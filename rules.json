@@ -1,0 +1,678 @@
+[
+  {
+    "code": "MD001",
+    "name": "heading-increment",
+    "aliases": [],
+    "summary": "Heading levels should only increment by one level at a time",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md001/"
+  },
+  {
+    "code": "MD003",
+    "name": "heading-style",
+    "aliases": [],
+    "summary": "Heading style",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md003/"
+  },
+  {
+    "code": "MD004",
+    "name": "ul-style",
+    "aliases": [],
+    "summary": "Use consistent style for unordered list markers",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md004/"
+  },
+  {
+    "code": "MD005",
+    "name": "list-indent",
+    "aliases": [],
+    "summary": "List indentation should be consistent",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md005/"
+  },
+  {
+    "code": "MD007",
+    "name": "ul-indent",
+    "aliases": [],
+    "summary": "Unordered list indentation",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md007/"
+  },
+  {
+    "code": "MD009",
+    "name": "no-trailing-spaces",
+    "aliases": [],
+    "summary": "Trailing spaces should be removed",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md009/"
+  },
+  {
+    "code": "MD010",
+    "name": "no-hard-tabs",
+    "aliases": [],
+    "summary": "No tabs",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md010/"
+  },
+  {
+    "code": "MD011",
+    "name": "no-reversed-links",
+    "aliases": [],
+    "summary": "Reversed link syntax",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md011/"
+  },
+  {
+    "code": "MD012",
+    "name": "no-multiple-blanks",
+    "aliases": [],
+    "summary": "Multiple consecutive blank lines",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md012/"
+  },
+  {
+    "code": "MD013",
+    "name": "line-length",
+    "aliases": [],
+    "summary": "Line length should not be excessive",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md013/"
+  },
+  {
+    "code": "MD014",
+    "name": "commands-show-output",
+    "aliases": [],
+    "summary": "Commands in code blocks should show output",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md014/"
+  },
+  {
+    "code": "MD018",
+    "name": "no-missing-space-atx",
+    "aliases": [],
+    "summary": "No space after hash in heading",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md018/"
+  },
+  {
+    "code": "MD019",
+    "name": "no-multiple-space-atx",
+    "aliases": [],
+    "summary": "Multiple spaces after hash in heading",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md019/"
+  },
+  {
+    "code": "MD020",
+    "name": "no-missing-space-closed-atx",
+    "aliases": [],
+    "summary": "No space inside hashes on closed heading",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md020/"
+  },
+  {
+    "code": "MD021",
+    "name": "no-multiple-space-closed-atx",
+    "aliases": [],
+    "summary": "Multiple spaces inside hashes on closed heading",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md021/"
+  },
+  {
+    "code": "MD022",
+    "name": "blanks-around-headings",
+    "aliases": [],
+    "summary": "Headings should be surrounded by blank lines",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md022/"
+  },
+  {
+    "code": "MD023",
+    "name": "heading-start-left",
+    "aliases": [],
+    "summary": "Headings must start at the beginning of the line",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md023/"
+  },
+  {
+    "code": "MD024",
+    "name": "no-duplicate-heading",
+    "aliases": [],
+    "summary": "Multiple headings with the same content",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md024/"
+  },
+  {
+    "code": "MD025",
+    "name": "single-h1",
+    "aliases": [
+      "single-title"
+    ],
+    "summary": "Multiple top-level headings in the same document",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md025/"
+  },
+  {
+    "code": "MD026",
+    "name": "no-trailing-punctuation",
+    "aliases": [],
+    "summary": "Trailing punctuation in heading",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md026/"
+  },
+  {
+    "code": "MD027",
+    "name": "no-multiple-space-blockquote",
+    "aliases": [],
+    "summary": "Multiple spaces after quote marker (>)",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md027/"
+  },
+  {
+    "code": "MD028",
+    "name": "no-blanks-blockquote",
+    "aliases": [],
+    "summary": "Blank line inside blockquote",
+    "category": "blockquote",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md028/"
+  },
+  {
+    "code": "MD029",
+    "name": "ol-prefix",
+    "aliases": [],
+    "summary": "Ordered list marker value",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md029/"
+  },
+  {
+    "code": "MD030",
+    "name": "list-marker-space",
+    "aliases": [],
+    "summary": "Spaces after list markers should be consistent",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md030/"
+  },
+  {
+    "code": "MD031",
+    "name": "blanks-around-fences",
+    "aliases": [],
+    "summary": "Fenced code blocks should be surrounded by blank lines",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md031/"
+  },
+  {
+    "code": "MD032",
+    "name": "blanks-around-lists",
+    "aliases": [],
+    "summary": "Lists should be surrounded by blank lines",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md032/"
+  },
+  {
+    "code": "MD033",
+    "name": "no-inline-html",
+    "aliases": [],
+    "summary": "Inline HTML is not allowed",
+    "category": "html",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md033/"
+  },
+  {
+    "code": "MD034",
+    "name": "no-bare-urls",
+    "aliases": [],
+    "summary": "No bare URLs - wrap URLs in angle brackets",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md034/"
+  },
+  {
+    "code": "MD035",
+    "name": "hr-style",
+    "aliases": [],
+    "summary": "Horizontal rule style",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md035/"
+  },
+  {
+    "code": "MD036",
+    "name": "no-emphasis-as-heading",
+    "aliases": [],
+    "summary": "Emphasis should not be used instead of a heading",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md036/"
+  },
+  {
+    "code": "MD037",
+    "name": "no-space-in-emphasis",
+    "aliases": [],
+    "summary": "Spaces inside emphasis markers",
+    "category": "emphasis",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md037/"
+  },
+  {
+    "code": "MD038",
+    "name": "no-space-in-code",
+    "aliases": [],
+    "summary": "Spaces inside code span elements",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md038/"
+  },
+  {
+    "code": "MD039",
+    "name": "no-space-in-links",
+    "aliases": [],
+    "summary": "Spaces inside link text",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md039/"
+  },
+  {
+    "code": "MD040",
+    "name": "fenced-code-language",
+    "aliases": [],
+    "summary": "Code blocks should have a language specified",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md040/"
+  },
+  {
+    "code": "MD041",
+    "name": "first-line-h1",
+    "aliases": [
+      "first-line-heading"
+    ],
+    "summary": "First line in file should be a top level heading",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md041/"
+  },
+  {
+    "code": "MD042",
+    "name": "no-empty-links",
+    "aliases": [],
+    "summary": "No empty links",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md042/"
+  },
+  {
+    "code": "MD043",
+    "name": "required-headings",
+    "aliases": [],
+    "summary": "Required heading structure",
+    "category": "heading",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md043/"
+  },
+  {
+    "code": "MD044",
+    "name": "proper-names",
+    "aliases": [],
+    "summary": "Proper names should have the correct capitalization",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md044/"
+  },
+  {
+    "code": "MD045",
+    "name": "no-alt-text",
+    "aliases": [],
+    "summary": "Images should have alternate text (alt text)",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md045/"
+  },
+  {
+    "code": "MD046",
+    "name": "code-block-style",
+    "aliases": [],
+    "summary": "Code blocks should use a consistent style",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md046/"
+  },
+  {
+    "code": "MD047",
+    "name": "single-trailing-newline",
+    "aliases": [],
+    "summary": "Files should end with a single newline character",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md047/"
+  },
+  {
+    "code": "MD048",
+    "name": "code-fence-style",
+    "aliases": [],
+    "summary": "Code fence style should be consistent",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md048/"
+  },
+  {
+    "code": "MD049",
+    "name": "emphasis-style",
+    "aliases": [],
+    "summary": "Emphasis style should be consistent",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md049/"
+  },
+  {
+    "code": "MD050",
+    "name": "strong-style",
+    "aliases": [],
+    "summary": "Strong emphasis style should be consistent",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md050/"
+  },
+  {
+    "code": "MD051",
+    "name": "link-fragments",
+    "aliases": [],
+    "summary": "Link fragments should reference valid headings",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md051/"
+  },
+  {
+    "code": "MD052",
+    "name": "reference-links-images",
+    "aliases": [],
+    "summary": "Reference links and images should use a reference that exists",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md052/"
+  },
+  {
+    "code": "MD053",
+    "name": "link-image-reference-definitions",
+    "aliases": [],
+    "summary": "Link and image reference definitions should be needed",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md053/"
+  },
+  {
+    "code": "MD054",
+    "name": "link-image-style",
+    "aliases": [],
+    "summary": "Link and image style should be consistent",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md054/"
+  },
+  {
+    "code": "MD055",
+    "name": "table-pipe-style",
+    "aliases": [],
+    "summary": "Table pipe style should be consistent",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md055/"
+  },
+  {
+    "code": "MD056",
+    "name": "table-column-count",
+    "aliases": [],
+    "summary": "Table column count should be consistent",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md056/"
+  },
+  {
+    "code": "MD057",
+    "name": "existing-relative-links",
+    "aliases": [],
+    "summary": "Relative links should point to existing files",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md057/"
+  },
+  {
+    "code": "MD058",
+    "name": "blanks-around-tables",
+    "aliases": [],
+    "summary": "Tables should be surrounded by blank lines",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md058/"
+  },
+  {
+    "code": "MD059",
+    "name": "descriptive-link-text",
+    "aliases": [],
+    "summary": "Link text should be descriptive",
+    "category": "link",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md059/"
+  },
+  {
+    "code": "MD060",
+    "name": "table-cell-alignment",
+    "aliases": [
+      "table-format"
+    ],
+    "summary": "Table columns should be consistently aligned",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md060/"
+  },
+  {
+    "code": "MD061",
+    "name": "forbidden-terms",
+    "aliases": [],
+    "summary": "Forbidden terms",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md061/"
+  },
+  {
+    "code": "MD062",
+    "name": "link-destination-whitespace",
+    "aliases": [],
+    "summary": "Link destination should not have leading or trailing whitespace",
+    "category": "link",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md062/"
+  },
+  {
+    "code": "MD063",
+    "name": "heading-capitalization",
+    "aliases": [],
+    "summary": "Heading capitalization",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md063/"
+  },
+  {
+    "code": "MD064",
+    "name": "no-multiple-consecutive-spaces",
+    "aliases": [],
+    "summary": "Multiple consecutive spaces",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md064/"
+  },
+  {
+    "code": "MD065",
+    "name": "blanks-around-horizontal-rules",
+    "aliases": [],
+    "summary": "Horizontal rules should be surrounded by blank lines",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md065/"
+  },
+  {
+    "code": "MD066",
+    "name": "footnote-validation",
+    "aliases": [],
+    "summary": "Footnote validation",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md066/"
+  },
+  {
+    "code": "MD067",
+    "name": "footnote-definition-order",
+    "aliases": [],
+    "summary": "Footnote definitions should appear in order of first reference",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md067/"
+  },
+  {
+    "code": "MD068",
+    "name": "empty-footnote-definition",
+    "aliases": [],
+    "summary": "Footnote definitions should not be empty",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md068/"
+  },
+  {
+    "code": "MD069",
+    "name": "no-duplicate-list-markers",
+    "aliases": [],
+    "summary": "Duplicate list markers",
+    "category": "list",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md069/"
+  },
+  {
+    "code": "MD070",
+    "name": "nested-code-fence",
+    "aliases": [],
+    "summary": "Nested code fence collision - use longer fence to avoid premature closure",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md070/"
+  },
+  {
+    "code": "MD071",
+    "name": "blank-line-after-frontmatter",
+    "aliases": [],
+    "summary": "Blank line after frontmatter",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md071/"
+  },
+  {
+    "code": "MD072",
+    "name": "frontmatter-key-sort",
+    "aliases": [],
+    "summary": "Frontmatter keys should be sorted alphabetically",
+    "category": "front-matter",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md072/"
+  },
+  {
+    "code": "MD073",
+    "name": "toc-validation",
+    "aliases": [],
+    "summary": "Table of Contents should match document headings",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md073/"
+  }
+]

@@ -172,6 +172,27 @@ else
     ((ERRORS++))
 fi
 
+# Check 11: Verify rules.json is up-to-date
+echo -n "Checking rules.json is up-to-date... "
+if [[ -f "rules.json" ]]; then
+    TEMP_RULES=$(mktemp)
+    ./target/release/rumdl rule -o json > "$TEMP_RULES" 2>/dev/null || cargo run --release -- rule -o json > "$TEMP_RULES" 2>/dev/null
+    if diff -q rules.json "$TEMP_RULES" &>/dev/null; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: rules.json is out of date${NC}"
+        echo "Run: ./target/release/rumdl rule -o json > rules.json"
+        ((ERRORS++))
+    fi
+    rm -f "$TEMP_RULES"
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: rules.json not found${NC}"
+    echo "Run: ./target/release/rumdl rule -o json > rules.json"
+    ((ERRORS++))
+fi
+
 # Summary
 echo ""
 echo "════════════════════════════════════════"
