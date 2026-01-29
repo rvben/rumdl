@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-01-29
+
+### Added
+
+- **CLI: Shell completions subcommand** ([#327](https://github.com/rvben/rumdl/issues/327))
+  - `rumdl completions <shell>` generates shell completions for bash, zsh, fish, powershell, and elvish
+  - Auto-detects current shell and provides installation hints
+  - (thanks @tpoliaw in [#333](https://github.com/rvben/rumdl/pull/333))
+
+- **CLI: Static rules.json for tooling integration** ([#351](https://github.com/rvben/rumdl/issues/351))
+  - Rule metadata now available at `https://raw.githubusercontent.com/rvben/rumdl/main/rules.json`
+  - Enables external tools (Alfred workflows, etc.) to access rule data without installing rumdl
+  - Release verification ensures rules.json stays in sync
+
+### Fixed
+
+- **MD073: Read indent config from MD007 by default** ([#353](https://github.com/rvben/rumdl/issues/353))
+  - TOC indentation now respects MD007's `indent` setting automatically
+  - Can be overridden with explicit `[MD073] indent = N`
+
 ## [0.1.5] - 2026-01-29
 
 ### Added
