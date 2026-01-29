@@ -41,6 +41,8 @@ struct TocEntry {
     text: String,
     /// Anchor/fragment (without #)
     anchor: String,
+    /// Number of leading whitespace characters (for indentation checking)
+    indent_spaces: usize,
 }
 
 /// An expected TOC entry generated from document headings
@@ -70,6 +72,12 @@ enum TocMismatch {
     },
     /// TOC entries are in wrong order
     OrderMismatch { entry: TocEntry, expected_position: usize },
+    /// TOC entry has wrong indentation level
+    IndentationMismatch {
+        entry: TocEntry,
+        actual_indent: usize,
+        expected_indent: usize,
+    },
 }
 
 /// Regex patterns for stripping markdown formatting from heading text
@@ -249,10 +257,15 @@ impl MD073TocValidation {
             let content = line_info.content(ctx.content);
 
             if let Some(caps) = TOC_ENTRY_PATTERN.captures(content) {
+                let indent_spaces = caps.get(1).map_or(0, |m| m.as_str().len());
                 let text = caps.get(2).map_or("", |m| m.as_str()).to_string();
                 let anchor = caps.get(3).map_or("", |m| m.as_str()).to_string();
 
-                entries.push(TocEntry { text, anchor });
+                entries.push(TocEntry {
+                    text,
+                    anchor,
+                    indent_spaces,
+                });
             }
         }
 
@@ -349,6 +362,35 @@ impl MD073TocValidation {
                         entry: entry.clone(),
                         expected: (*exp).clone(),
                     });
+                }
+            }
+        }
+
+        // Check for indentation mismatches
+        // Expected indentation is 2 spaces per level difference from base level
+        if !expected.is_empty() {
+            let base_level = expected.iter().map(|e| e.level).min().unwrap_or(2);
+
+            for entry in actual {
+                if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
+                    let level_diff = exp.level.saturating_sub(base_level) as usize;
+                    let expected_indent = level_diff * 2;
+
+                    if entry.indent_spaces != expected_indent {
+                        // Don't report indentation mismatch if already reported as text mismatch
+                        let already_reported = mismatches.iter().any(|m| match m {
+                            TocMismatch::TextMismatch { entry: e, .. } => e.anchor == entry.anchor,
+                            TocMismatch::StaleEntry { entry: e } => e.anchor == entry.anchor,
+                            _ => false,
+                        });
+                        if !already_reported {
+                            mismatches.push(TocMismatch::IndentationMismatch {
+                                entry: entry.clone(),
+                                actual_indent: entry.indent_spaces,
+                                expected_indent,
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -487,6 +529,17 @@ impl Rule for MD073TocValidation {
                         details.push(format!(
                             "Order mismatch: '{}' should be at position {}",
                             entry.text, expected_position
+                        ));
+                    }
+                    TocMismatch::IndentationMismatch {
+                        entry,
+                        actual_indent,
+                        expected_indent,
+                        ..
+                    } => {
+                        details.push(format!(
+                            "Indentation mismatch: '{}' has {} spaces, expected {} spaces",
+                            entry.text, actual_indent, expected_indent
                         ));
                     }
                 }
@@ -1067,6 +1120,86 @@ Content.
         assert!(toc.contains("  - [Level 3](#level-3)"));
         assert!(toc.contains("    - [Level 4](#level-4)"));
         assert!(toc.contains("- [Another Level 2](#another-level-2)"));
+    }
+
+    // ========== Indentation Mismatch Tests ==========
+
+    #[test]
+    fn test_indentation_mismatch_detected() {
+        let rule = create_enabled_rule();
+        // TOC entries are all at same indentation level, but headings have different levels
+        let content = r#"<!-- toc -->
+- [Hello](#hello)
+- [Another](#another)
+- [Heading](#heading)
+<!-- tocstop -->
+
+## Hello
+
+### Another
+
+## Heading
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should detect indentation mismatch - "Another" is level 3 but has no indent
+        assert_eq!(result.len(), 1, "Should report indentation mismatch: {result:?}");
+        assert!(
+            result[0].message.contains("Indentation mismatch"),
+            "Message should mention indentation: {}",
+            result[0].message
+        );
+        assert!(
+            result[0].message.contains("Another"),
+            "Message should mention the entry: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_indentation_mismatch_fixed() {
+        let rule = create_enabled_rule();
+        // TOC entries are all at same indentation level, but headings have different levels
+        let content = r#"<!-- toc -->
+- [Hello](#hello)
+- [Another](#another)
+- [Heading](#heading)
+<!-- tocstop -->
+
+## Hello
+
+### Another
+
+## Heading
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // After fix, "Another" should be indented
+        assert!(fixed.contains("- [Hello](#hello)"));
+        assert!(fixed.contains("  - [Another](#another)")); // Indented with 2 spaces
+        assert!(fixed.contains("- [Heading](#heading)"));
+    }
+
+    #[test]
+    fn test_no_indentation_mismatch_when_correct() {
+        let rule = create_enabled_rule();
+        // TOC has correct indentation
+        let content = r#"<!-- toc -->
+- [Hello](#hello)
+  - [Another](#another)
+- [Heading](#heading)
+<!-- tocstop -->
+
+## Hello
+
+### Another
+
+## Heading
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        // Should not report any issues - indentation is correct
+        assert!(result.is_empty(), "Should not report issues: {result:?}");
     }
 
     // ========== Order Mismatch Tests ==========
