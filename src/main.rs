@@ -2044,7 +2044,7 @@ fn handle_explain_command(rule_query: &str) {
                 println!("This rule helps maintain consistent Markdown formatting.");
                 println!();
                 println!("For more information, see the documentation at:");
-                println!("  https://github.com/rvben/rumdl/blob/main/docs/{rule_id}.md");
+                println!("  https://rumdl.dev/{rule_id}/");
             }
         }
     } else {

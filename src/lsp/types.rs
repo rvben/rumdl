@@ -139,13 +139,10 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
 
     // Create clickable link to rule documentation
     let code_description = warning.rule_name.as_ref().and_then(|rule_name| {
-        // Create a link to the rule documentation
-        Url::parse(&format!(
-            "https://github.com/rvben/rumdl/blob/main/docs/{}.md",
-            rule_name.to_lowercase()
-        ))
-        .ok()
-        .map(|href| CodeDescription { href })
+        // Create a link to the rule documentation on rumdl.dev
+        Url::parse(&format!("https://rumdl.dev/{}/", rule_name.to_lowercase()))
+            .ok()
+            .map(|href| CodeDescription { href })
     });
 
     Diagnostic {
@@ -773,7 +770,7 @@ mod tests {
         assert!(diagnostic.code_description.is_some());
 
         let url = diagnostic.code_description.unwrap().href;
-        assert_eq!(url.as_str(), "https://github.com/rvben/rumdl/blob/main/docs/md013.md");
+        assert_eq!(url.as_str(), "https://rumdl.dev/md013/");
     }
 
     #[test]
