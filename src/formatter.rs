@@ -9,6 +9,7 @@ pub struct PrintResultsArgs<'a> {
     pub args: &'a crate::CheckArgs,
     pub has_issues: bool,
     pub files_with_issues: usize,
+    pub files_fixed: usize,
     pub total_issues: usize,
     pub total_issues_fixed: usize,
     pub total_fixable_issues: usize,
@@ -22,6 +23,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         args,
         has_issues,
         files_with_issues,
+        files_fixed,
         total_issues,
         total_issues_fixed,
         total_fixable_issues,
@@ -30,7 +32,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     } = params;
     // Choose singular or plural form of "file" based on count
     let file_text = if total_files_processed == 1 { "file" } else { "files" };
-    let file_with_issues_text = if files_with_issues == 1 { "file" } else { "files" };
+    let files_fixed_text = if files_fixed == 1 { "file" } else { "files" };
 
     // Show results summary
     // In fix mode, show "Fixed" message if we fixed any issues, even if all are now resolved
@@ -45,8 +47,8 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
                 "Fixed:".green().bold(),
                 total_issues_fixed,
                 total_issues,
-                files_with_issues,
-                file_with_issues_text,
+                files_fixed,
+                files_fixed_text,
                 duration_ms
             );
         } else {
@@ -81,8 +83,8 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
             "Fixed:".green().bold(),
             total_issues_fixed,
             total_issues,
-            total_files_processed,
-            file_text,
+            files_fixed,
+            files_fixed_text,
             duration_ms
         );
     } else {

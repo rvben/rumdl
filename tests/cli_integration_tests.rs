@@ -1895,3 +1895,195 @@ mod issue197_exit_code {
         );
     }
 }
+
+/// Test that `rumdl fmt` correctly reports the number of files that were actually fixed
+/// (GitHub issue #347: summary underreported changed files)
+///
+/// This test verifies that when all issues in a file are fixed (leaving no remaining issues),
+/// the file is still counted in the "Fixed X issues in Y files" summary.
+#[test]
+fn test_fmt_files_fixed_count_reports_actual_modified_files() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create file A with fixable issues (no space after # in heading)
+    let file_a = temp_dir.path().join("file_a.md");
+    fs::write(
+        &file_a,
+        r#"# Heading A
+
+#Bad heading A1
+
+#Bad heading A2
+"#,
+    )
+    .unwrap();
+
+    // Create file B with fixable issues
+    let file_b = temp_dir.path().join("file_b.md");
+    fs::write(
+        &file_b,
+        r#"# Heading B
+
+#Bad heading B1
+"#,
+    )
+    .unwrap();
+
+    // Create file C with NO issues (clean file)
+    let file_c = temp_dir.path().join("file_c.md");
+    fs::write(
+        &file_c,
+        r#"# Clean file
+
+This file has no issues.
+"#,
+    )
+    .unwrap();
+
+    // Create file D with fixable issues
+    let file_d = temp_dir.path().join("file_d.md");
+    fs::write(
+        &file_d,
+        r#"# Heading D
+
+#Bad heading D1
+
+#Bad heading D2
+
+#Bad heading D3
+"#,
+    )
+    .unwrap();
+
+    // Run rumdl fmt
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The summary should report 3 files fixed (A, B, D), NOT 0 or 4
+    // Before the fix, it would show "in 0 files" because no remaining issues
+    assert!(
+        stdout.contains("in 3 files") || stdout.contains("in 3 file"),
+        "Summary should report 3 files fixed (not 0 or 4). Got:\n{stdout}"
+    );
+
+    // Verify files were actually modified
+    let content_a = fs::read_to_string(&file_a).unwrap();
+    assert!(
+        content_a.contains("## Bad heading A1"),
+        "File A should be modified. Got:\n{content_a}"
+    );
+
+    let content_c = fs::read_to_string(&file_c).unwrap();
+    assert!(
+        content_c.contains("# Clean file"),
+        "File C should not be modified. Got:\n{content_c}"
+    );
+}
+
+/// Test that files_fixed count is correct when some files have unfixable issues
+#[test]
+fn test_fmt_files_fixed_count_with_unfixable_issues() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create file A with fixable issues only
+    let file_a = temp_dir.path().join("file_a.md");
+    fs::write(
+        &file_a,
+        r#"# Heading A
+
+#Bad heading A1
+"#,
+    )
+    .unwrap();
+
+    // Create file B with unfixable issue (MD041 - first line should be heading)
+    let file_b = temp_dir.path().join("file_b.md");
+    fs::write(
+        &file_b,
+        r#"This file starts with text, not a heading.
+
+# Later heading
+"#,
+    )
+    .unwrap();
+
+    // Create file C with NO issues
+    let file_c = temp_dir.path().join("file_c.md");
+    fs::write(
+        &file_c,
+        r#"# Clean file
+
+This file has no issues.
+"#,
+    )
+    .unwrap();
+
+    // Run rumdl fmt
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Only file A should be counted as fixed (file B has unfixable issues)
+    assert!(
+        stdout.contains("in 1 file"),
+        "Summary should report 1 file fixed (only file_a). Got:\n{stdout}"
+    );
+
+    // Verify file A was modified
+    let content_a = fs::read_to_string(&file_a).unwrap();
+    assert!(
+        content_a.contains("## Bad heading A1"),
+        "File A should be modified. Got:\n{content_a}"
+    );
+}
+
+/// Test that files_fixed is 0 when no files are actually modified
+#[test]
+fn test_fmt_files_fixed_count_zero_when_no_changes() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create clean files only
+    let file_a = temp_dir.path().join("file_a.md");
+    fs::write(
+        &file_a,
+        r#"# Clean file A
+
+This file has no issues.
+"#,
+    )
+    .unwrap();
+
+    let file_b = temp_dir.path().join("file_b.md");
+    fs::write(
+        &file_b,
+        r#"# Clean file B
+
+This file also has no issues.
+"#,
+    )
+    .unwrap();
+
+    // Run rumdl fmt
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should show success with no issues found
+    assert!(
+        stdout.contains("No issues found") || stdout.contains("Success"),
+        "Summary should indicate no issues found. Got:\n{stdout}"
+    );
+}

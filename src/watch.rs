@@ -351,6 +351,7 @@ pub fn perform_check_run(
         mut has_warnings,
         mut has_errors,
         mut files_with_issues,
+        files_fixed,
         mut total_issues,
         total_issues_fixed,
         total_fixable_issues,
@@ -392,6 +393,7 @@ pub fn perform_check_run(
         let mut has_warnings = false;
         let mut has_errors = false;
         let mut files_with_issues = 0;
+        let mut files_fixed = 0;
         let mut total_issues = 0;
         let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
@@ -404,6 +406,11 @@ pub fn perform_check_run(
             // Always accumulate total_issues from initial count (issues_found), regardless of whether
             // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
             total_issues += issues_found;
+
+            // Track files that had at least one fix applied (for "Fixed X issues in Y files" message)
+            if issues_fixed > 0 {
+                files_fixed += 1;
+            }
 
             if file_has_issues {
                 has_issues = true;
@@ -438,6 +445,7 @@ pub fn perform_check_run(
             has_warnings,
             has_errors,
             files_with_issues,
+            files_fixed,
             total_issues,
             total_issues_fixed,
             total_fixable_issues,
@@ -449,6 +457,7 @@ pub fn perform_check_run(
         let mut has_warnings = false;
         let mut has_errors = false;
         let mut files_with_issues = 0;
+        let mut files_fixed = 0;
         let mut total_issues = 0;
         let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
@@ -488,6 +497,11 @@ pub fn perform_check_run(
             // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
             total_issues += issues_found;
 
+            // Track files that had at least one fix applied (for "Fixed X issues in Y files" message)
+            if issues_fixed > 0 {
+                files_fixed += 1;
+            }
+
             if file_has_issues {
                 has_issues = true;
                 files_with_issues += 1;
@@ -514,6 +528,7 @@ pub fn perform_check_run(
             has_warnings,
             has_errors,
             files_with_issues,
+            files_fixed,
             total_issues,
             total_issues_fixed,
             total_fixable_issues,
@@ -635,6 +650,7 @@ pub fn perform_check_run(
             args,
             has_issues,
             files_with_issues,
+            files_fixed,
             total_issues,
             total_issues_fixed,
             total_fixable_issues,
