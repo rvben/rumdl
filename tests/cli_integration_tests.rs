@@ -994,7 +994,343 @@ fn test_rule_command_shows_specific_rule() {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     assert!(output.status.success(), "'rumdl rule MD013' did not exit successfully");
     assert!(stdout.contains("MD013"), "Output missing rule name MD013");
-    assert!(stdout.contains("Description"), "Output missing 'Description'");
+    // Updated to match new output format
+    assert!(
+        stdout.contains("Name:") || stdout.contains("Description"),
+        "Output missing expected field"
+    );
+}
+
+#[test]
+fn test_rule_command_json_output_all_rules() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --output-format json'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(
+        output.status.success(),
+        "'rumdl rule --output-format json' did not exit successfully"
+    );
+
+    // Parse the JSON output
+    let rules: serde_json::Value = serde_json::from_str(&stdout).expect("Failed to parse JSON output");
+    assert!(rules.is_array(), "Expected JSON array");
+    let rules_array = rules.as_array().unwrap();
+    assert!(!rules_array.is_empty(), "Expected at least one rule");
+
+    // Check structure of first rule
+    let first_rule = &rules_array[0];
+    assert!(first_rule.get("code").is_some(), "Missing 'code' field");
+    assert!(first_rule.get("name").is_some(), "Missing 'name' field");
+    assert!(first_rule.get("aliases").is_some(), "Missing 'aliases' field");
+    assert!(first_rule.get("summary").is_some(), "Missing 'summary' field");
+    assert!(first_rule.get("category").is_some(), "Missing 'category' field");
+    assert!(first_rule.get("fix").is_some(), "Missing 'fix' field");
+    assert!(
+        first_rule.get("fix_availability").is_some(),
+        "Missing 'fix_availability' field"
+    );
+    assert!(first_rule.get("url").is_some(), "Missing 'url' field");
+
+    // Verify MD001 is present
+    let md001 = rules_array
+        .iter()
+        .find(|r| r.get("code").and_then(|c| c.as_str()) == Some("MD001"));
+    assert!(md001.is_some(), "MD001 not found in rules");
+    let md001 = md001.unwrap();
+    assert_eq!(md001.get("name").and_then(|n| n.as_str()), Some("heading-increment"));
+    assert_eq!(md001.get("category").and_then(|c| c.as_str()), Some("heading"));
+    assert!(
+        md001.get("url").and_then(|u| u.as_str()).unwrap().contains("rumdl.dev"),
+        "URL should contain rumdl.dev"
+    );
+}
+
+#[test]
+fn test_rule_command_json_output_single_rule() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "MD041", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule MD041 --output-format json'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    assert!(
+        output.status.success(),
+        "'rumdl rule MD041 --output-format json' did not exit successfully"
+    );
+
+    // Parse the JSON output (single object, not array)
+    let rule: serde_json::Value = serde_json::from_str(&stdout).expect("Failed to parse JSON output");
+    assert!(rule.is_object(), "Expected JSON object for single rule");
+
+    assert_eq!(rule.get("code").and_then(|c| c.as_str()), Some("MD041"));
+    assert_eq!(rule.get("name").and_then(|n| n.as_str()), Some("first-line-h1"));
+    // MD041 has "first-line-heading" as an alias
+    let aliases = rule.get("aliases").and_then(|a| a.as_array()).unwrap();
+    assert!(aliases.iter().any(|a| a.as_str() == Some("first-line-heading")));
+    assert_eq!(
+        rule.get("url").and_then(|u| u.as_str()),
+        Some("https://rumdl.dev/md041/")
+    );
+}
+
+#[test]
+fn test_rule_command_json_fix_availability_values() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --output-format json'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    // Verify fix_availability values are one of the expected values
+    for rule in &rules {
+        let fix_avail = rule.get("fix_availability").and_then(|f| f.as_str()).unwrap();
+        assert!(
+            matches!(fix_avail, "Always" | "Sometimes" | "None"),
+            "Unexpected fix_availability value: {} for rule {}",
+            fix_avail,
+            rule.get("code").and_then(|c| c.as_str()).unwrap_or("unknown")
+        );
+    }
+
+    // Verify at least one unfixable rule exists (MD033 - no-inline-html)
+    let md033 = rules
+        .iter()
+        .find(|r| r.get("code").and_then(|c| c.as_str()) == Some("MD033"));
+    assert!(md033.is_some(), "MD033 not found");
+    assert_eq!(
+        md033.unwrap().get("fix_availability").and_then(|f| f.as_str()),
+        Some("None")
+    );
+}
+
+#[test]
+fn test_rule_command_fixable_filter() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--fixable", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --fixable'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    // All returned rules should be fixable (Always or Sometimes)
+    for rule in &rules {
+        let fix_avail = rule.get("fix_availability").and_then(|f| f.as_str()).unwrap();
+        assert!(
+            matches!(fix_avail, "Always" | "Sometimes"),
+            "Non-fixable rule {} returned with --fixable filter",
+            rule.get("code").and_then(|c| c.as_str()).unwrap_or("unknown")
+        );
+    }
+
+    // Should not include MD033 (no-inline-html) which has fix_availability = None
+    let has_md033 = rules
+        .iter()
+        .any(|r| r.get("code").and_then(|c| c.as_str()) == Some("MD033"));
+    assert!(!has_md033, "MD033 should not be included with --fixable filter");
+}
+
+#[test]
+fn test_rule_command_category_filter() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--category", "heading", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --category heading'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    assert!(!rules.is_empty(), "Should return at least one heading rule");
+
+    // All returned rules should have category "heading"
+    for rule in &rules {
+        let category = rule.get("category").and_then(|c| c.as_str()).unwrap();
+        assert_eq!(
+            category,
+            "heading",
+            "Rule {} has category {} instead of heading",
+            rule.get("code").and_then(|c| c.as_str()).unwrap_or("unknown"),
+            category
+        );
+    }
+
+    // Should include MD001 (heading-increment)
+    let has_md001 = rules
+        .iter()
+        .any(|r| r.get("code").and_then(|c| c.as_str()) == Some("MD001"));
+    assert!(has_md001, "MD001 should be included with --category heading");
+}
+
+#[test]
+fn test_rule_command_combined_filters() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--fixable", "--category", "heading", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --fixable --category heading'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    assert!(!rules.is_empty(), "Should return at least one fixable heading rule");
+
+    // All returned rules should be fixable AND have category heading
+    for rule in &rules {
+        let fix_avail = rule.get("fix_availability").and_then(|f| f.as_str()).unwrap();
+        let category = rule.get("category").and_then(|c| c.as_str()).unwrap();
+
+        assert!(
+            matches!(fix_avail, "Always" | "Sometimes"),
+            "Rule {} should be fixable",
+            rule.get("code").and_then(|c| c.as_str()).unwrap_or("unknown")
+        );
+        assert_eq!(
+            category,
+            "heading",
+            "Rule {} should have category heading",
+            rule.get("code").and_then(|c| c.as_str()).unwrap_or("unknown")
+        );
+    }
+}
+
+#[test]
+fn test_rule_command_json_lines_format() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--output-format", "json-lines"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --output-format json-lines'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    // Each line should be valid JSON
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert!(!lines.is_empty(), "Should output at least one line");
+
+    for (i, line) in lines.iter().enumerate() {
+        let rule: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("Line {i} is not valid JSON: {e}"));
+        assert!(rule.get("code").is_some(), "Line {i} missing 'code' field");
+        assert!(rule.get("name").is_some(), "Line {i} missing 'name' field");
+    }
+
+    // First line should be MD001
+    let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+    assert_eq!(
+        first.get("code").and_then(|c| c.as_str()),
+        Some("MD001"),
+        "First line should be MD001"
+    );
+}
+
+#[test]
+fn test_rule_command_explain_flag() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "MD001", "--output-format", "json", "--explain"])
+        .output()
+        .expect("Failed to execute 'rumdl rule MD001 --explain'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rule: serde_json::Value = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    // Should have explanation field
+    let explanation = rule.get("explanation").and_then(|e| e.as_str());
+    assert!(explanation.is_some(), "Should have explanation field with --explain");
+    assert!(
+        explanation.unwrap().contains("heading"),
+        "Explanation should contain 'heading'"
+    );
+
+    // Without --explain, should not have explanation field
+    let output_no_explain = Command::new(rumdl_exe)
+        .args(["rule", "MD001", "--output-format", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule MD001'");
+    let stdout_no_explain = String::from_utf8_lossy(&output_no_explain.stdout).to_string();
+    let rule_no_explain: serde_json::Value = serde_json::from_str(&stdout_no_explain).expect("Failed to parse JSON");
+
+    assert!(
+        rule_no_explain.get("explanation").is_none(),
+        "Should not have explanation field without --explain"
+    );
+}
+
+#[test]
+fn test_rule_command_text_output_with_filters() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--fixable", "--category", "heading"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --fixable --category heading'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    // Should show filter info in header
+    assert!(stdout.contains("fixable"), "Output should mention fixable filter");
+    assert!(stdout.contains("heading"), "Output should mention category filter");
+
+    // Should show total count
+    assert!(stdout.contains("Total:"), "Output should show total count");
+
+    // Should include MD001
+    assert!(stdout.contains("MD001"), "Should include MD001 in output");
+}
+
+#[test]
+fn test_rule_command_list_categories() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--list-categories"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --list-categories'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(output.status.success(), "Should exit successfully");
+    assert!(stdout.contains("Available categories:"), "Should show header");
+    assert!(stdout.contains("heading"), "Should list heading category");
+    assert!(stdout.contains("whitespace"), "Should list whitespace category");
+    assert!(stdout.contains("rules)"), "Should show rule counts");
+}
+
+#[test]
+fn test_rule_command_invalid_category_error() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "--category", "nonexistent"])
+        .output()
+        .expect("Failed to execute 'rumdl rule --category nonexistent'");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    assert!(!output.status.success(), "Should exit with error");
+    assert!(stderr.contains("Invalid category"), "Should mention invalid category");
+    assert!(stderr.contains("Valid categories:"), "Should list valid categories");
+    assert!(stderr.contains("heading"), "Should show heading as valid option");
+}
+
+#[test]
+fn test_rule_command_short_flags() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Test -f (fixable) and -c (category) short flags
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "-f", "-c", "heading", "-o", "json"])
+        .output()
+        .expect("Failed to execute 'rumdl rule -f -c heading -o json'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
+
+    assert!(!rules.is_empty(), "Should return at least one rule");
+
+    // All rules should be fixable and in heading category
+    for rule in &rules {
+        let fix_avail = rule.get("fix_availability").and_then(|f| f.as_str()).unwrap();
+        let category = rule.get("category").and_then(|c| c.as_str()).unwrap();
+
+        assert!(matches!(fix_avail, "Always" | "Sometimes"), "Rule should be fixable");
+        assert_eq!(category, "heading", "Rule should be in heading category");
+    }
 }
 
 #[test]
