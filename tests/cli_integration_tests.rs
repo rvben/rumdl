@@ -2553,3 +2553,192 @@ This has <b>inline HTML</b> which triggers MD033.
         "HTML should remain unchanged. Got:\n{content}"
     );
 }
+
+// =============================================================================
+// Shell completions tests
+// =============================================================================
+
+#[test]
+fn test_completions_list_shells() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "--list"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(stdout.contains("bash"), "Should list bash");
+    assert!(stdout.contains("zsh"), "Should list zsh");
+    assert!(stdout.contains("fish"), "Should list fish");
+    assert!(stdout.contains("powershell"), "Should list powershell");
+    assert!(stdout.contains("elvish"), "Should list elvish");
+}
+
+#[test]
+fn test_completions_bash_generates_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "bash"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        stderr.contains("Installation"),
+        "Should have installation instructions on stderr"
+    );
+    assert!(stdout.contains("_rumdl()"), "Should generate bash completion function");
+    assert!(stdout.contains("COMPREPLY"), "Should use COMPREPLY for completions");
+}
+
+#[test]
+fn test_completions_zsh_generates_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "zsh"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        stderr.contains("Installation"),
+        "Should have installation instructions on stderr"
+    );
+    assert!(stdout.contains("#compdef rumdl"), "Should have zsh compdef directive");
+    assert!(stdout.contains("_rumdl()"), "Should generate zsh completion function");
+}
+
+#[test]
+fn test_completions_fish_generates_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "fish"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        stderr.contains("Installation"),
+        "Should have installation instructions on stderr"
+    );
+    assert!(
+        stdout.contains("complete -c rumdl"),
+        "Should generate fish complete commands"
+    );
+}
+
+#[test]
+fn test_completions_powershell_generates_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "powershell"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        stderr.contains("Installation"),
+        "Should have installation instructions on stderr"
+    );
+    assert!(
+        stdout.contains("Register-ArgumentCompleter"),
+        "Should register argument completer"
+    );
+}
+
+#[test]
+fn test_completions_elvish_generates_script() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "elvish"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "Command should succeed");
+    assert!(
+        stderr.contains("Installation"),
+        "Should have installation instructions on stderr"
+    );
+}
+
+#[test]
+fn test_completions_auto_detect_from_shell_env() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions"])
+        .env("SHELL", "/bin/bash")
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "Command should succeed with SHELL=bash");
+    assert!(
+        stdout.contains("_rumdl()"),
+        "Should auto-detect bash and generate bash completions"
+    );
+}
+
+#[test]
+fn test_completions_unknown_shell_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions"])
+        .env("SHELL", "/bin/unknown")
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "Command should fail with unknown shell");
+    assert!(
+        stderr.contains("Could not detect shell"),
+        "Should show helpful error message"
+    );
+    assert!(
+        stderr.contains("rumdl completions bash"),
+        "Should suggest explicit shell argument"
+    );
+}
+
+#[test]
+fn test_completions_short_list_flag() {
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "-l"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "Command should succeed with -l flag");
+    assert!(stdout.contains("bash"), "Should list shells with short flag");
+}
+
+#[test]
+fn test_completions_clean_piping_stdout_has_no_instructions() {
+    // Verify stdout contains only the script (no instructions)
+    // This ensures `rumdl completions zsh > file` produces a clean script
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["completions", "zsh"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // stdout should have the script, NOT installation instructions
+    assert!(
+        stdout.contains("#compdef rumdl"),
+        "stdout should contain the zsh script"
+    );
+    assert!(
+        !stdout.contains("Installation"),
+        "stdout should NOT contain installation instructions"
+    );
+
+    // stderr should have instructions, NOT the script
+    assert!(
+        stderr.contains("Installation"),
+        "stderr should contain installation instructions"
+    );
+    assert!(!stderr.contains("#compdef"), "stderr should NOT contain the script");
+}

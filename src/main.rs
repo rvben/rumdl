@@ -572,7 +572,13 @@ enum Commands {
         status: bool,
     },
     /// Generate shell completion scripts
-    Completions { shell: Shell },
+    Completions {
+        /// Shell to generate completions for (detected from $SHELL if omitted)
+        shell: Option<Shell>,
+        /// List available shells
+        #[arg(long, short = 'l')]
+        list: bool,
+    },
     /// Clear the cache
     Clean,
     /// Show version information
@@ -950,6 +956,90 @@ fn resolve_cache_directory(cli: &Cli) -> std::path::PathBuf {
     }
 
     cache_dir
+}
+
+/// Handle the completions command
+fn handle_completions_command(shell: Option<Shell>, list: bool) {
+    const AVAILABLE_SHELLS: &[(&str, &str)] = &[
+        ("bash", "Bourne Again SHell"),
+        ("zsh", "Z shell"),
+        ("fish", "Friendly Interactive SHell"),
+        ("powershell", "PowerShell"),
+        ("elvish", "Elvish shell"),
+    ];
+
+    if list {
+        println!("Available shells:");
+        for (name, description) in AVAILABLE_SHELLS {
+            println!("  {name:<12} {description}");
+        }
+        return;
+    }
+
+    let shell = match shell {
+        Some(s) => s,
+        None => detect_shell_from_env().unwrap_or_else(|| {
+            eprintln!(
+                "{}: Could not detect shell from $SHELL environment variable",
+                "Error".red().bold()
+            );
+            eprintln!();
+            eprintln!("Please specify a shell explicitly:");
+            eprintln!("  rumdl completions bash");
+            eprintln!("  rumdl completions zsh");
+            eprintln!("  rumdl completions fish");
+            eprintln!("  rumdl completions powershell");
+            eprintln!("  rumdl completions elvish");
+            eprintln!();
+            eprintln!("Or use --list to see all available shells");
+            exit::tool_error();
+        }),
+    };
+
+    print_completion_instructions(&shell);
+    generate(shell, &mut Cli::command(), "rumdl", &mut stdout());
+}
+
+fn detect_shell_from_env() -> Option<Shell> {
+    let shell_path = std::env::var("SHELL").ok()?;
+    let shell_name = std::path::Path::new(&shell_path).file_name()?.to_str()?;
+
+    match shell_name {
+        "bash" => Some(Shell::Bash),
+        "zsh" => Some(Shell::Zsh),
+        "fish" => Some(Shell::Fish),
+        "pwsh" | "powershell" => Some(Shell::PowerShell),
+        "elvish" => Some(Shell::Elvish),
+        _ => None,
+    }
+}
+
+fn print_completion_instructions(shell: &Shell) {
+    match shell {
+        Shell::Bash => {
+            eprintln!("# Installation: Add to ~/.bashrc or save to /etc/bash_completion.d/rumdl");
+            eprintln!("#   echo 'source <(rumdl completions bash)' >> ~/.bashrc");
+        }
+        Shell::Zsh => {
+            eprintln!("# Installation: Save to a directory in your $fpath");
+            eprintln!("#   rumdl completions zsh > ~/.zfunc/_rumdl");
+        }
+        Shell::Fish => {
+            eprintln!("# Installation:");
+            eprintln!("#   rumdl completions fish > ~/.config/fish/completions/rumdl.fish");
+        }
+        Shell::PowerShell => {
+            eprintln!("# Installation: Add to your PowerShell profile");
+            eprintln!("#   rumdl completions powershell >> $PROFILE");
+        }
+        Shell::Elvish => {
+            eprintln!("# Installation:");
+            eprintln!("#   rumdl completions elvish > ~/.config/elvish/lib/rumdl.elv");
+        }
+        _ => {
+            eprintln!("# See your shell's documentation for completion installation");
+        }
+    }
 }
 
 /// Handle the clean command
@@ -2002,7 +2092,9 @@ build-backend = "setuptools.build_meta"
                     }
                 }
             }
-            Commands::Completions { shell } => generate(shell, &mut Cli::command(), "rumdl", &mut stdout()),
+            Commands::Completions { shell, list } => {
+                handle_completions_command(shell, list);
+            }
             Commands::Clean => {
                 handle_clean_command(&cli);
             }
