@@ -2087,3 +2087,133 @@ This file also has no issues.
         "Summary should indicate no issues found. Got:\n{stdout}"
     );
 }
+
+/// Test that MD033 warnings are NOT counted as fixable (issue #349)
+/// MD033 has LSP-only fixes (for VS Code quick actions) but declares FixCapability::Unfixable
+#[test]
+fn test_md033_not_counted_as_fixable() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create file with MD033 violation (inline HTML)
+    let file = temp_dir.path().join("test.md");
+    fs::write(
+        &file,
+        r#"# Test
+
+This has <b>inline HTML</b> which triggers MD033.
+"#,
+    )
+    .unwrap();
+
+    // Run rumdl check - should report issue but NOT as fixable
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should find MD033 issue
+    assert!(
+        stdout.contains("MD033") || stderr.contains("MD033"),
+        "Should detect MD033 violation. Got stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    // Should NOT show fixable count (MD033 is not CLI-fixable)
+    assert!(
+        !stdout.contains("fixable"),
+        "MD033 should NOT be counted as fixable. Got:\n{stdout}"
+    );
+
+    // Run rumdl fmt - should report 0 fixes
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should NOT report any fixes
+    assert!(!stdout.contains("Fixed"), "MD033 should NOT be fixed. Got:\n{stdout}");
+
+    // File content should be unchanged
+    let content = fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("<b>inline HTML</b>"),
+        "File should not be modified. Got:\n{content}"
+    );
+}
+
+/// Test that capability-based fix counting works correctly with mixed rule types
+/// Tests that only truly CLI-fixable rules are counted as fixable
+#[test]
+fn test_capability_based_fixable_count() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create file with both fixable (MD018) and unfixable (MD033) issues
+    let file = temp_dir.path().join("test.md");
+    fs::write(
+        &file,
+        r#"#Missing space after hash
+
+This has <b>inline HTML</b> which triggers MD033.
+"#,
+    )
+    .unwrap();
+
+    // Run rumdl check
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should detect both issues
+    assert!(
+        stdout.contains("MD018") || stdout.contains("no-missing-space-atx"),
+        "Should detect MD018 violation. Got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("MD033") || stdout.contains("no-inline-html"),
+        "Should detect MD033 violation. Got:\n{stdout}"
+    );
+
+    // Should show 1 fixable (MD018 only, not MD033)
+    // Output format: "Run `rumdl fmt` to automatically fix 1 of the 2 issues"
+    assert!(
+        stdout.contains("fix 1 of the 2 issues") || stdout.contains("1 fixable"),
+        "Should report 1 fixable issue (MD018 only). Got:\n{stdout}"
+    );
+
+    // Run rumdl fmt
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--no-cache", "."])
+        .current_dir(temp_dir.path())
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Should report 1 fix (MD018 only)
+    // Output format: "Fixed 1/2 issues in 1 file"
+    assert!(
+        stdout.contains("Fixed 1/2 issues") || stdout.contains("Fixed 1 issue"),
+        "Should report 1 issue fixed. Got:\n{stdout}"
+    );
+
+    // Verify MD018 was fixed but HTML remains
+    let content = fs::read_to_string(&file).unwrap();
+    assert!(
+        content.contains("# Missing space"),
+        "MD018 should be fixed. Got:\n{content}"
+    );
+    assert!(
+        content.contains("<b>inline HTML</b>"),
+        "HTML should remain unchanged. Got:\n{content}"
+    );
+}
