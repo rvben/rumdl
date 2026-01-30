@@ -30,7 +30,7 @@ mod md032_blanks_around_lists;
 mod md033_no_inline_html;
 mod md034_no_bare_urls;
 mod md035_hr_style;
-mod md036_no_emphasis_only_first;
+pub mod md036_no_emphasis_only_first;
 mod md037_spaces_around_emphasis;
 mod md038_no_space_in_code;
 mod md039_no_space_in_links;

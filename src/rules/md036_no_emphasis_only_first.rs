@@ -3,14 +3,15 @@
 //!
 //! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::utils::range_utils::calculate_emphasis_range;
 use regex::Regex;
 use std::sync::LazyLock;
 use toml;
 
 mod md036_config;
-use md036_config::MD036Config;
+pub use md036_config::HeadingStyle;
+pub use md036_config::MD036Config;
 
 // Optimize regex patterns with compilation once at startup
 // Note: The content between emphasis markers should not contain other emphasis markers
@@ -37,12 +38,38 @@ pub struct MD036NoEmphasisAsHeading {
 impl MD036NoEmphasisAsHeading {
     pub fn new(punctuation: String) -> Self {
         Self {
-            config: MD036Config { punctuation },
+            config: MD036Config {
+                punctuation,
+                fix: false,
+                heading_style: HeadingStyle::default(),
+                heading_level: crate::types::HeadingLevel::new(2).unwrap(),
+            },
+        }
+    }
+
+    pub fn new_with_fix(punctuation: String, fix: bool, heading_style: HeadingStyle, heading_level: u8) -> Self {
+        // Validate heading level, defaulting to 2 if invalid
+        let validated_level = crate::types::HeadingLevel::new(heading_level)
+            .unwrap_or_else(|_| crate::types::HeadingLevel::new(2).unwrap());
+        Self {
+            config: MD036Config {
+                punctuation,
+                fix,
+                heading_style,
+                heading_level: validated_level,
+            },
         }
     }
 
     pub fn from_config_struct(config: MD036Config) -> Self {
         Self { config }
+    }
+
+    /// Generate the ATX heading prefix for the configured heading level
+    fn atx_prefix(&self) -> String {
+        // HeadingLevel is already validated to 1-6, no clamping needed
+        let level = self.config.heading_level.get();
+        format!("{} ", "#".repeat(level as usize))
     }
 
     fn ends_with_punctuation(&self, text: &str) -> bool {
@@ -196,6 +223,21 @@ impl Rule for MD036NoEmphasisAsHeading {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_emphasis_range(i + 1, line, start_pos, end_pos);
 
+                // Only include fix if auto-fix is enabled in config
+                let fix = if self.config.fix {
+                    let prefix = self.atx_prefix();
+                    // Get the byte range for the full line content
+                    let range = ctx.line_index.line_content_range(i + 1);
+                    // Preserve leading whitespace by not including it in the replacement
+                    let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+                    Some(Fix {
+                        range,
+                        replacement: format!("{leading_ws}{prefix}{text}"),
+                    })
+                } else {
+                    None
+                };
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: start_line,
@@ -204,7 +246,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     end_column: end_col,
                     message: format!("Emphasis used instead of a heading: '{text}'"),
                     severity: Severity::Warning,
-                    fix: None, // No automatic fix - too risky to convert to heading
+                    fix,
                 });
             }
         }
@@ -213,10 +255,36 @@ impl Rule for MD036NoEmphasisAsHeading {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // MD036 does not provide automatic fixes
-        // Converting bold text to headings is too risky and can corrupt documents
-        // Users should manually decide if bold text should be a heading
-        Ok(ctx.content.to_string())
+        // Auto-fix is opt-in: only apply if explicitly enabled in config
+        // When disabled, check() returns warnings without fixes, so this is a no-op
+        if !self.config.fix {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Get warnings with their inline fixes
+        let warnings = self.check(ctx)?;
+
+        // If no warnings with fixes, return original content
+        if warnings.is_empty() || !warnings.iter().any(|w| w.fix.is_some()) {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Apply fixes from end to beginning to preserve byte offsets
+        let mut result = ctx.content.to_string();
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
+            }
+        }
+
+        Ok(result)
     }
 
     /// Check if this rule should be skipped for performance
@@ -235,6 +303,12 @@ impl Rule for MD036NoEmphasisAsHeading {
             "punctuation".to_string(),
             toml::Value::String(self.config.punctuation.clone()),
         );
+        map.insert("fix".to_string(), toml::Value::Boolean(self.config.fix));
+        map.insert("heading-style".to_string(), toml::Value::String("atx".to_string()));
+        map.insert(
+            "heading-level".to_string(),
+            toml::Value::Integer(i64::from(self.config.heading_level.get())),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -245,7 +319,22 @@ impl Rule for MD036NoEmphasisAsHeading {
         let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
             .unwrap_or_else(|| ".,;:!?".to_string());
 
-        Box::new(MD036NoEmphasisAsHeading::new(punctuation))
+        let fix = crate::config::get_rule_config_value::<bool>(config, "MD036", "fix").unwrap_or(false);
+
+        // heading_style currently only supports "atx"
+        let heading_style = HeadingStyle::Atx;
+
+        // HeadingLevel validation is handled by new_with_fix, which defaults to 2 if invalid
+        let heading_level = crate::config::get_rule_config_value::<u8>(config, "MD036", "heading-level")
+            .or_else(|| crate::config::get_rule_config_value::<u8>(config, "MD036", "heading_level"))
+            .unwrap_or(2);
+
+        Box::new(MD036NoEmphasisAsHeading::new_with_fix(
+            punctuation,
+            fix,
+            heading_style,
+            heading_level,
+        ))
     }
 }
 
@@ -411,24 +500,174 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_no_changes() {
+    fn test_fix_disabled_by_default() {
+        // When fix is not enabled (default), no changes should be made
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*Convert to heading*\n\nRegular text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // MD036 no longer provides automatic fixes
+        // Fix is opt-in, so by default no changes are made
         assert_eq!(fixed, content);
     }
 
     #[test]
-    fn test_fix_preserves_content() {
+    fn test_fix_disabled_preserves_content() {
+        // When fix is not enabled, content is preserved
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "**Convert to heading**\n\nRegular text";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // MD036 no longer provides automatic fixes
+        // Fix is opt-in, so by default no changes are made
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_fix_enabled_single_asterisk() {
+        // When fix is enabled, single asterisk emphasis is converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "*Section Title*\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "## Section Title\n\nBody text.");
+    }
+
+    #[test]
+    fn test_fix_enabled_double_asterisk() {
+        // When fix is enabled, double asterisk emphasis is converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**Section Title**\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "## Section Title\n\nBody text.");
+    }
+
+    #[test]
+    fn test_fix_enabled_single_underscore() {
+        // When fix is enabled, single underscore emphasis is converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 3);
+        let content = "_Section Title_\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "### Section Title\n\nBody text.");
+    }
+
+    #[test]
+    fn test_fix_enabled_double_underscore() {
+        // When fix is enabled, double underscore emphasis is converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 4);
+        let content = "__Section Title__\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "#### Section Title\n\nBody text.");
+    }
+
+    #[test]
+    fn test_fix_enabled_multiple_lines() {
+        // When fix is enabled, multiple emphasis-as-heading lines are converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**First Section**\n\nSome text.\n\n**Second Section**\n\nMore text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed,
+            "## First Section\n\nSome text.\n\n## Second Section\n\nMore text."
+        );
+    }
+
+    #[test]
+    fn test_fix_enabled_skips_punctuation() {
+        // When fix is enabled, lines ending with punctuation are skipped
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**Important Note:**\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should not be changed because it ends with punctuation (colon)
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_fix_enabled_heading_level_1() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 1);
+        let content = "**Title**";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "# Title");
+    }
+
+    #[test]
+    fn test_fix_enabled_heading_level_6() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 6);
+        let content = "**Subsubsubheading**";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "###### Subsubsubheading");
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_newline_enabled() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**Heading**\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "## Heading\n");
+    }
+
+    #[test]
+    fn test_fix_idempotent() {
+        // A second fix run should produce no further changes
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**Section Title**\n\nBody text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed1 = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed1, "## Section Title\n\nBody text.");
+
+        // Run fix again on the fixed content
+        let ctx2 = LintContext::new(&fixed1, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed2, fixed1, "Fix should be idempotent");
+    }
+
+    #[test]
+    fn test_fix_skips_lists() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "- *List item*\n- Another item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // List items should not be converted
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_fix_skips_blockquotes() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "> **Quoted text**\n> More quote";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Blockquotes should not be converted
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_fix_skips_code_blocks() {
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "```\n**Not a heading**\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Code blocks should not be converted
         assert_eq!(fixed, content);
     }
 
@@ -443,8 +682,20 @@ mod tests {
         assert_eq!(result.len(), 1);
 
         let fixed = rule.fix(&ctx).unwrap();
-        // MD036 no longer provides automatic fixes
+        // Fix is opt-in, so by default no changes are made
         assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_empty_punctuation_config_with_fix() {
+        // With fix enabled and empty punctuation, all emphasis is converted
+        let rule = MD036NoEmphasisAsHeading::new_with_fix("".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "**Important Note:**\n\nRegular text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // With empty punctuation and fix enabled, all emphasis is converted
+        assert_eq!(fixed, "## Important Note:\n\nRegular text");
     }
 
     #[test]
@@ -493,13 +744,14 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_preserves_trailing_newline() {
+    fn test_fix_preserves_trailing_newline_disabled() {
+        // When fix is disabled, trailing newline is preserved
         let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
         let content = "*Convert to heading*\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // MD036 no longer provides automatic fixes
+        // Fix is opt-in, so by default no changes are made
         assert_eq!(fixed, content);
     }
 
@@ -511,6 +763,9 @@ mod tests {
 
         let table = config.as_table().unwrap();
         assert_eq!(table.get("punctuation").unwrap().as_str().unwrap(), ".,;:!?");
+        assert!(!table.get("fix").unwrap().as_bool().unwrap());
+        assert_eq!(table.get("heading-style").unwrap().as_str().unwrap(), "atx");
+        assert_eq!(table.get("heading-level").unwrap().as_integer().unwrap(), 2);
     }
 
     #[test]
@@ -526,10 +781,10 @@ mod tests {
         assert_eq!(result[0].line, 3);
         assert!(result[0].message.contains("commits par année : rumdl"));
 
-        // But should NOT provide a fix
+        // Warnings don't include inline fixes (fix is opt-in via config)
         assert!(result[0].fix.is_none());
 
-        // And the fix method should return unchanged content
+        // Fix is opt-in, so by default the content is unchanged
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content);
     }
