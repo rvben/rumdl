@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-01-30
+
+### Added
+
+- **MD060: Loose last column option** ([#356](https://github.com/rvben/rumdl/issues/356))
+  - `loose-last-column = true` skips padding the last column in body rows
+  - Keeps tables compact while maintaining alignment for other columns
+  - Useful for tables with variable-length description columns
+  - (thanks @Ravlen for the suggestion)
+
+- **MD060: Separate header/body alignment** ([#348](https://github.com/rvben/rumdl/issues/348))
+  - `column-align-header` controls alignment for the header row only
+  - `column-align-body` controls alignment for body rows only
+  - Existing `column-align` remains as fallback for both
+  - (thanks @pygarap for the suggestion)
+
+- **MD018: MagicLink support in MkDocs flavor** ([#355](https://github.com/rvben/rumdl/issues/355))
+  - When using `flavor = "mkdocs"`, MD018 skips PyMdown MagicLink-style issue references
+  - `#10` and `#123` at the start of lines are not flagged as malformed headings
+  - Non-numeric patterns like `#Summary` are still flagged correctly
+  - (thanks @kattni for the suggestion)
+
+### Changed
+
+- **Docs: Add MD073 to opt-in rules table**
+  - MD073 (TOC validation) now listed in the opt-in rules section of docs/RULES.md
+
+- **Release: Add SchemaStore update reminder**
+  - `verify-release-ready.sh` now warns when `rumdl.schema.json` has changed
+  - Reminds to submit a PR to SchemaStore after releasing
+
+- **Release: Add opt-in rules documentation check**
+  - `verify-release-ready.sh` verifies all opt-in rules are documented in docs/RULES.md
+  - Prevents forgetting to document new opt-in rules
+
+### Fixed
+
+- **CLI: Remove noisy hints from completions command**
+  - Shell completion output is now cleaner without installation hints in the generated script
+
 ## [0.1.6] - 2026-01-29
 
 ### Added
