@@ -255,7 +255,10 @@ max-width = 80
 
 [MD073]
 enabled = true
-toc-marker = "<!-- TOC -->"
+min-level = 2
+max-level = 4
+indent = 2
+enforce-order = true
 CONFIGEOF
 
 TEMP_MD=$(mktemp)
