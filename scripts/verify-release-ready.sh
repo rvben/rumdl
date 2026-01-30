@@ -177,6 +177,23 @@ else
     ((ERRORS++))
 fi
 
+# Check 11: Check if schema changed since last release (SchemaStore reminder)
+echo -n "Checking if schema changed since last release... "
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+if [[ -n "$LAST_TAG" ]]; then
+    if git diff --quiet "$LAST_TAG" -- rumdl.schema.json 2>/dev/null; then
+        echo -e "${GREEN}✓${NC} (unchanged)"
+    else
+        echo -e "${YELLOW}⚠${NC}"
+        echo -e "${YELLOW}WARNING: rumdl.schema.json has changed since $LAST_TAG${NC}"
+        echo "After releasing, submit a PR to update SchemaStore:"
+        echo "  https://github.com/SchemaStore/schemastore"
+        echo "  File: src/schemas/json/rumdl.json"
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} (no previous tag found)"
+fi
+
 # Summary
 echo ""
 echo "════════════════════════════════════════"
