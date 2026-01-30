@@ -121,7 +121,7 @@ pub struct MD060Config {
     /// column-align-header = "center"  # Center header text
     /// column-align-body = "left"      # Left-align body text
     /// ```
-    #[serde(default, rename = "column-align-header", skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "column-align-header")]
     pub column_align_header: Option<ColumnAlign>,
 
     /// Controls alignment specifically for body rows (non-header, non-delimiter).
@@ -137,7 +137,7 @@ pub struct MD060Config {
     /// column-align-header = "center"  # Center header text
     /// column-align-body = "left"      # Left-align body text
     /// ```
-    #[serde(default, rename = "column-align-body", skip_serializing_if = "Option::is_none")]
+    #[serde(default, rename = "column-align-body")]
     pub column_align_body: Option<ColumnAlign>,
 
     /// When enabled, the last column in body rows is not padded to match the header width.

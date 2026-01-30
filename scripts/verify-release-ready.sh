@@ -238,6 +238,45 @@ else
     ((ERRORS++))
 fi
 
+# Check 13: Verify no config validation warnings for rule options
+echo -n "Checking config validation for rule options... "
+# Create a test config with all configurable rules enabled
+TEMP_CONFIG=$(mktemp)
+cat > "$TEMP_CONFIG" << 'CONFIGEOF'
+# Test config to verify all rule options are recognized
+[MD060]
+enabled = true
+style = "aligned"
+column-align = "auto"
+column-align-header = "center"
+column-align-body = "left"
+loose-last-column = true
+max-width = 80
+
+[MD073]
+enabled = true
+toc-marker = "<!-- TOC -->"
+CONFIGEOF
+
+TEMP_MD=$(mktemp)
+echo "# Test" > "$TEMP_MD"
+
+# Run rumdl and capture stderr for config warnings
+CONFIG_WARNINGS=$(./target/release/rumdl check --no-cache --config "$TEMP_CONFIG" "$TEMP_MD" 2>&1 | grep -i "Unknown option" || true)
+rm -f "$TEMP_CONFIG" "$TEMP_MD"
+
+if [[ -z "$CONFIG_WARNINGS" ]]; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: Config validation warnings found:${NC}"
+    echo "$CONFIG_WARNINGS"
+    echo ""
+    echo "This usually means a rule's default_config_section() doesn't include all valid config keys."
+    echo "Fix: Ensure all config keys (including optional ones) are included in the schema."
+    ((ERRORS++))
+fi
+
 # Summary
 echo ""
 echo "════════════════════════════════════════"
