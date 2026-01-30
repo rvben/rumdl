@@ -194,6 +194,50 @@ else
     echo -e "${YELLOW}⚠${NC} (no previous tag found)"
 fi
 
+# Check 12: Verify opt-in rules are documented
+echo -n "Checking opt-in rules are documented... "
+# Find rules with enabled: false as default (opt-in rules)
+# Pattern 1: explicit "enabled: false" in Default impl
+OPT_IN_EXPLICIT=$(grep -rl "enabled: false" src/rules/ 2>/dev/null | \
+    grep -oE "md[0-9]+" | tr '[:lower:]' '[:upper:]' | sort -u)
+
+# Pattern 2: fn default_enabled() -> bool { false }
+OPT_IN_FN=""
+while IFS= read -r file; do
+    if grep -A1 "fn default_enabled" "$file" 2>/dev/null | grep -q "false"; then
+        OPT_IN_FN="$OPT_IN_FN $(dirname "$file" | grep -oE "md[0-9]+" | tr '[:lower:]' '[:upper:]')"
+    fi
+done < <(grep -rl "fn default_enabled" src/rules/ 2>/dev/null)
+OPT_IN_FN=$(echo "$OPT_IN_FN" | tr ' ' '\n' | sort -u | grep -v "^$")
+
+# Pattern 3: comment says "default: false - opt-in rule"
+OPT_IN_COMMENT=$(grep -rl "default: false.*opt-in\|opt-in.*default.*false" src/rules/ 2>/dev/null | \
+    grep -oE "md[0-9]+" | tr '[:lower:]' '[:upper:]' | sort -u)
+
+OPT_IN_RULES=$(echo -e "$OPT_IN_EXPLICIT\n$OPT_IN_FN\n$OPT_IN_COMMENT" | sort -u | grep -v "^$")
+
+# Check which are documented in RULES.md opt-in table
+MISSING_DOCS=""
+for RULE in $OPT_IN_RULES; do
+    if ! grep -q "\[${RULE}\]" docs/RULES.md | grep -A20 "## Opt-in Rules" &>/dev/null; then
+        # More precise check: look in the opt-in section specifically
+        OPT_IN_SECTION=$(sed -n '/## Opt-in Rules/,/## /p' docs/RULES.md | head -20)
+        if ! echo "$OPT_IN_SECTION" | grep -qi "\[${RULE}\]"; then
+            MISSING_DOCS="${MISSING_DOCS}${RULE} "
+        fi
+    fi
+done
+
+if [[ -z "$MISSING_DOCS" ]]; then
+    echo -e "${GREEN}✓${NC}"
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: Opt-in rules missing from docs/RULES.md opt-in table:${NC}"
+    echo "  $MISSING_DOCS"
+    echo "Add them to the '## Opt-in Rules' section in docs/RULES.md"
+    ((ERRORS++))
+fi
+
 # Summary
 echo ""
 echo "════════════════════════════════════════"
