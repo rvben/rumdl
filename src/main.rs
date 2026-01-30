@@ -996,7 +996,6 @@ fn handle_completions_command(shell: Option<Shell>, list: bool) {
         }),
     };
 
-    print_completion_instructions(&shell);
     generate(shell, &mut Cli::command(), "rumdl", &mut stdout());
 }
 
@@ -1011,34 +1010,6 @@ fn detect_shell_from_env() -> Option<Shell> {
         "pwsh" | "powershell" => Some(Shell::PowerShell),
         "elvish" => Some(Shell::Elvish),
         _ => None,
-    }
-}
-
-fn print_completion_instructions(shell: &Shell) {
-    match shell {
-        Shell::Bash => {
-            eprintln!("# Installation: Add to ~/.bashrc or save to /etc/bash_completion.d/rumdl");
-            eprintln!("#   echo 'source <(rumdl completions bash)' >> ~/.bashrc");
-        }
-        Shell::Zsh => {
-            eprintln!("# Installation: Save to a directory in your $fpath");
-            eprintln!("#   rumdl completions zsh > ~/.zfunc/_rumdl");
-        }
-        Shell::Fish => {
-            eprintln!("# Installation:");
-            eprintln!("#   rumdl completions fish > ~/.config/fish/completions/rumdl.fish");
-        }
-        Shell::PowerShell => {
-            eprintln!("# Installation: Add to your PowerShell profile");
-            eprintln!("#   rumdl completions powershell >> $PROFILE");
-        }
-        Shell::Elvish => {
-            eprintln!("# Installation:");
-            eprintln!("#   rumdl completions elvish > ~/.config/elvish/lib/rumdl.elv");
-        }
-        _ => {
-            eprintln!("# See your shell's documentation for completion installation");
-        }
     }
 }
 
