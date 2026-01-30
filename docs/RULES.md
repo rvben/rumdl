@@ -252,12 +252,12 @@ Severity affects:
 
 ## Other Rules
 
-| Rule ID           | Rule Name              | Description                           |
-| ----------------- | ---------------------- | ------------------------------------- |
-| [MD057](md057.md) | Relative links         | Relative links should exist           |
-| [MD060](md060.md) | Table format           | Table formatting should be consistent |
-| [MD061](md061.md) | Forbidden terms        | Certain terms should not be used      |
-| [MD062](md062.md) | Link destination space | No whitespace in link destinations    |
+| Rule ID           | Rule Name              | Description                             |
+| ----------------- | ---------------------- | --------------------------------------- |
+| [MD057](md057.md) | Relative links         | Relative links should exist             |
+| [MD060](md060.md) | Table format           | Table formatting should be consistent   |
+| [MD061](md061.md) | Forbidden terms        | Certain terms should not be used        |
+| [MD062](md062.md) | Link destination space | No whitespace in link destinations      |
 | [MD073](md073.md) | TOC validation         | Table of Contents should match headings |
 
 ## Using Rules

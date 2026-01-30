@@ -299,20 +299,24 @@ make lint
 
 ```markdown
 ## Description
+
 Brief description of changes
 
 ## Type of Change
+
 - [ ] Bug fix (non-breaking change fixing an issue)
 - [ ] New feature (non-breaking change adding functionality)
 - [ ] Breaking change (fix or feature causing existing functionality to change)
 - [ ] Documentation update
 
 ## Testing
+
 - [ ] Tests added/updated
 - [ ] All tests passing (`make test-dev`)
 - [ ] Manual testing performed
 
 ## Checklist
+
 - [ ] Code follows project style (`make fmt` && `make lint`)
 - [ ] Conventional commit messages used
 - [ ] Documentation updated (if needed)
