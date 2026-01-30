@@ -126,23 +126,7 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# Check 9: Discover new notable projects using rumdl (informational only)
-echo -n "Checking for new notable projects using rumdl... "
-if command -v python3 &>/dev/null && [[ -f "scripts/update-used-by.py" ]]; then
-    DISCOVERY_OUTPUT=$(python3 scripts/update-used-by.py 2>&1)
-    if echo "$DISCOVERY_OUTPUT" | grep -q "NEW:"; then
-        echo -e "${YELLOW}⚠${NC}"
-        echo -e "${YELLOW}INFO: New projects with 500+ stars discovered${NC}"
-        echo "$DISCOVERY_OUTPUT" | grep -E "(NEW:|Add to README)"
-        echo ""
-    else
-        echo -e "${GREEN}✓${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠${NC} (script not found)"
-fi
-
-# Check 10: Verify documented rule count matches actual rule count
+# Check 9: Verify documented rule count matches actual rule count
 echo -n "Checking rule count in docs... "
 ACTUAL_RULE_COUNT=$(grep -cE '^\s*\("MD[0-9]+", ' src/rules/mod.rs)
 DOCS_MISMATCHES=""
@@ -172,7 +156,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 11: Verify rules.json is up-to-date
+# Check 10: Verify rules.json is up-to-date
 echo -n "Checking rules.json is up-to-date... "
 if [[ -f "rules.json" ]]; then
     TEMP_RULES=$(mktemp)
@@ -199,8 +183,11 @@ echo "════════════════════════�
 if [[ $ERRORS -eq 0 ]]; then
     echo -e "${GREEN}✅ Release is ready!${NC}"
     echo ""
+    echo "Optional: Check for new notable projects using rumdl:"
+    echo "  uv run scripts/update-used-by.py"
+    echo ""
     echo "To create and push the release:"
-    echo "  git tag v$CARGO_VERSION"
+    echo "  git tag -a v$CARGO_VERSION -m \"v$CARGO_VERSION\""
     echo "  git push origin main v$CARGO_VERSION"
 else
     echo -e "${RED}❌ Release is NOT ready ($ERRORS errors)${NC}"
