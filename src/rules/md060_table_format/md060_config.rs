@@ -107,6 +107,64 @@ pub struct MD060Config {
     /// ```
     #[serde(default, rename = "column-align")]
     pub column_align: ColumnAlign,
+
+    /// Controls alignment specifically for the header row.
+    ///
+    /// When set, overrides `column-align` for the header row only.
+    /// If not set, falls back to `column-align`.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// column-align-header = "center"  # Center header text
+    /// column-align-body = "left"      # Left-align body text
+    /// ```
+    #[serde(default, rename = "column-align-header", skip_serializing_if = "Option::is_none")]
+    pub column_align_header: Option<ColumnAlign>,
+
+    /// Controls alignment specifically for body rows (non-header, non-delimiter).
+    ///
+    /// When set, overrides `column-align` for body rows only.
+    /// If not set, falls back to `column-align`.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// column-align-header = "center"  # Center header text
+    /// column-align-body = "left"      # Left-align body text
+    /// ```
+    #[serde(default, rename = "column-align-body", skip_serializing_if = "Option::is_none")]
+    pub column_align_body: Option<ColumnAlign>,
+
+    /// When enabled, the last column in body rows is not padded to match the header width.
+    ///
+    /// This is useful for tables where the last column contains descriptions or other
+    /// variable-length content. The header and delimiter rows remain fully aligned,
+    /// but body rows can have shorter or longer last columns.
+    ///
+    /// Only applies when `style = "aligned"` or `style = "aligned-no-space"`.
+    ///
+    /// # Examples
+    ///
+    /// ```toml
+    /// [MD060]
+    /// style = "aligned"
+    /// loose-last-column = true
+    /// ```
+    ///
+    /// Result:
+    /// ```markdown
+    /// | Name   | Status   | Description |
+    /// |--------|----------|-------------|
+    /// | Foo    | Enabled  | Short |
+    /// | Bar    | Disabled | A much longer description that would waste space if padded |
+    /// ```
+    #[serde(default, rename = "loose-last-column")]
+    pub loose_last_column: bool,
 }
 
 impl Default for MD060Config {
@@ -116,6 +174,9 @@ impl Default for MD060Config {
             style: default_style(),
             max_width: default_max_width(),
             column_align: ColumnAlign::Auto,
+            column_align_header: None,
+            column_align_body: None,
+            loose_last_column: false,
         }
     }
 }

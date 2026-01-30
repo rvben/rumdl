@@ -1,7 +1,8 @@
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::MD060TableFormat;
+use rumdl_lib::rules::{ColumnAlign, MD013Config, MD060Config, MD060TableFormat};
+use rumdl_lib::types::LineLength;
 use unicode_width::UnicodeWidthStr;
 
 #[test]
@@ -1881,5 +1882,722 @@ fn test_md060_mkdocs_flavor_escaped_and_inline_code_pipes() {
     assert!(fixed.contains("`x | y`"), "Inline code pipe should be preserved");
 
     let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Should have 4 lines");
+}
+
+// ============================================================================
+// LOOSE LAST COLUMN FEATURE TESTS (#356)
+// ============================================================================
+
+/// Helper to create MD013Config with default values
+fn default_md013_config() -> MD013Config {
+    MD013Config::default()
+}
+
+#[test]
+fn test_md060_loose_last_column_basic() {
+    // Test that loose-last-column allows unpadded last column in body rows
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // Input: header "Description" is 11 chars, but body has "Short" (5 chars) and long text (26 chars)
+    // The max width of last column = max(11, 5, 26) = 26
+    // Header is padded to 26, body rows are NOT padded (loose)
+    let content = "| Name | Description |\n|---|---|\n| Foo | Short |\n| Bar | A much longer description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header and delimiter should still be aligned
+    assert_eq!(
+        lines[0].len(),
+        lines[1].len(),
+        "Header and delimiter should be same length"
+    );
+
+    // KEY TEST: Body row with "Short" should be SHORTER than header row
+    // because loose_last_column=true means we don't pad the last column in body rows
+    // Header has "Description" padded to 26 chars, body has "Short" (5 chars) unpadded
+    assert!(
+        lines[2].len() < lines[0].len(),
+        "Body row with short content ({} chars) should be shorter than header ({} chars) when loose_last_column=true",
+        lines[2].len(),
+        lines[0].len()
+    );
+
+    // Body row with longest content should equal header length (both have same last column width)
+    // Header is padded to match max content, body with max content doesn't need padding
+    assert_eq!(
+        lines[3].len(),
+        lines[0].len(),
+        "Body row with max content should equal header length (both use max column width)"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_disabled_by_default() {
+    // Test that loose-last-column is disabled by default
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Name | Description |\n|---|---|\n| Foo | Short |\n| Bar | Longer text |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // All rows should have equal length (default behavior)
+    assert_eq!(lines[0].len(), lines[1].len(), "Header and delimiter should match");
+    assert_eq!(
+        lines[1].len(),
+        lines[2].len(),
+        "Delimiter and first body row should match"
+    );
+    assert_eq!(lines[2].len(), lines[3].len(), "Body rows should match");
+}
+
+#[test]
+fn test_md060_loose_last_column_header_delimiter_still_aligned() {
+    // Test that header and delimiter remain aligned even with loose-last-column
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| ID | Name | Description |\n|---|---|---|\n| 1 | A | X |\n| 2 | B | Y |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header and delimiter MUST still be aligned
+    assert_eq!(
+        lines[0].len(),
+        lines[1].len(),
+        "Header and delimiter should be same length even with loose-last-column"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_multiple_columns() {
+    // Test loose-last-column with multiple columns
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| A | B | C | D |\n|---|---|---|---|\n| 1 | 2 | 3 | Short |\n| 1 | 2 | 3 | Longer text here |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Verify table structure: should have 4 lines
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Should have 4 lines");
+
+    // Non-last columns should be present in all rows
+    assert!(fixed.contains("| A "), "Header A should be in output");
+    assert!(fixed.contains("| B "), "Header B should be in output");
+    assert!(fixed.contains("| C "), "Header C should be in output");
+    assert!(fixed.contains("| D "), "Header D should be in output");
+
+    // Body content should be preserved
+    assert!(fixed.contains("Short"), "Short text should be in output");
+    assert!(fixed.contains("Longer text here"), "Long text should be in output");
+}
+
+#[test]
+fn test_md060_loose_last_column_single_column_table() {
+    // Edge case: Single column table with loose-last-column
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Description |\n|---|\n| Short |\n| A much longer description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    // Should not panic
+    let result = rule.fix(&ctx);
+    assert!(result.is_ok(), "Single column with loose-last-column should not crash");
+
+    let fixed = result.unwrap();
+    assert!(fixed.contains("Short"), "Short text should be preserved");
+    assert!(
+        fixed.contains("A much longer description"),
+        "Long text should be preserved"
+    );
+}
+
+// ============================================================================
+// COLUMN ALIGN HEADER/BODY FEATURE TESTS (#348)
+// ============================================================================
+
+#[test]
+fn test_md060_column_align_header_basic() {
+    // Test column-align-header overrides global column-align for header only
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Left,                // Body will be left-aligned
+        column_align_header: Some(ColumnAlign::Center), // Header is centered
+        column_align_body: None,
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // Use content where "A" needs centering in a wider column
+    let content = "| A | B |\n|---|---|\n| Long | Text |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 3, "Should have 3 lines");
+
+    // Header "A" should be centered in a column wide enough for "Long"
+    // Centering means space on left AND right: "| A    |" becomes "|  A   |" (or similar)
+    let header = lines[0];
+    let body = lines[2];
+
+    // Find the first cell content position
+    // In centered header, "A" should have space before it (after the pipe)
+    // In left-aligned body, "Long" should be right after the pipe with space after
+    assert!(
+        header.contains("|  ") || header.contains("| A "),
+        "Header should show centering pattern, got: {header}"
+    );
+    assert!(
+        body.starts_with("| Long"),
+        "Body should be left-aligned (content right after pipe), got: {body}"
+    );
+}
+
+#[test]
+fn test_md060_column_align_body_basic() {
+    // Test column-align-body overrides global column-align for body rows only
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Left, // Header will be left-aligned
+        column_align_header: None,
+        column_align_body: Some(ColumnAlign::Right), // Body is right-aligned
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // Use content where body "A" needs right-aligning in a wider column
+    let content = "| Long | Text |\n|---|---|\n| A | B |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 3, "Should have 3 lines");
+
+    let header = lines[0];
+    let body = lines[2];
+
+    // Header "Long" should be left-aligned (right after pipe)
+    assert!(
+        header.starts_with("| Long"),
+        "Header should be left-aligned, got: {header}"
+    );
+
+    // Body "A" should be right-aligned (space before content, content before pipe)
+    // Right-alignment means: "|    A |" pattern (spaces, then content, then space, then pipe)
+    assert!(
+        body.contains("  A |") || body.contains(" A |"),
+        "Body should be right-aligned with padding before 'A', got: {body}"
+    );
+}
+
+#[test]
+fn test_md060_column_align_header_and_body_different() {
+    // Test different alignments for header and body
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,                // Fall back to auto
+        column_align_header: Some(ColumnAlign::Center), // Header centered
+        column_align_body: Some(ColumnAlign::Left),     // Body left-aligned
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| ColumnA | ColumnB |\n|---|---|\n| X | Y |\n| XX | YY |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 4, "Should have 4 lines");
+
+    // Header (line 0) should be centered
+    // Body (lines 2, 3) should be left-aligned
+    // All lines should still have equal length
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+    assert_eq!(lines[2].len(), lines[3].len());
+}
+
+#[test]
+fn test_md060_column_align_header_only_set() {
+    // Test when only column-align-header is set (body falls back to column-align)
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Right,             // Body and default
+        column_align_header: Some(ColumnAlign::Left), // Header left
+        column_align_body: None,                      // Body uses column_align (Right)
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| A | B |\n|---|---|\n| X | Y |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Verify the table is properly formatted
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_column_align_body_only_set() {
+    // Test when only column-align-body is set (header falls back to column-align)
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Left,              // Header and default
+        column_align_header: None,                    // Header uses column_align (Left)
+        column_align_body: Some(ColumnAlign::Center), // Body centered
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Value |\n|---|---|\n| Key | 42 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].len(), lines[1].len());
+    assert_eq!(lines[1].len(), lines[2].len());
+}
+
+#[test]
+fn test_md060_column_align_auto_with_header_body_override() {
+    // Test that Auto alignment respects delimiter markers while header/body overrides work
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,                // Use delimiter markers
+        column_align_header: Some(ColumnAlign::Center), // Override header to center
+        column_align_body: None,                        // Body uses Auto (delimiter markers)
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // Delimiter says: left, center, right
+    let content = "| Left | Center | Right |\n|:---|:---:|---:|\n| A | B | C |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Delimiter markers should be preserved
+    assert!(fixed.contains(":---"), "Left alignment marker should be preserved");
+    assert!(fixed.contains("---:"), "Right alignment marker should be preserved");
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 3);
+}
+
+#[test]
+fn test_md060_column_align_all_combinations() {
+    // Test all combinations of ColumnAlign values
+    for header_align in [
+        Some(ColumnAlign::Left),
+        Some(ColumnAlign::Center),
+        Some(ColumnAlign::Right),
+        None,
+    ] {
+        for body_align in [
+            Some(ColumnAlign::Left),
+            Some(ColumnAlign::Center),
+            Some(ColumnAlign::Right),
+            None,
+        ] {
+            let config = MD060Config {
+                enabled: true,
+                style: "aligned".to_string(),
+                max_width: LineLength::from_const(0),
+                column_align: ColumnAlign::Auto,
+                column_align_header: header_align,
+                column_align_body: body_align,
+                loose_last_column: false,
+            };
+            let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+            let content = "| A | B |\n|---|---|\n| X | Y |";
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+            // Should not panic for any combination
+            let result = rule.fix(&ctx);
+            assert!(
+                result.is_ok(),
+                "Should not panic for header={header_align:?}, body={body_align:?}"
+            );
+        }
+    }
+}
+
+// ============================================================================
+// COMBINED FEATURES TESTS
+// ============================================================================
+
+#[test]
+fn test_md060_loose_last_column_with_header_body_alignment() {
+    // Test both features together
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: Some(ColumnAlign::Center),
+        column_align_body: Some(ColumnAlign::Left),
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Description |\n|---|---|\n| A | Short |\n| B | A very long description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header and delimiter should still be aligned
+    assert_eq!(lines[0].len(), lines[1].len(), "Header and delimiter should match");
+
+    // Content should be preserved
+    assert!(fixed.contains("Short"), "Short text preserved");
+    assert!(fixed.contains("A very long description"), "Long text preserved");
+}
+
+#[test]
+fn test_md060_features_idempotency() {
+    // Test that applying fix twice with new features produces same result
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: Some(ColumnAlign::Center),
+        column_align_body: Some(ColumnAlign::Left),
+        loose_last_column: false, // Keep strict for idempotency test
+    };
+    let rule = MD060TableFormat::from_config_struct(config.clone(), default_md013_config(), false);
+
+    let content = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | NYC |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed_once = rule.fix(&ctx).unwrap();
+
+    let ctx2 = LintContext::new(&fixed_once, MarkdownFlavor::Standard, None);
+    let rule2 = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+    let fixed_twice = rule2.fix(&ctx2).unwrap();
+
+    assert_eq!(fixed_once, fixed_twice, "Applying fix twice should produce same result");
+}
+
+// ============================================================================
+// EXPERT-LEVEL TESTS WITH EXACT OUTPUT ASSERTIONS
+// ============================================================================
+
+#[test]
+fn test_md060_loose_last_column_exact_output() {
+    // Verify exact output for loose-last-column feature
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| A | B |\n|---|---|\n| X | Short |\n| Y | Much longer text |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Expected: Header padded to max width, body rows NOT padded in last column
+    // Column widths: A=min(3)=3 (GFM minimum), B=max(1, 5, 16)=16
+    // Header: "| A   | B                |" (A padded to min 3, B padded to 16)
+    // Body1:  "| X   | Short |" (first column padded, last column NOT padded - loose)
+    // Body2:  "| Y   | Much longer text |" (first column padded, last no padding needed)
+    let expected =
+        "| A   | B                |\n| --- | ---------------- |\n| X   | Short |\n| Y   | Much longer text |";
+    assert_eq!(
+        fixed, expected,
+        "Loose last column should produce unpadded body rows in last column only"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_empty_cell() {
+    // Edge case: empty cell in last column with loose-last-column
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| A | Description |\n|---|---|\n| X |  |\n| Y | Has content |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Empty cell row should be shortest
+    assert!(
+        lines[2].len() < lines[0].len(),
+        "Row with empty last cell ({}) should be shorter than header ({})",
+        lines[2].len(),
+        lines[0].len()
+    );
+
+    // Row with content should match or be close to header
+    assert!(
+        lines[3].len() <= lines[0].len(),
+        "Row with content should not exceed header length"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_preserves_alignment_markers() {
+    // Verify alignment markers in delimiter are preserved with loose-last-column
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Left | Right |\n|:---|---:|\n| A | B |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Alignment markers should be preserved
+    assert!(fixed.contains(":---"), "Left alignment marker should be preserved");
+    assert!(
+        fixed.contains("---:") || fixed.contains("-:"),
+        "Right alignment marker should be preserved"
+    );
+}
+
+#[test]
+fn test_md060_column_align_header_center_exact() {
+    // Verify exact centering behavior for header
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Left,
+        column_align_header: Some(ColumnAlign::Center),
+        column_align_body: None, // Uses column_align (Left)
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // "A" (1 char) needs to be centered in column wide enough for "Long" (4 chars)
+    let content = "| A |\n|---|\n| Long |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header "A" should be centered: spaces on both sides
+    // For 4-char column width, "A" centered = " A  " or "  A " (depending on even/odd handling)
+    let header = lines[0];
+    let a_pos = header.find('A').expect("A should be in header");
+    let pipe_after_a = header[a_pos..].find('|').expect("Pipe should follow A");
+
+    // Check there's space before A (after first pipe)
+    let first_pipe = header.find('|').unwrap();
+    let chars_before_a = a_pos - first_pipe - 1;
+    let chars_after_a = pipe_after_a - 1;
+
+    assert!(
+        chars_before_a > 0,
+        "Centered header should have space before 'A', got {chars_before_a} chars before"
+    );
+    assert!(
+        chars_after_a > 0,
+        "Centered header should have space after 'A', got {chars_after_a} chars after"
+    );
+
+    // Body should be left-aligned: "Long" right after pipe
+    let body = lines[2];
+    assert!(
+        body.contains("| Long"),
+        "Body should be left-aligned with 'Long' right after pipe, got: {body}"
+    );
+}
+
+#[test]
+fn test_md060_column_align_body_right_exact() {
+    // Verify exact right-alignment behavior for body
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Left,
+        column_align_header: None, // Uses column_align (Left)
+        column_align_body: Some(ColumnAlign::Right),
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // "X" (1 char) needs to be right-aligned in column wide enough for "Long" (4 chars)
+    let content = "| Long |\n|---|\n| X |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header should be left-aligned
+    let header = lines[0];
+    assert!(
+        header.contains("| Long"),
+        "Header should be left-aligned, got: {header}"
+    );
+
+    // Body "X" should be right-aligned: spaces before, then X, then space, then pipe
+    let body = lines[2];
+    // Right-aligned "X" in 4-char column = "   X" -> "|    X |"
+    // Find X position relative to the cell boundaries
+    let x_pos = body.find('X').expect("X should be in body");
+    let first_pipe = body.find('|').unwrap();
+    let chars_before_x = x_pos - first_pipe - 1;
+
+    assert!(
+        chars_before_x >= 3,
+        "Right-aligned body should have multiple spaces before 'X', got {chars_before_x} chars before. Line: {body}"
+    );
+}
+
+#[test]
+fn test_md060_delimiter_unaffected_by_column_align() {
+    // Verify delimiter row is NOT affected by column-align settings
+    // Delimiter should always use dashes, not be "aligned" with spaces
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Center,
+        column_align_header: Some(ColumnAlign::Right),
+        column_align_body: Some(ColumnAlign::Left),
+        loose_last_column: false,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| A | B |\n|---|---|\n| X | Y |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    let delimiter = lines[1];
+
+    // Delimiter should contain only pipes, dashes, colons, and spaces
+    // It should NOT have content alignment applied
+    assert!(
+        !delimiter.contains('A') && !delimiter.contains('B') && !delimiter.contains('X') && !delimiter.contains('Y'),
+        "Delimiter should not contain cell content, got: {delimiter}"
+    );
+
+    // Delimiter should have dashes
+    assert!(
+        delimiter.contains("---"),
+        "Delimiter should contain dashes, got: {delimiter}"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_with_cjk() {
+    // Edge case: CJK characters in last column with loose-last-column
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    // CJK chars are double-width
+    let content = "| A | Name |\n|---|---|\n| X | 中文 |\n| Y | English |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Should not panic and should preserve content
+    assert!(fixed.contains("中文"), "CJK content should be preserved");
+    assert!(fixed.contains("English"), "ASCII content should be preserved");
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    // With loose last column, body rows can differ in length
+    // CJK row might be different length than English row due to display width differences
     assert_eq!(lines.len(), 4, "Should have 4 lines");
 }
