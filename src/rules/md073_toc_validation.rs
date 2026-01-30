@@ -620,6 +620,8 @@ min-level = 2
 max-level = 4
 # Whether TOC order must match document order
 enforce-order = true
+# Indentation per nesting level (defaults to MD007's indent value)
+indent = 2
 "#,
         )
         .ok()?;
