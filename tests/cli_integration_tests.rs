@@ -2582,12 +2582,7 @@ fn test_completions_bash_generates_script() {
         .expect("Failed to execute rumdl");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "Command should succeed");
-    assert!(
-        stderr.contains("Installation"),
-        "Should have installation instructions on stderr"
-    );
     assert!(stdout.contains("_rumdl()"), "Should generate bash completion function");
     assert!(stdout.contains("COMPREPLY"), "Should use COMPREPLY for completions");
 }
@@ -2600,12 +2595,7 @@ fn test_completions_zsh_generates_script() {
         .expect("Failed to execute rumdl");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "Command should succeed");
-    assert!(
-        stderr.contains("Installation"),
-        "Should have installation instructions on stderr"
-    );
     assert!(stdout.contains("#compdef rumdl"), "Should have zsh compdef directive");
     assert!(stdout.contains("_rumdl()"), "Should generate zsh completion function");
 }
@@ -2618,12 +2608,7 @@ fn test_completions_fish_generates_script() {
         .expect("Failed to execute rumdl");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "Command should succeed");
-    assert!(
-        stderr.contains("Installation"),
-        "Should have installation instructions on stderr"
-    );
     assert!(
         stdout.contains("complete -c rumdl"),
         "Should generate fish complete commands"
@@ -2638,12 +2623,7 @@ fn test_completions_powershell_generates_script() {
         .expect("Failed to execute rumdl");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "Command should succeed");
-    assert!(
-        stderr.contains("Installation"),
-        "Should have installation instructions on stderr"
-    );
     assert!(
         stdout.contains("Register-ArgumentCompleter"),
         "Should register argument completer"
@@ -2657,11 +2637,11 @@ fn test_completions_elvish_generates_script() {
         .output()
         .expect("Failed to execute rumdl");
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success(), "Command should succeed");
     assert!(
-        stderr.contains("Installation"),
-        "Should have installation instructions on stderr"
+        stdout.contains("set edit:completion:arg-completer[rumdl]"),
+        "Should set elvish completion handler"
     );
 }
 
@@ -2714,9 +2694,9 @@ fn test_completions_short_list_flag() {
 }
 
 #[test]
-fn test_completions_clean_piping_stdout_has_no_instructions() {
-    // Verify stdout contains only the script (no instructions)
-    // This ensures `rumdl completions zsh > file` produces a clean script
+fn test_completions_clean_piping_stdout_only_has_script() {
+    // Verify stdout contains only the script (no extra output)
+    // This ensures `eval "$(rumdl completions zsh)"` works cleanly
     let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
         .args(["completions", "zsh"])
         .output()
@@ -2725,7 +2705,7 @@ fn test_completions_clean_piping_stdout_has_no_instructions() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // stdout should have the script, NOT installation instructions
+    // stdout should have the script only
     assert!(
         stdout.contains("#compdef rumdl"),
         "stdout should contain the zsh script"
@@ -2735,10 +2715,6 @@ fn test_completions_clean_piping_stdout_has_no_instructions() {
         "stdout should NOT contain installation instructions"
     );
 
-    // stderr should have instructions, NOT the script
-    assert!(
-        stderr.contains("Installation"),
-        "stderr should contain installation instructions"
-    );
-    assert!(!stderr.contains("#compdef"), "stderr should NOT contain the script");
+    // stderr should be empty (no noise for eval usage)
+    assert!(stderr.is_empty(), "stderr should be empty for clean eval usage");
 }
