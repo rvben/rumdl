@@ -307,6 +307,11 @@ fn has_hard_break(line: &str) -> bool {
     line.ends_with("  ") || line.ends_with('\\')
 }
 
+/// Check if text ends with sentence-terminating punctuation (. ! ?)
+fn ends_with_sentence_punct(text: &str) -> bool {
+    text.ends_with('.') || text.ends_with('!') || text.ends_with('?')
+}
+
 /// Trim trailing whitespace while preserving hard breaks (two trailing spaces or backslash)
 ///
 /// Hard breaks in Markdown can be indicated by:
@@ -1191,8 +1196,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
                     } else if i == sentences.len() - 1 {
                         // Last sentence: check if it's complete or incomplete
                         let trimmed = sentence.trim();
-                        let ends_with_sentence_punct =
-                            trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+                        let ends_with_sentence_punct = ends_with_sentence_punct(trimmed);
 
                         if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Complete sentence - emit it immediately
@@ -1210,8 +1214,15 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
             } else {
                 // Single sentence - check if it's complete
                 let trimmed = combined.trim();
-                let ends_with_sentence_punct =
-                    trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+
+                // If the combined result is only whitespace, don't accumulate it.
+                // This prevents leading spaces on subsequent elements when lines
+                // are joined with spaces during reflow iteration.
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let ends_with_sentence_punct = ends_with_sentence_punct(trimmed);
 
                 if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
                     // Complete single sentence - emit it
@@ -1280,7 +1291,7 @@ fn handle_emphasis_sentence_split(
 
         // Check if the emphasis content ends with sentence punctuation - if so, emit
         let trimmed = content.trim();
-        let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+        let ends_with_punct = ends_with_sentence_punct(trimmed);
         if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
             lines.push(current_line.clone());
             current_line.clear();
@@ -1307,14 +1318,14 @@ fn handle_emphasis_sentence_split(
                 current_line.push_str(marker);
 
                 // Check if this is a complete sentence
-                let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+                let ends_with_punct = ends_with_sentence_punct(trimmed);
                 if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
                     lines.push(current_line.clone());
                     current_line.clear();
                 }
             } else if i == sentences.len() - 1 {
                 // Last sentence: check if complete
-                let ends_with_punct = trimmed.ends_with('.') || trimmed.ends_with('!') || trimmed.ends_with('?');
+                let ends_with_punct = ends_with_sentence_punct(trimmed);
 
                 let mut line = String::new();
                 line.push_str(marker);

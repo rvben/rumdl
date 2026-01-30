@@ -675,3 +675,38 @@ fn test_issue_338_bare_snippet_delimiter_as_paragraph_boundary() {
         }
     }
 }
+
+#[test]
+fn test_emphasis_wrapping_multiple_sentences() {
+    // Test case from issue #360 - emphasis spanning multiple sentences
+    let rule = create_sentence_per_line_rule();
+    let content = "**First sentence. Second sentence.**\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    println!("Content: {content:?}");
+    println!("Warnings: {:?}", result.len());
+    for w in &result {
+        println!("  Warning: {}", w.message);
+        if let Some(fix) = &w.fix {
+            println!("    Fix range: {:?}", fix.range);
+            println!("    Replacement: {:?}", fix.replacement);
+        }
+    }
+
+    assert!(!result.is_empty(), "Should detect multiple sentences");
+    assert!(result[0].fix.is_some(), "Should have fix");
+
+    let fix = result[0].fix.as_ref().unwrap();
+
+    // The fix should NOT have leading spaces on the second line
+    assert!(
+        !fix.replacement.contains("  **Second"),
+        "Second sentence should not have leading spaces: {:?}",
+        fix.replacement
+    );
+
+    // The expected output is each sentence on its own line with emphasis preserved
+    let expected = "**First sentence.**\n**Second sentence.**\n";
+    assert_eq!(fix.replacement, expected, "Fix should produce correct output");
+}

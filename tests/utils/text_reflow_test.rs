@@ -3240,3 +3240,135 @@ fn test_hugo_shortcode_extraction_no_duplication() {
         "Shortcode should appear exactly once: {result:?}"
     );
 }
+
+#[test]
+fn test_emphasis_multiple_sentences_idempotent() {
+    // Regression test for issue #360: sentence-per-line reflow should be idempotent
+    // when emphasis spans multiple sentences
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    // Original input: bold text with two sentences
+    let input = "**First sentence. Second sentence.**";
+    let result = reflow_line(input, &options);
+
+    // Should split into two lines, each with its own emphasis markers
+    assert_eq!(result.len(), 2, "Should produce 2 lines: {result:?}");
+    assert_eq!(result[0], "**First sentence.**");
+    assert_eq!(result[1], "**Second sentence.**");
+
+    // Idempotency check: reflowing the result again should produce the same output
+    // This was the bug - the second reflow would add a leading space
+    let joined = result.join("\n");
+    let second_result = reflow_markdown(&joined, &options);
+
+    // Join and compare
+    let second_joined = second_result.trim_end();
+    assert_eq!(
+        joined, second_joined,
+        "Reflow should be idempotent. First: {joined:?}, Second: {second_joined:?}"
+    );
+
+    // Specifically check that no leading spaces are introduced
+    for line in second_result.lines() {
+        assert!(!line.starts_with(' '), "Line should not start with space: {line:?}");
+    }
+}
+
+#[test]
+fn test_emphasis_idempotent_all_types() {
+    // Test idempotency for all emphasis types: bold, italic, strikethrough
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let test_cases = vec![
+        // (input, expected_first_line, expected_second_line)
+        ("**Bold one. Bold two.**", "**Bold one.**", "**Bold two.**"),
+        ("*Italic one. Italic two.*", "*Italic one.*", "*Italic two.*"),
+        ("~~Strike one. Strike two.~~", "~~Strike one.~~", "~~Strike two.~~"),
+        ("__Bold underscore. Second.__", "__Bold underscore.__", "__Second.__"),
+        ("_Italic underscore. Second._", "_Italic underscore._", "_Second._"),
+    ];
+
+    for (input, expected_first, expected_second) in test_cases {
+        let result = reflow_line(input, &options);
+        assert_eq!(result.len(), 2, "Input {input:?} should produce 2 lines: {result:?}");
+        assert_eq!(result[0], expected_first, "First line mismatch for {input:?}");
+        assert_eq!(result[1], expected_second, "Second line mismatch for {input:?}");
+
+        // Idempotency: reflow the result and verify it's unchanged
+        let joined = result.join("\n");
+        let second_result = reflow_markdown(&joined, &options);
+        let second_joined = second_result.trim_end();
+
+        assert_eq!(
+            joined, second_joined,
+            "Reflow should be idempotent for {input:?}. First: {joined:?}, Second: {second_joined:?}"
+        );
+
+        // No leading spaces on any line
+        for (i, line) in second_result.lines().enumerate() {
+            assert!(
+                !line.starts_with(' '),
+                "Line {i} should not start with space for {input:?}: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_emphasis_idempotent_convergence_stress() {
+    // Stress test: verify that reflow converges within a few iterations
+    // This mirrors the fix coordinator's 100-iteration limit
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "**First. Second. Third.**";
+    let mut current = input.to_string();
+
+    for iteration in 0..10 {
+        let result = reflow_markdown(&current, &options);
+        let next = result.trim_end().to_string();
+
+        if next == current {
+            // Converged - success!
+            assert!(iteration <= 2, "Should converge within 2 iterations, took {iteration}");
+            return;
+        }
+        current = next;
+    }
+
+    panic!("Reflow did not converge after 10 iterations. Final state: {current:?}");
+}
+
+#[test]
+fn test_whitespace_only_text_not_accumulated() {
+    // Test that whitespace-only text elements don't pollute the output
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    // Simulates what happens when already-formatted lines are joined with space
+    // The space between emphasis elements should not cause leading spaces
+    let already_formatted = "**First.**\n**Second.**";
+    let result = reflow_markdown(already_formatted, &options);
+
+    for line in result.lines() {
+        assert!(!line.starts_with(' '), "Line should not start with space: {line:?}");
+        assert!(
+            !line.starts_with(" **"),
+            "Emphasis should not have leading space: {line:?}"
+        );
+    }
+}
