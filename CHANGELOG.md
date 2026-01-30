@@ -42,7 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `verify-release-ready.sh` verifies all opt-in rules are documented in docs/RULES.md
   - Prevents forgetting to document new opt-in rules
 
+- **Release: Add config validation check**
+  - `verify-release-ready.sh` now tests all rule config options for validation warnings
+  - Catches schema bugs where valid options show "Unknown option" warnings
+
 ### Fixed
+
+- **MD060: Fix config validation warnings for optional alignment options**
+  - `column-align-header` and `column-align-body` no longer show "Unknown option" warnings
+  - Schema now explicitly includes all valid config keys
+
+- **MD073: Add missing indent option to config schema**
+  - `indent` option was accepted but not in the validation schema
 
 - **CLI: Remove noisy hints from completions command**
   - Shell completion output is now cleaner without installation hints in the generated script
