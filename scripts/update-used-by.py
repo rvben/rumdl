@@ -46,9 +46,10 @@ def search_repos() -> set[str]:
     """Search GitHub for repos using rumdl."""
     repos = set()
     searches = [
-        (["search", "code", "tool.rumdl", "--filename", "pyproject.toml", "--json", "repository", "--limit", "100"]),
-        (["search", "code", "--filename", ".rumdl.toml", "--json", "repository", "--limit", "100"]),
-        (["search", "code", "rumdl", "--filename", ".pre-commit-config.yaml", "--json", "repository", "--limit", "100"]),
+        ["search", "code", "tool.rumdl", "--filename", "pyproject.toml", "--json", "repository", "--limit", "100"],
+        ["search", "code", "--filename", ".rumdl.toml", "--json", "repository", "--limit", "100"],
+        ["search", "code", "rumdl", "--filename", ".pre-commit-config.yaml", "--json", "repository", "--limit", "100"],
+        ["search", "code", "rumdl", "--filename", ".pre-commit-config.yml", "--json", "repository", "--limit", "100"],
     ]
 
     for args in searches:
