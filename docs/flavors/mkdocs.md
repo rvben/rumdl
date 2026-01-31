@@ -154,8 +154,58 @@ Use the MkDocs flavor when:
 - Using mkdocstrings for API documentation
 - Using PyMdown Extensions
 
+## Extension Support Reference
+
+The MkDocs flavor provides lint-aware support for the common Python-Markdown and PyMdown Extensions used in the MkDocs ecosystem. This means rumdl will not flag valid extension syntax as errors and will preserve extension constructs during auto-fix.
+
+### Python-Markdown Extensions
+
+| Extension | Status | Description |
+|-----------|--------|-------------|
+| [abbr](https://python-markdown.github.io/extensions/abbreviations/) | ✅ Supported | Abbreviation definitions `*[HTML]: Hypertext Markup Language` |
+| [admonition](https://python-markdown.github.io/extensions/admonition/) | ✅ Supported | Admonition blocks `!!! note` |
+| [attr_list](https://python-markdown.github.io/extensions/attr_list/) | ✅ Supported | Attribute lists `{#id .class}` |
+| [def_list](https://python-markdown.github.io/extensions/definition_lists/) | ✅ Supported | Definition lists with `:` markers |
+| [footnotes](https://python-markdown.github.io/extensions/footnotes/) | ✅ Supported | Footnotes `[^1]` and definitions |
+| [md_in_html](https://python-markdown.github.io/extensions/md_in_html/) | ✅ Supported | `markdown="1"` attribute on HTML |
+| [toc](https://python-markdown.github.io/extensions/toc/) | ✅ Supported | `[TOC]` markers are preserved |
+| [tables](https://python-markdown.github.io/extensions/tables/) | ✅ Supported | Standard table support |
+| [meta](https://python-markdown.github.io/extensions/meta_data/) | ✅ Supported | YAML frontmatter detection |
+| [fenced_code](https://python-markdown.github.io/extensions/fenced_code_blocks/) | ✅ Supported | Fenced code blocks with attributes |
+| [codehilite](https://python-markdown.github.io/extensions/code_hilite/) | N/A | Rendering-only (no linting needed) |
+
+### PyMdown Extensions
+
+| Extension | Status | Description |
+|-----------|--------|-------------|
+| [arithmatex](https://facelessuser.github.io/pymdown-extensions/extensions/arithmatex/) | ✅ Supported | Math blocks `$$ ... $$` and inline `$...$` |
+| [caret](https://facelessuser.github.io/pymdown-extensions/extensions/caret/) | ✅ Supported | Superscript `^text^` and insert `^^text^^` |
+| [mark](https://facelessuser.github.io/pymdown-extensions/extensions/mark/) | ✅ Supported | Highlighted text `==text==` |
+| [tilde](https://facelessuser.github.io/pymdown-extensions/extensions/tilde/) | ✅ Supported | Subscript `~text~` and strikethrough `~~text~~` |
+| [details](https://facelessuser.github.io/pymdown-extensions/extensions/details/) | ✅ Supported | Collapsible blocks `??? note` and `???+ note` |
+| [emoji](https://facelessuser.github.io/pymdown-extensions/extensions/emoji/) | ✅ Supported | Emoji/icon shortcodes `:material-check:` |
+| [highlight](https://facelessuser.github.io/pymdown-extensions/extensions/highlight/) | N/A | Rendering-only (no linting needed) |
+| [inlinehilite](https://facelessuser.github.io/pymdown-extensions/extensions/inlinehilite/) | ✅ Supported | Inline code highlighting `` `#!python code` `` |
+| [keys](https://facelessuser.github.io/pymdown-extensions/extensions/keys/) | ✅ Supported | Keyboard keys `++ctrl+alt+del++` |
+| [smartsymbols](https://facelessuser.github.io/pymdown-extensions/extensions/smartsymbols/) | ✅ Supported | Smart symbols `(c)`, `(tm)`, `-->` |
+| [snippets](https://facelessuser.github.io/pymdown-extensions/extensions/snippets/) | ✅ Supported | File inclusion `--8<-- "file.md"` |
+| [superfences](https://facelessuser.github.io/pymdown-extensions/extensions/superfences/) | ✅ Supported | Custom fences with language + attributes |
+| [tabbed](https://facelessuser.github.io/pymdown-extensions/extensions/tabbed/) | ✅ Supported | Content tabs `=== "Tab"` |
+| [tasklist](https://facelessuser.github.io/pymdown-extensions/extensions/tasklist/) | ✅ Supported | Task lists `- [x] Task` (standard GFM) |
+| [betterem](https://facelessuser.github.io/pymdown-extensions/extensions/betterem/) | ✅ Supported | Standard emphasis handling applies |
+| [critic](https://facelessuser.github.io/pymdown-extensions/extensions/critic/) | ✅ Supported | Critic markup `{++add++}`, `{--del--}` |
+
+### mkdocstrings
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| [Auto-doc blocks](https://mkdocstrings.github.io/) | ✅ Supported | `::: module.Class` with YAML options |
+| [Cross-references](https://mkdocstrings.github.io/) | ✅ Supported | `[module.Class][]` reference links |
+
 ## See Also
 
 - [Flavors Overview](../flavors.md) - Compare all flavors
 - [MkDocs Documentation](https://www.mkdocs.org/)
 - [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
+- [PyMdown Extensions](https://facelessuser.github.io/pymdown-extensions/)
+- [mkdocstrings](https://mkdocstrings.github.io/)

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-01-31
+
+### Added
+
+- **Inline config: Automatic support for all rules** ([#364](https://github.com/rvben/rumdl/issues/364))
+  - All rules now automatically support inline configuration via `<!-- rumdl-configure-file -->` comments
+  - Engine-level implementation ensures consistent behavior across rules
+  - Added `get_effective_config` helper for inline config support
+
+- **MD033: Opt-in auto-fix for inline HTML conversion**
+  - New `fix = true` option enables auto-fix (disabled by default)
+  - Converts simple inline HTML to Markdown equivalents
+  - Conservative approach: only fixes clear-cut cases
+
+- **MD036: Opt-in auto-fix for emphasis-as-heading**
+  - New `fix = true` option enables auto-fix (disabled by default)
+  - Converts emphasis-only paragraphs to proper headings
+
+- **Test: Comprehensive MkDocs extension regression tests**
+  - Added 197 tests across 20 modules for MkDocs flavor
+  - Covers admonitions, content tabs, mkdocstrings, keys, snippets, math, and more
+  - Tests edge cases, cross-flavor comparison, fix preservation, and malformed syntax
+
+### Fixed
+
+- **MD013: Preserve MkDocs admonition and tab content during reflow** ([#361](https://github.com/rvben/rumdl/issues/361))
+  - Reflow now preserves required indentation inside MkDocs containers
+  - Admonition content no longer incorrectly converted to fenced code blocks
+  - Content tabs (`=== "Tab"`) properly handled during line wrapping
+
+- **MD013: Prevent whitespace accumulation in sentence-per-line reflow** ([#360](https://github.com/rvben/rumdl/issues/360))
+  - Fixed infinite loop causing "failed to converge after 100 iterations" error
+  - Sentence-per-line mode now produces stable, idempotent output
+
+- **MD064: Support inline configure-file comments** ([#364](https://github.com/rvben/rumdl/issues/364))
+  - `allow-sentence-double-space` now works with inline HTML config comments
+  - Sentences ending with markup (`` `code`. ``) now correctly recognized
+
 ## [0.1.7] - 2026-01-30
 
 ### Added
