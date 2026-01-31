@@ -312,9 +312,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
             return Ok(vec![]);
         }
 
-        // Get effective config by merging inline config overrides
-        let effective_config = ctx.get_effective_config("MD064", &self.config);
-
+        // Config is already correct - engine applies inline overrides before calling check()
         let mut warnings = Vec::new();
         let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
         let line_index = &ctx.line_index;
@@ -400,7 +398,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
 
                 // Allow exactly 2 spaces after sentence-ending punctuation if configured
                 // This supports the traditional typewriter convention of two spaces after sentences
-                if effective_config.allow_sentence_double_space
+                if self.config.allow_sentence_double_space
                     && space_count == 2
                     && is_after_sentence_ending(line.content, match_start)
                 {
@@ -420,13 +418,12 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
 
                 // Determine the replacement: if allow_sentence_double_space is enabled
                 // and this is after a sentence ending, collapse to 2 spaces, otherwise to 1
-                let replacement = if effective_config.allow_sentence_double_space
-                    && is_after_sentence_ending(line.content, match_start)
-                {
-                    "  ".to_string() // Collapse to two spaces after sentence
-                } else {
-                    " ".to_string() // Collapse to single space
-                };
+                let replacement =
+                    if self.config.allow_sentence_double_space && is_after_sentence_ending(line.content, match_start) {
+                        "  ".to_string() // Collapse to two spaces after sentence
+                    } else {
+                        " ".to_string() // Collapse to single space
+                    };
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -1440,6 +1437,8 @@ Normal paragraph.
     #[test]
     fn test_inline_config_allow_sentence_double_space() {
         // Issue #364: Inline configure-file comments should work
+        // Tests the automatic inline config support via Config::merge_with_inline_config
+
         let rule = MD064NoMultipleConsecutiveSpaces::new(); // Default config (disabled)
 
         // Without inline config, should flag
@@ -1449,11 +1448,16 @@ Normal paragraph.
         assert_eq!(result.len(), 1, "Default config should flag double spaces");
 
         // With inline config, should allow
+        // Simulate engine behavior: parse inline config, merge with base config, recreate rule
         let content = r#"<!-- rumdl-configure-file { "MD064": { "allow-sentence-double-space": true } } -->
 
 `<svg>`.  Fortunately"#;
+        let inline_config = crate::inline_config::InlineConfig::from_content(content);
+        let base_config = crate::config::Config::default();
+        let merged_config = base_config.merge_with_inline_config(&inline_config);
+        let effective_rule = MD064NoMultipleConsecutiveSpaces::from_config(&merged_config);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
+        let result = effective_rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Inline config should allow double spaces after sentence"
@@ -1463,15 +1467,18 @@ Normal paragraph.
         let content = r#"<!-- markdownlint-configure-file { "MD064": { "allow-sentence-double-space": true } } -->
 
 **scalable**.  Pick"#;
+        let inline_config = crate::inline_config::InlineConfig::from_content(content);
+        let merged_config = base_config.merge_with_inline_config(&inline_config);
+        let effective_rule = MD064NoMultipleConsecutiveSpaces::from_config(&merged_config);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
+        let result = effective_rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Inline config with markdownlint prefix should work");
     }
 
     #[test]
     fn test_inline_config_allow_sentence_double_space_issue_364() {
         // Full test case from issue #364
-        let rule = MD064NoMultipleConsecutiveSpaces::new();
+        // Tests the automatic inline config support via Config::merge_with_inline_config
 
         let content = r#"<!-- rumdl-configure-file { "MD064": { "allow-sentence-double-space": true } } -->
 
@@ -1485,8 +1492,13 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
 
 **SVG documents are scalable**.  That's their whole reason for being!"#;
 
+        // Simulate engine behavior: parse inline config, merge with base config, recreate rule
+        let inline_config = crate::inline_config::InlineConfig::from_content(content);
+        let base_config = crate::config::Config::default();
+        let merged_config = base_config.merge_with_inline_config(&inline_config);
+        let effective_rule = MD064NoMultipleConsecutiveSpaces::from_config(&merged_config);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
+        let result = effective_rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
             "Issue #364: All sentence-ending double spaces should be allowed with inline config. Found {} warnings",

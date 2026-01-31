@@ -380,6 +380,68 @@ impl Config {
         // Auto-detect from extension
         MarkdownFlavor::from_path(file_path)
     }
+
+    /// Merge inline configuration overrides into a copy of this config
+    ///
+    /// This enables automatic inline config support - the engine can merge
+    /// inline overrides and recreate rules without any per-rule changes.
+    ///
+    /// Returns a new Config with the inline overrides merged in.
+    /// If there are no inline overrides, returns a clone of self.
+    pub fn merge_with_inline_config(&self, inline_config: &crate::inline_config::InlineConfig) -> Self {
+        let overrides = inline_config.get_all_rule_configs();
+        if overrides.is_empty() {
+            return self.clone();
+        }
+
+        let mut merged = self.clone();
+
+        for (rule_name, json_override) in overrides {
+            // Get or create the rule config entry
+            let rule_config = merged.rules.entry(rule_name.clone()).or_default();
+
+            // Merge JSON values into the rule's config
+            if let Some(obj) = json_override.as_object() {
+                for (key, value) in obj {
+                    // Normalize key to kebab-case for consistency
+                    let normalized_key = key.replace('_', "-");
+
+                    // Convert JSON value to TOML value
+                    if let Some(toml_value) = json_to_toml(value) {
+                        rule_config.values.insert(normalized_key, toml_value);
+                    }
+                }
+            }
+        }
+
+        merged
+    }
+}
+
+/// Convert a serde_json::Value to a toml::Value
+fn json_to_toml(json: &serde_json::Value) -> Option<toml::Value> {
+    match json {
+        serde_json::Value::Null => None,
+        serde_json::Value::Bool(b) => Some(toml::Value::Boolean(*b)),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(toml::Value::Integer)
+            .or_else(|| n.as_f64().map(toml::Value::Float)),
+        serde_json::Value::String(s) => Some(toml::Value::String(s.clone())),
+        serde_json::Value::Array(arr) => {
+            let toml_arr: Vec<toml::Value> = arr.iter().filter_map(json_to_toml).collect();
+            Some(toml::Value::Array(toml_arr))
+        }
+        serde_json::Value::Object(obj) => {
+            let mut table = toml::map::Map::new();
+            for (k, v) in obj {
+                if let Some(tv) = json_to_toml(v) {
+                    table.insert(k.clone(), tv);
+                }
+            }
+            Some(toml::Value::Table(table))
+        }
+    }
 }
 
 impl PerFileIgnoreCache {

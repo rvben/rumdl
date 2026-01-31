@@ -158,79 +158,98 @@ pub use md057_existing_relative_links::MD057ExistingRelativeLinks;
 
 use crate::rule::Rule;
 
+/// Type alias for rule constructor functions
+type RuleCtor = fn(&crate::config::Config) -> Box<dyn Rule>;
+
+/// Registry of all available rules with their constructor functions
+/// This enables automatic inline config support - the engine can recreate
+/// any rule with a merged config without per-rule opt-in
+const RULES: &[(&str, RuleCtor)] = &[
+    ("MD001", MD001HeadingIncrement::from_config),
+    ("MD003", MD003HeadingStyle::from_config),
+    ("MD004", MD004UnorderedListStyle::from_config),
+    ("MD005", MD005ListIndent::from_config),
+    ("MD007", MD007ULIndent::from_config),
+    ("MD009", MD009TrailingSpaces::from_config),
+    ("MD010", MD010NoHardTabs::from_config),
+    ("MD011", MD011NoReversedLinks::from_config),
+    ("MD012", MD012NoMultipleBlanks::from_config),
+    ("MD013", MD013LineLength::from_config),
+    ("MD014", MD014CommandsShowOutput::from_config),
+    ("MD018", MD018NoMissingSpaceAtx::from_config),
+    ("MD019", MD019NoMultipleSpaceAtx::from_config),
+    ("MD020", MD020NoMissingSpaceClosedAtx::from_config),
+    ("MD021", MD021NoMultipleSpaceClosedAtx::from_config),
+    ("MD022", MD022BlanksAroundHeadings::from_config),
+    ("MD023", MD023HeadingStartLeft::from_config),
+    ("MD024", MD024NoDuplicateHeading::from_config),
+    ("MD025", MD025SingleTitle::from_config),
+    ("MD026", MD026NoTrailingPunctuation::from_config),
+    ("MD027", MD027MultipleSpacesBlockquote::from_config),
+    ("MD028", MD028NoBlanksBlockquote::from_config),
+    ("MD029", MD029OrderedListPrefix::from_config),
+    ("MD030", MD030ListMarkerSpace::from_config),
+    ("MD031", MD031BlanksAroundFences::from_config),
+    ("MD032", MD032BlanksAroundLists::from_config),
+    ("MD033", MD033NoInlineHtml::from_config),
+    ("MD034", MD034NoBareUrls::from_config),
+    ("MD035", MD035HRStyle::from_config),
+    ("MD036", MD036NoEmphasisAsHeading::from_config),
+    ("MD037", MD037NoSpaceInEmphasis::from_config),
+    ("MD038", MD038NoSpaceInCode::from_config),
+    ("MD039", MD039NoSpaceInLinks::from_config),
+    ("MD040", MD040FencedCodeLanguage::from_config),
+    ("MD041", MD041FirstLineHeading::from_config),
+    ("MD042", MD042NoEmptyLinks::from_config),
+    ("MD043", MD043RequiredHeadings::from_config),
+    ("MD044", MD044ProperNames::from_config),
+    ("MD045", MD045NoAltText::from_config),
+    ("MD046", MD046CodeBlockStyle::from_config),
+    ("MD047", MD047SingleTrailingNewline::from_config),
+    ("MD048", MD048CodeFenceStyle::from_config),
+    ("MD049", MD049EmphasisStyle::from_config),
+    ("MD050", MD050StrongStyle::from_config),
+    ("MD051", MD051LinkFragments::from_config),
+    ("MD052", MD052ReferenceLinkImages::from_config),
+    ("MD053", MD053LinkImageReferenceDefinitions::from_config),
+    ("MD054", MD054LinkImageStyle::from_config),
+    ("MD055", MD055TablePipeStyle::from_config),
+    ("MD056", MD056TableColumnCount::from_config),
+    ("MD057", MD057ExistingRelativeLinks::from_config),
+    ("MD058", MD058BlanksAroundTables::from_config),
+    ("MD059", MD059LinkText::from_config),
+    ("MD060", MD060TableFormat::from_config),
+    ("MD061", MD061ForbiddenTerms::from_config),
+    ("MD062", MD062LinkDestinationWhitespace::from_config),
+    ("MD063", MD063HeadingCapitalization::from_config),
+    ("MD064", MD064NoMultipleConsecutiveSpaces::from_config),
+    ("MD065", MD065BlanksAroundHorizontalRules::from_config),
+    ("MD066", MD066FootnoteValidation::from_config),
+    ("MD067", MD067FootnoteDefinitionOrder::from_config),
+    ("MD068", MD068EmptyFootnoteDefinition::from_config),
+    ("MD069", MD069NoDuplicateListMarkers::from_config),
+    ("MD070", MD070NestedCodeFence::from_config),
+    ("MD071", MD071BlankLineAfterFrontmatter::from_config),
+    ("MD072", MD072FrontmatterKeySort::from_config),
+    ("MD073", MD073TocValidation::from_config),
+];
+
 /// Returns all rule instances for config validation and CLI
 pub fn all_rules(config: &crate::config::Config) -> Vec<Box<dyn Rule>> {
-    type RuleCtor = fn(&crate::config::Config) -> Box<dyn Rule>;
-    const RULES: &[(&str, RuleCtor)] = &[
-        ("MD001", MD001HeadingIncrement::from_config),
-        ("MD003", MD003HeadingStyle::from_config),
-        ("MD004", MD004UnorderedListStyle::from_config),
-        ("MD005", MD005ListIndent::from_config),
-        ("MD007", MD007ULIndent::from_config),
-        ("MD009", MD009TrailingSpaces::from_config),
-        ("MD010", MD010NoHardTabs::from_config),
-        ("MD011", MD011NoReversedLinks::from_config),
-        ("MD012", MD012NoMultipleBlanks::from_config),
-        ("MD013", MD013LineLength::from_config),
-        ("MD014", MD014CommandsShowOutput::from_config),
-        ("MD018", MD018NoMissingSpaceAtx::from_config),
-        ("MD019", MD019NoMultipleSpaceAtx::from_config),
-        ("MD020", MD020NoMissingSpaceClosedAtx::from_config),
-        ("MD021", MD021NoMultipleSpaceClosedAtx::from_config),
-        ("MD022", MD022BlanksAroundHeadings::from_config),
-        ("MD023", MD023HeadingStartLeft::from_config),
-        ("MD024", MD024NoDuplicateHeading::from_config),
-        ("MD025", MD025SingleTitle::from_config),
-        ("MD026", MD026NoTrailingPunctuation::from_config),
-        ("MD027", MD027MultipleSpacesBlockquote::from_config),
-        ("MD028", MD028NoBlanksBlockquote::from_config),
-        ("MD029", MD029OrderedListPrefix::from_config),
-        ("MD030", MD030ListMarkerSpace::from_config),
-        ("MD031", MD031BlanksAroundFences::from_config),
-        ("MD032", MD032BlanksAroundLists::from_config),
-        ("MD033", MD033NoInlineHtml::from_config),
-        ("MD034", MD034NoBareUrls::from_config),
-        ("MD035", MD035HRStyle::from_config),
-        ("MD036", MD036NoEmphasisAsHeading::from_config),
-        ("MD037", MD037NoSpaceInEmphasis::from_config),
-        ("MD038", MD038NoSpaceInCode::from_config),
-        ("MD039", MD039NoSpaceInLinks::from_config),
-        ("MD040", MD040FencedCodeLanguage::from_config),
-        ("MD041", MD041FirstLineHeading::from_config),
-        ("MD042", MD042NoEmptyLinks::from_config),
-        ("MD043", MD043RequiredHeadings::from_config),
-        ("MD044", MD044ProperNames::from_config),
-        ("MD045", MD045NoAltText::from_config),
-        ("MD046", MD046CodeBlockStyle::from_config),
-        ("MD047", MD047SingleTrailingNewline::from_config),
-        ("MD048", MD048CodeFenceStyle::from_config),
-        ("MD049", MD049EmphasisStyle::from_config),
-        ("MD050", MD050StrongStyle::from_config),
-        ("MD051", MD051LinkFragments::from_config),
-        ("MD052", MD052ReferenceLinkImages::from_config),
-        ("MD053", MD053LinkImageReferenceDefinitions::from_config),
-        ("MD054", MD054LinkImageStyle::from_config),
-        ("MD055", MD055TablePipeStyle::from_config),
-        ("MD056", MD056TableColumnCount::from_config),
-        ("MD057", MD057ExistingRelativeLinks::from_config),
-        ("MD058", MD058BlanksAroundTables::from_config),
-        ("MD059", MD059LinkText::from_config),
-        ("MD060", MD060TableFormat::from_config),
-        ("MD061", MD061ForbiddenTerms::from_config),
-        ("MD062", MD062LinkDestinationWhitespace::from_config),
-        ("MD063", MD063HeadingCapitalization::from_config),
-        ("MD064", MD064NoMultipleConsecutiveSpaces::from_config),
-        ("MD065", MD065BlanksAroundHorizontalRules::from_config),
-        ("MD066", MD066FootnoteValidation::from_config),
-        ("MD067", MD067FootnoteDefinitionOrder::from_config),
-        ("MD068", MD068EmptyFootnoteDefinition::from_config),
-        ("MD069", MD069NoDuplicateListMarkers::from_config),
-        ("MD070", MD070NestedCodeFence::from_config),
-        ("MD071", MD071BlankLineAfterFrontmatter::from_config),
-        ("MD072", MD072FrontmatterKeySort::from_config),
-        ("MD073", MD073TocValidation::from_config),
-    ];
     RULES.iter().map(|(_, ctor)| ctor(config)).collect()
+}
+
+/// Creates a single rule by name with the given config
+///
+/// This enables automatic inline config support - the engine can recreate
+/// any rule with a merged config without per-rule changes.
+///
+/// Returns None if the rule name is not found.
+pub fn create_rule_by_name(name: &str, config: &crate::config::Config) -> Option<Box<dyn Rule>> {
+    RULES
+        .iter()
+        .find(|(rule_name, _)| *rule_name == name)
+        .map(|(_, ctor)| ctor(config))
 }
 
 // Filter rules based on config (moved from main.rs)

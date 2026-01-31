@@ -282,6 +282,29 @@ pub fn lint_and_index(
     #[cfg(target_arch = "wasm32")]
     let profile_rules = false;
 
+    // Automatic inline config support: merge inline overrides into config once,
+    // then recreate only the affected rules. Works for ALL rules without per-rule changes.
+    let inline_overrides = inline_config.get_all_rule_configs();
+    let merged_config = if !inline_overrides.is_empty() {
+        config.map(|c| c.merge_with_inline_config(&inline_config))
+    } else {
+        None
+    };
+    let effective_config = merged_config.as_ref().or(config);
+
+    // Cache recreated rules for rules with inline overrides
+    let mut recreated_rules: std::collections::HashMap<String, Box<dyn crate::rule::Rule>> =
+        std::collections::HashMap::new();
+
+    // Pre-create rules that have inline config overrides
+    if let Some(cfg) = effective_config {
+        for rule_name in inline_overrides.keys() {
+            if let Some(recreated) = crate::rules::create_rule_by_name(rule_name, cfg) {
+                recreated_rules.insert(rule_name.clone(), recreated);
+            }
+        }
+    }
+
     for rule in &applicable_rules {
         #[cfg(not(target_arch = "wasm32"))]
         let _rule_start = Instant::now();
@@ -291,8 +314,14 @@ pub fn lint_and_index(
             continue;
         }
 
-        // Run single-file check
-        let result = rule.check(&lint_ctx);
+        // Use recreated rule if inline config overrides exist for this rule
+        let effective_rule: &dyn crate::rule::Rule = recreated_rules
+            .get(rule.name())
+            .map(|r| r.as_ref())
+            .unwrap_or(rule.as_ref());
+
+        // Run single-file check with the effective rule (possibly with inline config applied)
+        let result = effective_rule.check(&lint_ctx);
 
         match result {
             Ok(rule_warnings) => {
