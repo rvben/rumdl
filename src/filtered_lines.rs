@@ -217,6 +217,18 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside any MkDocs container (admonitions or content tabs)
+    ///
+    /// This is a convenience method that enables both `skip_admonitions` and
+    /// `skip_content_tabs`. MkDocs containers use 4-space indented content
+    /// which may need special handling to preserve structure.
+    #[must_use]
+    pub fn skip_mkdocs_containers(mut self) -> Self {
+        self.skip_admonitions = true;
+        self.skip_content_tabs = true;
+        self
+    }
+
     /// Skip lines inside definition lists (:  definition)
     ///
     /// Definition lists have special formatting that rules should
@@ -440,6 +452,17 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_content_tabs(mut self) -> Self {
         self.config = self.config.skip_content_tabs();
+        self
+    }
+
+    /// Skip lines inside any MkDocs container (admonitions or content tabs)
+    ///
+    /// This is a convenience method that enables both `skip_admonitions` and
+    /// `skip_content_tabs`. MkDocs containers use 4-space indented content
+    /// which may need special handling to preserve structure.
+    #[must_use]
+    pub fn skip_mkdocs_containers(mut self) -> Self {
+        self.config = self.config.skip_mkdocs_containers();
         self
     }
 

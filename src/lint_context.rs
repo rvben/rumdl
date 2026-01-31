@@ -133,6 +133,14 @@ impl LineInfo {
     pub fn content<'a>(&self, source: &'a str) -> &'a str {
         &source[self.byte_offset..self.byte_offset + self.byte_len]
     }
+
+    /// Check if this line is inside MkDocs-specific indented content (admonitions or tabs).
+    /// This content uses 4-space indentation which pulldown-cmark would interpret as code blocks,
+    /// but in MkDocs flavor it's actually container content that should be preserved.
+    #[inline]
+    pub fn in_mkdocs_container(&self) -> bool {
+        self.in_admonition || self.in_content_tab
+    }
 }
 
 /// Information about a list item

@@ -285,8 +285,6 @@ impl Rule for MD013LineLength {
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
-                    || ctx.line_info(line_number).is_some_and(|info| info.in_admonition)
-                    || ctx.line_info(line_number).is_some_and(|info| info.in_content_tab)
                 {
                     continue;
                 }
@@ -303,8 +301,9 @@ impl Rule for MD013LineLength {
                         || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
-                        || ctx.line_info(line_number).is_some_and(|info| info.in_admonition)
-                        || ctx.line_info(line_number).is_some_and(|info| info.in_content_tab);
+                        || ctx
+                            .line_info(line_number)
+                            .is_some_and(|info| info.in_mkdocs_container());
 
                     // Skip regular paragraph text when paragraphs = false
                     if !is_special_block {
@@ -457,7 +456,7 @@ impl MD013LineLength {
         while i < lines.len() {
             let line_num = i + 1;
 
-            // Skip special structures
+            // Skip special structures (but NOT MkDocs containers - those get special handling)
             let should_skip_due_to_line_info = ctx.line_info(line_num).is_some_and(|info| {
                 info.in_code_block
                     || info.in_front_matter
@@ -466,8 +465,6 @@ impl MD013LineLength {
                     || info.in_esm_block
                     || info.in_jsx_expression
                     || info.in_mdx_comment
-                    || info.in_admonition
-                    || info.in_content_tab
             });
 
             if should_skip_due_to_line_info
@@ -479,6 +476,141 @@ impl MD013LineLength {
                 || is_template_directive_only(lines[i])
             {
                 i += 1;
+                continue;
+            }
+
+            // Handle MkDocs container content (admonitions and tabs) with indent-preserving reflow
+            if ctx.line_info(line_num).is_some_and(|info| info.in_mkdocs_container()) {
+                let container_start = i;
+
+                // Detect the actual indent level from the first content line
+                // (supports nested admonitions with 8+ spaces)
+                let first_line = lines[i];
+                let base_indent_len = first_line.len() - first_line.trim_start().len();
+                let base_indent: String = " ".repeat(base_indent_len);
+
+                // Collect consecutive MkDocs container paragraph lines
+                let mut container_lines: Vec<&str> = Vec::new();
+                while i < lines.len() {
+                    let current_line_num = i + 1;
+                    let line_info = ctx.line_info(current_line_num);
+
+                    // Stop if we leave the MkDocs container
+                    if !line_info.is_some_and(|info| info.in_mkdocs_container()) {
+                        break;
+                    }
+
+                    let line = lines[i];
+
+                    // Stop at paragraph boundaries within the container
+                    if line.trim().is_empty() {
+                        break;
+                    }
+
+                    // Skip list items, code blocks, headings within containers
+                    if is_list_item(line.trim())
+                        || line.trim().starts_with("```")
+                        || line.trim().starts_with("~~~")
+                        || line.trim().starts_with('#')
+                    {
+                        break;
+                    }
+
+                    container_lines.push(line);
+                    i += 1;
+                }
+
+                if container_lines.is_empty() {
+                    continue;
+                }
+
+                // Strip the base indent from each line and join for reflow
+                let stripped_lines: Vec<&str> = container_lines
+                    .iter()
+                    .map(|line| {
+                        if line.starts_with(&base_indent) {
+                            &line[base_indent_len..]
+                        } else {
+                            line.trim_start()
+                        }
+                    })
+                    .collect();
+                let paragraph_text = stripped_lines.join(" ");
+
+                // Check if reflow is needed
+                let needs_reflow = match config.reflow_mode {
+                    ReflowMode::Normalize => container_lines.len() > 1,
+                    ReflowMode::SentencePerLine => {
+                        let sentences = split_into_sentences(&paragraph_text);
+                        sentences.len() > 1 || container_lines.len() > 1
+                    }
+                    ReflowMode::Default => container_lines
+                        .iter()
+                        .any(|line| self.calculate_effective_length(line) > config.line_length.get()),
+                };
+
+                if !needs_reflow {
+                    continue;
+                }
+
+                // Calculate byte range for this container paragraph
+                let start_range = line_index.whole_line_range(container_start + 1);
+                let end_line = container_start + container_lines.len() - 1;
+                let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
+                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                } else {
+                    line_index.whole_line_range(end_line + 1)
+                };
+                let byte_range = start_range.start..end_range.end;
+
+                // Reflow with adjusted line length (accounting for the 4-space indent)
+                let reflow_line_length = if config.line_length.is_unlimited() {
+                    usize::MAX
+                } else {
+                    config.line_length.get().saturating_sub(base_indent_len).max(1)
+                };
+                let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                    line_length: reflow_line_length,
+                    break_on_sentences: true,
+                    preserve_breaks: false,
+                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                    abbreviations: config.abbreviations_for_reflow(),
+                };
+                let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+
+                // Re-add the 4-space indent to each reflowed line
+                let reflowed_with_indent: Vec<String> =
+                    reflowed.iter().map(|line| format!("{base_indent}{line}")).collect();
+                let reflowed_text = reflowed_with_indent.join("\n");
+
+                // Preserve trailing newline
+                let replacement = if end_line < lines.len() - 1 || ctx.content.ends_with('\n') {
+                    format!("{reflowed_text}\n")
+                } else {
+                    reflowed_text
+                };
+
+                // Only generate a warning if the replacement is different
+                let original_text = &ctx.content[byte_range.clone()];
+                if original_text != replacement {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!(
+                            "Line length {} exceeds {} characters (in MkDocs container)",
+                            container_lines.iter().map(|l| l.len()).max().unwrap_or(0),
+                            config.line_length.get()
+                        ),
+                        line: container_start + 1,
+                        column: 1,
+                        end_line: end_line + 1,
+                        end_column: lines[end_line].len() + 1,
+                        severity: Severity::Warning,
+                        fix: Some(crate::rule::Fix {
+                            range: byte_range,
+                            replacement,
+                        }),
+                    });
+                }
                 continue;
             }
 
@@ -1432,8 +1564,9 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_expression)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_mdx_comment)
-                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_admonition)
-                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_content_tab)
+                    || ctx
+                        .line_info(next_line_num)
+                        .is_some_and(|info| info.in_mkdocs_container())
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
