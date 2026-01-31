@@ -3206,12 +3206,9 @@ impl<'a> LintContext<'a> {
                 break;
             }
 
-            // Skip lines in code blocks
-            if lines[i].in_code_block {
-                continue;
-            }
-
-            // Check for admonition markers
+            // Check for admonition markers first - even on lines marked as code blocks
+            // Pulldown-cmark marks 4-space indented content as indented code blocks,
+            // but in MkDocs this is admonition/tab content, not code.
             if mkdocs_admonitions::is_admonition_start(line) {
                 in_admonition = true;
                 admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
@@ -3221,8 +3218,12 @@ impl<'a> LintContext<'a> {
                 if line.trim().is_empty() {
                     // Blank lines are part of admonitions
                     lines[i].in_admonition = true;
+                    // Override code block detection for blank lines inside admonitions
+                    lines[i].in_code_block = false;
                 } else if mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
                     lines[i].in_admonition = true;
+                    // Override code block detection - this is admonition content, not code
+                    lines[i].in_code_block = false;
                 } else {
                     // End of admonition
                     in_admonition = false;
@@ -3235,7 +3236,8 @@ impl<'a> LintContext<'a> {
                 }
             }
 
-            // Check for tab markers
+            // Check for tab markers - also before the code block skip
+            // Tab content also uses 4-space indentation which pulldown-cmark treats as code
             if mkdocs_tabs::is_tab_marker(line) {
                 in_tab = true;
                 tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
@@ -3245,8 +3247,11 @@ impl<'a> LintContext<'a> {
                 if line.trim().is_empty() {
                     // Blank lines are part of tabs
                     lines[i].in_content_tab = true;
+                    lines[i].in_code_block = false;
                 } else if mkdocs_tabs::is_tab_content(line, tab_indent) {
                     lines[i].in_content_tab = true;
+                    // Override code block detection - this is tab content, not code
+                    lines[i].in_code_block = false;
                 } else {
                     // End of tab content
                     in_tab = false;
@@ -3257,6 +3262,11 @@ impl<'a> LintContext<'a> {
                         lines[i].in_content_tab = true;
                     }
                 }
+            }
+
+            // Skip remaining detection for lines in actual code blocks
+            if lines[i].in_code_block {
+                continue;
             }
 
             // Check for definition list items

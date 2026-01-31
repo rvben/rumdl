@@ -285,6 +285,8 @@ impl Rule for MD013LineLength {
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
+                    || ctx.line_info(line_number).is_some_and(|info| info.in_admonition)
+                    || ctx.line_info(line_number).is_some_and(|info| info.in_content_tab)
                 {
                     continue;
                 }
@@ -300,7 +302,9 @@ impl Rule for MD013LineLength {
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
-                        || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment);
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_admonition)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_content_tab);
 
                     // Skip regular paragraph text when paragraphs = false
                     if !is_special_block {
@@ -462,6 +466,8 @@ impl MD013LineLength {
                     || info.in_esm_block
                     || info.in_jsx_expression
                     || info.in_mdx_comment
+                    || info.in_admonition
+                    || info.in_content_tab
             });
 
             if should_skip_due_to_line_info
@@ -1426,6 +1432,8 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_expression)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_mdx_comment)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_admonition)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_content_tab)
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())
