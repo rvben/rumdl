@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn test_all_valid_heading_levels() {
         for level in 1..=6 {
-            let toml_str = format!("heading-level = {}", level);
+            let toml_str = format!("heading-level = {level}");
             let config: MD036Config = toml::from_str(&toml_str).unwrap();
             assert_eq!(config.heading_level.get(), level);
         }

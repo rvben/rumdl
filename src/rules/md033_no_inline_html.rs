@@ -40,6 +40,8 @@ impl MD033NoInlineHtml {
         let config = MD033Config {
             allowed: allowed_vec.clone(),
             disallowed: Vec::new(),
+            fix: false,
+            br_style: md033_config::BrStyle::default(),
         };
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
@@ -54,6 +56,25 @@ impl MD033NoInlineHtml {
         let config = MD033Config {
             allowed: Vec::new(),
             disallowed: disallowed_vec.clone(),
+            fix: false,
+            br_style: md033_config::BrStyle::default(),
+        };
+        let allowed = config.allowed_set();
+        let disallowed = config.disallowed_set();
+        Self {
+            config,
+            allowed,
+            disallowed,
+        }
+    }
+
+    /// Create a new rule with auto-fix enabled
+    pub fn with_fix(fix: bool) -> Self {
+        let config = MD033Config {
+            allowed: Vec::new(),
+            disallowed: Vec::new(),
+            fix,
+            br_style: md033_config::BrStyle::default(),
         };
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
@@ -397,6 +418,94 @@ impl MD033NoInlineHtml {
             || content.starts_with("mailto:")
     }
 
+    /// Convert paired HTML tags to their Markdown equivalents.
+    /// Returns None if the tag cannot be safely converted (has nested tags, HTML entities, etc.)
+    fn convert_to_markdown(tag_name: &str, inner_content: &str) -> Option<String> {
+        // Skip if content contains nested HTML tags
+        if inner_content.contains('<') {
+            return None;
+        }
+        // Skip if content contains HTML entities (e.g., &vert;, &amp;, &lt;)
+        // These need HTML context to render correctly; markdown won't process them
+        if inner_content.contains('&') && inner_content.contains(';') {
+            // Check for common HTML entity patterns
+            let has_entity = inner_content
+                .split('&')
+                .skip(1)
+                .any(|part| part.split(';').next().is_some_and(|e| !e.is_empty() && e.len() < 10));
+            if has_entity {
+                return None;
+            }
+        }
+        match tag_name {
+            "em" | "i" => Some(format!("*{inner_content}*")),
+            "strong" | "b" => Some(format!("**{inner_content}**")),
+            "code" => {
+                // Handle backticks in content by using double backticks with padding
+                if inner_content.contains('`') {
+                    Some(format!("`` {inner_content} ``"))
+                } else {
+                    Some(format!("`{inner_content}`"))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Convert self-closing HTML tags to their Markdown equivalents.
+    fn convert_self_closing_to_markdown(&self, tag_name: &str) -> Option<String> {
+        match tag_name {
+            "br" => match self.config.br_style {
+                md033_config::BrStyle::TrailingSpaces => Some("  \n".to_string()),
+                md033_config::BrStyle::Backslash => Some("\\\n".to_string()),
+            },
+            "hr" => Some("\n---\n".to_string()),
+            _ => None,
+        }
+    }
+
+    /// Check if an HTML tag has attributes that would make conversion unsafe
+    fn has_significant_attributes(opening_tag: &str) -> bool {
+        // Tags with just whitespace or empty are fine
+        let tag_content = opening_tag
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .trim_end_matches('/');
+
+        // Split by whitespace; if there's more than the tag name, it has attributes
+        let parts: Vec<&str> = tag_content.split_whitespace().collect();
+        parts.len() > 1
+    }
+
+    /// Check if a tag appears to be nested inside another HTML element
+    /// by looking at the surrounding context (e.g., `<code><em>text</em></code>`)
+    fn is_nested_in_html(content: &str, tag_byte_start: usize, tag_byte_end: usize) -> bool {
+        // Check if there's a `>` immediately before this tag (indicating inside another element)
+        if tag_byte_start > 0 {
+            let before = &content[..tag_byte_start];
+            let before_trimmed = before.trim_end();
+            if before_trimmed.ends_with('>') && !before_trimmed.ends_with("->") {
+                // Check it's not a closing tag or comment
+                if let Some(last_lt) = before_trimmed.rfind('<') {
+                    let potential_tag = &before_trimmed[last_lt..];
+                    // Skip if it's a closing tag (</...>) or comment (<!--)
+                    if !potential_tag.starts_with("</") && !potential_tag.starts_with("<!--") {
+                        return true;
+                    }
+                }
+            }
+        }
+        // Check if there's a `<` immediately after the closing tag (indicating inside another element)
+        if tag_byte_end < content.len() {
+            let after = &content[tag_byte_end..];
+            let after_trimmed = after.trim_start();
+            if after_trimmed.starts_with("</") {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Calculate fix to remove HTML tags while keeping content
     ///
     /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
@@ -404,36 +513,87 @@ impl MD033NoInlineHtml {
     ///
     /// Returns (range, replacement_text) where range is the bytes to replace
     /// and replacement_text is what to put there (content without tags, or empty for self-closing).
+    ///
+    /// When `fix` is enabled and `in_html_block` is true, returns None to avoid
+    /// converting tags that are nested inside HTML block elements (like `<pre>`).
     fn calculate_fix(
         &self,
         content: &str,
         opening_tag: &str,
         tag_byte_start: usize,
+        in_html_block: bool,
     ) -> Option<(std::ops::Range<usize>, String)> {
-        // Check if it's a self-closing tag (ends with />)
-        if opening_tag.ends_with("/>") {
-            return Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()));
-        }
-
-        // Extract tag name from opening tag (e.g., "<div>" -> "div", "<span class='x'>" -> "span")
+        // Extract tag name from opening tag
         let tag_name = opening_tag
             .trim_start_matches('<')
             .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
             .next()?
             .to_lowercase();
 
-        // Build the closing tag pattern
-        let closing_tag = format!("</{tag_name}>");
+        // Check if it's a self-closing tag (ends with /> or is a void element like <br>)
+        let is_self_closing =
+            opening_tag.ends_with("/>") || matches!(tag_name.as_str(), "br" | "hr" | "img" | "input" | "meta" | "link");
 
-        // Search for the closing tag after the opening tag
+        if is_self_closing {
+            // When fix is enabled, try to convert to Markdown equivalent
+            // But skip if we're inside an HTML block (would break structure)
+            if self.config.fix
+                && MD033Config::is_safe_fixable_tag(&tag_name)
+                && !in_html_block
+                && let Some(markdown) = self.convert_self_closing_to_markdown(&tag_name)
+            {
+                return Some((tag_byte_start..tag_byte_start + opening_tag.len(), markdown));
+            }
+            // Otherwise just remove the tag
+            return Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()));
+        }
+
+        // Search for the closing tag after the opening tag (case-insensitive)
         let search_start = tag_byte_start + opening_tag.len();
-        if let Some(closing_pos) = content[search_start..].find(&closing_tag) {
+        let search_slice = &content[search_start..];
+
+        // Find closing tag case-insensitively
+        let closing_tag_lower = format!("</{tag_name}>");
+        let closing_pos = search_slice.to_ascii_lowercase().find(&closing_tag_lower);
+
+        if let Some(closing_pos) = closing_pos {
+            // Get actual closing tag from original content to get correct byte length
+            let closing_tag_len = closing_tag_lower.len();
             let closing_byte_start = search_start + closing_pos;
-            let closing_byte_end = closing_byte_start + closing_tag.len();
+            let closing_byte_end = closing_byte_start + closing_tag_len;
 
             // Extract the content between tags
             let inner_content = &content[search_start..closing_byte_start];
 
+            // Skip auto-fix if inside an HTML block (like <pre>, <div>, etc.)
+            // Converting tags inside HTML blocks would break the intended structure
+            if in_html_block {
+                return None;
+            }
+
+            // Skip auto-fix if this tag is nested inside another HTML element
+            // e.g., <code><em>text</em></code> - don't convert the inner <em>
+            if Self::is_nested_in_html(content, tag_byte_start, closing_byte_end) {
+                return None;
+            }
+
+            // When fix is enabled and tag is safe to convert, try markdown conversion
+            // Tags with attributes are NOT converted - leave them as-is
+            if self.config.fix && MD033Config::is_safe_fixable_tag(&tag_name) {
+                if Self::has_significant_attributes(opening_tag) {
+                    // Don't provide a fix for tags with attributes
+                    // User may want to keep the attributes, so leave as-is
+                    return None;
+                }
+                if let Some(markdown) = Self::convert_to_markdown(&tag_name, inner_content) {
+                    return Some((tag_byte_start..closing_byte_end, markdown));
+                }
+                // convert_to_markdown returned None, meaning content has nested tags or
+                // HTML entities that shouldn't be converted - leave as-is
+                return None;
+            }
+
+            // For non-fixable tags, extract content (removing tags)
             return Some((tag_byte_start..closing_byte_end, inner_content.to_string()));
         }
 
@@ -608,9 +768,12 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
+            // Check if we're inside an HTML block (like <pre>, <div>, etc.)
+            let in_html_block = ctx.is_in_html_block(line_num);
+
             // Calculate fix to remove HTML tags but keep content
             let fix = self
-                .calculate_fix(content, tag, tag_byte_start)
+                .calculate_fix(content, tag, tag_byte_start, in_html_block)
                 .map(|(range, replacement)| Fix { range, replacement });
 
             // Calculate actual end line and column for multiline tags
@@ -638,12 +801,43 @@ impl Rule for MD033NoInlineHtml {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // No fix for MD033: do not remove or alter HTML, just return the input unchanged
-        Ok(ctx.content.to_string())
+        // Auto-fix is opt-in: only apply if explicitly enabled in config
+        if !self.config.fix {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Get warnings with their inline fixes
+        let warnings = self.check(ctx)?;
+
+        // If no warnings with fixes, return original content
+        if warnings.is_empty() || !warnings.iter().any(|w| w.fix.is_some()) {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Collect all fixes and sort by range start (descending) to apply from end to beginning
+        let mut fixes: Vec<_> = warnings
+            .iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
+            .collect();
+        fixes.sort_by(|a, b| b.0.cmp(&a.0));
+
+        // Apply fixes from end to beginning to preserve byte offsets
+        let mut result = ctx.content.to_string();
+        for (start, end, replacement) in fixes {
+            if start < result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, replacement);
+            }
+        }
+
+        Ok(result)
     }
 
     fn fix_capability(&self) -> crate::rule::FixCapability {
-        crate::rule::FixCapability::Unfixable
+        if self.config.fix {
+            crate::rule::FixCapability::FullyFixable
+        } else {
+            crate::rule::FixCapability::Unfixable
+        }
     }
 
     /// Get the category of this rule for selective processing
@@ -851,18 +1045,16 @@ mod tests {
 
     #[test]
     fn test_md033_quick_fix_multiline_tag() {
-        // Test Quick Fix for multiline HTML tags - keeps content
+        // HTML block elements like <div> are intentionally NOT auto-fixed
+        // Removing them would change document structure significantly
         let rule = MD033NoInlineHtml::default();
         let content = "<div>\nBlock content\n</div>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
-        assert!(result[0].fix.is_some(), "Should have a fix");
-
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(&content[fix.range.clone()], "<div>\nBlock content\n</div>");
-        assert_eq!(fix.replacement, "\nBlock content\n");
+        // HTML block elements should NOT have auto-fix
+        assert!(result[0].fix.is_none(), "HTML block elements should NOT have auto-fix");
     }
 
     #[test]
@@ -1201,5 +1393,400 @@ Regular text with <div>content</div> HTML tag.
 
         // Should flag in standard markdown
         assert_eq!(result.len(), 1, "Should flag JSX-style elements in standard markdown");
+    }
+
+    // Auto-fix tests for MD033
+
+    #[test]
+    fn test_md033_fix_disabled_by_default() {
+        // Auto-fix should be disabled by default
+        let rule = MD033NoInlineHtml::default();
+        assert!(!rule.config.fix, "Fix should be disabled by default");
+        assert_eq!(rule.fix_capability(), crate::rule::FixCapability::Unfixable);
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_em_to_italic() {
+        // When fix is enabled, <em>text</em> should convert to *text*
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <em>emphasized text</em> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has *emphasized text* here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_i_to_italic() {
+        // <i>text</i> should convert to *text*
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <i>italic text</i> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has *italic text* here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_strong_to_bold() {
+        // <strong>text</strong> should convert to **text**
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <strong>bold text</strong> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has **bold text** here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_b_to_bold() {
+        // <b>text</b> should convert to **text**
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <b>bold text</b> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has **bold text** here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_code_to_backticks() {
+        // <code>text</code> should convert to `text`
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <code>inline code</code> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has `inline code` here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_code_with_backticks() {
+        // <code>text with `backticks`</code> should use double backticks
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <code>text with `backticks`</code> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has `` text with `backticks` `` here.");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_br_trailing_spaces() {
+        // <br> should convert to two trailing spaces + newline (default)
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "First line<br>Second line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "First line  \nSecond line");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_br_self_closing() {
+        // <br/> and <br /> should also convert
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "First<br/>second<br />third";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "First  \nsecond  \nthird");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_br_backslash_style() {
+        // With br_style = backslash, <br> should convert to backslash + newline
+        let config = MD033Config {
+            allowed: Vec::new(),
+            disallowed: Vec::new(),
+            fix: true,
+            br_style: md033_config::BrStyle::Backslash,
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let content = "First line<br>Second line";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "First line\\\nSecond line");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_hr() {
+        // <hr> should convert to horizontal rule
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Above<hr>Below";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Above\n---\nBelow");
+    }
+
+    #[test]
+    fn test_md033_fix_enabled_hr_self_closing() {
+        // <hr/> should also convert
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Above<hr/>Below";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Above\n---\nBelow");
+    }
+
+    #[test]
+    fn test_md033_fix_skips_nested_tags() {
+        // Tags with nested HTML - outer tags may not be fully fixed due to overlapping ranges
+        // The inner tags are processed first, which can invalidate outer tag ranges
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <em>text with <strong>nested</strong> tags</em> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Inner <strong> is converted to markdown, outer <em> range becomes invalid
+        // This is expected behavior - user should run fix multiple times for nested tags
+        assert_eq!(fixed, "This has <em>text with **nested** tags</em> here.");
+    }
+
+    #[test]
+    fn test_md033_fix_skips_tags_with_attributes() {
+        // Tags with attributes should NOT be fixed at all - leave as-is
+        // User may want to keep the attributes (e.g., class="highlight" for styling)
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <em class=\"highlight\">emphasized</em> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Content should remain unchanged - we don't know if attributes matter
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_disabled_no_changes() {
+        // When fix is disabled, original content should be returned
+        let rule = MD033NoInlineHtml::default(); // fix is false by default
+        let content = "This has <em>emphasized text</em> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Should return original content when fix is disabled");
+    }
+
+    #[test]
+    fn test_md033_fix_capability_enabled() {
+        let rule = MD033NoInlineHtml::with_fix(true);
+        assert_eq!(rule.fix_capability(), crate::rule::FixCapability::FullyFixable);
+    }
+
+    #[test]
+    fn test_md033_fix_multiple_tags() {
+        // Test fixing multiple HTML tags in one document
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Here is <em>italic</em> and <strong>bold</strong> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Here is *italic* and **bold** text.");
+    }
+
+    #[test]
+    fn test_md033_fix_uppercase_tags() {
+        // HTML tags are case-insensitive
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <EM>emphasized</EM> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This has *emphasized* text.");
+    }
+
+    #[test]
+    fn test_md033_fix_unsafe_tags_removed_not_converted() {
+        // Tags without safe markdown equivalents should be removed, not converted
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This has <div>a div</div> content.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remove tags but keep content
+        assert_eq!(fixed, "This has a div content.");
+    }
+
+    #[test]
+    fn test_md033_fix_multiple_tags_same_line() {
+        // Multiple tags on the same line should all be fixed correctly
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Regular text <i>italic</i> and <b>bold</b> here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Regular text *italic* and **bold** here.");
+    }
+
+    #[test]
+    fn test_md033_fix_multiple_em_tags_same_line() {
+        // Multiple em/strong tags on the same line
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<em>first</em> and <strong>second</strong> and <code>third</code>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "*first* and **second** and `third`");
+    }
+
+    #[test]
+    fn test_md033_fix_skips_tags_inside_pre() {
+        // Tags inside <pre> blocks should NOT be fixed (would break structure)
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<pre><code><em>VALUE</em></code></pre>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The <em> inside <pre><code> should NOT be converted
+        // Only the outer structure might be changed
+        assert!(
+            !fixed.contains("*VALUE*"),
+            "Tags inside <pre> should not be converted to markdown. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_skips_tags_inside_div() {
+        // Tags inside HTML block elements should not be fixed
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<div>\n<em>emphasized</em>\n</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The <em> inside <div> should not be converted to *emphasized*
+        assert!(
+            !fixed.contains("*emphasized*"),
+            "Tags inside HTML blocks should not be converted. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_outside_html_block() {
+        // Tags outside HTML blocks should still be fixed
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<div>\ncontent\n</div>\n\nOutside <em>emphasized</em> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The <em> outside the div should be converted
+        assert!(
+            fixed.contains("*emphasized*"),
+            "Tags outside HTML blocks should be converted. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_with_id_attribute() {
+        // Tags with id attributes should not be fixed (id might be used for anchors)
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "See <em id=\"important\">this note</em> for details.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged - id attribute matters for linking
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_with_style_attribute() {
+        // Tags with style attributes should not be fixed
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This is <strong style=\"color: red\">important</strong> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged - style attribute provides formatting
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_mixed_with_and_without_attributes() {
+        // Mix of tags with and without attributes
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<em>normal</em> and <em class=\"special\">styled</em> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Only the tag without attributes should be fixed
+        assert_eq!(fixed, "*normal* and <em class=\"special\">styled</em> text.");
+    }
+
+    #[test]
+    fn test_md033_quick_fix_tag_with_attributes_no_fix() {
+        // Quick fix should not be provided for tags with attributes
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<em class=\"test\">emphasized</em>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should find one HTML tag");
+        // No fix should be provided for tags with attributes
+        assert!(
+            result[0].fix.is_none(),
+            "Should NOT have a fix for tags with attributes"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_skips_html_entities() {
+        // Tags containing HTML entities should NOT be fixed
+        // HTML entities need HTML context to render; markdown won't process them
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<code>&vert;</code>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged - converting would break rendering
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_skips_multiple_html_entities() {
+        // Multiple HTML entities should also be skipped
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<code>&lt;T&gt;</code>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_allows_ampersand_without_entity() {
+        // Content with & but no semicolon should still be fixed
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<code>a & b</code>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should be converted since & is not part of an entity
+        assert_eq!(fixed, "`a & b`");
+    }
+
+    #[test]
+    fn test_md033_fix_em_with_entities_skipped() {
+        // <em> with entities should also be skipped
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<em>&nbsp;text</em>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should remain unchanged
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_md033_fix_skips_nested_em_in_code() {
+        // Tags nested inside other HTML elements should NOT be fixed
+        // e.g., <code><em>n</em></code> - the <em> should not be converted
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<code><em>n</em></code>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The inner <em> should NOT be converted to *n* because it's nested
+        // The whole structure should be left as-is (or outer code converted, but not inner)
+        assert!(
+            !fixed.contains("*n*"),
+            "Nested <em> should not be converted to markdown. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_skips_nested_in_table() {
+        // Tags nested in HTML structures in tables should not be fixed
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "| <code>><em>n</em></code> | description |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should not convert nested <em> to *n*
+        assert!(
+            !fixed.contains("*n*"),
+            "Nested tags in table should not be converted. Got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_standalone_em_still_converted() {
+        // Standalone (non-nested) <em> should still be converted
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "This is <em>emphasized</em> text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "This is *emphasized* text.");
     }
 }

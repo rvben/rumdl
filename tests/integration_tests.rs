@@ -140,12 +140,11 @@ fn test_md036_invalid_heading_level_defaults_to_2() {
 fn test_md036_config_serde_validation() {
     // Valid heading levels should parse successfully
     for level in 1..=6 {
-        let toml_str = format!("heading-level = {}", level);
+        let toml_str = format!("heading-level = {level}");
         let config: Result<MD036Config, _> = toml::from_str(&toml_str);
         assert!(
             config.is_ok(),
-            "Level {} should be valid, got error: {:?}",
-            level,
+            "Level {level} should be valid, got error: {:?}",
             config.err()
         );
         assert_eq!(config.unwrap().heading_level.get(), level);
@@ -153,19 +152,16 @@ fn test_md036_config_serde_validation() {
 
     // Invalid heading levels should fail deserialization
     for level in [0, 7, 10, 100, 255] {
-        let toml_str = format!("heading-level = {}", level);
+        let toml_str = format!("heading-level = {level}");
         let config: Result<MD036Config, _> = toml::from_str(&toml_str);
         assert!(
             config.is_err(),
-            "Level {} should be rejected during deserialization",
-            level
+            "Level {level} should be rejected during deserialization"
         );
         let err = config.unwrap_err().to_string();
         assert!(
             err.contains("must be between 1 and 6"),
-            "Error for level {} should mention valid range, got: {}",
-            level,
-            err
+            "Error for level {level} should mention valid range, got: {err}"
         );
     }
 }

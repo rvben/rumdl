@@ -18,6 +18,27 @@ pub const GFM_DISALLOWED_TAGS: &[&str] = &[
     "plaintext",
 ];
 
+/// HTML tags that have unambiguous Markdown equivalents and can be safely auto-fixed.
+/// These conversions are lossless for simple cases (no attributes, no nesting).
+pub const SAFE_FIXABLE_TAGS: &[&str] = &[
+    "em", "i", // italic: *text*
+    "strong", "b",    // bold: **text**
+    "code", // inline code: `text`
+    "br",   // line break
+    "hr",   // horizontal rule: ---
+];
+
+/// Style for converting `<br>` tags to Markdown line breaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BrStyle {
+    /// Use two trailing spaces followed by newline (CommonMark standard)
+    #[default]
+    TrailingSpaces,
+    /// Use backslash followed by newline (Pandoc/extended markdown)
+    Backslash,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct MD033Config {
     #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
@@ -33,6 +54,19 @@ pub struct MD033Config {
         alias = "disallowed"
     )]
     pub disallowed: Vec<String>,
+
+    /// Enable auto-fix to convert simple HTML tags to Markdown equivalents.
+    /// When enabled, tags like `<em>`, `<strong>`, `<code>`, `<br>`, `<hr>` are converted.
+    /// Tags with attributes or complex nesting are not auto-fixed.
+    /// Default: false (opt-in like MD036)
+    #[serde(default)]
+    pub fix: bool,
+
+    /// Style for converting `<br>` tags to Markdown line breaks.
+    /// - "trailing-spaces": Two spaces + newline (CommonMark standard, default)
+    /// - "backslash": Backslash + newline (Pandoc/extended markdown)
+    #[serde(default, rename = "br-style", alias = "br_style")]
+    pub br_style: BrStyle,
 }
 
 impl MD033Config {
@@ -62,6 +96,11 @@ impl MD033Config {
     /// Check if the rule is operating in disallowed-only mode
     pub fn is_disallowed_mode(&self) -> bool {
         !self.disallowed.is_empty()
+    }
+
+    /// Check if a tag is safe to auto-fix (has a simple Markdown equivalent)
+    pub fn is_safe_fixable_tag(tag_name: &str) -> bool {
+        SAFE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
     }
 }
 
