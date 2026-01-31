@@ -312,28 +312,8 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
             return Ok(vec![]);
         }
 
-        // Parse inline configuration and apply overrides
-        let inline_config = crate::inline_config::InlineConfig::from_content(content);
-        let config_override = inline_config.get_rule_config("MD064");
-
-        let effective_config = if let Some(json_config) = config_override {
-            if let Some(obj) = json_config.as_object() {
-                let mut config = self.config.clone();
-                // Check both kebab-case and snake_case variants
-                if let Some(allow) = obj
-                    .get("allow-sentence-double-space")
-                    .or_else(|| obj.get("allow_sentence_double_space"))
-                    .and_then(|v| v.as_bool())
-                {
-                    config.allow_sentence_double_space = allow;
-                }
-                config
-            } else {
-                self.config.clone()
-            }
-        } else {
-            self.config.clone()
-        };
+        // Get effective config by merging inline config overrides
+        let effective_config = ctx.get_effective_config("MD064", &self.config);
 
         let mut warnings = Vec::new();
         let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
