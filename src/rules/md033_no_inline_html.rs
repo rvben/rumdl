@@ -544,8 +544,9 @@ impl MD033NoInlineHtml {
             {
                 return Some((tag_byte_start..tag_byte_start + opening_tag.len(), markdown));
             }
-            // Otherwise just remove the tag
-            return Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()));
+            // Can't convert this self-closing tag to Markdown, don't provide a fix
+            // (e.g., <img>, <input>, <meta> - these have no Markdown equivalent)
+            return None;
         }
 
         // Search for the closing tag after the opening tag (case-insensitive)
@@ -593,12 +594,13 @@ impl MD033NoInlineHtml {
                 return None;
             }
 
-            // For non-fixable tags, extract content (removing tags)
-            return Some((tag_byte_start..closing_byte_end, inner_content.to_string()));
+            // For non-fixable tags, don't provide a fix
+            // (e.g., <a href="...">Link</a>, <div>content</div>)
+            return None;
         }
 
-        // If no closing tag found, just remove the opening tag
-        Some((tag_byte_start..tag_byte_start + opening_tag.len(), String::new()))
+        // If no closing tag found, don't provide a fix (malformed HTML)
+        None
     }
 }
 
@@ -1029,18 +1031,19 @@ mod tests {
 
     #[test]
     fn test_md033_quick_fix_inline_tag() {
-        // Test Quick Fix for inline HTML tags - keeps content, removes tags
+        // Test that non-fixable tags (like <span>) do NOT get a fix
+        // Only safe fixable tags (em, i, strong, b, code, br, hr) with fix=true get fixes
         let rule = MD033NoInlineHtml::default();
         let content = "This has <span>inline text</span> that should keep content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
-        assert!(result[0].fix.is_some(), "Should have a fix");
-
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(&content[fix.range.clone()], "<span>inline text</span>");
-        assert_eq!(fix.replacement, "inline text");
+        // <span> is NOT a safe fixable tag, so no fix should be provided
+        assert!(
+            result[0].fix.is_none(),
+            "Non-fixable tags like <span> should not have a fix"
+        );
     }
 
     #[test]
@@ -1059,39 +1062,36 @@ mod tests {
 
     #[test]
     fn test_md033_quick_fix_self_closing_tag() {
-        // Test Quick Fix for self-closing tags - removes tag (no content)
+        // Test that self-closing tags with fix=false (default) do NOT get a fix
         let rule = MD033NoInlineHtml::default();
         let content = "Self-closing: <br/>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1, "Should find one HTML tag");
-        assert!(result[0].fix.is_some(), "Should have a fix");
-
-        let fix = result[0].fix.as_ref().unwrap();
-        assert_eq!(&content[fix.range.clone()], "<br/>");
-        assert_eq!(fix.replacement, "");
+        // Default config has fix=false, so no fix should be provided
+        assert!(
+            result[0].fix.is_none(),
+            "Self-closing tags should not have a fix when fix config is false"
+        );
     }
 
     #[test]
     fn test_md033_quick_fix_multiple_tags() {
-        // Test Quick Fix with multiple HTML tags - keeps content for both
+        // Test that multiple tags without fix=true do NOT get fixes
+        // <span> is not a safe fixable tag, <strong> is but fix=false by default
         let rule = MD033NoInlineHtml::default();
         let content = "<span>first</span> and <strong>second</strong>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 2, "Should find two HTML tags");
-        assert!(result[0].fix.is_some(), "First tag should have a fix");
-        assert!(result[1].fix.is_some(), "Second tag should have a fix");
-
-        let fix1 = result[0].fix.as_ref().unwrap();
-        assert_eq!(&content[fix1.range.clone()], "<span>first</span>");
-        assert_eq!(fix1.replacement, "first");
-
-        let fix2 = result[1].fix.as_ref().unwrap();
-        assert_eq!(&content[fix2.range.clone()], "<strong>second</strong>");
-        assert_eq!(fix2.replacement, "second");
+        // Neither should have a fix: <span> is not fixable, <strong> is but fix=false
+        assert!(result[0].fix.is_none(), "Non-fixable <span> should not have a fix");
+        assert!(
+            result[1].fix.is_none(),
+            "<strong> should not have a fix when fix config is false"
+        );
     }
 
     #[test]
@@ -1583,14 +1583,39 @@ Regular text with <div>content</div> HTML tag.
     }
 
     #[test]
-    fn test_md033_fix_unsafe_tags_removed_not_converted() {
-        // Tags without safe markdown equivalents should be removed, not converted
+    fn test_md033_fix_unsafe_tags_not_modified() {
+        // Tags without safe markdown equivalents should NOT be modified
+        // Only safe fixable tags (em, i, strong, b, code, br, hr) get converted
         let rule = MD033NoInlineHtml::with_fix(true);
         let content = "This has <div>a div</div> content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // Should remove tags but keep content
-        assert_eq!(fixed, "This has a div content.");
+        // <div> is not a safe fixable tag, so content should be unchanged
+        assert_eq!(fixed, "This has <div>a div</div> content.");
+    }
+
+    #[test]
+    fn test_md033_fix_img_tag_not_removed() {
+        // Regression test: <img> tags should NOT be removed or modified
+        // They have no Markdown equivalent, so fix should leave them unchanged
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Image: <img src=\"photo.jpg\" alt=\"My Photo\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // <img> is a self-closing tag without a Markdown equivalent - must be unchanged
+        assert_eq!(fixed, "Image: <img src=\"photo.jpg\" alt=\"My Photo\">");
+    }
+
+    #[test]
+    fn test_md033_fix_mixed_safe_and_unsafe_tags() {
+        // Mix of safe fixable tags and unsafe tags on the same line
+        // Safe tags should be converted, unsafe should be left unchanged
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<em>italic</em> and <img src=\"x.jpg\"> and <strong>bold</strong>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // <em> and <strong> are safe, <img> is not
+        assert_eq!(fixed, "*italic* and <img src=\"x.jpg\"> and **bold**");
     }
 
     #[test]
