@@ -241,25 +241,36 @@ impl MD064NoMultipleConsecutiveSpaces {
         before == ":"
     }
 
-    /// Check if the match is inside a task list checkbox
-    /// Pattern: - [ ]  or - [x]  (spaces after checkbox)
-    fn is_after_task_checkbox(&self, line: &str, match_start: usize) -> bool {
+    /// Check if the match is immediately after a task list checkbox.
+    /// Standard GFM: only `[ ]`, `[x]`, `[X]` are valid checkboxes.
+    /// Obsidian flavor: any single character inside brackets is a valid checkbox
+    /// (e.g., `[/]`, `[-]`, `[>]`, `[✓]`).
+    fn is_after_task_checkbox(&self, line: &str, match_start: usize, flavor: crate::config::MarkdownFlavor) -> bool {
         let before = line[..match_start].trim_start();
 
-        // Task list patterns: *, -, + followed by [ ], [x], or [X]
-        // Examples: "- [ ]", "* [x]", "+ [X]"
-        if before.len() >= 4 {
-            let patterns = [
-                "- [ ]", "- [x]", "- [X]", "* [ ]", "* [x]", "* [X]", "+ [ ]", "+ [x]", "+ [X]",
-            ];
-            for pattern in patterns {
-                if before == pattern {
-                    return true;
+        // Zero-allocation iterator-based check for: marker + space + '[' + char + ']'
+        let mut chars = before.chars();
+        let pattern = (
+            chars.next(),
+            chars.next(),
+            chars.next(),
+            chars.next(),
+            chars.next(),
+            chars.next(),
+        );
+
+        match pattern {
+            (Some('*' | '-' | '+'), Some(' '), Some('['), Some(c), Some(']'), None) => {
+                if flavor == crate::config::MarkdownFlavor::Obsidian {
+                    // Obsidian: any single character is a valid checkbox state
+                    true
+                } else {
+                    // Standard GFM: only space, 'x', or 'X' are valid
+                    matches!(c, ' ' | 'x' | 'X')
                 }
             }
+            _ => false,
         }
-
-        false
     }
 
     /// Check if this is a table row without outer pipes (GFM extension)
@@ -393,7 +404,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                 }
 
                 // Skip spaces after task list checkboxes
-                if self.is_after_task_checkbox(line.content, match_start) {
+                if self.is_after_task_checkbox(line.content, match_start, ctx.flavor) {
                     continue;
                 }
 
@@ -888,6 +899,103 @@ Normal paragraph.
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_skip_extended_task_checkbox_spaces_obsidian() {
+        // Extended checkboxes are only recognized in Obsidian flavor
+        let rule = MD064NoMultipleConsecutiveSpaces::new();
+
+        // Extended Obsidian checkboxes: [/] in progress
+        let content = "- [/]  In progress task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [/] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [-] cancelled
+        let content = "- [-]  Cancelled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [-] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [>] deferred
+        let content = "- [>]  Deferred task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [>] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [<] scheduled
+        let content = "- [<]  Scheduled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [<] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [?] question
+        let content = "- [?]  Question task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [?] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [!] important
+        let content = "- [!]  Important task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [!] checkbox in Obsidian");
+
+        // Extended Obsidian checkboxes: [*] star/highlight
+        let content = "- [*]  Starred task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip [*] checkbox in Obsidian");
+
+        // With asterisk list marker and extended checkbox
+        let content = "* [/]  In progress with asterisk\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip extended checkbox with * marker");
+
+        // With plus list marker and extended checkbox
+        let content = "+ [-]  Cancelled with plus\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip extended checkbox with + marker");
+
+        // Multi-byte UTF-8 checkboxes (Unicode checkmarks)
+        let content = "- [✓]  Completed with checkmark\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip Unicode checkmark [✓]");
+
+        let content = "- [✗]  Failed with X mark\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip Unicode X mark [✗]");
+
+        let content = "- [→]  Forwarded with arrow\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should skip Unicode arrow [→]");
+    }
+
+    #[test]
+    fn test_flag_extended_checkboxes_in_standard_flavor() {
+        // Extended checkboxes should be flagged in Standard flavor (GFM only recognizes [ ], [x], [X])
+        let rule = MD064NoMultipleConsecutiveSpaces::new();
+
+        let content = "- [/]  In progress task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag [/] in Standard flavor");
+
+        let content = "- [-]  Cancelled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag [-] in Standard flavor");
+
+        let content = "- [✓]  Unicode checkbox\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag [✓] in Standard flavor");
     }
 
     #[test]

@@ -77,6 +77,34 @@ The file name is `= this.file.name`.
 Dynamic content: `$= dv.current().field`.
 ```
 
+### Dataview Inline Fields
+
+MD011 recognizes Dataview inline field syntax to prevent false positives:
+
+```markdown
+(status:: active)[link text]
+(author:: John Doe)[read more]
+(date:: 2024-01-01)[view]
+```
+
+These patterns look like reversed links but are valid Dataview inline field syntax.
+
+### Extended Task Checkboxes
+
+MD064 recognizes extended task checkbox syntax beyond the standard `[ ]`, `[x]`, and `[X]`:
+
+```markdown
+- [/] In progress
+- [-] Cancelled
+- [>] Deferred
+- [<] Scheduled
+- [?] Question
+- [!] Important
+- [*] Star/highlight
+```
+
+These extended checkboxes are commonly used in Obsidian with plugins like Tasks or custom CSS.
+
 ### Templater Syntax
 
 MD033 correctly ignores Templater plugin syntax (not flagged as inline HTML):
@@ -97,13 +125,13 @@ MD033 correctly ignores Templater plugin syntax (not flagged as inline HTML):
 | MD033 | Flag inline HTML               | Ignore Templater `<% %>` syntax                  |
 | MD037 | Check emphasis spacing         | Recognize `==highlight==` syntax                 |
 | MD038 | Check code span spacing        | Allow `= ` and `$= ` Dataview prefixes           |
-| MD011 | Check reversed links           | Skip content in `%%comments%%`                   |
+| MD011 | Check reversed links           | Skip `%%comments%%` and `(field:: value)` patterns |
 | MD012 | Check multiple blanks          | Skip content in `%%comments%%`                   |
 | MD034 | Check bare URLs                | Skip content in `%%comments%%`                   |
 | MD044 | Check proper names             | Skip content in `%%comments%%`                   |
 | MD049 | Check emphasis style           | Skip content in `%%comments%%`                   |
 | MD061 | Check link fragments           | Skip content in `%%comments%%`                   |
-| MD064 | Check link destinations        | Skip content in `%%comments%%`                   |
+| MD064 | Check multiple consecutive spaces | Skip `%%comments%%`, allow extended checkboxes `[/]`, `[-]`, etc. |
 | MD069 | Check reference links          | Skip content in `%%comments%%`                   |
 
 ## Configuration
