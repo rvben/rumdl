@@ -1634,6 +1634,27 @@ Content."#;
     }
 
     #[test]
+    fn test_skip_obsidian_comments_in_inline_code_multi_backtick() {
+        // %% inside inline code spans with multiple backticks should NOT be treated as comments
+        let content = r#"# Heading
+
+The syntax is ``%%comment%%`` in Obsidian.
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("The syntax is")),
+            "Should include line with %% in multi-backtick code span"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content after code span"
+        );
+    }
+
+    #[test]
     fn test_skip_obsidian_comments_consecutive_blocks() {
         // Multiple consecutive comment blocks
         let content = r#"# Heading

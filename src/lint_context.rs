@@ -716,7 +716,7 @@ impl<'a> LintContext<'a> {
         let obsidian_comment_ranges = profile_section!(
             "Obsidian comments",
             profile,
-            Self::detect_obsidian_comments(content, &mut lines, flavor)
+            Self::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges)
         );
 
         // Collect link byte ranges early for heading detection (to skip lines inside link syntax)
@@ -919,13 +919,9 @@ impl<'a> LintContext<'a> {
             return false;
         }
 
-        // Convert line/column to byte position
-        if let Some(line_start) = self.line_index.get_line_start_byte(line_num) {
-            let byte_pos = line_start + col.saturating_sub(1); // col is 1-indexed
-            self.is_in_obsidian_comment(byte_pos)
-        } else {
-            false
-        }
+        // Convert line/column (1-indexed, char-based) to byte position
+        let byte_pos = self.line_index.line_col_to_byte_range(line_num, col).start;
+        self.is_in_obsidian_comment(byte_pos)
     }
 
     /// Get HTML tags - computed lazily on first access
@@ -3364,14 +3360,19 @@ impl<'a> LintContext<'a> {
     /// Comments are NOT detected inside code blocks or HTML comments.
     ///
     /// Returns the computed comment ranges for use by rules that need position-level checking.
-    fn detect_obsidian_comments(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) -> Vec<(usize, usize)> {
+    fn detect_obsidian_comments(
+        content: &str,
+        lines: &mut [LineInfo],
+        flavor: MarkdownFlavor,
+        code_span_ranges: &[(usize, usize)],
+    ) -> Vec<(usize, usize)> {
         // Only process Obsidian files
         if flavor != MarkdownFlavor::Obsidian {
             return Vec::new();
         }
 
         // Compute Obsidian comment ranges (byte ranges)
-        let comment_ranges = Self::compute_obsidian_comment_ranges(content, lines);
+        let comment_ranges = Self::compute_obsidian_comment_ranges(content, lines, code_span_ranges);
 
         // Mark lines that fall within comment ranges
         for range in &comment_ranges {
@@ -3414,7 +3415,11 @@ impl<'a> LintContext<'a> {
     ///
     /// Returns a vector of (start, end) byte offset pairs for each comment.
     /// Comments do not nest - first `%%` after an opening `%%` closes it.
-    fn compute_obsidian_comment_ranges(content: &str, lines: &[LineInfo]) -> Vec<(usize, usize)> {
+    fn compute_obsidian_comment_ranges(
+        content: &str,
+        lines: &[LineInfo],
+        code_span_ranges: &[(usize, usize)],
+    ) -> Vec<(usize, usize)> {
         let mut ranges = Vec::new();
 
         // Quick check - if no %% at all, no comments
@@ -3422,42 +3427,55 @@ impl<'a> LintContext<'a> {
             return ranges;
         }
 
-        // Build a set of byte positions that are inside code blocks or HTML comments
-        // to avoid detecting %% inside those regions
+        // Build skip ranges for code blocks, HTML comments, and inline code spans
+        // to avoid detecting %% inside those regions.
         let mut skip_ranges: Vec<(usize, usize)> = Vec::new();
         for line in lines {
             if line.in_code_block || line.in_html_comment {
                 skip_ranges.push((line.byte_offset, line.byte_offset + line.byte_len));
             }
         }
+        skip_ranges.extend(code_span_ranges.iter().copied());
 
-        // Also need to skip code spans (inline code)
-        // We'll handle this by checking each %% position
+        if !skip_ranges.is_empty() {
+            // Sort and merge overlapping ranges for efficient scanning
+            skip_ranges.sort_by_key(|(start, _)| *start);
+            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(skip_ranges.len());
+            for (start, end) in skip_ranges {
+                if let Some((_, last_end)) = merged.last_mut()
+                    && start <= *last_end
+                {
+                    *last_end = (*last_end).max(end);
+                    continue;
+                }
+                merged.push((start, end));
+            }
+            skip_ranges = merged;
+        }
+
         let content_bytes = content.as_bytes();
         let len = content.len();
         let mut i = 0;
         let mut in_comment = false;
         let mut comment_start = 0;
+        let mut skip_idx = 0;
 
         while i < len.saturating_sub(1) {
-            // Check if current position is inside a skip range
-            let is_in_skip_range = skip_ranges.iter().any(|(start, end)| i >= *start && i < *end);
-
-            if is_in_skip_range {
-                i += 1;
-                continue;
+            // Fast-skip any ranges we should ignore (code blocks, HTML comments, code spans)
+            if skip_idx < skip_ranges.len() {
+                let (skip_start, skip_end) = skip_ranges[skip_idx];
+                if i >= skip_end {
+                    skip_idx += 1;
+                    continue;
+                }
+                if i >= skip_start {
+                    i = skip_end;
+                    continue;
+                }
             }
 
             // Check for %%
             if content_bytes[i] == b'%' && content_bytes[i + 1] == b'%' {
-                // Check if this %% is inside a code span
-                // Code spans are tricky because they can contain %% legitimately
-                // We'll use a simple heuristic: check for backticks before and after
-                if Self::is_in_code_span_at_position(content, i) {
-                    i += 2;
-                    continue;
-                }
-
                 if !in_comment {
                     // Opening %%
                     in_comment = true;
@@ -3481,22 +3499,6 @@ impl<'a> LintContext<'a> {
         }
 
         ranges
-    }
-
-    /// Check if a byte position is inside a code span (inline code)
-    ///
-    /// Uses a simple approach: scan backwards for backticks to determine if we're
-    /// inside an inline code region.
-    fn is_in_code_span_at_position(content: &str, pos: usize) -> bool {
-        // Simple heuristic: count unmatched backticks before this position on the same line
-        let line_start = content[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let line_prefix = &content[line_start..pos];
-
-        // Count backticks
-        let backtick_count = line_prefix.chars().filter(|&c| c == '`').count();
-
-        // If odd number of backticks before position, we're inside a code span
-        backtick_count % 2 == 1
     }
 
     /// Helper to mark lines within a byte range

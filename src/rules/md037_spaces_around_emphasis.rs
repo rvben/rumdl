@@ -138,6 +138,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                         && !is_in_jsx_expression(ctx, byte_pos)
                         && !is_in_mdx_comment(ctx, byte_pos)
                         && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
+                        && !ctx.is_position_in_obsidian_comment(line_num, warning.column)
                     {
                         let mut adjusted_warning = warning.clone();
                         if let Some(fix) = &mut adjusted_warning.fix {
@@ -927,5 +928,20 @@ This has * real spaced emphasis * that should be flagged."#;
         let result = rule.check(&ctx).unwrap();
         // The highlight in HTML comment should be ignored, only the actual highlight is processed
         let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_inline_comment_emphasis_ignored() {
+        // Emphasis inside Obsidian comments should be ignored
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "Visible %%* spaced emphasis *%% still visible.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should ignore emphasis inside Obsidian comments. Got: {result:?}"
+        );
     }
 }

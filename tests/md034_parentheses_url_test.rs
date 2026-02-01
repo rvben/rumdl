@@ -233,6 +233,23 @@ fn test_url_inside_obsidian_inline_comment_ignored() {
     );
 }
 
+/// Test that inline comments with multibyte characters still suppress URLs correctly
+#[test]
+fn test_url_inside_obsidian_inline_comment_with_unicode_ignored() {
+    let content = "✅ Check this: %%https://hidden.example.com%% and https://visible.example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert_eq!(warnings.len(), 1, "Should only flag the visible URL");
+    assert!(
+        warnings[0].message.contains("visible.example.com"),
+        "Should flag the visible URL, not the hidden one: {}",
+        warnings[0].message
+    );
+}
+
 /// Test that multiple URLs inside Obsidian comments are all ignored
 #[test]
 fn test_multiple_urls_inside_obsidian_comments_ignored() {

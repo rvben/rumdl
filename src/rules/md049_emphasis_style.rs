@@ -133,6 +133,10 @@ impl Rule for MD049EmphasisStyle {
         // Filter out emphasis markers that are inside links or MkDocs markup
         let lines: Vec<&str> = ctx.content.lines().collect();
         emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
+            // Skip emphasis inside Obsidian comments
+            if ctx.is_in_obsidian_comment(*abs_pos) {
+                return false;
+            }
             // Skip if inside a link
             if self.is_in_link(ctx, *abs_pos) {
                 return false;
@@ -393,5 +397,19 @@ This should be _flagged_ since we're using asterisk style.
         // The underscore emphasis should still be flagged
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Emphasis should use * instead of _"));
+    }
+
+    #[test]
+    fn test_obsidian_inline_comment_emphasis_ignored() {
+        // Emphasis inside Obsidian comments should be ignored
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "Visible %%_hidden_%% text.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should ignore emphasis inside Obsidian comments. Got: {result:?}"
+        );
     }
 }
