@@ -8,7 +8,12 @@
 /// - `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]`
 ///   These alerts MUST be separated by blank lines to render correctly on GitHub.
 ///
+/// Obsidian Callouts are also supported when using the Obsidian flavor:
+/// - Any `> [!TYPE]` pattern is recognized as a callout
+/// - Foldable syntax is supported: `> [!NOTE]+` (expanded) or `> [!NOTE]-` (collapsed)
+///
 /// See [docs/md028.md](../../docs/md028.md) for full documentation, configuration, and examples.
+use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_line_range;
 
@@ -109,6 +114,60 @@ impl MD028NoBlanksBlockquote {
         false
     }
 
+    /// Check if a blockquote line is an Obsidian callout
+    /// Obsidian callouts have the format: `> [!TYPE]` where TYPE can be any string
+    /// Obsidian also supports foldable callouts: `> [!TYPE]+` (expanded) or `> [!TYPE]-` (collapsed)
+    /// Reference: https://help.obsidian.md/callouts
+    #[inline]
+    fn is_obsidian_callout_line(line: &str) -> bool {
+        // Fast path: must contain '[!' pattern
+        if !line.contains("[!") {
+            return false;
+        }
+
+        // Extract content after the > marker(s)
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('>') {
+            return false;
+        }
+
+        // Skip all > markers and whitespace to get to content
+        let content = trimmed
+            .trim_start_matches('>')
+            .trim_start_matches([' ', '\t'])
+            .trim_start_matches('>')
+            .trim_start();
+
+        // Check for Obsidian callout pattern: [!TYPE] or [!TYPE]+ or [!TYPE]-
+        if !content.starts_with("[!") {
+            return false;
+        }
+
+        // Find the closing bracket - must have at least one char for TYPE
+        if let Some(end_bracket) = content.find(']') {
+            // TYPE must be at least one character
+            if end_bracket > 2 {
+                // Verify the type contains only valid characters (alphanumeric, hyphen, underscore)
+                let alert_type = &content[2..end_bracket];
+                return !alert_type.is_empty()
+                    && alert_type.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_');
+            }
+        }
+
+        false
+    }
+
+    /// Check if a line is a callout/alert based on the flavor
+    /// For Obsidian flavor: accepts any [!TYPE] pattern
+    /// For other flavors: only accepts GFM alert types
+    #[inline]
+    fn is_callout_line(line: &str, flavor: MarkdownFlavor) -> bool {
+        match flavor {
+            MarkdownFlavor::Obsidian => Self::is_obsidian_callout_line(line),
+            _ => Self::is_gfm_alert_line(line),
+        }
+    }
+
     /// Find the first line of a blockquote block starting from a given line
     /// Scans backwards to find where this blockquote block begins
     fn find_blockquote_start(lines: &[&str], from_idx: usize) -> Option<usize> {
@@ -147,18 +206,20 @@ impl MD028NoBlanksBlockquote {
         }
     }
 
-    /// Check if a blockquote block (starting at given index) is a GFM alert
-    fn is_gfm_alert_block(lines: &[&str], blockquote_line_idx: usize) -> bool {
+    /// Check if a blockquote block (starting at given index) is a callout/alert
+    /// For Obsidian flavor: accepts any [!TYPE] pattern
+    /// For other flavors: only accepts GFM alert types
+    fn is_callout_block(lines: &[&str], blockquote_line_idx: usize, flavor: MarkdownFlavor) -> bool {
         // Find the start of this blockquote block
         if let Some(start_idx) = Self::find_blockquote_start(lines, blockquote_line_idx) {
-            // Check if the first line of the block is a GFM alert
-            return Self::is_gfm_alert_line(lines[start_idx]);
+            // Check if the first line of the block is a callout/alert
+            return Self::is_callout_line(lines[start_idx], flavor);
         }
         false
     }
 
     /// Analyze context to determine if quotes are likely the same or different
-    fn are_likely_same_blockquote(lines: &[&str], blank_idx: usize) -> bool {
+    fn are_likely_same_blockquote(lines: &[&str], blank_idx: usize, flavor: MarkdownFlavor) -> bool {
         // Look for patterns that suggest these are the same blockquote:
         // 1. Only one blank line between them (multiple blanks suggest separation)
         // 2. Same indentation level
@@ -197,12 +258,14 @@ impl MD028NoBlanksBlockquote {
             _ => return false,
         };
 
-        // GFM Alert check: If either blockquote is a GFM alert (> [!NOTE], > [!TIP], etc.),
-        // treat them as intentionally separate blockquotes. GFM alerts MUST be separated
-        // by blank lines to render correctly on GitHub.
-        let prev_is_alert = Self::is_gfm_alert_block(lines, prev_idx);
-        let next_is_alert = Self::is_gfm_alert_block(lines, next_idx);
-        if prev_is_alert || next_is_alert {
+        // Callout/Alert check: If either blockquote is a callout/alert, treat them as
+        // intentionally separate blockquotes. Callouts MUST be separated by blank lines
+        // to render correctly.
+        // For Obsidian flavor: any [!TYPE] is a callout
+        // For other flavors: only GFM alert types (NOTE, TIP, IMPORTANT, WARNING, CAUTION)
+        let prev_is_callout = Self::is_callout_block(lines, prev_idx, flavor);
+        let next_is_callout = Self::is_callout_block(lines, next_idx, flavor);
+        if prev_is_callout || next_is_callout {
             return false;
         }
 
@@ -233,7 +296,7 @@ impl MD028NoBlanksBlockquote {
     }
 
     /// Check if a blank line is problematic (inside a blockquote)
-    fn is_problematic_blank_line(lines: &[&str], index: usize) -> Option<(usize, String)> {
+    fn is_problematic_blank_line(lines: &[&str], index: usize, flavor: MarkdownFlavor) -> Option<(usize, String)> {
         let current_line = lines[index];
 
         // Must be a blank line (no content, no > markers)
@@ -243,7 +306,7 @@ impl MD028NoBlanksBlockquote {
 
         // Use heuristics to determine if this blank line is inside a blockquote
         // or if it's an intentional separator between blockquotes
-        if !Self::are_likely_same_blockquote(lines, index) {
+        if !Self::are_likely_same_blockquote(lines, index, flavor) {
             return None;
         }
 
@@ -321,7 +384,7 @@ impl Rule for MD028NoBlanksBlockquote {
             let line_num = line_idx + 1;
 
             // Check if this is a problematic blank line inside a blockquote
-            if let Some((level, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx) {
+            if let Some((level, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx, ctx.flavor) {
                 let line = lines[line_idx];
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
@@ -352,7 +415,7 @@ impl Rule for MD028NoBlanksBlockquote {
 
         for (line_idx, line) in lines.iter().enumerate() {
             // Check if this blank line needs fixing
-            if let Some((_, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx) {
+            if let Some((_, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx, ctx.flavor) {
                 result.push(fix_content);
             } else {
                 result.push(line.to_string());
@@ -859,6 +922,239 @@ Final text."#;
         assert!(
             result.is_empty(),
             "Should not flag multiple blank lines between GFM alerts"
+        );
+    }
+
+    // ==================== Obsidian Callout Tests ====================
+    // Obsidian callouts use the same > [!TYPE] syntax as GFM alerts, but support
+    // any custom type (not just NOTE, TIP, IMPORTANT, WARNING, CAUTION).
+    // They also support foldable callouts with + or - suffix.
+    // Reference: https://help.obsidian.md/callouts
+
+    #[test]
+    fn test_obsidian_callout_detection() {
+        // Obsidian callouts should be detected
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!NOTE]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!info]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!todo]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!success]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!question]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!failure]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!danger]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!bug]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!example]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!quote]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!cite]"));
+    }
+
+    #[test]
+    fn test_obsidian_callout_custom_types() {
+        // Obsidian supports custom callout types
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!custom]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!my-callout]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!my_callout]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!MyCallout]"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!callout123]"));
+    }
+
+    #[test]
+    fn test_obsidian_callout_foldable() {
+        // Obsidian supports foldable callouts with + or -
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!NOTE]+ Expanded"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line(
+            "> [!NOTE]- Collapsed"
+        ));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!WARNING]+"));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!TIP]-"));
+    }
+
+    #[test]
+    fn test_obsidian_callout_with_title() {
+        // Obsidian callouts can have custom titles
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line(
+            "> [!NOTE] Custom Title"
+        ));
+        assert!(MD028NoBlanksBlockquote::is_obsidian_callout_line(
+            "> [!WARNING]+ Be Careful!"
+        ));
+    }
+
+    #[test]
+    fn test_obsidian_callout_invalid() {
+        // Invalid callout patterns
+        assert!(!MD028NoBlanksBlockquote::is_obsidian_callout_line(
+            "> Regular blockquote"
+        ));
+        assert!(!MD028NoBlanksBlockquote::is_obsidian_callout_line("> [NOTE]")); // missing !
+        assert!(!MD028NoBlanksBlockquote::is_obsidian_callout_line("> [!]")); // empty type
+        assert!(!MD028NoBlanksBlockquote::is_obsidian_callout_line(
+            "Regular text [!NOTE]"
+        )); // not blockquote
+        assert!(!MD028NoBlanksBlockquote::is_obsidian_callout_line("")); // empty
+    }
+
+    #[test]
+    fn test_obsidian_callouts_separated_by_blank_line() {
+        // Obsidian callouts separated by blank line should NOT be flagged
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!info]\n> Some info\n\n> [!todo]\n> A todo item";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag blank line between Obsidian callouts"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_custom_callouts_separated() {
+        // Custom Obsidian callouts should also be recognized
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!my-custom]\n> Custom content\n\n> [!another_custom]\n> More content";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag blank line between custom Obsidian callouts"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_foldable_callouts_separated() {
+        // Foldable Obsidian callouts should also be recognized
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!NOTE]+ Expanded\n> Content\n\n> [!WARNING]- Collapsed\n> Warning content";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag blank line between foldable Obsidian callouts"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_custom_not_recognized_in_standard_flavor() {
+        // Custom callout types should NOT be recognized in Standard flavor
+        // (only GFM alert types are recognized)
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!info]\n> Info content\n\n> [!todo]\n> Todo content";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // In Standard flavor, [!info] and [!todo] are NOT GFM alerts, so this is flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Custom callout types should be flagged in Standard flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_gfm_alerts_work_in_both_flavors() {
+        // GFM alert types should work in both Standard and Obsidian flavors
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!NOTE]\n> Note\n\n> [!WARNING]\n> Warning";
+
+        // Standard flavor
+        let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result_standard = rule.check(&ctx_standard).unwrap();
+        assert!(result_standard.is_empty(), "GFM alerts should work in Standard flavor");
+
+        // Obsidian flavor
+        let ctx_obsidian = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result_obsidian = rule.check(&ctx_obsidian).unwrap();
+        assert!(
+            result_obsidian.is_empty(),
+            "GFM alerts should also work in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_callout_all_builtin_types() {
+        // Test all built-in Obsidian callout types
+        let rule = MD028NoBlanksBlockquote;
+        let content = r#"> [!note]
+> Note
+
+> [!abstract]
+> Abstract
+
+> [!summary]
+> Summary
+
+> [!info]
+> Info
+
+> [!todo]
+> Todo
+
+> [!tip]
+> Tip
+
+> [!success]
+> Success
+
+> [!question]
+> Question
+
+> [!warning]
+> Warning
+
+> [!failure]
+> Failure
+
+> [!danger]
+> Danger
+
+> [!bug]
+> Bug
+
+> [!example]
+> Example
+
+> [!quote]
+> Quote"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "All Obsidian callout types should be recognized");
+    }
+
+    #[test]
+    fn test_obsidian_fix_not_applied_to_callouts() {
+        // Fix should not modify blank lines between Obsidian callouts
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!info]\n> Info\n\n> [!todo]\n> Todo";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Fix should not modify blank lines between Obsidian callouts"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_regular_blockquotes_still_flagged() {
+        // Regular blockquotes (not callouts) should still be flagged in Obsidian flavor
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First blockquote\n\n> Second blockquote";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Regular blockquotes should still be flagged in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_callout_mixed_with_regular_blockquote() {
+        // Callout followed by regular blockquote - should NOT flag (callout takes precedence)
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> [!note]\n> Note content\n\n> Regular blockquote";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag blank after callout even if followed by regular blockquote"
         );
     }
 }

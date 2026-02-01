@@ -282,8 +282,7 @@ fn test_obsidian_flavor_fix_preserves_tags() {
     fs::write(&md_path, md_content).unwrap();
 
     // Run fix with obsidian flavor
-    let (success, _stdout, stderr) =
-        run_rumdl(temp_dir.path(), &["check", "--fix", "--flavor", "obsidian", "test.md"]);
+    let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--fix", "--flavor", "obsidian", "test.md"]);
     assert!(success, "Fix command should succeed. stderr: {stderr}");
 
     // Read the fixed content

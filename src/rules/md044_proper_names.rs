@@ -275,6 +275,11 @@ impl MD044ProperNames {
                 continue;
             }
 
+            // Skip Obsidian comments (Obsidian flavor)
+            if line_info.in_obsidian_comment {
+                continue;
+            }
+
             // Early return: skip lines that don't contain any potential matches
             let line_lower = line.to_lowercase();
             let has_line_matches = self.name_variants.iter().any(|name| line_lower.contains(name));

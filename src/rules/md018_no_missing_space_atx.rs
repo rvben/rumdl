@@ -311,7 +311,12 @@ impl Rule for MD018NoMissingSpaceAtx {
                         ctx.flavor == MarkdownFlavor::Obsidian && heading.level == 1 && Self::is_obsidian_tag(line);
 
                     // Only attempt fix if not a special pattern
-                    if !is_emoji && !is_unicode && !is_magiclink && !is_obsidian_tag && trimmed.len() > heading.marker.len() {
+                    if !is_emoji
+                        && !is_unicode
+                        && !is_magiclink
+                        && !is_obsidian_tag
+                        && trimmed.len() > heading.marker.len()
+                    {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
@@ -1230,11 +1235,13 @@ More content.
             "#tag should be skipped in Obsidian flavor"
         );
         assert!(
-            rule.check_atx_heading_line("#hello", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#hello", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#hello should be skipped in Obsidian flavor"
         );
         assert!(
-            rule.check_atx_heading_line("#myTag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#myTag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#myTag should be skipped in Obsidian flavor"
         );
     }
@@ -1251,15 +1258,18 @@ More content.
             "#project/active should be skipped in Obsidian flavor (nested tag)"
         );
         assert!(
-            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#my-tag should be skipped in Obsidian flavor"
         );
         assert!(
-            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#my_tag should be skipped in Obsidian flavor"
         );
         assert!(
-            rule.check_atx_heading_line("#tag2023", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#tag2023", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#tag2023 should be skipped in Obsidian flavor"
         );
         assert!(
@@ -1295,7 +1305,8 @@ More content.
             "##tag should be flagged in Obsidian flavor (only single # is a tag)"
         );
         assert!(
-            rule.check_atx_heading_line("###hello", MarkdownFlavor::Obsidian).is_some(),
+            rule.check_atx_heading_line("###hello", MarkdownFlavor::Obsidian)
+                .is_some(),
             "###hello should be flagged in Obsidian flavor"
         );
     }
@@ -1348,10 +1359,7 @@ More content.
             flagged_lines.contains(&7),
             "##Introduction SHOULD be flagged in Obsidian flavor"
         );
-        assert!(
-            flagged_lines.contains(&9),
-            "#123 SHOULD be flagged in Obsidian flavor"
-        );
+        assert!(flagged_lines.contains(&9), "#123 SHOULD be flagged in Obsidian flavor");
     }
 
     #[test]
@@ -1421,16 +1429,16 @@ More content.
 
         // Valid Obsidian tags - should be SKIPPED
         let valid_tags = [
-            "#a",       // Minimum valid tag (but note: may be skipped due to length < 2)
-            "#tag",     // Simple tag
-            "#Tag",     // Capitalized tag
-            "#TAG",     // Uppercase tag
-            "#my-tag",  // Hyphenated tag
-            "#my_tag",  // Underscored tag
-            "#tag123",  // Tag with trailing numbers
-            "#a1",      // Short tag with number
-            "#日本語",  // Unicode tag
-            "#über",    // Unicode with umlaut
+            "#a",      // Minimum valid tag (but note: may be skipped due to length < 2)
+            "#tag",    // Simple tag
+            "#Tag",    // Capitalized tag
+            "#TAG",    // Uppercase tag
+            "#my-tag", // Hyphenated tag
+            "#my_tag", // Underscored tag
+            "#tag123", // Tag with trailing numbers
+            "#a1",     // Short tag with number
+            "#日本語", // Unicode tag
+            "#über",   // Unicode with umlaut
         ];
 
         for tag in valid_tags {
@@ -1499,14 +1507,14 @@ More content.
         let rule = MD018NoMissingSpaceAtx::new();
 
         let unicode_tags = [
-            "#日本語",    // Japanese
-            "#中文",      // Chinese
-            "#한국어",    // Korean
-            "#über",      // German umlaut
-            "#café",      // French accent
-            "#ñoño",      // Spanish tilde
-            "#Москва",    // Russian
-            "#αβγ",       // Greek
+            "#日本語", // Japanese
+            "#中文",   // Chinese
+            "#한국어", // Korean
+            "#über",   // German umlaut
+            "#café",   // French accent
+            "#ñoño",   // Spanish tilde
+            "#Москва", // Russian
+            "#αβγ",    // Greek
         ];
 
         for tag in unicode_tags {
@@ -1569,19 +1577,22 @@ More content.
 
         // Tag with underscore
         assert!(
-            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#my_tag should be skipped"
         );
 
         // Tag with hyphen
         assert!(
-            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#my-tag should be skipped"
         );
 
         // Tag with mixed case
         assert!(
-            rule.check_atx_heading_line("#MyTag", MarkdownFlavor::Obsidian).is_none(),
+            rule.check_atx_heading_line("#MyTag", MarkdownFlavor::Obsidian)
+                .is_none(),
             "#MyTag should be skipped"
         );
 

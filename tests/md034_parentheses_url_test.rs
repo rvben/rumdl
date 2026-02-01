@@ -187,3 +187,104 @@ fn test_multibyte_url_with_balanced_parens() {
         "Fixed URL should preserve balanced parentheses"
     );
 }
+
+// ==================== Obsidian Comment Tests ====================
+
+/// Test that URLs inside Obsidian block comments are not flagged
+#[test]
+fn test_url_inside_obsidian_block_comment_ignored() {
+    let content = r#"# Test
+
+%%
+This URL should be ignored: https://hidden.example.com
+%%
+
+This URL should be flagged: https://visible.example.com
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Only the visible URL should be flagged
+    assert_eq!(warnings.len(), 1, "Should only flag the visible URL");
+    assert!(
+        warnings[0].message.contains("visible.example.com"),
+        "Should flag the visible URL, not the hidden one: {}",
+        warnings[0].message
+    );
+}
+
+/// Test that URLs inside inline Obsidian comments are not flagged
+#[test]
+fn test_url_inside_obsidian_inline_comment_ignored() {
+    let content = "Check this: %%https://hidden.example.com%% and https://visible.example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Only the visible URL should be flagged
+    assert_eq!(warnings.len(), 1, "Should only flag the visible URL");
+    assert!(
+        warnings[0].message.contains("visible.example.com"),
+        "Should flag the visible URL, not the hidden one: {}",
+        warnings[0].message
+    );
+}
+
+/// Test that multiple URLs inside Obsidian comments are all ignored
+#[test]
+fn test_multiple_urls_inside_obsidian_comments_ignored() {
+    let content = r#"%%http://a.com%% text %%http://b.com%%
+
+%%
+http://c.com
+http://d.com
+%%
+
+http://visible.com
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Only the visible URL should be flagged
+    assert_eq!(warnings.len(), 1, "Should only flag the visible URL");
+    assert!(
+        warnings[0].message.contains("visible.com"),
+        "Should flag only visible.com: {}",
+        warnings[0].message
+    );
+}
+
+/// Test that Obsidian comment syntax in Standard flavor is NOT treated as comment
+#[test]
+fn test_obsidian_comment_syntax_not_special_in_standard_flavor() {
+    let content = "Check: %%http://example.com%% end\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    // In Standard flavor, %% is just text, so the URL should be flagged
+    assert_eq!(warnings.len(), 1, "Should flag URL in Standard flavor even with %%");
+    assert!(warnings[0].message.contains("example.com"), "Should flag the URL");
+}
+
+/// Test that URLs after closing %% are still flagged
+#[test]
+fn test_url_after_obsidian_comment_flagged() {
+    let content = "%%comment%% http://visible.example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    let rule = MD034NoBareUrls;
+
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert_eq!(warnings.len(), 1, "Should flag URL after comment closes");
+    assert!(
+        warnings[0].message.contains("visible.example.com"),
+        "Should flag the visible URL"
+    );
+}

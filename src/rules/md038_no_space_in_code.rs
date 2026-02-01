@@ -129,6 +129,27 @@ impl MD038NoSpaceInCode {
         false
     }
 
+    /// Check if content is an Obsidian Dataview inline query
+    ///
+    /// Dataview plugin uses two inline query syntaxes:
+    /// - Inline DQL: `= expression` - Starts with "= "
+    /// - Inline DataviewJS: `$= expression` - Starts with "$= "
+    ///
+    /// Examples:
+    /// - `= this.file.name` - Get current file name
+    /// - `= date(today)` - Get today's date
+    /// - `= [[Page]].field` - Access field from another page
+    /// - `$= dv.current().file.mtime` - DataviewJS expression
+    /// - `$= dv.pages().length` - Count pages
+    ///
+    /// These patterns legitimately start with a space after = or $=,
+    /// so they should not trigger MD038.
+    fn is_dataview_expression(content: &str) -> bool {
+        // Inline DQL: starts with "= " (equals followed by space)
+        // Inline DataviewJS: starts with "$= " (dollar-equals followed by space)
+        content.starts_with("= ") || content.starts_with("$= ")
+    }
+
     /// Check if a code span is likely part of a nested backtick structure
     fn is_likely_nested_backticks(&self, ctx: &crate::lint_context::LintContext, span_index: usize) -> bool {
         // If there are multiple code spans on the same line, and there's text
@@ -259,6 +280,13 @@ impl Rule for MD038NoSpaceInCode {
                 // Skip InlineHilite syntax in MkDocs: `#!python code`
                 // The space after the language specifier is legitimate
                 if ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_inline_hilite_content(trimmed) {
+                    continue;
+                }
+
+                // Skip Dataview inline queries in Obsidian: `= expression` or `$= expression`
+                // Dataview plugin uses these patterns for inline DQL and DataviewJS queries.
+                // The space after = or $= is part of the syntax, not a spacing error.
+                if ctx.flavor == crate::config::MarkdownFlavor::Obsidian && Self::is_dataview_expression(code_content) {
                     continue;
                 }
 
@@ -830,6 +858,493 @@ mod tests {
         assert!(
             result.is_ok(),
             "Mixed Chinese text with multiple code spans should not panic"
+        );
+    }
+
+    // ==================== Obsidian Dataview Plugin Tests ====================
+
+    /// Test that Dataview inline DQL expressions are not flagged in Obsidian flavor
+    #[test]
+    fn test_obsidian_dataview_inline_dql_not_flagged() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Basic inline DQL expressions - should NOT be flagged in Obsidian
+        let valid_dql_cases = vec![
+            "`= this.file.name`",
+            "`= date(today)`",
+            "`= [[Page]].field`",
+            "`= choice(condition, \"yes\", \"no\")`",
+            "`= this.file.mtime`",
+            "`= this.file.ctime`",
+            "`= this.file.path`",
+            "`= this.file.folder`",
+            "`= this.file.size`",
+            "`= this.file.ext`",
+            "`= this.file.link`",
+            "`= this.file.outlinks`",
+            "`= this.file.inlinks`",
+            "`= this.file.tags`",
+        ];
+
+        for case in valid_dql_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Dataview DQL expression should not be flagged in Obsidian: {case}"
+            );
+        }
+    }
+
+    /// Test that Dataview inline DataviewJS expressions are not flagged in Obsidian flavor
+    #[test]
+    fn test_obsidian_dataview_inline_dvjs_not_flagged() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Inline DataviewJS expressions - should NOT be flagged in Obsidian
+        let valid_dvjs_cases = vec![
+            "`$= dv.current().file.mtime`",
+            "`$= dv.pages().length`",
+            "`$= dv.current()`",
+            "`$= dv.pages('#tag').length`",
+            "`$= dv.pages('\"folder\"').length`",
+            "`$= dv.current().file.name`",
+            "`$= dv.current().file.path`",
+            "`$= dv.current().file.folder`",
+            "`$= dv.current().file.link`",
+        ];
+
+        for case in valid_dvjs_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Dataview JS expression should not be flagged in Obsidian: {case}"
+            );
+        }
+    }
+
+    /// Test complex Dataview expressions with nested parentheses
+    #[test]
+    fn test_obsidian_dataview_complex_expressions() {
+        let rule = MD038NoSpaceInCode::new();
+
+        let complex_cases = vec![
+            // Nested function calls
+            "`= sum(filter(pages, (p) => p.done))`",
+            "`= length(filter(file.tags, (t) => startswith(t, \"project\")))`",
+            // choice() function
+            "`= choice(x > 5, \"big\", \"small\")`",
+            "`= choice(this.status = \"done\", \"✅\", \"⏳\")`",
+            // date functions
+            "`= date(today) - dur(7 days)`",
+            "`= dateformat(this.file.mtime, \"yyyy-MM-dd\")`",
+            // Math expressions
+            "`= sum(rows.amount)`",
+            "`= round(average(rows.score), 2)`",
+            "`= min(rows.priority)`",
+            "`= max(rows.priority)`",
+            // String operations
+            "`= join(this.file.tags, \", \")`",
+            "`= replace(this.title, \"-\", \" \")`",
+            "`= lower(this.file.name)`",
+            "`= upper(this.file.name)`",
+            // List operations
+            "`= length(this.file.outlinks)`",
+            "`= contains(this.file.tags, \"important\")`",
+            // Link references
+            "`= [[Page Name]].field`",
+            "`= [[Folder/Subfolder/Page]].nested.field`",
+            // Conditional expressions
+            "`= default(this.status, \"unknown\")`",
+            "`= coalesce(this.priority, this.importance, 0)`",
+        ];
+
+        for case in complex_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Complex Dataview expression should not be flagged in Obsidian: {case}"
+            );
+        }
+    }
+
+    /// Test that complex DataviewJS expressions with method chains are not flagged
+    #[test]
+    fn test_obsidian_dataviewjs_method_chains() {
+        let rule = MD038NoSpaceInCode::new();
+
+        let method_chain_cases = vec![
+            "`$= dv.pages().where(p => p.status).length`",
+            "`$= dv.pages('#project').where(p => !p.done).length`",
+            "`$= dv.pages().filter(p => p.file.day).sort(p => p.file.mtime, 'desc').limit(5)`",
+            "`$= dv.pages('\"folder\"').map(p => p.file.link).join(', ')`",
+            "`$= dv.current().file.tasks.where(t => !t.completed).length`",
+            "`$= dv.pages().flatMap(p => p.file.tags).distinct().sort()`",
+            "`$= dv.page('Index').children.map(p => p.title)`",
+            "`$= dv.pages().groupBy(p => p.status).map(g => [g.key, g.rows.length])`",
+        ];
+
+        for case in method_chain_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "DataviewJS method chain should not be flagged in Obsidian: {case}"
+            );
+        }
+    }
+
+    /// Test Dataview-like patterns in Standard flavor
+    ///
+    /// Note: The actual content `= this.file.name` starts with `=`, not whitespace,
+    /// so it doesn't have a leading space issue. Dataview expressions only become
+    /// relevant when their content would otherwise be flagged.
+    ///
+    /// To properly test the difference, we need patterns that have leading whitespace
+    /// issues that would be skipped in Obsidian but flagged in Standard.
+    #[test]
+    fn test_standard_flavor_vs_obsidian_dataview() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // These Dataview expressions don't have leading whitespace (they start with "=")
+        // so they wouldn't be flagged in ANY flavor
+        let no_issue_cases = vec!["`= this.file.name`", "`$= dv.current()`"];
+
+        for case in no_issue_cases {
+            // Standard flavor - no issue because content doesn't start with whitespace
+            let ctx_std = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result_std = rule.check(&ctx_std).unwrap();
+            assert!(
+                result_std.is_empty(),
+                "Dataview expression without leading space shouldn't be flagged in Standard: {case}"
+            );
+
+            // Obsidian flavor - also no issue
+            let ctx_obs = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result_obs = rule.check(&ctx_obs).unwrap();
+            assert!(
+                result_obs.is_empty(),
+                "Dataview expression shouldn't be flagged in Obsidian: {case}"
+            );
+        }
+
+        // Test that regular code with leading/trailing spaces is still flagged in both flavors
+        // (when not matching Dataview pattern)
+        let space_issues = vec![
+            "` code`", // Leading space, no trailing
+            "`code `", // Trailing space, no leading
+        ];
+
+        for case in space_issues {
+            // Standard flavor - should be flagged
+            let ctx_std = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result_std = rule.check(&ctx_std).unwrap();
+            assert!(
+                !result_std.is_empty(),
+                "Code with spacing issue should be flagged in Standard: {case}"
+            );
+
+            // Obsidian flavor - should also be flagged (not a Dataview pattern)
+            let ctx_obs = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result_obs = rule.check(&ctx_obs).unwrap();
+            assert!(
+                !result_obs.is_empty(),
+                "Code with spacing issue should be flagged in Obsidian (not Dataview): {case}"
+            );
+        }
+    }
+
+    /// Test that regular code spans with leading space are still flagged in Obsidian
+    #[test]
+    fn test_obsidian_still_flags_regular_code_spans_with_space() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // These are NOT Dataview expressions, just regular code spans with leading space
+        // They should still be flagged even in Obsidian flavor
+        let invalid_cases = [
+            "` regular code`", // Space at start, not Dataview
+            "`code `",         // Space at end
+            "` code `",        // This is valid per CommonMark (symmetric single space)
+            "`  code`",        // Double space at start (not Dataview pattern)
+        ];
+
+        // Only the asymmetric cases should be flagged
+        let expected_flags = [
+            true,  // ` regular code` - leading space, no trailing
+            true,  // `code ` - trailing space, no leading
+            false, // ` code ` - symmetric single space (CommonMark valid)
+            true,  // `  code` - double leading space
+        ];
+
+        for (case, should_flag) in invalid_cases.iter().zip(expected_flags.iter()) {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            if *should_flag {
+                assert!(
+                    !result.is_empty(),
+                    "Non-Dataview code span with spacing issue should be flagged in Obsidian: {case}"
+                );
+            } else {
+                assert!(
+                    result.is_empty(),
+                    "CommonMark-valid symmetric spacing should not be flagged: {case}"
+                );
+            }
+        }
+    }
+
+    /// Test edge cases for Dataview pattern detection
+    #[test]
+    fn test_obsidian_dataview_edge_cases() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Valid Dataview patterns
+        let valid_cases = vec![
+            ("`= x`", true),                         // Minimal DQL
+            ("`$= x`", true),                        // Minimal DVJS
+            ("`= `", true),                          // Just equals-space (empty expression)
+            ("`$= `", true),                         // Just dollar-equals-space (empty expression)
+            ("`=x`", false),                         // No space after = (not Dataview, and no leading whitespace issue)
+            ("`$=x`", false),       // No space after $= (not Dataview, and no leading whitespace issue)
+            ("`= [[Link]]`", true), // Link in expression
+            ("`= this`", true),     // Simple this reference
+            ("`$= dv`", true),      // Just dv object reference
+            ("`= 1 + 2`", true),    // Math expression
+            ("`$= 1 + 2`", true),   // Math in DVJS
+            ("`= \"string\"`", true), // String literal
+            ("`$= 'string'`", true), // Single-quoted string
+            ("`= this.field ?? \"default\"`", true), // Null coalescing
+            ("`$= dv?.pages()`", true), // Optional chaining
+        ];
+
+        for (case, should_be_valid) in valid_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            if should_be_valid {
+                assert!(
+                    result.is_empty(),
+                    "Valid Dataview expression should not be flagged: {case}"
+                );
+            } else {
+                // These might or might not be flagged depending on other MD038 rules
+                // We just verify they don't crash
+                let _ = result;
+            }
+        }
+    }
+
+    /// Test Dataview expressions in context (mixed with regular markdown)
+    #[test]
+    fn test_obsidian_dataview_in_context() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Document with mixed Dataview and regular code spans
+        let content = r#"# My Note
+
+The file name is `= this.file.name` and it was created on `= this.file.ctime`.
+
+Regular code: `println!("hello")` and `let x = 5;`
+
+DataviewJS count: `$= dv.pages('#project').length` projects found.
+
+More regular code with issue: ` bad code` should be flagged.
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should only flag ` bad code` (line 9)
+        assert_eq!(
+            result.len(),
+            1,
+            "Should only flag the regular code span with leading space, not Dataview expressions"
+        );
+        assert_eq!(result[0].line, 9, "Warning should be on line 9");
+    }
+
+    /// Test that Dataview expressions in code blocks are properly handled
+    #[test]
+    fn test_obsidian_dataview_in_code_blocks() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Dataview expressions inside fenced code blocks should be ignored
+        // (because they're inside code blocks, not because of Dataview logic)
+        let content = r#"# Example
+
+```
+`= this.file.name`
+`$= dv.current()`
+```
+
+Regular paragraph with `= this.file.name` Dataview.
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should not flag anything - code blocks are skipped, and inline Dataview is valid
+        assert!(
+            result.is_empty(),
+            "Dataview in code blocks should be ignored, inline Dataview should be valid"
+        );
+    }
+
+    /// Test Dataview with Unicode content
+    #[test]
+    fn test_obsidian_dataview_unicode() {
+        let rule = MD038NoSpaceInCode::new();
+
+        let unicode_cases = vec![
+            "`= this.日本語`",                  // Japanese field name
+            "`= this.中文字段`",                // Chinese field name
+            "`= \"Привет мир\"`",               // Russian string
+            "`$= dv.pages('#日本語タグ')`",     // Japanese tag
+            "`= choice(true, \"✅\", \"❌\")`", // Emoji in strings
+            "`= this.file.name + \" 📝\"`",     // Emoji concatenation
+        ];
+
+        for case in unicode_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Unicode Dataview expression should not be flagged: {case}"
+            );
+        }
+    }
+
+    /// Test that Dataview detection doesn't break regular equals patterns
+    #[test]
+    fn test_obsidian_regular_equals_still_works() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Regular code with equals signs should still work normally
+        let valid_regular_cases = vec![
+            "`x = 5`",       // Assignment (no leading space)
+            "`a == b`",      // Equality check
+            "`x >= 10`",     // Comparison
+            "`let x = 10`",  // Variable declaration
+            "`const y = 5`", // Const declaration
+        ];
+
+        for case in valid_regular_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Regular code with equals should not be flagged: {case}"
+            );
+        }
+    }
+
+    /// Test fix behavior doesn't break Dataview expressions
+    #[test]
+    fn test_obsidian_dataview_fix_preserves_expressions() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Content with Dataview expressions and one fixable issue
+        let content = "Dataview: `= this.file.name` and bad: ` fixme`";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Should fix ` fixme` but preserve `= this.file.name`
+        assert!(
+            fixed.contains("`= this.file.name`"),
+            "Dataview expression should be preserved after fix"
+        );
+        assert!(
+            fixed.contains("`fixme`"),
+            "Regular code span should be fixed (space removed)"
+        );
+        assert!(!fixed.contains("` fixme`"), "Bad code span should have been fixed");
+    }
+
+    /// Test multiple Dataview expressions on same line
+    #[test]
+    fn test_obsidian_multiple_dataview_same_line() {
+        let rule = MD038NoSpaceInCode::new();
+
+        let content = "Created: `= this.file.ctime` | Modified: `= this.file.mtime` | Count: `$= dv.pages().length`";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Multiple Dataview expressions on same line should all be valid"
+        );
+    }
+
+    /// Performance test: Many Dataview expressions
+    #[test]
+    fn test_obsidian_dataview_performance() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Create content with many Dataview expressions
+        let mut content = String::new();
+        for i in 0..100 {
+            content.push_str(&format!("Field {i}: `= this.field{i}` | JS: `$= dv.current().f{i}`\n"));
+        }
+
+        let ctx = crate::lint_context::LintContext::new(&content, crate::config::MarkdownFlavor::Obsidian, None);
+        let start = std::time::Instant::now();
+        let result = rule.check(&ctx).unwrap();
+        let duration = start.elapsed();
+
+        assert!(result.is_empty(), "All Dataview expressions should be valid");
+        assert!(
+            duration.as_millis() < 1000,
+            "Performance test: Should process 200 Dataview expressions in <1s, took {duration:?}"
+        );
+    }
+
+    /// Test is_dataview_expression helper function directly
+    #[test]
+    fn test_is_dataview_expression_helper() {
+        // Valid Dataview patterns
+        assert!(MD038NoSpaceInCode::is_dataview_expression("= this.file.name"));
+        assert!(MD038NoSpaceInCode::is_dataview_expression("= "));
+        assert!(MD038NoSpaceInCode::is_dataview_expression("$= dv.current()"));
+        assert!(MD038NoSpaceInCode::is_dataview_expression("$= "));
+        assert!(MD038NoSpaceInCode::is_dataview_expression("= x"));
+        assert!(MD038NoSpaceInCode::is_dataview_expression("$= x"));
+
+        // Invalid Dataview patterns
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("=")); // No space after =
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("$=")); // No space after $=
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("=x")); // No space
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("$=x")); // No space
+        assert!(!MD038NoSpaceInCode::is_dataview_expression(" = x")); // Leading space before =
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("x = 5")); // Assignment, not Dataview
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("== x")); // Double equals
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("")); // Empty
+        assert!(!MD038NoSpaceInCode::is_dataview_expression("regular")); // Regular text
+    }
+
+    /// Test Dataview expressions work alongside other Obsidian features (tags)
+    #[test]
+    fn test_obsidian_dataview_with_tags() {
+        let rule = MD038NoSpaceInCode::new();
+
+        // Document using both Dataview and Obsidian tags
+        let content = r#"# Project Status
+
+Tags: #project #active
+
+Status: `= this.status`
+Count: `$= dv.pages('#project').length`
+
+Regular code: `function test() {}`
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Nothing should be flagged
+        assert!(
+            result.is_empty(),
+            "Dataview expressions and regular code should work together"
         );
     }
 }

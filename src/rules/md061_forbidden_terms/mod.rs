@@ -88,12 +88,13 @@ impl Rule for MD061ForbiddenTerms {
 
         let mut warnings = Vec::new();
 
-        // Use filtered_lines to skip frontmatter, code blocks, and HTML comments
+        // Use filtered_lines to skip frontmatter, code blocks, HTML comments, and Obsidian comments
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
             .skip_html_comments()
+            .skip_obsidian_comments()
         {
             let content = line.content;
 

@@ -131,12 +131,14 @@ impl Rule for MD012NoMultipleBlanks {
         // and correctly handles both fenced code blocks and indented code blocks
         // The in_quarto_div field is only set for Quarto flavor, so skip_quarto_divs() has no effect otherwise
         // The in_math_block field tracks $$ delimited math blocks (Quarto/LaTeX)
+        // The in_obsidian_comment field tracks Obsidian %%...%% comments (Obsidian flavor only)
         for filtered_line in ctx
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
             .skip_quarto_divs()
             .skip_math_blocks()
+            .skip_obsidian_comments()
         {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;

@@ -594,8 +594,8 @@ No ID here.
         assert!(!is_mkdocs_anchor_line("{ #standalone-attr }"));
 
         // Malformed patterns
-        assert!(!is_mkdocs_anchor_line("[]{#anchor}"));   // Missing ()
-        assert!(!is_mkdocs_anchor_line("[](#anchor)"));   // ID in URL position
+        assert!(!is_mkdocs_anchor_line("[]{#anchor}")); // Missing ()
+        assert!(!is_mkdocs_anchor_line("[](#anchor)")); // ID in URL position
         assert!(!is_mkdocs_anchor_line("[](){ #anchor")); // Unclosed brace
     }
 

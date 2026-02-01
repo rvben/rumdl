@@ -336,15 +336,23 @@ pub fn is_in_icon_shortcode(line: &str, position: usize, _flavor: MarkdownFlavor
 
 /// Check if a byte position is within PyMdown extension markup
 /// Includes: Keys (++ctrl+alt++), Caret (^text^), Insert (^^text^^), Mark (==text==)
+///
+/// For MkDocs flavor: supports all PyMdown extensions
+/// For Obsidian flavor: only supports Mark (==highlight==) syntax
 pub fn is_in_pymdown_markup(line: &str, position: usize, flavor: MarkdownFlavor) -> bool {
-    if flavor != MarkdownFlavor::MkDocs {
-        return false;
+    match flavor {
+        MarkdownFlavor::MkDocs => mkdocs_extensions::is_in_pymdown_markup(line, position),
+        MarkdownFlavor::Obsidian => {
+            // Obsidian supports ==highlight== syntax (same as PyMdown Mark)
+            mkdocs_extensions::is_in_mark(line, position)
+        }
+        _ => false,
     }
-    mkdocs_extensions::is_in_pymdown_markup(line, position)
 }
 
-/// Check if a byte position is within any MkDocs-specific markup
-/// Combines icon shortcodes and PyMdown extensions
+/// Check if a byte position is within flavor-specific markup
+/// For MkDocs: icon shortcodes and PyMdown extensions
+/// For Obsidian: highlight syntax (==text==)
 pub fn is_in_mkdocs_markup(line: &str, position: usize, flavor: MarkdownFlavor) -> bool {
     if is_in_icon_shortcode(line, position, flavor) {
         return true;
@@ -540,5 +548,88 @@ More content"#;
         assert!(is_in_mkdocs_markup(line, 5, MarkdownFlavor::MkDocs)); // In icon
         assert!(is_in_mkdocs_markup(line, 23, MarkdownFlavor::MkDocs)); // In keys
         assert!(!is_in_mkdocs_markup(line, 17, MarkdownFlavor::MkDocs)); // In " and "
+    }
+
+    // ==================== Obsidian highlight tests ====================
+
+    #[test]
+    fn test_obsidian_highlight_basic() {
+        // Obsidian flavor should recognize ==highlight== syntax
+        let line = "This is ==highlighted== text";
+        assert!(!is_in_pymdown_markup(line, 0, MarkdownFlavor::Obsidian)); // "T"
+        assert!(is_in_pymdown_markup(line, 8, MarkdownFlavor::Obsidian)); // First "="
+        assert!(is_in_pymdown_markup(line, 10, MarkdownFlavor::Obsidian)); // "h"
+        assert!(is_in_pymdown_markup(line, 15, MarkdownFlavor::Obsidian)); // "g"
+        assert!(is_in_pymdown_markup(line, 22, MarkdownFlavor::Obsidian)); // Last "="
+        assert!(!is_in_pymdown_markup(line, 23, MarkdownFlavor::Obsidian)); // " "
+    }
+
+    #[test]
+    fn test_obsidian_highlight_multiple() {
+        // Multiple highlights on one line
+        let line = "Both ==one== and ==two== here";
+        assert!(is_in_pymdown_markup(line, 5, MarkdownFlavor::Obsidian)); // In first
+        assert!(is_in_pymdown_markup(line, 8, MarkdownFlavor::Obsidian)); // "o"
+        assert!(!is_in_pymdown_markup(line, 12, MarkdownFlavor::Obsidian)); // Space after
+        assert!(is_in_pymdown_markup(line, 17, MarkdownFlavor::Obsidian)); // In second
+    }
+
+    #[test]
+    fn test_obsidian_highlight_not_standard_flavor() {
+        // Standard flavor should NOT recognize ==highlight== as special
+        let line = "This is ==highlighted== text";
+        assert!(!is_in_pymdown_markup(line, 8, MarkdownFlavor::Standard));
+        assert!(!is_in_pymdown_markup(line, 15, MarkdownFlavor::Standard));
+    }
+
+    #[test]
+    fn test_obsidian_highlight_with_spaces_inside() {
+        // Highlights can have spaces inside the content
+        let line = "This is ==text with spaces== here";
+        assert!(is_in_pymdown_markup(line, 10, MarkdownFlavor::Obsidian)); // "t"
+        assert!(is_in_pymdown_markup(line, 15, MarkdownFlavor::Obsidian)); // "w"
+        assert!(is_in_pymdown_markup(line, 27, MarkdownFlavor::Obsidian)); // "="
+    }
+
+    #[test]
+    fn test_obsidian_does_not_support_keys_notation() {
+        // Obsidian flavor should NOT recognize ++keys++ syntax (that's MkDocs-specific)
+        let line = "Press ++ctrl+c++ to copy";
+        assert!(!is_in_pymdown_markup(line, 6, MarkdownFlavor::Obsidian));
+        assert!(!is_in_pymdown_markup(line, 10, MarkdownFlavor::Obsidian));
+    }
+
+    #[test]
+    fn test_obsidian_mkdocs_markup_function() {
+        // is_in_mkdocs_markup should also work for Obsidian highlights
+        let line = "This is ==highlighted== text";
+        assert!(is_in_mkdocs_markup(line, 10, MarkdownFlavor::Obsidian)); // In highlight
+        assert!(!is_in_mkdocs_markup(line, 0, MarkdownFlavor::Obsidian)); // Not in highlight
+    }
+
+    #[test]
+    fn test_obsidian_highlight_edge_cases() {
+        // Empty highlight (====) should not match
+        let line = "Test ==== here";
+        assert!(!is_in_pymdown_markup(line, 5, MarkdownFlavor::Obsidian)); // Position at first =
+        assert!(!is_in_pymdown_markup(line, 6, MarkdownFlavor::Obsidian));
+
+        // Single character highlight
+        let line2 = "Test ==a== here";
+        assert!(is_in_pymdown_markup(line2, 5, MarkdownFlavor::Obsidian));
+        assert!(is_in_pymdown_markup(line2, 7, MarkdownFlavor::Obsidian)); // "a"
+        assert!(is_in_pymdown_markup(line2, 9, MarkdownFlavor::Obsidian)); // last =
+
+        // Triple equals (===) should not create highlight
+        let line3 = "a === b";
+        assert!(!is_in_pymdown_markup(line3, 3, MarkdownFlavor::Obsidian));
+    }
+
+    #[test]
+    fn test_obsidian_highlight_unclosed() {
+        // Unclosed highlight should not match
+        let line = "This ==starts but never ends";
+        assert!(!is_in_pymdown_markup(line, 5, MarkdownFlavor::Obsidian));
+        assert!(!is_in_pymdown_markup(line, 10, MarkdownFlavor::Obsidian));
     }
 }

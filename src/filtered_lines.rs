@@ -89,6 +89,8 @@ pub struct LineFilterConfig {
     pub skip_content_tabs: bool,
     /// Skip lines inside definition lists (:  definition)
     pub skip_definition_lists: bool,
+    /// Skip lines inside Obsidian comments (%%...%%)
+    pub skip_obsidian_comments: bool,
 }
 
 impl LineFilterConfig {
@@ -239,6 +241,16 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside Obsidian comments (%%...%%)
+    ///
+    /// Obsidian comments are content hidden from rendering and most
+    /// markdown rules should not process them.
+    #[must_use]
+    pub fn skip_obsidian_comments(mut self) -> Self {
+        self.skip_obsidian_comments = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
@@ -254,6 +266,7 @@ impl LineFilterConfig {
             || (self.skip_admonitions && line_info.in_admonition)
             || (self.skip_content_tabs && line_info.in_content_tab)
             || (self.skip_definition_lists && line_info.in_definition_list)
+            || (self.skip_obsidian_comments && line_info.in_obsidian_comment)
     }
 }
 
@@ -470,6 +483,13 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_definition_lists(mut self) -> Self {
         self.config = self.config.skip_definition_lists();
+        self
+    }
+
+    /// Skip lines inside Obsidian comments (%%...%%)
+    #[must_use]
+    pub fn skip_obsidian_comments(mut self) -> Self {
+        self.config = self.config.skip_obsidian_comments();
         self
     }
 }
@@ -1205,6 +1225,496 @@ Content."#;
         assert!(
             lines.iter().any(|l| l.content.contains("{this is not JSX")),
             "Should NOT exclude brace content in standard markdown"
+        );
+    }
+
+    // ==================== Obsidian Comment Tests ====================
+
+    #[test]
+    fn test_skip_obsidian_comments_simple_inline() {
+        // Simple inline comment: text %%hidden%% text
+        let content = r#"# Heading
+
+This is visible %%this is hidden%% and visible again.
+
+More content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // All lines should be included - inline comments don't hide entire lines
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("This is visible")),
+            "Should include line with inline comment"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("More content")),
+            "Should include content after comment"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_multiline_block() {
+        // Multi-line comment block
+        let content = r#"# Heading
+
+%%
+This is a multi-line
+comment block
+%%
+
+Content after."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Should include content outside the comment block
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content after")),
+            "Should include content after comment block"
+        );
+
+        // Lines inside the comment block should be excluded
+        assert!(
+            !lines.iter().any(|l| l.content.contains("This is a multi-line")),
+            "Should exclude multi-line comment content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("comment block")),
+            "Should exclude multi-line comment content"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_in_code_block() {
+        // %% inside code blocks should NOT be treated as comments
+        let content = r#"# Heading
+
+```
+%% This is NOT a comment
+It's inside a code block
+%%
+```
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx
+            .filtered_lines()
+            .skip_obsidian_comments()
+            .skip_code_blocks()
+            .into_iter()
+            .collect();
+
+        // The code block content should be excluded by skip_code_blocks, not by obsidian comments
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content after code block"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_in_html_comment() {
+        // %% inside HTML comments should NOT be treated as Obsidian comments
+        let content = r#"# Heading
+
+<!-- %% This is inside HTML comment %% -->
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx
+            .filtered_lines()
+            .skip_obsidian_comments()
+            .skip_html_comments()
+            .into_iter()
+            .collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_empty() {
+        // Empty comment: %%%%
+        let content = r#"# Heading
+
+%%%% empty comment
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Empty comments should be handled gracefully
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_unclosed() {
+        // Unclosed comment extends to end of document
+        let content = r#"# Heading
+
+%% starts but never ends
+This should be hidden
+Until end of document"#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Should include content before the unclosed comment
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading before unclosed comment"
+        );
+
+        // Content after the %% should be excluded
+        assert!(
+            !lines.iter().any(|l| l.content.contains("This should be hidden")),
+            "Should exclude content in unclosed comment"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Until end of document")),
+            "Should exclude content until end of document"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_multiple_on_same_line() {
+        // Multiple comments on same line
+        let content = r#"# Heading
+
+First %%hidden1%% middle %%hidden2%% last
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Line should still be included (inline comments)
+        assert!(
+            lines.iter().any(|l| l.content.contains("First")),
+            "Should include line with multiple inline comments"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("middle")),
+            "Should include visible text between comments"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_at_start_of_line() {
+        // Comment at start of line
+        let content = r#"# Heading
+
+%%comment at start%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_at_end_of_line() {
+        // Comment at end of line
+        let content = r#"# Heading
+
+Some text %%comment at end%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("Some text")),
+            "Should include text before comment"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_with_markdown_inside() {
+        // Comments containing special markdown
+        let content = r#"# Heading
+
+%%
+# hidden heading
+[hidden link](url)
+**hidden bold**
+%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        assert!(
+            !lines.iter().any(|l| l.content.contains("# hidden heading")),
+            "Should exclude heading inside comment"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("[hidden link]")),
+            "Should exclude link inside comment"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("**hidden bold**")),
+            "Should exclude bold inside comment"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_with_unicode() {
+        // Unicode content inside comments
+        let content = r#"# Heading
+
+%%日本語コメント%%
+
+%%Комментарий%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Lines with only comments should be handled properly
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_triple_percent() {
+        // Odd number of percent signs: %%%
+        let content = r#"# Heading
+
+%%% odd percent
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // Should handle gracefully - the %%% starts a comment, single % is content
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_not_in_standard_flavor() {
+        // Obsidian comments should NOT be detected in Standard flavor
+        let content = r#"# Heading
+
+%%this is not hidden in standard%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // In Standard flavor, %% is just text - nothing should be filtered
+        assert!(
+            lines.iter().any(|l| l.content.contains("%%this is not hidden")),
+            "Should NOT hide %% content in Standard flavor"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_integration_with_other_filters() {
+        // Test combining with frontmatter and code block filters
+        let content = r#"---
+title: Test
+---
+
+# Heading
+
+```
+code
+```
+
+%%hidden comment%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_code_blocks()
+            .skip_obsidian_comments()
+            .into_iter()
+            .collect();
+
+        // Should skip frontmatter, code blocks, and Obsidian comments
+        assert!(
+            !lines.iter().any(|l| l.content.contains("title: Test")),
+            "Should skip frontmatter"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content == "code"),
+            "Should skip code block content"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_whole_line_only() {
+        // Multi-line comment should only mark lines entirely within the comment
+        let content = "start %%\nfully hidden\n%% end";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // First line starts before comment, should be included
+        assert!(
+            lines.iter().any(|l| l.content.contains("start")),
+            "First line should be included (starts outside comment)"
+        );
+        // Middle line is entirely within comment, should be excluded
+        assert!(
+            !lines.iter().any(|l| l.content == "fully hidden"),
+            "Middle line should be excluded (entirely within comment)"
+        );
+        // Last line ends after comment, should be included
+        assert!(
+            lines.iter().any(|l| l.content.contains("end")),
+            "Last line should be included (ends outside comment)"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_in_inline_code() {
+        // %% inside inline code spans should NOT be treated as comments
+        let content = r#"# Heading
+
+The syntax is `%%comment%%` in Obsidian.
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // The line with code span should be included
+        assert!(
+            lines.iter().any(|l| l.content.contains("The syntax is")),
+            "Should include line with %% in code span"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("in Obsidian")),
+            "Should include text after code span"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_consecutive_blocks() {
+        // Multiple consecutive comment blocks
+        let content = r#"# Heading
+
+%%comment 1%%
+
+%%comment 2%%
+
+Content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content")),
+            "Should include content after comments"
+        );
+    }
+
+    #[test]
+    fn test_skip_obsidian_comments_spanning_many_lines() {
+        // Comment block spanning many lines
+        let content = r#"# Title
+
+%%
+Line 1 of comment
+Line 2 of comment
+Line 3 of comment
+Line 4 of comment
+Line 5 of comment
+%%
+
+After comment."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_obsidian_comments().into_iter().collect();
+
+        // All lines inside the comment should be excluded
+        for i in 1..=5 {
+            assert!(
+                !lines
+                    .iter()
+                    .any(|l| l.content.contains(&format!("Line {i} of comment"))),
+                "Should exclude line {i} of comment"
+            );
+        }
+
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Title")),
+            "Should include title"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("After comment")),
+            "Should include content after comment"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_comment_line_info_field() {
+        // Verify the in_obsidian_comment field is set correctly
+        let content = "visible\n%%\nhidden\n%%\nvisible";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+
+        // Line 0: visible - should NOT be in comment
+        assert!(
+            !ctx.lines[0].in_obsidian_comment,
+            "Line 0 should not be marked as in_obsidian_comment"
+        );
+
+        // Line 2: hidden - should be in comment
+        assert!(
+            ctx.lines[2].in_obsidian_comment,
+            "Line 2 (hidden) should be marked as in_obsidian_comment"
+        );
+
+        // Line 4: visible - should NOT be in comment
+        assert!(
+            !ctx.lines[4].in_obsidian_comment,
+            "Line 4 should not be marked as in_obsidian_comment"
         );
     }
 }

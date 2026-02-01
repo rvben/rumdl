@@ -10,6 +10,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [gfm](flavors/gfm.md)             | GitHub Flavored Markdown             | MD033, MD034                                                                |
 | [mkdocs](flavors/mkdocs.md)       | MkDocs / Material for MkDocs         | MD024, MD031, MD033, MD038, MD040, MD042, MD046, MD049, MD050, MD052, MD056 |
 | [mdx](flavors/mdx.md)             | MDX (JSX in Markdown)                | MD013, MD033, MD037, MD039, MD044, MD049                                    |
+| [obsidian](flavors/obsidian.md)   | Obsidian knowledge base              | MD011, MD012, MD018, MD028, MD033, MD034, MD037, MD038, MD044, MD049, MD061, MD064, MD069 |
 | [quarto](flavors/quarto.md)       | Quarto / RMarkdown                   | MD034, MD037, MD038, MD040, MD042, MD049, MD050, MD051, MD052               |
 
 ## Configuration
@@ -56,6 +57,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[GFM](flavors/gfm.md)** - GitHub-specific features: security-sensitive HTML warnings, extended autolinks
 - **[MkDocs](flavors/mkdocs.md)** - Admonitions, content tabs, autorefs, mkdocstrings, extended syntax
 - **[MDX](flavors/mdx.md)** - JSX components, JSX attributes, expressions, ESM imports
+- **[Obsidian](flavors/obsidian.md)** - Callouts, comments, highlights, Dataview queries, Templater syntax, tags
 - **[Quarto](flavors/quarto.md)** - Citations, shortcodes, div blocks, math blocks, executable code
 
 ## Adding Flavor Support

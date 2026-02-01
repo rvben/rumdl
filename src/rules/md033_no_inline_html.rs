@@ -1814,4 +1814,335 @@ Regular text with <div>content</div> HTML tag.
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "This is *emphasized* text.");
     }
+
+    // ==========================================================================
+    // Obsidian Templater Plugin Syntax Tests
+    //
+    // Templater is a popular Obsidian plugin that uses `<% ... %>` syntax for
+    // template interpolation. The `<%` pattern is NOT captured by the HTML tag
+    // parser because `%` is not a valid HTML tag name character (tags must start
+    // with a letter). This behavior is documented here with comprehensive tests.
+    //
+    // Reference: https://silentvoid13.github.io/Templater/
+    // ==========================================================================
+
+    #[test]
+    fn test_md033_templater_basic_interpolation_not_flagged() {
+        // Basic Templater interpolation: <% expr %>
+        // Should NOT be flagged because `%` is not a valid HTML tag character
+        let rule = MD033NoInlineHtml::default();
+        let content = "Today is <% tp.date.now() %> which is nice.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater basic interpolation should not be flagged as HTML. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_file_functions_not_flagged() {
+        // Templater file functions: <% tp.file.* %>
+        let rule = MD033NoInlineHtml::default();
+        let content = "File: <% tp.file.title %>\nCreated: <% tp.file.creation_date() %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater file functions should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_with_arguments_not_flagged() {
+        // Templater with function arguments
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"Date: <% tp.date.now("YYYY-MM-DD") %>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater with arguments should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_javascript_execution_not_flagged() {
+        // Templater JavaScript execution block: <%* code %>
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%* const today = tp.date.now(); tR += today; %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater JS execution block should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_dynamic_execution_not_flagged() {
+        // Templater dynamic/preview execution: <%+ expr %>
+        let rule = MD033NoInlineHtml::default();
+        let content = "Dynamic: <%+ tp.date.now() %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater dynamic execution should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_whitespace_trim_all_not_flagged() {
+        // Templater whitespace control - trim all: <%_ expr _%>
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%_ tp.date.now() _%>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater trim-all whitespace should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_whitespace_trim_newline_not_flagged() {
+        // Templater whitespace control - trim newline: <%- expr -%>
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%- tp.date.now() -%>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater trim-newline should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_combined_modifiers_not_flagged() {
+        // Templater combined whitespace and execution modifiers
+        let rule = MD033NoInlineHtml::default();
+        let contents = [
+            "<%-* const x = 1; -%>",  // trim + JS execution
+            "<%_+ tp.date.now() _%>", // trim-all + dynamic
+            "<%- tp.file.title -%>",  // trim-newline only
+            "<%_ tp.file.title _%>",  // trim-all only
+        ];
+        for content in contents {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Templater combined modifiers should not be flagged: {content}. Got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_md033_templater_multiline_block_not_flagged() {
+        // Multi-line Templater JavaScript block
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"<%*
+const x = 1;
+const y = 2;
+tR += x + y;
+%>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater multi-line block should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_with_angle_brackets_in_condition_not_flagged() {
+        // Templater with angle brackets in JavaScript condition
+        // This is a key edge case: `<` inside Templater should not trigger HTML detection
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%* if (x < 5) { tR += 'small'; } %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater with angle brackets in conditions should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_mixed_with_html_only_html_flagged() {
+        // Templater syntax mixed with actual HTML - only HTML should be flagged
+        let rule = MD033NoInlineHtml::default();
+        let content = "<% tp.date.now() %> is today's date. <div>This is HTML</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should only flag the HTML div tag");
+        assert!(
+            result[0].message.contains("<div>"),
+            "Should flag <div>, got: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_in_heading_not_flagged() {
+        // Templater in markdown heading
+        let rule = MD033NoInlineHtml::default();
+        let content = "# <% tp.file.title %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater in heading should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_multiple_on_same_line_not_flagged() {
+        // Multiple Templater blocks on same line
+        let rule = MD033NoInlineHtml::default();
+        let content = "From <% tp.date.now() %> to <% tp.date.tomorrow() %> we have meetings.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multiple Templater blocks should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_in_code_block_not_flagged() {
+        // Templater syntax in code blocks should not be flagged (code blocks are skipped)
+        let rule = MD033NoInlineHtml::default();
+        let content = "```\n<% tp.date.now() %>\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater in code block should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_in_inline_code_not_flagged() {
+        // Templater syntax in inline code span should not be flagged
+        let rule = MD033NoInlineHtml::default();
+        let content = "Use `<% tp.date.now() %>` for current date.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater in inline code should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_also_works_in_standard_flavor() {
+        // Templater syntax should also not be flagged in Standard flavor
+        // because the HTML parser doesn't recognize `<%` as a valid tag
+        let rule = MD033NoInlineHtml::default();
+        let content = "<% tp.date.now() %> works everywhere.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater should not be flagged even in Standard flavor. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_empty_tag_not_flagged() {
+        // Empty Templater tags
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Empty Templater-like tag should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_unclosed_not_flagged() {
+        // Unclosed Templater tags - these are template errors, not HTML
+        let rule = MD033NoInlineHtml::default();
+        let content = "<% tp.date.now() without closing tag";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Unclosed Templater should not be flagged as HTML. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_with_newlines_inside_not_flagged() {
+        // Templater with newlines inside the expression
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"<% tp.date.now("YYYY") +
+"-" +
+tp.date.now("MM") %>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Templater with internal newlines should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_erb_style_tags_not_flagged() {
+        // ERB/EJS style tags (similar to Templater) are also not HTML
+        // This documents the general principle that `<%` is not valid HTML
+        let rule = MD033NoInlineHtml::default();
+        let content = "<%= variable %> and <% code %> and <%# comment %>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "ERB/EJS style tags should not be flagged as HTML. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_templater_complex_expression_not_flagged() {
+        // Complex Templater expression with multiple function calls
+        let rule = MD033NoInlineHtml::default();
+        let content = r#"<%*
+const file = tp.file.title;
+const date = tp.date.now("YYYY-MM-DD");
+const folder = tp.file.folder();
+tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
+%>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Complex Templater expression should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_percent_sign_variations_not_flagged() {
+        // Various patterns starting with <% that should all be safe
+        let rule = MD033NoInlineHtml::default();
+        let patterns = [
+            "<%=",  // ERB output
+            "<%#",  // ERB comment
+            "<%%",  // Double percent
+            "<%!",  // Some template engines
+            "<%@",  // JSP directive
+            "<%--", // JSP comment
+        ];
+        for pattern in patterns {
+            let content = format!("{pattern} content %>");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Pattern {pattern} should not be flagged. Got: {result:?}"
+            );
+        }
+    }
 }

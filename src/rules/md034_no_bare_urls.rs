@@ -493,9 +493,15 @@ impl Rule for MD034NoBareUrls {
         // Allocate reusable buffers once instead of per-line to reduce allocations
         let mut buffers = LineCheckBuffers::default();
 
-        // Iterate over content lines, automatically skipping front matter and code blocks
+        // Iterate over content lines, automatically skipping front matter, code blocks,
+        // and Obsidian comments (when in Obsidian flavor)
         // This uses the filtered iterator API which centralizes the skip logic
-        for line in ctx.filtered_lines().skip_front_matter().skip_code_blocks() {
+        for line in ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_code_blocks()
+            .skip_obsidian_comments()
+        {
             let mut line_warnings =
                 self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
 
@@ -523,6 +529,10 @@ impl Rule for MD034NoBareUrls {
                     true
                 }
             });
+
+            // Filter out warnings where the URL is inside an Obsidian comment (%%...%%)
+            // This handles inline comments like: text %%https://hidden.com%% text
+            line_warnings.retain(|warning| !ctx.is_position_in_obsidian_comment(warning.line, warning.column));
 
             warnings.extend(line_warnings);
         }

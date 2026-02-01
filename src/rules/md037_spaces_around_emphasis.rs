@@ -93,13 +93,15 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         let mut warnings = Vec::new();
 
-        // Process content lines, automatically skipping front matter, code blocks, and math blocks
+        // Process content lines, automatically skipping front matter, code blocks, math blocks,
+        // and Obsidian comments (when in Obsidian flavor)
         // Math blocks contain LaTeX syntax where _ and * have special meaning
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
             .skip_math_blocks()
+            .skip_obsidian_comments()
         {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
@@ -664,5 +666,266 @@ This has * real spaced emphasis * that should be flagged."#;
             !result4.is_empty(),
             "Should still flag real spaced emphasis alongside PyMdown markup"
         );
+    }
+
+    // ==================== Obsidian highlight tests ====================
+
+    #[test]
+    fn test_obsidian_highlight_not_flagged() {
+        // Test that Obsidian highlight syntax (==text==) is not flagged as emphasis
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Simple highlight
+        let content = "This is ==highlighted text== here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag Obsidian highlight syntax. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_multiple_on_line() {
+        // Multiple highlights on one line
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "Both ==one== and ==two== are highlighted.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag multiple Obsidian highlights. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_entire_paragraph() {
+        // Entire paragraph highlighted
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "==Entire paragraph highlighted==";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag entire highlighted paragraph. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_with_emphasis() {
+        // Highlights nested with other emphasis
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Bold highlight
+        let content = "**==bold highlight==**";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag bold highlight combination. Got: {result:?}"
+        );
+
+        // Italic highlight
+        let content2 = "*==italic highlight==*";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Obsidian, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Should not flag italic highlight combination. Got: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_in_lists() {
+        // Highlights in list items
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "- Item with ==highlight== text\n- Another ==highlighted== item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag highlights in list items. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_in_blockquote() {
+        // Highlights in blockquotes
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "> This quote has ==highlighted== text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag highlights in blockquotes. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_in_tables() {
+        // Highlights in tables
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "| Header | Column |\n|--------|--------|\n| ==highlighted== | text |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag highlights in tables. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_in_code_blocks_ignored() {
+        // Highlights inside code blocks should be ignored (they're in code)
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "```\n==not highlight in code==\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should ignore highlights in code blocks. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_edge_case_three_equals() {
+        // Three equals signs (===) should not be treated as highlight
+        let rule = MD037NoSpaceInEmphasis;
+
+        // This is not valid highlight syntax
+        let content = "Test === something === here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // This may or may not generate warnings depending on if it looks like emphasis
+        // The key is it shouldn't crash and should be handled gracefully
+        let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_highlight_edge_case_four_equals() {
+        // Four equals signs (====) - empty highlight
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "Test ==== here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // Empty highlights should not match as valid highlights
+        let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_highlight_adjacent() {
+        // Adjacent highlights
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "==one====two==";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should handle adjacent highlights gracefully
+        let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_highlight_with_special_chars() {
+        // Highlights with special characters inside
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Highlight with backtick inside
+        let content = "Test ==code: `test`== here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should handle gracefully
+        let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_highlight_unclosed() {
+        // Unclosed highlight should not cause issues
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "This ==starts but never ends";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // Unclosed highlight should not match anything special
+        let _ = result;
+    }
+
+    #[test]
+    fn test_obsidian_highlight_still_flags_real_emphasis_issues() {
+        // Real emphasis issues should still be flagged in Obsidian mode
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "This has * spaced emphasis * and ==valid highlight==";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should still flag real spaced emphasis in Obsidian mode"
+        );
+        assert!(
+            result.len() == 1,
+            "Should flag exactly one issue (the spaced emphasis). Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_does_not_recognize_highlight() {
+        // Standard flavor should NOT recognize ==highlight== as special
+        // It may or may not flag it as emphasis depending on context
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "This is ==highlighted text== here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // In standard flavor, == is not recognized as highlight syntax
+        // It won't be flagged as "spaces in emphasis" because == is not * or _
+        // The key is that standard flavor doesn't give special treatment to ==
+        let _ = result; // Just ensure it runs without error
+    }
+
+    #[test]
+    fn test_obsidian_highlight_mixed_with_regular_emphasis() {
+        // Mix of highlights and regular emphasis
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "==highlighted== and *italic* and **bold** text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag valid highlight and emphasis. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_unicode() {
+        // Highlights with Unicode content
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "Text ==日本語 highlighted== here";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should handle Unicode in highlights. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_highlight_with_html() {
+        // Highlights inside HTML should be handled
+        let rule = MD037NoSpaceInEmphasis;
+
+        let content = "<!-- ==not highlight in comment== --> ==actual highlight==";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        // The highlight in HTML comment should be ignored, only the actual highlight is processed
+        let _ = result;
     }
 }
