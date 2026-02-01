@@ -4,6 +4,7 @@ pub use md041_config::MD041Config;
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::utils::mkdocs_attr_list::is_mkdocs_anchor_line;
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::HTML_HEADING_PATTERN;
 use regex::Regex;
@@ -258,8 +259,12 @@ impl Rule for MD041FirstLineHeading {
             }
         }
 
+        // Check if we're in MkDocs flavor
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+
         for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
-            let line_content = line_info.content(ctx.content).trim();
+            let line_content = line_info.content(ctx.content);
+            let trimmed = line_content.trim();
             // Skip ESM blocks in MDX files (import/export statements)
             if line_info.in_esm_block {
                 continue;
@@ -268,7 +273,11 @@ impl Rule for MD041FirstLineHeading {
             if line_info.in_html_comment {
                 continue;
             }
-            if !line_content.is_empty() && !Self::is_non_content_line(line_info.content(ctx.content)) {
+            // Skip MkDocs anchor lines (empty link with attr_list) when in MkDocs flavor
+            if is_mkdocs && is_mkdocs_anchor_line(line_content) {
+                continue;
+            }
+            if !trimmed.is_empty() && !Self::is_non_content_line(line_content) {
                 first_content_line_num = Some(line_num);
                 break;
             }
@@ -1068,5 +1077,108 @@ mod tests {
         assert!(!MD041FirstLineHeading::is_badge_image_line("Some text"));
         assert!(!MD041FirstLineHeading::is_badge_image_line("![badge](url) text"));
         assert!(!MD041FirstLineHeading::is_badge_image_line("# Heading"));
+    }
+
+    // Integration tests for MkDocs anchor line detection (issue #365)
+    // Unit tests for is_mkdocs_anchor_line are in utils/mkdocs_attr_list.rs
+
+    #[test]
+    fn test_mkdocs_anchor_before_heading_in_mkdocs_flavor() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MkDocs anchor line before heading in MkDocs flavor (should pass)
+        let content = "[](){ #example }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs anchor line should be skipped in MkDocs flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_before_heading_in_standard_flavor() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MkDocs anchor line before heading in Standard flavor (should fail)
+        let content = "[](){ #example }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "MkDocs anchor line should NOT be skipped in Standard flavor"
+        );
+    }
+
+    #[test]
+    fn test_multiple_mkdocs_anchors_before_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multiple MkDocs anchor lines before heading in MkDocs flavor
+        let content = "[](){ #first }\n[](){ #second }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multiple MkDocs anchor lines should all be skipped in MkDocs flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_with_front_matter() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MkDocs anchor after front matter
+        let content = "---\nauthor: John\n---\n[](){ #anchor }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs anchor line after front matter should be skipped in MkDocs flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_kramdown_style() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Kramdown-style with colon
+        let content = "[](){: #anchor }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Kramdown-style MkDocs anchor should be skipped in MkDocs flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_without_heading_still_warns() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MkDocs anchor followed by non-heading content
+        let content = "[](){ #anchor }\nThis is not a heading.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "MkDocs anchor followed by non-heading should still trigger MD041"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_with_html_comment() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MkDocs anchor combined with HTML comment before heading
+        let content = "<!-- Comment -->\n[](){ #anchor }\n# Title";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs anchor with HTML comment should both be skipped in MkDocs flavor"
+        );
     }
 }

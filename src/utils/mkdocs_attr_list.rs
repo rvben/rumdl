@@ -134,6 +134,99 @@ pub fn is_standalone_attr_list(line: &str) -> bool {
     ATTR_LIST_PATTERN.is_match(trimmed)
 }
 
+/// Check if a line is a MkDocs anchor line (empty link with attr_list)
+///
+/// MkDocs anchor lines are used to create invisible anchor points in documentation.
+/// They consist of an empty link `[]()` followed by an attr_list containing an ID
+/// or class. These are rendered as `<a id="anchor"></a>` in the HTML output.
+///
+/// # Syntax
+///
+/// ```markdown
+/// [](){ #anchor-id }              <!-- Basic anchor -->
+/// [](){#anchor-id}                <!-- No spaces -->
+/// [](){ #id .class }              <!-- Anchor with class -->
+/// [](){: #id }                    <!-- Kramdown-style with colon -->
+/// [](){ .highlight }              <!-- Class-only (styling hook) -->
+/// ```
+///
+/// # Use Cases
+///
+/// 1. **Deep linking**: Create anchor points for linking to specific paragraphs
+/// 2. **Cross-references**: Target for mkdocs-autorefs links
+/// 3. **Styling hooks**: Apply CSS classes to following content
+///
+/// # Examples
+///
+/// ```
+/// use rumdl_lib::utils::mkdocs_attr_list::is_mkdocs_anchor_line;
+///
+/// // Valid anchor lines
+/// assert!(is_mkdocs_anchor_line("[](){ #example }"));
+/// assert!(is_mkdocs_anchor_line("[](){#example}"));
+/// assert!(is_mkdocs_anchor_line("[](){ #id .class }"));
+/// assert!(is_mkdocs_anchor_line("[](){: #anchor }"));
+///
+/// // NOT anchor lines
+/// assert!(!is_mkdocs_anchor_line("[link](url)"));           // Has URL
+/// assert!(!is_mkdocs_anchor_line("[](){ #id } text"));      // Has trailing content
+/// assert!(!is_mkdocs_anchor_line("[]()"));                  // No attr_list
+/// assert!(!is_mkdocs_anchor_line("[](){ }"));               // Empty attr_list
+/// ```
+///
+/// # References
+///
+/// - [Python-Markdown attr_list](https://python-markdown.github.io/extensions/attr_list/)
+/// - [MkDocs Material - Anchor Links](https://squidfunk.github.io/mkdocs-material/reference/annotations/#anchor-links)
+/// - [MkDocs discussions on paragraph anchors](https://github.com/mkdocs/mkdocs/discussions/3754)
+#[inline]
+pub fn is_mkdocs_anchor_line(line: &str) -> bool {
+    let trimmed = line.trim();
+
+    // Fast path: must contain the empty link pattern
+    if !trimmed.starts_with("[]()") {
+        return false;
+    }
+
+    // Extract the part after []()
+    let after_link = &trimmed[4..];
+
+    // Fast path: must contain opening brace for attr_list
+    if !after_link.contains('{') {
+        return false;
+    }
+
+    // Skip optional whitespace between []() and {
+    let attr_start = after_link.trim_start();
+
+    // Must start with { or {:
+    if !attr_start.starts_with('{') {
+        return false;
+    }
+
+    // Find the closing brace
+    let Some(close_idx) = attr_start.find('}') else {
+        return false;
+    };
+
+    // Nothing meaningful should follow the closing brace
+    if !attr_start[close_idx + 1..].trim().is_empty() {
+        return false;
+    }
+
+    // Extract and validate the attr_list content
+    let attr_content = &attr_start[..=close_idx];
+
+    // Use the existing attr_list validation - must be a valid attr_list
+    if !ATTR_LIST_PATTERN.is_match(attr_content) {
+        return false;
+    }
+
+    // Parse the attr_list to ensure it has meaningful content (ID or class)
+    let attrs = find_attr_lists(attr_content);
+    attrs.iter().any(|a| a.has_id() || a.has_classes())
+}
+
 /// Extract all attr_lists from a line
 pub fn find_attr_lists(line: &str) -> Vec<AttrList> {
     if !line.contains('{') {
@@ -426,5 +519,116 @@ No ID here.
         // Empty line
         assert!(!is_standalone_attr_list(""));
         assert!(!is_standalone_attr_list("   "));
+    }
+
+    /// Test for issue #365: MkDocs anchor lines should be detected
+    /// Pattern: `[](){ #anchor }` creates invisible anchor points
+    #[test]
+    fn test_is_mkdocs_anchor_line_basic() {
+        // Valid anchor lines with ID
+        assert!(is_mkdocs_anchor_line("[](){ #example }"));
+        assert!(is_mkdocs_anchor_line("[](){#example}"));
+        assert!(is_mkdocs_anchor_line("[](){ #my-anchor }"));
+        assert!(is_mkdocs_anchor_line("[](){ #anchor_with_underscore }"));
+
+        // Valid anchor lines with class
+        assert!(is_mkdocs_anchor_line("[](){ .highlight }"));
+        assert!(is_mkdocs_anchor_line("[](){.my-class}"));
+
+        // Valid anchor lines with both ID and class
+        assert!(is_mkdocs_anchor_line("[](){ #anchor .class }"));
+        assert!(is_mkdocs_anchor_line("[](){ .class #anchor }"));
+        assert!(is_mkdocs_anchor_line("[](){ #id .class1 .class2 }"));
+    }
+
+    #[test]
+    fn test_is_mkdocs_anchor_line_kramdown_style() {
+        // Kramdown-style with colon prefix
+        assert!(is_mkdocs_anchor_line("[](){: #anchor }"));
+        assert!(is_mkdocs_anchor_line("[](){:#anchor}"));
+        assert!(is_mkdocs_anchor_line("[](){: .class }"));
+        assert!(is_mkdocs_anchor_line("[](){: #id .class }"));
+    }
+
+    #[test]
+    fn test_is_mkdocs_anchor_line_whitespace_variations() {
+        // Leading/trailing whitespace on line
+        assert!(is_mkdocs_anchor_line("  [](){ #example }"));
+        assert!(is_mkdocs_anchor_line("[](){ #example }  "));
+        assert!(is_mkdocs_anchor_line("  [](){ #example }  "));
+        assert!(is_mkdocs_anchor_line("\t[](){ #example }\t"));
+
+        // Whitespace between []() and {
+        assert!(is_mkdocs_anchor_line("[]()  { #example }"));
+        assert!(is_mkdocs_anchor_line("[]()\t{ #example }"));
+
+        // No whitespace (compact form)
+        assert!(is_mkdocs_anchor_line("[](){#example}"));
+    }
+
+    #[test]
+    fn test_is_mkdocs_anchor_line_not_anchor_lines() {
+        // Empty link without attr_list
+        assert!(!is_mkdocs_anchor_line("[]()"));
+
+        // Empty attr_list (no ID or class)
+        assert!(!is_mkdocs_anchor_line("[](){ }"));
+        assert!(!is_mkdocs_anchor_line("[](){}"));
+
+        // Regular link with URL
+        assert!(!is_mkdocs_anchor_line("[](url)"));
+        assert!(!is_mkdocs_anchor_line("[text](url)"));
+        assert!(!is_mkdocs_anchor_line("[text](url){ #id }"));
+
+        // Trailing content after attr_list
+        assert!(!is_mkdocs_anchor_line("[](){ #anchor } extra text"));
+        assert!(!is_mkdocs_anchor_line("[](){ #anchor } <!-- comment -->"));
+
+        // Leading content before link
+        assert!(!is_mkdocs_anchor_line("text [](){ #anchor }"));
+        assert!(!is_mkdocs_anchor_line("# Heading [](){ #anchor }"));
+
+        // Not a link at all
+        assert!(!is_mkdocs_anchor_line("# Heading"));
+        assert!(!is_mkdocs_anchor_line("Some paragraph text"));
+        assert!(!is_mkdocs_anchor_line("{ #standalone-attr }"));
+
+        // Malformed patterns
+        assert!(!is_mkdocs_anchor_line("[]{#anchor}"));   // Missing ()
+        assert!(!is_mkdocs_anchor_line("[](#anchor)"));   // ID in URL position
+        assert!(!is_mkdocs_anchor_line("[](){ #anchor")); // Unclosed brace
+    }
+
+    #[test]
+    fn test_is_mkdocs_anchor_line_edge_cases() {
+        // Empty line
+        assert!(!is_mkdocs_anchor_line(""));
+        assert!(!is_mkdocs_anchor_line("   "));
+        assert!(!is_mkdocs_anchor_line("\t"));
+
+        // Only braces
+        assert!(!is_mkdocs_anchor_line("{}"));
+        assert!(!is_mkdocs_anchor_line("{ }"));
+
+        // Key-value attributes (valid in MkDocs but unusual for anchors)
+        assert!(is_mkdocs_anchor_line("[](){ #id data-value=\"test\" }"));
+
+        // Multiple IDs (first one wins per HTML spec, but pattern is valid)
+        assert!(is_mkdocs_anchor_line("[](){ #first #second }"));
+
+        // Unicode in ID (should work per attr_list spec)
+        // Note: depends on regex pattern supporting unicode identifiers
+    }
+
+    #[test]
+    fn test_is_mkdocs_anchor_line_real_world_examples() {
+        // Examples from MkDocs Material documentation
+        assert!(is_mkdocs_anchor_line("[](){ #installation }"));
+        assert!(is_mkdocs_anchor_line("[](){ #getting-started }"));
+        assert!(is_mkdocs_anchor_line("[](){ #api-reference }"));
+
+        // Examples with styling classes
+        assert!(is_mkdocs_anchor_line("[](){ .annotate }"));
+        assert!(is_mkdocs_anchor_line("[](){ #note .warning }"));
     }
 }
