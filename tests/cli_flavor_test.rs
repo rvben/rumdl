@@ -182,3 +182,69 @@ Regular paragraph.
     // Run with Quarto flavor - command completing without panic is the test
     let (_success, _stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", "quarto", "test.qmd"]);
 }
+
+/// Regression test: Fix coordination must respect per-file-flavor configuration.
+///
+/// Bug: FixCoordinator used config.markdown_flavor() (global) instead of
+/// config.get_flavor_for_file() (per-file), causing MkDocs content inside
+/// admonitions to not be fixed because the fix phase didn't recognize
+/// the MkDocs syntax.
+#[test]
+fn test_per_file_flavor_fix_coordination() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with per-file-flavor for MkDocs (NOT global flavor)
+    // The global flavor is NOT set to mkdocs, so if per-file-flavor is ignored,
+    // the fix won't recognize MkDocs admonition syntax
+    let config_content = r#"
+[global]
+enable = ["MD013"]
+line-length = 80
+
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+
+[MD013]
+line-length = 80
+reflow = true
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // Create docs directory and markdown file with MkDocs admonition
+    // The content inside the admonition has a long line that should be reflowed
+    let docs_dir = temp_dir.path().join("docs");
+    fs::create_dir(&docs_dir).unwrap();
+
+    let md_content = r#"# Test
+
+!!! note "Important Note"
+    This is a very long line inside an MkDocs admonition that exceeds the 80 character line length limit and should be reflowed by the fix command.
+"#;
+    let md_path = docs_dir.join("test.md");
+    fs::write(&md_path, md_content).unwrap();
+
+    // Run fix mode
+    let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--fix", "docs/test.md"]);
+
+    // The command should succeed (exit 0)
+    assert!(success, "Fix command should succeed. stderr: {stderr}");
+
+    // The key test is that the content was actually modified
+    // (proving that fix coordination used the per-file-flavor and recognized MkDocs syntax)
+    let fixed_content = fs::read_to_string(&md_path).expect("Should read fixed file");
+
+    // Verify the content was modified (the long line should have been reflowed)
+    // The original content had one line starting with "    This is a very long line"
+    // After reflow, that line should be different (wrapped into multiple lines or reformatted)
+    let original_long_line = "    This is a very long line inside an MkDocs admonition that exceeds the 80 character line length limit and should be reflowed by the fix command.";
+
+    assert!(
+        !fixed_content.contains(original_long_line),
+        "Long line should have been modified by fix.\n\
+         This proves per-file-flavor was respected in fix coordination.\n\
+         If the line is unchanged, fix coordination likely used global flavor (standard) \n\
+         instead of per-file flavor (mkdocs), failing to recognize admonition content.\n\
+         Fixed content:\n{fixed_content}\n\
+         stderr: {stderr}"
+    );
+}

@@ -237,7 +237,8 @@ impl Linter {
         let coordinator = FixCoordinator::new();
         let mut fixed_content = content.to_string();
 
-        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10) {
+        // WASM doesn't have file paths, so use None (falls back to global flavor)
+        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10, None) {
             Ok(_) => fixed_content,
             Err(_) => content.to_string(),
         }

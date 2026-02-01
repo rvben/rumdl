@@ -166,6 +166,9 @@ impl FixCoordinator {
     ///
     /// This implements a Ruff-inspired fix loop that re-checks ALL rules after each fix
     /// to detect cascading issues (e.g., MD046 creating code blocks that MD040 needs to fix).
+    ///
+    /// The `file_path` parameter is used to determine per-file flavor overrides. If provided,
+    /// the flavor for creating LintContext will be resolved using `config.get_flavor_for_file()`.
     pub fn apply_fixes_iterative(
         &self,
         rules: &[Box<dyn Rule>],
@@ -173,6 +176,7 @@ impl FixCoordinator {
         content: &mut String,
         config: &Config,
         max_iterations: usize,
+        file_path: Option<&std::path::Path>,
     ) -> Result<FixResult, String> {
         // Use the minimum of max_iterations parameter and MAX_ITERATIONS constant
         let max_iterations = max_iterations.min(MAX_ITERATIONS);
@@ -200,7 +204,11 @@ impl FixCoordinator {
             iterations += 1;
 
             // Create fresh context for this iteration
-            let ctx = LintContext::new(content, config.markdown_flavor(), None);
+            // Use per-file flavor if file_path is provided, otherwise fall back to global flavor
+            let flavor = file_path
+                .map(|p| config.get_flavor_for_file(p))
+                .unwrap_or_else(|| config.markdown_flavor());
+            let ctx = LintContext::new(content, flavor, None);
             total_ctx_creations += 1;
 
             let mut any_fix_applied = false;
@@ -443,7 +451,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         assert_eq!(content, "This is GOOD content");
@@ -475,7 +483,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10, None)
             .unwrap();
 
         // Should reach final state in one run (internally multiple iterations)
@@ -516,7 +524,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10, None)
             .unwrap();
 
         // Key assertion: all fixes applied in single run
@@ -540,7 +548,7 @@ mod tests {
         config.global.unfixable = vec!["MD001".to_string()];
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         assert_eq!(content, "BAD content"); // Should not be changed
@@ -570,7 +578,7 @@ mod tests {
         config.global.fixable = vec!["AllowedRule".to_string()];
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         assert_eq!(content, "XB"); // Only A->X, B unchanged
@@ -627,7 +635,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         // Should stop at max iterations
@@ -645,7 +653,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         assert_eq!(result.rules_fixed, 0);
@@ -669,7 +677,7 @@ mod tests {
         let config = Config::default();
 
         let result = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5)
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
         assert_eq!(content, "clean content");
@@ -734,13 +742,13 @@ mod tests {
         // First run
         let mut content1 = "A".to_string();
         let result1 = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content1, &config, 10)
+            .apply_fixes_iterative(&rules, &[], &mut content1, &config, 10, None)
             .unwrap();
 
         // Second run on same final content
         let mut content2 = content1.clone();
         let result2 = coordinator
-            .apply_fixes_iterative(&rules, &[], &mut content2, &config, 10)
+            .apply_fixes_iterative(&rules, &[], &mut content2, &config, 10, None)
             .unwrap();
 
         // Should be identical (idempotent)

@@ -80,7 +80,13 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     let source_file = args.stdin_filename.as_ref().map(std::path::PathBuf::from);
 
     // Create a lint context for the stdin content
-    let ctx = LintContext::new(&content, config.markdown_flavor(), source_file.clone());
+    // Use per-file flavor if stdin_filename is provided
+    let flavor = args
+        .stdin_filename
+        .as_ref()
+        .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
+        .unwrap_or_else(|| config.markdown_flavor());
+    let ctx = LintContext::new(&content, flavor, source_file.clone());
     let mut all_warnings = Vec::new();
 
     // Run all enabled rules on the content
@@ -120,6 +126,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     if args.fix_mode != crate::FixMode::Check {
         if has_issues {
             let mut fixed_content = content.clone();
+            let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
             let warnings_fixed = file_processor::apply_fixes_coordinated(
                 rules,
                 &all_warnings,
@@ -127,6 +134,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 quiet,
                 silent,
                 config,
+                file_path,
             );
 
             // Denormalize back to original line ending before output (I/O boundary)
@@ -136,7 +144,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             print!("{output_content}");
 
             // Re-check the fixed content to see if any issues remain
-            let fixed_ctx = LintContext::new(&fixed_content, config.markdown_flavor(), source_file.clone());
+            // Use same per-file flavor as initial lint
+            let fixed_ctx = LintContext::new(&fixed_content, flavor, source_file.clone());
             let mut remaining_warnings = Vec::new();
             for rule in rules {
                 if rule.should_skip(&fixed_ctx) {

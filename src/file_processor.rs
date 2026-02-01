@@ -708,7 +708,15 @@ pub fn process_file_with_formatter(
     if diff {
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
-        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, true, true, config);
+        warnings_fixed = apply_fixes_coordinated(
+            rules,
+            &all_warnings,
+            &mut content,
+            true,
+            true,
+            config,
+            Some(Path::new(file_path)),
+        );
 
         // Format embedded markdown blocks (recursive formatting)
         // Use filtered_rules to respect per-file-ignores for embedded content
@@ -733,7 +741,15 @@ pub fn process_file_with_formatter(
         );
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
-        warnings_fixed = apply_fixes_coordinated(rules, &all_warnings, &mut content, quiet, silent, config);
+        warnings_fixed = apply_fixes_coordinated(
+            rules,
+            &all_warnings,
+            &mut content,
+            quiet,
+            silent,
+            config,
+            Some(Path::new(file_path)),
+        );
 
         // Format embedded markdown blocks (recursive formatting)
         // Use filtered_rules to respect per-file-ignores for embedded content
@@ -780,7 +796,9 @@ pub fn process_file_with_formatter(
             rules.iter().collect()
         };
 
-        let fixed_ctx = LintContext::new(&content, config.markdown_flavor(), None);
+        // Use per-file flavor for re-lint (same as initial lint)
+        let flavor = config.get_flavor_for_file(Path::new(file_path));
+        let fixed_ctx = LintContext::new(&content, flavor, None);
         let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(&content);
         let mut remaining_warnings = Vec::new();
 
@@ -1127,6 +1145,7 @@ pub fn apply_fixes_coordinated(
     _quiet: bool,
     silent: bool,
     config: &rumdl_config::Config,
+    file_path: Option<&std::path::Path>,
 ) -> usize {
     use rumdl_lib::fix_coordinator::FixCoordinator;
     use std::time::Instant;
@@ -1135,7 +1154,8 @@ pub fn apply_fixes_coordinated(
     let coordinator = FixCoordinator::new();
 
     // Apply fixes iteratively (up to 100 iterations to ensure convergence, same as Ruff)
-    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 100) {
+    // Pass file_path to enable per-file flavor resolution
+    match coordinator.apply_fixes_iterative(rules, all_warnings, content, config, 100, file_path) {
         Ok(result) => {
             let elapsed = start.elapsed();
 
@@ -1273,8 +1293,9 @@ fn format_embedded_markdown_blocks_recursive(
         }
 
         // Apply fixes
+        // Note: file_path is None for embedded blocks since they're synthetic content
         if !warnings.is_empty() {
-            let _fixed = apply_fixes_coordinated(&block_rules, &warnings, &mut formatted, true, true, config);
+            let _fixed = apply_fixes_coordinated(&block_rules, &warnings, &mut formatted, true, true, config, None);
         }
 
         // Remove trailing newline that MD047 may have added if original didn't have one
