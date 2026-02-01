@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-02-01
+
+### Fixed
+
+- **MD033: Don't remove HTML tags that can't be converted to Markdown**
+  - Previously, auto-fix would destructively remove tags like `<img>`, `<span>`, and `<div>`
+  - Now only safe fixable tags (`em`, `i`, `strong`, `b`, `code`, `br`, `hr`) are converted
+  - All other HTML tags are left unchanged as expected
+
+- **Fix mode: Respect per-file-flavor configuration**
+  - `rumdl check --fix` now correctly uses per-file flavor settings from `[per-file-flavor]`
+  - Previously used global flavor instead of file-specific flavor during fix coordination
+
 ## [0.1.8] - 2026-01-31
 
 ### Added
