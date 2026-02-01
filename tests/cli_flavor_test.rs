@@ -38,7 +38,7 @@ fn test_flavor_cli_all_variants() {
     fs::write(&md_path, "# Test\n\nSome content.\n").unwrap();
 
     // Test all valid flavor values
-    for flavor in ["standard", "mkdocs", "mdx", "quarto"] {
+    for flavor in ["standard", "mkdocs", "mdx", "quarto", "obsidian"] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
             success,
@@ -181,6 +181,125 @@ Regular paragraph.
 
     // Run with Quarto flavor - command completing without panic is the test
     let (_success, _stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", "quarto", "test.qmd"]);
+}
+
+/// End-to-end test: Obsidian flavor skips tag syntax in MD018
+///
+/// Verifies that --flavor obsidian actually affects MD018 behavior,
+/// skipping Obsidian tag patterns (#tagname) while still flagging
+/// multi-hash patterns (##tag) and digit-starting patterns (#123).
+#[test]
+fn test_obsidian_flavor_md018_tags() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create a markdown file with Obsidian tags and malformed headings
+    let md_content = r#"# Real Heading
+
+#todo this is an Obsidian tag
+
+#project/active nested tag
+
+##Introduction
+
+#123
+"#;
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // Run with standard flavor - should flag ALL single-hash patterns
+    let (success_std, stdout_std, _stderr_std) =
+        run_rumdl(temp_dir.path(), &["check", "--flavor", "standard", "test.md"]);
+    assert!(!success_std, "Standard flavor should find issues");
+
+    // Count MD018 warnings in standard mode
+    let std_md018_count = stdout_std.matches("MD018").count();
+    assert!(
+        std_md018_count >= 4,
+        "Standard flavor should flag at least 4 MD018 issues (#todo, #project/active, ##Introduction, #123). Found {std_md018_count}. stdout: {stdout_std}"
+    );
+
+    // Run with obsidian flavor - should skip tags, flag only ##Introduction and #123
+    let (success_obs, stdout_obs, _stderr_obs) =
+        run_rumdl(temp_dir.path(), &["check", "--flavor", "obsidian", "test.md"]);
+    assert!(!success_obs, "Obsidian flavor should still find some issues");
+
+    // Count MD018 warnings in obsidian mode
+    let obs_md018_count = stdout_obs.matches("MD018").count();
+    assert_eq!(
+        obs_md018_count, 2,
+        "Obsidian flavor should flag exactly 2 MD018 issues (##Introduction, #123). Found {obs_md018_count}. stdout: {stdout_obs}"
+    );
+
+    // Verify specific patterns are NOT flagged
+    // Note: Output format is "file:LINE:COLUMN:", so we check for "test.md:LINE:" pattern
+    assert!(
+        !stdout_obs.contains("test.md:3:"),
+        "#todo (line 3) should NOT be flagged in Obsidian flavor. stdout: {stdout_obs}"
+    );
+    assert!(
+        !stdout_obs.contains("test.md:5:"),
+        "#project/active (line 5) should NOT be flagged in Obsidian flavor. stdout: {stdout_obs}"
+    );
+}
+
+/// End-to-end test: Obsidian flavor works with config file
+#[test]
+fn test_obsidian_flavor_config_file() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with obsidian flavor
+    let config_content = r#"
+[global]
+flavor = "obsidian"
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // Create markdown with Obsidian tag
+    let md_content = "#todo this is a tag\n";
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // Run without --flavor flag (should use config's obsidian)
+    let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "test.md"]);
+
+    // Should pass (no MD018 warning) because #todo is an Obsidian tag
+    assert!(
+        success,
+        "Obsidian flavor from config should skip #todo tag. stdout: {stdout}, stderr: {stderr}"
+    );
+    assert!(
+        !stdout.contains("MD018"),
+        "#todo should NOT be flagged when flavor=obsidian in config. stdout: {stdout}"
+    );
+}
+
+/// End-to-end test: Obsidian fix mode preserves tags
+#[test]
+fn test_obsidian_flavor_fix_preserves_tags() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create markdown with tags and malformed headings
+    let md_content = "#todo tag\n\n##Introduction\n";
+    let md_path = temp_dir.path().join("test.md");
+    fs::write(&md_path, md_content).unwrap();
+
+    // Run fix with obsidian flavor
+    let (success, _stdout, stderr) =
+        run_rumdl(temp_dir.path(), &["check", "--fix", "--flavor", "obsidian", "test.md"]);
+    assert!(success, "Fix command should succeed. stderr: {stderr}");
+
+    // Read the fixed content
+    let fixed_content = fs::read_to_string(&md_path).expect("Should read fixed file");
+
+    // #todo should be preserved (not changed to "# todo")
+    assert!(
+        fixed_content.contains("#todo tag"),
+        "#todo should be preserved in Obsidian flavor. Fixed content: {fixed_content}"
+    );
+
+    // ##Introduction should be fixed to "## Introduction"
+    assert!(
+        fixed_content.contains("## Introduction"),
+        "##Introduction should be fixed to '## Introduction'. Fixed content: {fixed_content}"
+    );
 }
 
 /// Regression test: Fix coordination must respect per-file-flavor configuration.

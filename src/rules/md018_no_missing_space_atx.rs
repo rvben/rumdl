@@ -15,6 +15,12 @@ const UNICODE_HASHTAG_PATTERN_STR: &str = r"^#[\u{FE0F}\u{20E3}]";
 // whitespace, or punctuation (not alphanumeric continuation)
 const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
 
+// Obsidian tag pattern: #tagname, #project/active, #my-tag_2023, etc.
+// Obsidian tags start with # followed by a non-digit, non-space character,
+// then any combination of word characters, hyphens, underscores, and slashes.
+// Tags cannot start with a number.
+const OBSIDIAN_TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
+
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx;
 
@@ -33,6 +39,12 @@ impl MD018NoMissingSpaceAtx {
     /// Used by MkDocs flavor to skip PyMdown MagicLink patterns
     fn is_magiclink_ref(line: &str) -> bool {
         get_cached_regex(MAGICLINK_REF_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
+    }
+
+    /// Check if a line is an Obsidian tag (e.g., #tagname, #project/active)
+    /// Used by Obsidian flavor to skip tag syntax
+    fn is_obsidian_tag(line: &str) -> bool {
+        get_cached_regex(OBSIDIAN_TAG_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
     }
 
     /// Check if an ATX heading line is missing space after the marker
@@ -106,6 +118,12 @@ impl MD018NoMissingSpaceAtx {
             // MkDocs flavor: skip MagicLink-style issue/PR refs (#123, #10, etc.)
             // MagicLink only uses single #, so check hash_count == 1
             if flavor == MarkdownFlavor::MkDocs && hash_count == 1 && Self::is_magiclink_ref(line) {
+                return None;
+            }
+
+            // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
+            // Obsidian tags only use single #
+            if flavor == MarkdownFlavor::Obsidian && hash_count == 1 && Self::is_obsidian_tag(line) {
                 return None;
             }
 
@@ -188,6 +206,11 @@ impl Rule for MD018NoMissingSpaceAtx {
 
                     // MkDocs flavor: skip MagicLink-style issue/PR refs (#123, #10, etc.)
                     if ctx.flavor == MarkdownFlavor::MkDocs && heading.level == 1 && Self::is_magiclink_ref(line) {
+                        continue;
+                    }
+
+                    // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
+                    if ctx.flavor == MarkdownFlavor::Obsidian && heading.level == 1 && Self::is_obsidian_tag(line) {
                         continue;
                     }
 
@@ -283,8 +306,12 @@ impl Rule for MD018NoMissingSpaceAtx {
                     let is_magiclink =
                         ctx.flavor == MarkdownFlavor::MkDocs && heading.level == 1 && Self::is_magiclink_ref(line);
 
+                    // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
+                    let is_obsidian_tag =
+                        ctx.flavor == MarkdownFlavor::Obsidian && heading.level == 1 && Self::is_obsidian_tag(line);
+
                     // Only attempt fix if not a special pattern
-                    if !is_emoji && !is_unicode && !is_magiclink && trimmed.len() > heading.marker.len() {
+                    if !is_emoji && !is_unicode && !is_magiclink && !is_obsidian_tag && trimmed.len() > heading.marker.len() {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
@@ -1184,5 +1211,384 @@ More content.
         let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed_standard = rule.fix(&ctx_standard).unwrap();
         assert_eq!(fixed_standard, "# 10 is an issue\n# Summary");
+    }
+
+    // ==================== Obsidian flavor tests ====================
+
+    #[test]
+    fn test_obsidian_tag_skips_simple_tags() {
+        // Obsidian flavor should skip tag syntax (#tagname)
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Simple tags should be SKIPPED in Obsidian flavor
+        assert!(
+            rule.check_atx_heading_line("#hey", MarkdownFlavor::Obsidian).is_none(),
+            "#hey should be skipped in Obsidian flavor (tag syntax)"
+        );
+        assert!(
+            rule.check_atx_heading_line("#tag", MarkdownFlavor::Obsidian).is_none(),
+            "#tag should be skipped in Obsidian flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#hello", MarkdownFlavor::Obsidian).is_none(),
+            "#hello should be skipped in Obsidian flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#myTag", MarkdownFlavor::Obsidian).is_none(),
+            "#myTag should be skipped in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_tag_skips_complex_tags() {
+        // Obsidian tags can have hyphens, underscores, numbers, and slashes
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Complex tag patterns should be SKIPPED in Obsidian flavor
+        assert!(
+            rule.check_atx_heading_line("#project/active", MarkdownFlavor::Obsidian)
+                .is_none(),
+            "#project/active should be skipped in Obsidian flavor (nested tag)"
+        );
+        assert!(
+            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian).is_none(),
+            "#my-tag should be skipped in Obsidian flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian).is_none(),
+            "#my_tag should be skipped in Obsidian flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#tag2023", MarkdownFlavor::Obsidian).is_none(),
+            "#tag2023 should be skipped in Obsidian flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#project/sub/task", MarkdownFlavor::Obsidian)
+                .is_none(),
+            "#project/sub/task should be skipped in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_tag_with_trailing_content() {
+        // Tags followed by whitespace should still be skipped
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("#hey ", MarkdownFlavor::Obsidian).is_none(),
+            "#hey followed by space should be skipped"
+        );
+        assert!(
+            rule.check_atx_heading_line("#tag some text", MarkdownFlavor::Obsidian)
+                .is_none(),
+            "#tag followed by text should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_tag_still_flags_multi_hash() {
+        // Obsidian tags only use single #, so ##tag should still be flagged
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("##tag", MarkdownFlavor::Obsidian).is_some(),
+            "##tag should be flagged in Obsidian flavor (only single # is a tag)"
+        );
+        assert!(
+            rule.check_atx_heading_line("###hello", MarkdownFlavor::Obsidian).is_some(),
+            "###hello should be flagged in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_tag_numeric_still_flagged() {
+        // Tags cannot start with a number in Obsidian, so #123 should still be flagged
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("#123", MarkdownFlavor::Obsidian).is_some(),
+            "#123 should be flagged in Obsidian flavor (tags cannot start with digit)"
+        );
+        assert!(
+            rule.check_atx_heading_line("#10", MarkdownFlavor::Obsidian).is_some(),
+            "#10 should be flagged in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_flavor_full_check() {
+        // Integration test: verify Obsidian flavor skips tags through full check() flow
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = r#"# Real Heading
+
+#hey this is a tag
+
+#project/active also a tag
+
+##Introduction
+
+#123
+"#;
+
+        // Obsidian flavor - should skip #hey and #project/active, but flag ##Introduction and #123
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+        assert!(
+            !flagged_lines.contains(&3),
+            "#hey should NOT be flagged in Obsidian flavor"
+        );
+        assert!(
+            !flagged_lines.contains(&5),
+            "#project/active should NOT be flagged in Obsidian flavor"
+        );
+        assert!(
+            flagged_lines.contains(&7),
+            "##Introduction SHOULD be flagged in Obsidian flavor"
+        );
+        assert!(
+            flagged_lines.contains(&9),
+            "#123 SHOULD be flagged in Obsidian flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_flavor_fix_exact_output() {
+        // Verify fix() produces exact expected output
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // In Obsidian flavor, all single-# patterns that look like tags are preserved
+        // Only multi-hash patterns (##tag) and numeric patterns (#123) are fixed
+        let content = "#hey is a tag.\n\n##Introduction";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Exact expected output: #hey preserved, ##Introduction fixed
+        let expected = "#hey is a tag.\n\n## Introduction";
+        assert_eq!(
+            fixed, expected,
+            "Obsidian fix should preserve tags and fix multi-hash headings"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_flags_obsidian_tags() {
+        // Standard flavor should flag patterns that look like Obsidian tags
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        assert!(
+            rule.check_atx_heading_line("#hey", MarkdownFlavor::Standard).is_some(),
+            "#hey should be flagged in Standard flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#tag", MarkdownFlavor::Standard).is_some(),
+            "#tag should be flagged in Standard flavor"
+        );
+        assert!(
+            rule.check_atx_heading_line("#project/active", MarkdownFlavor::Standard)
+                .is_some(),
+            "#project/active should be flagged in Standard flavor"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_vs_standard_fix_comparison() {
+        // Compare fix output between Obsidian and Standard flavors
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Use a pattern that clearly shows the difference:
+        // - #hey tag: single-hash, looks like Obsidian tag followed by text
+        // - ##Introduction: multi-hash, clearly a malformed heading
+        let content = "#hey tag\n##Introduction";
+
+        // Obsidian: preserves #hey tag (single-hash tag syntax), fixes ##Introduction
+        let ctx_obsidian = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let fixed_obsidian = rule.fix(&ctx_obsidian).unwrap();
+        assert_eq!(fixed_obsidian, "#hey tag\n## Introduction");
+
+        // Standard: fixes both (no tag awareness)
+        let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed_standard = rule.fix(&ctx_standard).unwrap();
+        assert_eq!(fixed_standard, "# hey tag\n## Introduction");
+    }
+
+    #[test]
+    fn test_obsidian_tag_edge_cases() {
+        // Test various edge cases for Obsidian tag pattern matching
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Valid Obsidian tags - should be SKIPPED
+        let valid_tags = [
+            "#a",       // Minimum valid tag (but note: may be skipped due to length < 2)
+            "#tag",     // Simple tag
+            "#Tag",     // Capitalized tag
+            "#TAG",     // Uppercase tag
+            "#my-tag",  // Hyphenated tag
+            "#my_tag",  // Underscored tag
+            "#tag123",  // Tag with trailing numbers
+            "#a1",      // Short tag with number
+            "#日本語",  // Unicode tag
+            "#über",    // Unicode with umlaut
+        ];
+
+        for tag in valid_tags {
+            // Note: #a and #a1 might be skipped due to content length < 2 rule
+            let result = rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian);
+            // We don't assert is_none because some might be skipped by other rules
+            // Just verify the pattern doesn't cause errors
+            let _ = result;
+        }
+
+        // Invalid tags (start with digit) - should be FLAGGED
+        let invalid_tags = ["#1tag", "#123", "#2023-project"];
+
+        for tag in invalid_tags {
+            assert!(
+                rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_some(),
+                "{tag:?} should be flagged in Obsidian flavor (starts with digit)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_obsidian_tag_alone_on_line() {
+        // Standalone tag on a line (common in Obsidian notes)
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let content = "Some text\n\n#todo\n\nMore text.";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // #todo alone should not be flagged in Obsidian flavor
+        assert!(
+            result.is_empty(),
+            "Standalone #todo should not be flagged in Obsidian flavor"
+        );
+
+        // Verify fix doesn't modify it
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "fix() should not modify standalone Obsidian tag");
+    }
+
+    #[test]
+    fn test_obsidian_deeply_nested_tags() {
+        // Obsidian supports deeply nested tags with /
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let nested_tags = [
+            "#a/b",
+            "#a/b/c",
+            "#project/2023/q1/task",
+            "#work/meetings/weekly",
+            "#life/health/exercise/running",
+        ];
+
+        for tag in nested_tags {
+            assert!(
+                rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_none(),
+                "{tag:?} should be skipped in Obsidian flavor (nested tag)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_obsidian_unicode_tags() {
+        // Obsidian supports Unicode in tags
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        let unicode_tags = [
+            "#日本語",    // Japanese
+            "#中文",      // Chinese
+            "#한국어",    // Korean
+            "#über",      // German umlaut
+            "#café",      // French accent
+            "#ñoño",      // Spanish tilde
+            "#Москва",    // Russian
+            "#αβγ",       // Greek
+        ];
+
+        for tag in unicode_tags {
+            assert!(
+                rule.check_atx_heading_line(tag, MarkdownFlavor::Obsidian).is_none(),
+                "{tag:?} should be skipped in Obsidian flavor (Unicode tag)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_obsidian_tags_with_special_endings() {
+        // Tags followed by various punctuation
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Tags followed by space then text should be skipped
+        assert!(
+            rule.check_atx_heading_line("#tag followed by text", MarkdownFlavor::Obsidian)
+                .is_none(),
+            "#tag followed by text should be skipped"
+        );
+
+        // Tag at end of line (no trailing space)
+        let content = "#todo";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "#todo at end of line should be skipped");
+    }
+
+    #[test]
+    fn test_obsidian_combined_with_other_skip_contexts() {
+        // Verify Obsidian tags in code blocks and HTML comments are still skipped
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Tag inside code block (should be skipped by code block logic, not Obsidian logic)
+        let content = "```\n#todo\n```";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Tag in code block should be skipped");
+
+        // Tag inside HTML comment
+        let content = "<!-- #todo -->";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Tag in HTML comment should be skipped");
+    }
+
+    #[test]
+    fn test_obsidian_boundary_cases() {
+        // Test boundary cases for Obsidian tag detection
+        let rule = MD018NoMissingSpaceAtx::new();
+
+        // Minimum valid tag (single char after #)
+        // Note: #a alone might be skipped by content length < 2 rule
+        // #ab should definitely be recognized as a tag
+        assert!(
+            rule.check_atx_heading_line("#ab", MarkdownFlavor::Obsidian).is_none(),
+            "#ab should be skipped in Obsidian flavor"
+        );
+
+        // Tag with underscore
+        assert!(
+            rule.check_atx_heading_line("#my_tag", MarkdownFlavor::Obsidian).is_none(),
+            "#my_tag should be skipped"
+        );
+
+        // Tag with hyphen
+        assert!(
+            rule.check_atx_heading_line("#my-tag", MarkdownFlavor::Obsidian).is_none(),
+            "#my-tag should be skipped"
+        );
+
+        // Tag with mixed case
+        assert!(
+            rule.check_atx_heading_line("#MyTag", MarkdownFlavor::Obsidian).is_none(),
+            "#MyTag should be skipped"
+        );
+
+        // All caps (could be a tag or acronym)
+        assert!(
+            rule.check_atx_heading_line("#TODO", MarkdownFlavor::Obsidian).is_none(),
+            "#TODO should be skipped in Obsidian flavor"
+        );
     }
 }

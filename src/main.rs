@@ -703,8 +703,8 @@ pub struct CheckArgs {
     show_full_path: bool,
 
     /// Markdown flavor to use for linting
-    #[arg(long, value_parser = ["standard", "mkdocs", "mdx", "quarto"],
-          help = "Markdown flavor: standard (default), mkdocs, mdx, or quarto")]
+    #[arg(long, value_parser = ["standard", "mkdocs", "mdx", "quarto", "obsidian"],
+          help = "Markdown flavor: standard (default), mkdocs, mdx, quarto, or obsidian")]
     flavor: Option<String>,
 
     /// Read from stdin instead of files

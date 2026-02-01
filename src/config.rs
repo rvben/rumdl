@@ -51,14 +51,17 @@ pub enum MarkdownFlavor {
     /// Quarto/RMarkdown flavor for scientific publishing (.qmd, .Rmd files)
     #[serde(rename = "quarto")]
     Quarto,
+    /// Obsidian flavor with tag syntax support (#tagname as tags, not headings)
+    #[serde(rename = "obsidian")]
+    Obsidian,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto, obsidian. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown", "obsidian"]
     })
 }
 
@@ -79,6 +82,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::MkDocs => write!(f, "mkdocs"),
             MarkdownFlavor::MDX => write!(f, "mdx"),
             MarkdownFlavor::Quarto => write!(f, "quarto"),
+            MarkdownFlavor::Obsidian => write!(f, "obsidian"),
         }
     }
 }
@@ -92,6 +96,7 @@ impl FromStr for MarkdownFlavor {
             "mkdocs" => Ok(MarkdownFlavor::MkDocs),
             "mdx" => Ok(MarkdownFlavor::MDX),
             "quarto" | "qmd" | "rmd" | "rmarkdown" => Ok(MarkdownFlavor::Quarto),
+            "obsidian" => Ok(MarkdownFlavor::Obsidian),
             // GFM and CommonMark are aliases for Standard since the base parser
             // (pulldown-cmark) already supports GFM extensions (tables, task lists,
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
@@ -142,6 +147,7 @@ impl MarkdownFlavor {
             Self::MkDocs => "MkDocs",
             Self::MDX => "MDX",
             Self::Quarto => "Quarto",
+            Self::Obsidian => "Obsidian",
         }
     }
 }
