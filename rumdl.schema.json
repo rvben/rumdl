@@ -149,7 +149,7 @@
       "minimum": 0
     },
     "MarkdownFlavor": {
-      "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
+      "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto, obsidian. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
       "type": "string",
       "enum": [
         "standard",
@@ -161,7 +161,8 @@
         "quarto",
         "qmd",
         "rmd",
-        "rmarkdown"
+        "rmarkdown",
+        "obsidian"
       ]
     },
     "RuleConfig": {
