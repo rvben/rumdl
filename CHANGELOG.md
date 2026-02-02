@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-02-02
+
+### Added
+
+- **Obsidian flavor support** - New markdown flavor for Obsidian-specific syntax
+  - Tags (`#my-tag`) - Not flagged as missing heading space (MD018)
+  - Callouts (`> [!NOTE]`) - Recognized as valid blockquotes
+  - Highlights (`==text==`) - Not flagged as spacing issues
+  - Comments (`%%comment%%`) - Content inside is skipped by all rules
+  - Extended checkboxes (`- [/]`, `- [-]`, `- [>]`) - Recognized as valid task items
+  - Dataview fields (`field:: value`) - Not flagged as consecutive spaces
+  - Templater syntax (`<% code %>`) - Recognized as template syntax
+  - Block references (`^block-id`) - Not flagged
+
+- **WASM: Obsidian flavor support** - Use `flavor: 'obsidian'` in Linter config
+  - Enables Obsidian-specific syntax recognition in browser/plugin contexts
+
+- **WASM: Rule-specific configuration** - Pass rule configs to Linter constructor
+  - Example: `new Linter({ 'MD013': { 'line-length': 120 } })`
+
+### Fixed
+
+- **MD041: Skip MkDocs anchor lines** - Lines starting with `[](){#id}` are now skipped when checking for first-line heading
+
 ## [0.1.9] - 2026-02-01
 
 ### Fixed
