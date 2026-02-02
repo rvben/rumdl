@@ -258,6 +258,7 @@ impl LinterConfig {
             Some("mkdocs") => MarkdownFlavor::MkDocs,
             Some("mdx") => MarkdownFlavor::MDX,
             Some("quarto") => MarkdownFlavor::Quarto,
+            Some("obsidian") => MarkdownFlavor::Obsidian,
             _ => MarkdownFlavor::Standard,
         }
     }
@@ -393,6 +394,7 @@ impl Linter {
                 MarkdownFlavor::MkDocs => "mkdocs",
                 MarkdownFlavor::MDX => "mdx",
                 MarkdownFlavor::Quarto => "quarto",
+                MarkdownFlavor::Obsidian => "obsidian",
             },
             "rules": rules_json
         })
@@ -508,12 +510,58 @@ mod tests {
         );
         assert_eq!(
             LinterConfig {
+                flavor: Some("obsidian".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Obsidian
+        );
+        assert_eq!(
+            LinterConfig {
                 flavor: None,
                 ..Default::default()
             }
             .markdown_flavor(),
             MarkdownFlavor::Standard
         );
+    }
+
+    /// This test ensures all MarkdownFlavor variants are handled in WASM.
+    /// If a new flavor is added to the enum, this test will fail to compile
+    /// until the WASM code is updated.
+    #[test]
+    fn test_all_flavors_handled_in_wasm() {
+        // Exhaustive match ensures compile-time check for new variants
+        let flavors = [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::MkDocs,
+            MarkdownFlavor::MDX,
+            MarkdownFlavor::Quarto,
+            MarkdownFlavor::Obsidian,
+        ];
+
+        for flavor in flavors {
+            // Verify round-trip: flavor -> string -> flavor
+            let flavor_str = match flavor {
+                MarkdownFlavor::Standard => "standard",
+                MarkdownFlavor::MkDocs => "mkdocs",
+                MarkdownFlavor::MDX => "mdx",
+                MarkdownFlavor::Quarto => "quarto",
+                MarkdownFlavor::Obsidian => "obsidian",
+            };
+
+            let config = LinterConfig {
+                flavor: Some(flavor_str.to_string()),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                config.markdown_flavor(),
+                flavor,
+                "Round-trip failed for flavor: {:?}",
+                flavor
+            );
+        }
     }
 
     #[test]
