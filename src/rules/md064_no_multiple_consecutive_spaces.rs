@@ -999,6 +999,80 @@ Normal paragraph.
     }
 
     #[test]
+    fn test_extended_checkboxes_with_indentation() {
+        let rule = MD064NoMultipleConsecutiveSpaces::new();
+
+        // Space-indented task list with extended checkbox (Obsidian)
+        // 2 spaces is not enough for code block, so this is clearly a list item
+        let content = "  - [/]  In progress task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should skip space-indented extended checkbox in Obsidian"
+        );
+
+        // 3 spaces - still not a code block
+        let content = "   - [-]  Cancelled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should skip 3-space indented extended checkbox in Obsidian"
+        );
+
+        // Tab-indented with list context (parent list makes nested item clear)
+        // Without context, a tab-indented line is treated as a code block
+        let content = "- Parent item\n\t- [/]  In progress task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should skip tab-indented nested extended checkbox in Obsidian"
+        );
+
+        // Space-indented extended checkbox should be flagged in Standard flavor
+        let content = "  - [/]  In progress task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag indented [/] in Standard flavor");
+
+        // 3-space indented extended checkbox should be flagged in Standard flavor
+        let content = "   - [-]  Cancelled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag 3-space indented [-] in Standard flavor");
+
+        // Tab-indented nested list should be flagged in Standard flavor
+        let content = "- Parent item\n\t- [-]  Cancelled task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag tab-indented nested [-] in Standard flavor"
+        );
+
+        // Standard checkboxes should still work when indented (both flavors)
+        let content = "  - [x]  Completed task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should skip indented standard [x] checkbox in Standard flavor"
+        );
+
+        // Tab-indented with list context and standard checkbox
+        let content = "- Parent\n\t- [ ]  Pending task\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should skip tab-indented nested standard [ ] checkbox"
+        );
+    }
+
+    #[test]
     fn test_skip_table_without_outer_pipes() {
         let rule = MD064NoMultipleConsecutiveSpaces::new();
 
