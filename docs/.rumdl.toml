@@ -13,6 +13,7 @@ exclude = [
 disable = [
     "MD013",  # Line length not enforced in documentation
     "MD030",  # Grid cards use 3-space indentation for card layout
+    "MD033",  # Rule docs contain intentional HTML examples in markdown code blocks
     "MD035",  # Grid card separators (---) inside HTML blocks
     "MD057",  # Relative links are resolved by Zensical build
 ]
