@@ -10,40 +10,41 @@ rumdl is **fully compatible** with markdownlint while offering significant perfo
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
 - **Rule Coverage**: 100% compatible - all 53 markdownlint rules are implemented with the same behavior
-- **Unique Features**: Built-in LSP server, VS Code extension, CommonMark compliance focus, MD057 (relative link validation)
+- **Unique Features**: 14 additional rules (MD057, MD061-MD073), built-in LSP server, VS Code extension, 6 Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **all 53 markdownlint rules** with compatible behavior (100% compatibility):
+rumdl implements **67 rules total**: all 53 markdownlint rules plus 14 unique rules.
 
-✅ MD001, MD003, MD004, MD005, MD007, MD009, MD010, MD011, MD012, MD013, MD014, MD018, MD019, MD020, MD021, MD022, MD023, MD024, MD025, MD026, MD027, MD028, MD029, MD030, MD031, MD032,
-MD033, MD034, MD035, MD036, MD037, MD038, MD039, MD040, MD041, MD042, MD043, MD044, MD045, MD046, MD047, MD048, MD049, MD050, MD051, MD052, MD053, MD054, MD055, MD056, MD058, MD059, MD060
+**Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](RULES.md) for the complete list.
 
-**Note:** Although rule numbers go from MD001 to MD060 (60 slots), markdownlint only implements 53 rules due to 7 gaps in numbering (see "Skipped Rule Numbers" below).
+**Note:** Rule numbers MD001-MD060 have gaps (MD002, MD006, MD008, MD015-MD017 were never implemented in markdownlint). rumdl maintains these gaps for compatibility.
 
-### Rules Not in markdownlint
+### Rules Unique to rumdl
 
-rumdl implements additional rules not found in markdownlint:
+rumdl implements 14 additional rules not found in markdownlint:
 
-#### MD057 - Existing relative links
+| Rule   | Name                           | Description                                                |
+| ------ | ------------------------------ | ---------------------------------------------------------- |
+| MD057  | Relative links                 | Validates that relative file links point to existing files |
+| MD061  | Forbidden terms                | Flags usage of configurable forbidden terms                |
+| MD062  | Link destination whitespace    | No whitespace in link destinations                         |
+| MD063  | Heading capitalization         | Enforces consistent heading capitalization style           |
+| MD064  | No multiple consecutive spaces | Flags multiple consecutive spaces in content               |
+| MD065  | Blanks around horizontal rules | Horizontal rules should have surrounding blank lines       |
+| MD066  | Footnote validation            | Validates footnote references have definitions             |
+| MD067  | Footnote definition order      | Footnotes should appear in order of reference              |
+| MD068  | Empty footnote definitions     | Footnote definitions should not be empty                   |
+| MD069  | No duplicate list markers      | Flags duplicate markers like `- - text` from copy-paste    |
+| MD070  | Nested code fence              | Detects nested fence collisions                            |
+| MD071  | Blank line after frontmatter   | Frontmatter should be followed by a blank line             |
+| MD072  | Frontmatter key sort           | Frontmatter keys should be sorted (opt-in)                 |
+| MD073  | TOC validation                 | Table of Contents should match headings (opt-in)           |
 
-- **Status**: Unique to rumdl
-- **Purpose**: Validates that relative file links (e.g., `[docs](../README.md)`) point to files that actually exist
-- **Reason**: Catches broken documentation links at lint time
-- **Compatibility**: Not enabled by default; opt-in feature
-
-### Skipped Rule Numbers
-
-These rule numbers are not implemented in markdownlint:
-
-- **MD002**: Deprecated and removed from markdownlint v0.13.0 (replaced by MD041); removed from rumdl v0.0.172 for compatibility
-- **MD006**: Not implemented in DavidAnson/markdownlint (JavaScript version); removed from rumdl v0.0.172 for compatibility
-- **MD008**: Originally planned for "Unordered list spacing" but never implemented
-- **MD015, MD016, MD017**: Never assigned in markdownlint
-- **MD057**: Reserved by rumdl for "Existing relative links" validation (not in markdownlint)
+**Opt-in rules:** MD060, MD063, MD072, and MD073 are disabled by default. Enable them explicitly in your configuration.
 
 ## Intentional Design Differences
 
@@ -53,6 +54,8 @@ These rule numbers are not implemented in markdownlint:
 
 **Example - List Continuation vs Code Blocks:**
 
+<!-- markdownlint-disable MD046 -->
+
 ```markdown
 1. List item
 
@@ -60,6 +63,8 @@ These rule numbers are not implemented in markdownlint:
 
         This is a code block (8 spaces = continuation indent + 4)
 ```
+
+<!-- markdownlint-enable MD046 -->
 
 - **markdownlint**: May incorrectly treat 4-space indented paragraphs as code blocks
 - **rumdl**: Follows CommonMark: 4 spaces = list continuation, 8 spaces = code block within list
@@ -145,6 +150,32 @@ rumdl vscode
 - Quick fixes for supported rules
 - Hover documentation for rules
 - Zero configuration required
+
+### 6. Markdown Flavors
+
+**rumdl supports 6 Markdown flavors** to adapt rule behavior for different documentation systems:
+
+| Flavor     | Use Case                     | Key Adjustments                        |
+| ---------- | ---------------------------- | -------------------------------------- |
+| `standard` | Default Markdown             | CommonMark + GFM extensions            |
+| `gfm`      | GitHub Flavored Markdown     | Security-sensitive HTML, autolinks     |
+| `mkdocs`   | MkDocs / Material for MkDocs | Admonitions, tabs, mkdocstrings        |
+| `mdx`      | MDX (JSX in Markdown)        | JSX components, ESM imports            |
+| `obsidian` | Obsidian knowledge base      | Callouts, Dataview, Templater, wikilinks |
+| `quarto`   | Quarto / RMarkdown           | Citations, shortcodes, executable code |
+
+**Configuration:**
+
+```toml
+[global]
+flavor = "mkdocs"
+
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+"**/*.mdx" = "mdx"
+```
+
+markdownlint does not have built-in flavor support; users must configure individual rules manually.
 
 ## Configuration Compatibility
 
@@ -299,37 +330,38 @@ None currently known. If you encounter compatibility issues, please [file an iss
 
 ## Feature Comparison Table
 
-| Feature                  | markdownlint       | rumdl                 |
-| ------------------------ | ------------------ | --------------------- |
-| **Core Functionality**   |                    |                       |
-| Rule count               | 53 implemented     | 53 (+1 unique: MD057) |
-| Auto-fix                 | ✅                 | ✅                    |
-| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML     |
-| Inline config            | ✅                 | ✅ (compatible)       |
-| Custom rules             | ✅ (JavaScript)    | ❌ (planned)          |
-| **Performance**          |                    |                       |
-| Single file              | Fast               | Very Fast (10-30x)    |
-| Large repos (100+ files) | Slow               | Very Fast (30-100x)   |
-| Incremental mode         | ❌                 | ✅ (caching)          |
-| Parallel processing      | Partial            | ✅ Full               |
-| **Developer Experience** |                    |                       |
-| Built-in LSP             | ❌                 | ✅                    |
-| VS Code extension        | ✅ (separate)      | ✅ (built-in)         |
-| Watch mode               | Via external tools | ✅ `--watch`          |
-| Stdin/stdout             | ✅                 | ✅                    |
-| Diff preview             | ❌                 | ✅ `--diff`           |
-| **Installation**         |                    |                       |
-| Node.js required         | ✅                 | ❌                    |
-| Python pip               | ❌                 | ✅                    |
-| Rust cargo               | ❌                 | ✅                    |
-| Single binary            | ❌                 | ✅                    |
-| Homebrew                 | ✅                 | ✅                    |
-| **Output & Integration** |                    |                       |
-| Text format              | ✅                 | ✅                    |
-| JSON format              | ✅                 | ✅                    |
-| GitHub Actions           | ✅                 | ✅ Enhanced           |
-| Statistics               | ❌                 | ✅                    |
-| Profiling                | ❌                 | ✅                    |
+| Feature                  | markdownlint       | rumdl                       |
+| ------------------------ | ------------------ | --------------------------- |
+| **Core Functionality**   |                    |                             |
+| Rule count               | 53 implemented     | 67 (53 compatible + 14 new) |
+| Auto-fix                 | ✅                 | ✅                          |
+| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML           |
+| Inline config            | ✅                 | ✅ (compatible)             |
+| Custom rules             | ✅ (JavaScript)    | ❌                          |
+| Markdown flavors         | ❌                 | ✅ 6 flavors                |
+| **Performance**          |                    |                             |
+| Single file              | Fast               | Very Fast (10-30x)          |
+| Large repos (100+ files) | Slow               | Very Fast (30-100x)         |
+| Incremental mode         | ❌                 | ✅ (caching)                |
+| Parallel processing      | Partial            | ✅ Full                     |
+| **Developer Experience** |                    |                             |
+| Built-in LSP             | ❌                 | ✅                          |
+| VS Code extension        | ✅ (separate)      | ✅ (built-in)               |
+| Watch mode               | Via external tools | ✅ `--watch`                |
+| Stdin/stdout             | ✅                 | ✅                          |
+| Diff preview             | ❌                 | ✅ `--diff`                 |
+| **Installation**         |                    |                             |
+| Node.js required         | ✅                 | ❌                          |
+| Python pip               | ❌                 | ✅                          |
+| Rust cargo               | ❌                 | ✅                          |
+| Single binary            | ❌                 | ✅                          |
+| Homebrew                 | ✅                 | ✅                          |
+| **Output & Integration** |                    |                             |
+| Text format              | ✅                 | ✅                          |
+| JSON format              | ✅                 | ✅                          |
+| GitHub Actions           | ✅                 | ✅ Enhanced                 |
+| Statistics               | ❌                 | ✅                          |
+| Profiling                | ❌                 | ✅                          |
 
 ## CommonMark Compliance
 
@@ -360,3 +392,4 @@ If you find a compatibility issue with markdownlint:
 - [CommonMark specification](https://spec.commonmark.org/)
 - [rumdl GitHub repository](https://github.com/rvben/rumdl)
 - [rumdl rules documentation](RULES.md)
+- [rumdl flavors documentation](flavors.md)
