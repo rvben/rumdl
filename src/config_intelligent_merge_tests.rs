@@ -179,6 +179,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
+            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };
@@ -209,6 +210,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
+            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };
@@ -274,6 +276,7 @@ mod tests {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
+            code_block_tools: SourcedValue::new(Default::default(), ConfigSource::Default),
             rules: Default::default(),
             unknown_keys: vec![],
         };

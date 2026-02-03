@@ -216,6 +216,11 @@ pub struct Config {
     #[schemars(with = "HashMap<String, MarkdownFlavor>")]
     pub per_file_flavor: IndexMap<String, MarkdownFlavor>,
 
+    /// Code block tools configuration for per-language linting and formatting
+    /// using external tools like ruff, prettier, shellcheck, etc.
+    #[serde(default, rename = "code-block-tools")]
+    pub code_block_tools: crate::code_block_tools::CodeBlockToolsConfig,
+
     /// Rule-specific configurations (e.g., MD013, MD007, MD044)
     /// Each rule section can contain options specific to that rule.
     ///
@@ -247,6 +252,7 @@ impl PartialEq for Config {
         self.global == other.global
             && self.per_file_ignores == other.per_file_ignores
             && self.per_file_flavor == other.per_file_flavor
+            && self.code_block_tools == other.code_block_tools
             && self.rules == other.rules
             && self.project_root == other.project_root
     }
@@ -2999,6 +3005,7 @@ pub struct SourcedConfigFragment {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
+    pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
                                                              // Note: loaded_files is tracked globally in SourcedConfig.
@@ -3010,6 +3017,10 @@ impl Default for SourcedConfigFragment {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
+            code_block_tools: SourcedValue::new(
+                crate::code_block_tools::CodeBlockToolsConfig::default(),
+                ConfigSource::Default,
+            ),
             rules: BTreeMap::new(),
             unknown_keys: Vec::new(),
         }
@@ -3038,6 +3049,7 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
+    pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     pub loaded_files: Vec<String>,
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
@@ -3055,6 +3067,10 @@ impl Default for SourcedConfig<ConfigLoaded> {
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
+            code_block_tools: SourcedValue::new(
+                crate::code_block_tools::CodeBlockToolsConfig::default(),
+                ConfigSource::Default,
+            ),
             rules: BTreeMap::new(),
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
@@ -3212,6 +3228,14 @@ impl SourcedConfig<ConfigLoaded> {
             fragment.per_file_flavor.source,
             fragment.per_file_flavor.overrides.first().and_then(|o| o.file.clone()),
             fragment.per_file_flavor.overrides.first().and_then(|o| o.line),
+        );
+
+        // Merge code_block_tools
+        self.code_block_tools.merge_override(
+            fragment.code_block_tools.value,
+            fragment.code_block_tools.source,
+            fragment.code_block_tools.overrides.first().and_then(|o| o.file.clone()),
+            fragment.code_block_tools.overrides.first().and_then(|o| o.line),
         );
 
         // Merge rule configs
@@ -3771,6 +3795,7 @@ impl SourcedConfig<ConfigLoaded> {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
+            code_block_tools: self.code_block_tools,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -3805,6 +3830,7 @@ impl SourcedConfig<ConfigLoaded> {
             global: self.global,
             per_file_ignores: self.per_file_ignores,
             per_file_flavor: self.per_file_flavor,
+            code_block_tools: self.code_block_tools,
             rules: self.rules,
             loaded_files: self.loaded_files,
             unknown_keys: self.unknown_keys,
@@ -3852,6 +3878,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             per_file_flavor: sourced.per_file_flavor.value,
+            code_block_tools: sourced.code_block_tools.value,
             rules,
             project_root: sourced.project_root,
             per_file_ignores_cache: Arc::new(OnceLock::new()),
@@ -5319,10 +5346,28 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
             .push_override(per_file_map, source, file.clone(), None);
     }
 
+    // Handle [code-block-tools] section
+    if let Some(cbt_item) = doc.get("code-block-tools")
+        && let Some(cbt_table) = cbt_item.as_table()
+    {
+        // Convert the table to a TOML string and then deserialize into CodeBlockToolsConfig
+        let cbt_toml_str = cbt_table.to_string();
+        match toml::from_str::<crate::code_block_tools::CodeBlockToolsConfig>(&cbt_toml_str) {
+            Ok(cbt_config) => {
+                fragment
+                    .code_block_tools
+                    .push_override(cbt_config, source, file.clone(), None);
+            }
+            Err(e) => {
+                log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}: {e}");
+            }
+        }
+    }
+
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
         // Skip known special sections
-        if key == "global" || key == "per-file-ignores" || key == "per-file-flavor" {
+        if key == "global" || key == "per-file-ignores" || key == "per-file-flavor" || key == "code-block-tools" {
             continue;
         }
 

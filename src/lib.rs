@@ -1,3 +1,4 @@
+pub mod code_block_tools;
 pub mod config;
 pub mod exit_codes;
 pub mod filtered_lines;
