@@ -103,11 +103,13 @@ jobs:
 
           # Get rumdl version
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          BRANCH="rumdl-v${VERSION}"
+          BRANCH="rumdl-schema-update"
 
-          # Check if PR already exists for this version
-          if gh pr list --repo SchemaStore/schemastore --head "rvben:${BRANCH}" --state open | grep -q .; then
-            echo "PR already exists for this version, skipping"
+          # Check if ANY rumdl schema PR already exists
+          EXISTING_PR=$(gh pr list --repo SchemaStore/schemastore --author rvben --search "rumdl" --state open --json number,title --jq '.[0].number // empty')
+          if [ -n "$EXISTING_PR" ]; then
+            echo "PR #${EXISTING_PR} already exists for rumdl schema, skipping"
+            echo "The existing PR will be updated when merged or closed"
             exit 0
           fi
 
