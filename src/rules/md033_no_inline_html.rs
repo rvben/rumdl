@@ -453,14 +453,266 @@ impl MD033NoInlineHtml {
     }
 
     /// Convert self-closing HTML tags to their Markdown equivalents.
-    fn convert_self_closing_to_markdown(&self, tag_name: &str) -> Option<String> {
+    fn convert_self_closing_to_markdown(&self, tag_name: &str, opening_tag: &str) -> Option<String> {
         match tag_name {
             "br" => match self.config.br_style {
                 md033_config::BrStyle::TrailingSpaces => Some("  \n".to_string()),
                 md033_config::BrStyle::Backslash => Some("\\\n".to_string()),
             },
             "hr" => Some("\n---\n".to_string()),
+            "img" => Self::convert_img_to_markdown(opening_tag),
             _ => None,
+        }
+    }
+
+    /// Parse all attributes from an HTML tag into a list of (name, value) pairs.
+    /// This provides proper attribute parsing instead of naive string matching.
+    fn parse_attributes(tag: &str) -> Vec<(String, Option<String>)> {
+        let mut attrs = Vec::new();
+
+        // Remove < and > and tag name
+        let tag_content = tag.trim_start_matches('<').trim_end_matches('>').trim_end_matches('/');
+
+        // Find first whitespace to skip tag name
+        let attr_start = tag_content
+            .find(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(tag_content.len());
+
+        if attr_start >= tag_content.len() {
+            return attrs;
+        }
+
+        let attr_str = &tag_content[attr_start..];
+        let mut chars = attr_str.chars().peekable();
+
+        while chars.peek().is_some() {
+            // Skip whitespace
+            while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                chars.next();
+            }
+
+            if chars.peek().is_none() {
+                break;
+            }
+
+            // Read attribute name
+            let mut attr_name = String::new();
+            while let Some(&c) = chars.peek() {
+                if c.is_whitespace() || c == '=' || c == '>' || c == '/' {
+                    break;
+                }
+                attr_name.push(c);
+                chars.next();
+            }
+
+            if attr_name.is_empty() {
+                break;
+            }
+
+            // Skip whitespace before =
+            while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                chars.next();
+            }
+
+            // Check for = and value
+            if chars.peek() == Some(&'=') {
+                chars.next(); // consume =
+
+                // Skip whitespace after =
+                while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                    chars.next();
+                }
+
+                // Read value
+                let mut value = String::new();
+                if let Some(&quote) = chars.peek() {
+                    if quote == '"' || quote == '\'' {
+                        chars.next(); // consume opening quote
+                        for c in chars.by_ref() {
+                            if c == quote {
+                                break;
+                            }
+                            value.push(c);
+                        }
+                    } else {
+                        // Unquoted value
+                        while let Some(&c) = chars.peek() {
+                            if c.is_whitespace() || c == '>' || c == '/' {
+                                break;
+                            }
+                            value.push(c);
+                            chars.next();
+                        }
+                    }
+                }
+                attrs.push((attr_name.to_ascii_lowercase(), Some(value)));
+            } else {
+                // Boolean attribute (no value)
+                attrs.push((attr_name.to_ascii_lowercase(), None));
+            }
+        }
+
+        attrs
+    }
+
+    /// Extract an HTML attribute value from a tag string.
+    /// Handles double quotes, single quotes, and unquoted values.
+    /// Returns None if the attribute is not found.
+    fn extract_attribute(tag: &str, attr_name: &str) -> Option<String> {
+        let attrs = Self::parse_attributes(tag);
+        let attr_lower = attr_name.to_ascii_lowercase();
+
+        attrs
+            .into_iter()
+            .find(|(name, _)| name == &attr_lower)
+            .and_then(|(_, value)| value)
+    }
+
+    /// Check if an HTML tag has extra attributes beyond the specified allowed ones.
+    /// Uses proper attribute parsing to avoid false positives from string matching.
+    fn has_extra_attributes(tag: &str, allowed_attrs: &[&str]) -> bool {
+        let attrs = Self::parse_attributes(tag);
+
+        // All event handlers (on*) are dangerous
+        // Plus common attributes that would be lost in markdown conversion
+        const DANGEROUS_ATTR_PREFIXES: &[&str] = &["on"]; // onclick, onload, onerror, etc.
+        const DANGEROUS_ATTRS: &[&str] = &[
+            "class",
+            "id",
+            "style",
+            "target",
+            "rel",
+            "download",
+            "referrerpolicy",
+            "crossorigin",
+            "loading",
+            "decoding",
+            "fetchpriority",
+            "sizes",
+            "srcset",
+            "usemap",
+            "ismap",
+            "width",
+            "height",
+            "name",   // anchor names
+            "data-*", // data attributes (checked separately)
+        ];
+
+        for (attr_name, _) in attrs {
+            // Skip allowed attributes
+            if allowed_attrs.iter().any(|a| a.to_ascii_lowercase() == attr_name) {
+                continue;
+            }
+
+            // Check for event handlers (on*)
+            for prefix in DANGEROUS_ATTR_PREFIXES {
+                if attr_name.starts_with(prefix) && attr_name.len() > prefix.len() {
+                    return true;
+                }
+            }
+
+            // Check for data-* attributes
+            if attr_name.starts_with("data-") {
+                return true;
+            }
+
+            // Check for other dangerous attributes
+            if DANGEROUS_ATTRS.contains(&attr_name.as_str()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Convert `<a href="url">text</a>` to `[text](url)` or `[text](url "title")`
+    /// Returns None if conversion is not safe.
+    fn convert_a_to_markdown(opening_tag: &str, inner_content: &str) -> Option<String> {
+        // Extract href attribute
+        let href = Self::extract_attribute(opening_tag, "href")?;
+
+        // Check URL is safe
+        if !MD033Config::is_safe_url(&href) {
+            return None;
+        }
+
+        // Check for nested HTML tags in content
+        if inner_content.contains('<') {
+            return None;
+        }
+
+        // Check for HTML entities that wouldn't render correctly in markdown
+        if inner_content.contains('&') && inner_content.contains(';') {
+            let has_entity = inner_content
+                .split('&')
+                .skip(1)
+                .any(|part| part.split(';').next().is_some_and(|e| !e.is_empty() && e.len() < 10));
+            if has_entity {
+                return None;
+            }
+        }
+
+        // Extract optional title attribute
+        let title = Self::extract_attribute(opening_tag, "title");
+
+        // Check for extra dangerous attributes (title is allowed)
+        if Self::has_extra_attributes(opening_tag, &["href", "title"]) {
+            return None;
+        }
+
+        // Escape special markdown characters in link text
+        // Brackets need escaping to avoid breaking the link syntax
+        let escaped_text = inner_content.replace('[', r"\[").replace(']', r"\]");
+
+        // Escape parentheses in URL
+        let escaped_url = href.replace('(', "%28").replace(')', "%29");
+
+        // Format with or without title
+        if let Some(title_text) = title {
+            // Escape quotes in title
+            let escaped_title = title_text.replace('"', r#"\""#);
+            Some(format!("[{escaped_text}]({escaped_url} \"{escaped_title}\")"))
+        } else {
+            Some(format!("[{escaped_text}]({escaped_url})"))
+        }
+    }
+
+    /// Convert `<img src="url" alt="text">` to `![alt](src)` or `![alt](src "title")`
+    /// Returns None if conversion is not safe.
+    fn convert_img_to_markdown(tag: &str) -> Option<String> {
+        // Extract src attribute (required)
+        let src = Self::extract_attribute(tag, "src")?;
+
+        // Check URL is safe
+        if !MD033Config::is_safe_url(&src) {
+            return None;
+        }
+
+        // Extract alt attribute (optional, default to empty)
+        let alt = Self::extract_attribute(tag, "alt").unwrap_or_default();
+
+        // Extract optional title attribute
+        let title = Self::extract_attribute(tag, "title");
+
+        // Check for extra dangerous attributes (title is allowed)
+        if Self::has_extra_attributes(tag, &["src", "alt", "title"]) {
+            return None;
+        }
+
+        // Escape special markdown characters in alt text
+        let escaped_alt = alt.replace('[', r"\[").replace(']', r"\]");
+
+        // Escape parentheses in URL
+        let escaped_url = src.replace('(', "%28").replace(')', "%29");
+
+        // Format with or without title
+        if let Some(title_text) = title {
+            // Escape quotes in title
+            let escaped_title = title_text.replace('"', r#"\""#);
+            Some(format!("![{escaped_alt}]({escaped_url} \"{escaped_title}\")"))
+        } else {
+            Some(format!("![{escaped_alt}]({escaped_url})"))
         }
     }
 
@@ -540,12 +792,12 @@ impl MD033NoInlineHtml {
             if self.config.fix
                 && MD033Config::is_safe_fixable_tag(&tag_name)
                 && !in_html_block
-                && let Some(markdown) = self.convert_self_closing_to_markdown(&tag_name)
+                && let Some(markdown) = self.convert_self_closing_to_markdown(&tag_name, opening_tag)
             {
                 return Some((tag_byte_start..tag_byte_start + opening_tag.len(), markdown));
             }
             // Can't convert this self-closing tag to Markdown, don't provide a fix
-            // (e.g., <img>, <input>, <meta> - these have no Markdown equivalent)
+            // (e.g., <input>, <meta> - these have no Markdown equivalent without the new img support)
             return None;
         }
 
@@ -579,8 +831,17 @@ impl MD033NoInlineHtml {
             }
 
             // When fix is enabled and tag is safe to convert, try markdown conversion
-            // Tags with attributes are NOT converted - leave them as-is
             if self.config.fix && MD033Config::is_safe_fixable_tag(&tag_name) {
+                // Handle <a> tags specially - they require attribute extraction
+                if tag_name == "a" {
+                    if let Some(markdown) = Self::convert_a_to_markdown(opening_tag, inner_content) {
+                        return Some((tag_byte_start..closing_byte_end, markdown));
+                    }
+                    // convert_a_to_markdown returned None - unsafe URL, nested HTML, etc.
+                    return None;
+                }
+
+                // For simple tags (em, strong, code, etc.) - no attributes allowed
                 if Self::has_significant_attributes(opening_tag) {
                     // Don't provide a fix for tags with attributes
                     // User may want to keep the attributes, so leave as-is
@@ -595,7 +856,7 @@ impl MD033NoInlineHtml {
             }
 
             // For non-fixable tags, don't provide a fix
-            // (e.g., <a href="...">Link</a>, <div>content</div>)
+            // (e.g., <div>content</div>, <span>text</span>)
             return None;
         }
 
@@ -1595,27 +1856,36 @@ Regular text with <div>content</div> HTML tag.
     }
 
     #[test]
-    fn test_md033_fix_img_tag_not_removed() {
-        // Regression test: <img> tags should NOT be removed or modified
-        // They have no Markdown equivalent, so fix should leave them unchanged
+    fn test_md033_fix_img_tag_converted() {
+        // <img> tags with simple src/alt attributes are converted to markdown images
         let rule = MD033NoInlineHtml::with_fix(true);
         let content = "Image: <img src=\"photo.jpg\" alt=\"My Photo\">";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // <img> is a self-closing tag without a Markdown equivalent - must be unchanged
-        assert_eq!(fixed, "Image: <img src=\"photo.jpg\" alt=\"My Photo\">");
+        // <img> is converted to ![alt](src) format
+        assert_eq!(fixed, "Image: ![My Photo](photo.jpg)");
     }
 
     #[test]
-    fn test_md033_fix_mixed_safe_and_unsafe_tags() {
-        // Mix of safe fixable tags and unsafe tags on the same line
-        // Safe tags should be converted, unsafe should be left unchanged
+    fn test_md033_fix_img_tag_with_extra_attrs_not_converted() {
+        // <img> tags with width/height/style attributes are NOT converted
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "Image: <img src=\"photo.jpg\" alt=\"My Photo\" width=\"100\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Has width attribute - not safe to convert
+        assert_eq!(fixed, "Image: <img src=\"photo.jpg\" alt=\"My Photo\" width=\"100\">");
+    }
+
+    #[test]
+    fn test_md033_fix_mixed_safe_tags() {
+        // All tags are now safe fixable (em, img, strong)
         let rule = MD033NoInlineHtml::with_fix(true);
         let content = "<em>italic</em> and <img src=\"x.jpg\"> and <strong>bold</strong>";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // <em> and <strong> are safe, <img> is not
-        assert_eq!(fixed, "*italic* and <img src=\"x.jpg\"> and **bold**");
+        // All are converted
+        assert_eq!(fixed, "*italic* and ![](x.jpg) and **bold**");
     }
 
     #[test]

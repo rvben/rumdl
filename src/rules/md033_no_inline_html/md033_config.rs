@@ -26,7 +26,20 @@ pub const SAFE_FIXABLE_TAGS: &[&str] = &[
     "code", // inline code: `text`
     "br",   // line break
     "hr",   // horizontal rule: ---
+    "a",    // link: [text](url) - requires href attribute
+    "img",  // image: ![alt](src) - requires src attribute
 ];
+
+/// Tags that require attribute extraction for conversion (unlike simple tags like em/strong).
+/// These tags are fixable only when they have the required attributes.
+pub const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
+
+/// URL schemes that are safe to convert to Markdown links.
+/// Dangerous schemes like javascript: or data: are rejected.
+pub const SAFE_URL_SCHEMES: &[&str] = &["http://", "https://", "mailto:", "tel:", "ftp://", "ftps://"];
+
+/// URL schemes that are explicitly dangerous and must not be converted.
+pub const DANGEROUS_URL_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:", "about:", "blob:", "file:"];
 
 /// Style for converting `<br>` tags to Markdown line breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -101,6 +114,125 @@ impl MD033Config {
     /// Check if a tag is safe to auto-fix (has a simple Markdown equivalent)
     pub fn is_safe_fixable_tag(tag_name: &str) -> bool {
         SAFE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
+    }
+
+    /// Check if a tag requires attribute extraction for conversion
+    pub fn requires_attribute_extraction(tag_name: &str) -> bool {
+        ATTRIBUTE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
+    }
+
+    /// Decode percent-encoded characters in a URL for safety checking.
+    /// This prevents bypass attempts like `java%73cript:` for `javascript:`.
+    fn decode_percent_encoding(url: &str) -> String {
+        let mut result = String::with_capacity(url.len());
+        let mut chars = url.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '%' {
+                // Try to read two hex digits
+                let hex: String = chars.by_ref().take(2).collect();
+                if hex.len() == 2
+                    && let Ok(byte) = u8::from_str_radix(&hex, 16)
+                {
+                    result.push(byte as char);
+                    continue;
+                }
+                // Invalid encoding, keep as-is
+                result.push('%');
+                result.push_str(&hex);
+            } else {
+                result.push(c);
+            }
+        }
+
+        result
+    }
+
+    /// Decode common HTML entities in URLs.
+    /// This prevents bypass attempts like `javascript&#58;` for `javascript:`.
+    fn decode_html_entities(url: &str) -> String {
+        url.replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&#58;", ":")
+            .replace("&#x3a;", ":")
+            .replace("&#x3A;", ":")
+            .replace("&#47;", "/")
+            .replace("&#x2f;", "/")
+            .replace("&#x2F;", "/")
+    }
+
+    /// Check if a URL scheme is safe to convert to Markdown.
+    /// Safe URLs include: absolute URLs with safe schemes, relative URLs, fragments, empty.
+    /// Dangerous schemes (javascript:, data:, etc.) are rejected.
+    /// This function decodes percent-encoding and HTML entities to prevent bypass attacks.
+    pub fn is_safe_url(url: &str) -> bool {
+        // Decode URL to catch encoding bypass attempts
+        let decoded = Self::decode_percent_encoding(url);
+        let decoded = Self::decode_html_entities(&decoded);
+        let url_lower = decoded.to_ascii_lowercase();
+        let trimmed = url_lower.trim();
+
+        // Empty URLs are safe (though the link will be useless)
+        if trimmed.is_empty() {
+            return true;
+        }
+
+        // Check for dangerous schemes first (after decoding)
+        for scheme in DANGEROUS_URL_SCHEMES {
+            if trimmed.starts_with(scheme) {
+                return false;
+            }
+        }
+
+        // Also check without the colon in case of partial encoding
+        let dangerous_prefixes: &[&str] = &["javascript", "vbscript", "data", "about", "blob", "file"];
+        for prefix in dangerous_prefixes {
+            // Check for scheme with any variation of colon encoding
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
+                // After the prefix, should be followed by : or encoded :
+                if rest.starts_with(':') || rest.starts_with("%3a") || rest.starts_with("&#") {
+                    return false;
+                }
+            }
+        }
+
+        // Relative URLs and fragments are safe
+        // These include: /path, ./path, ../path, #anchor, ?query, path/to/file
+        if trimmed.starts_with('/') || trimmed.starts_with('.') || trimmed.starts_with('#') || trimmed.starts_with('?')
+        {
+            return true;
+        }
+
+        // Check for safe absolute schemes
+        for scheme in SAFE_URL_SCHEMES {
+            if trimmed.starts_with(scheme) {
+                return true;
+            }
+        }
+
+        // Protocol-relative URLs (//example.com) are safe
+        if trimmed.starts_with("//") {
+            return true;
+        }
+
+        // URLs without a scheme (relative paths like "path/to/file.html") are safe
+        // They don't contain ":" before any "/" which would indicate a scheme
+        if let Some(colon_pos) = trimmed.find(':') {
+            if let Some(slash_pos) = trimmed.find('/') {
+                // If colon comes after slash, it's a relative path with a port or something else
+                if colon_pos > slash_pos {
+                    return true;
+                }
+            }
+            // Has a colon before any slash - likely an unknown scheme, reject for safety
+            false
+        } else {
+            // No colon at all - relative path, safe
+            true
+        }
     }
 }
 
