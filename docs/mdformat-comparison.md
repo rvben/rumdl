@@ -69,7 +69,7 @@ See the [Rules Reference](RULES.md) for the complete list.
 **mdformat** uses plugins for extended syntax:
 
 ```bash
-pip install mdformat-gfm mdformat-frontmatter mdformat-tables
+pip install mdformat-gfm mdformat-frontmatter
 ```
 
 **rumdl** uses built-in flavors:

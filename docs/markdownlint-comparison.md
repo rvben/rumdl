@@ -276,13 +276,15 @@ rumdl additionally supports:
 
 ### Exit Codes
 
-**markdownlint:**
+**markdownlint-cli:**
 
 - `0`: No violations
 - `1`: Violations found
-- `2`: Error occurred
+- `2`: Unable to write output
+- `3`: Unable to load custom rules
+- `4`: Unexpected error
 
-**rumdl (same):**
+**rumdl:**
 
 - `0`: Success (or `rumdl fmt` completed successfully)
 - `1`: Violations found (or remain after `--fix`)
