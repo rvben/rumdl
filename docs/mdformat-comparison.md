@@ -20,20 +20,13 @@ Both tools format Markdown files, but serve different purposes:
 | Extensibility   | Plugin ecosystem          | Built-in flavors                |
 | CommonMark      | Strict compliance         | Strict compliance               |
 
-## When to Use Each Tool
+## When to Use rumdl
 
-**Choose mdformat if:**
-
-- You only need formatting, no linting
-- You want a plugin ecosystem for custom syntax
-- Your project already uses Python tooling
-
-**Choose rumdl if:**
-
-- You want both linting and formatting
-- Performance is important (large repositories)
+- You want both linting and formatting in one tool
+- Performance matters (large repositories, CI/CD pipelines)
 - You need rule-based validation (broken links, accessibility, style)
 - You want a single binary with no runtime dependencies
+- You need built-in support for MkDocs, MDX, Obsidian, or Quarto syntax
 
 ## Feature Comparison
 

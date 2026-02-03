@@ -40,6 +40,7 @@ nav = [
   ]},
   { "Reference" = [
     { "markdownlint Comparison" = "markdownlint-comparison.md" },
+    { "mdformat Comparison" = "mdformat-comparison.md" },
   ]},
 ]
 
