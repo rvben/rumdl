@@ -386,6 +386,10 @@ If you find a compatibility issue with markdownlint:
    - Actual behavior (rumdl output)
    - Versions of both tools
 
+## See Also
+
+- [Comparison with mdformat](mdformat-comparison.md) - For users coming from the mdformat formatter
+
 ## References
 
 - [markdownlint documentation](https://github.com/DavidAnson/markdownlint)
