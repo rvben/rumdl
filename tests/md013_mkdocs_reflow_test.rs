@@ -342,3 +342,86 @@ Another paragraph.
     assert!(!filtered.iter().any(|l| l.content.contains("Admonition content")));
     assert!(!filtered.iter().any(|l| l.content.contains("Tab content")));
 }
+
+#[test]
+fn test_admonition_with_code_block_at_start_does_not_hang() {
+    // Regression test: MkDocs admonition with code block as first content line
+    // followed by a long line outside the admonition should not cause infinite loop.
+    // The bug was that when container_lines was empty after breaking from the inner loop
+    // (due to code block at start), the code would `continue` without incrementing `i`,
+    // causing the outer loop to process the same line forever.
+    let content = r#"!!! note
+    ```
+    x
+    ```
+
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    // This should complete without hanging
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should have a warning for the long line outside the admonition
+    assert!(!warnings.is_empty(), "Long line should generate a warning");
+
+    // Fix should also complete without hanging
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The admonition with code block should be preserved
+    assert!(fixed.contains("!!! note"), "Admonition marker should be preserved");
+    assert!(fixed.contains("```"), "Code block should be preserved");
+}
+
+#[test]
+fn test_admonition_with_empty_line_at_start_does_not_hang() {
+    // Similar regression test: admonition with empty indented line at start
+    let content = r#"!!! note
+
+    Some content after blank line.
+
+This is a very long line that exceeds the default line length limit and should trigger the reflow logic.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    // This should complete without hanging
+    let _warnings = rule.check(&ctx).unwrap();
+
+    // Fix should also complete without hanging
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Content should be preserved
+    assert!(fixed.contains("!!! note"), "Admonition marker should be preserved");
+    assert!(fixed.contains("Some content"), "Admonition content should be preserved");
+}
+
+#[test]
+fn test_admonition_with_list_at_start_does_not_hang() {
+    // Similar regression test: admonition with list item at start
+    let content = r#"!!! note
+    - List item at start
+    - Another item
+
+This is a very long line that exceeds the default line length limit and should trigger the reflow logic in MD013.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    // This should complete without hanging
+    let _warnings = rule.check(&ctx).unwrap();
+
+    // Fix should also complete without hanging
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Content should be preserved
+    assert!(fixed.contains("!!! note"), "Admonition marker should be preserved");
+    assert!(fixed.contains("- List item"), "List items should be preserved");
+}

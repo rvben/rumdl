@@ -521,6 +521,10 @@ impl MD013LineLength {
                 }
 
                 if container_lines.is_empty() {
+                    // Must advance i to avoid infinite loop when we encounter
+                    // non-paragraph content (code block, list, heading, empty line)
+                    // at the start of an MkDocs container
+                    i += 1;
                     continue;
                 }
 
