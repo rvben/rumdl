@@ -97,43 +97,38 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.SCHEMASTORE_PAT }}
         run: |
-          # Configure git
+          set -euo pipefail
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Get rumdl version
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           BRANCH="rumdl-schema-update"
 
-          # Check if ANY rumdl schema PR already exists
-          EXISTING_PR=$(gh pr list --repo SchemaStore/schemastore --author rvben --search "rumdl" --state open --json number,title --jq '.[0].number // empty')
-          if [ -n "$EXISTING_PR" ]; then
-            echo "PR #${EXISTING_PR} already exists for rumdl schema, skipping"
-            echo "The existing PR will be updated when merged or closed"
-            exit 0
-          fi
-
-          # Sync fork with upstream first
+          # Always sync fork with upstream for clean base
           echo "Syncing fork with upstream..."
           gh repo sync rvben/schemastore --source SchemaStore/schemastore --force
 
-          # Clone the synced fork
-          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/rvben/schemastore.git" schemastore-repo
+          # Check for existing PR (to decide whether to create one later)
+          EXISTING_PR_NUM=$(gh pr list --repo SchemaStore/schemastore --author rvben --head "rvben:${BRANCH}" --state open --json number --jq '.[0].number // empty')
+
+          # Clone fork
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/rvben/schemastore.git" schemastore-repo
           cd schemastore-repo
 
-          # Create branch from latest master
-          git checkout -b "${BRANCH}"
+          # Always create/reset branch from master for clean history
+          git checkout -B "${BRANCH}" origin/master
 
-          # Copy updated schema
+          # Copy schema
           cp ../rumdl-schemastore.json src/schemas/json/rumdl.json
 
-          # Check if there are actual changes
-          if git diff --quiet src/schemas/json/rumdl.json; then
-            echo "No changes to schema file after conversion, skipping PR"
+          # Check for actual changes vs master
+          if git diff --quiet HEAD -- src/schemas/json/rumdl.json; then
+            echo "✅ Schema matches master, nothing to do"
             exit 0
           fi
 
-          # Install dependencies and run SchemaStore validation
+          # Validate schema
           echo "Running SchemaStore validation..."
           npm ci
           if ! node cli.js check --schema-name=rumdl.json; then
@@ -142,10 +137,9 @@ jobs:
           fi
           echo "✅ Schema validation passed"
 
-          # Generate changelog for PR body
+          # Generate changelog
           OLD_FLAVORS=$(jq -r '.definitions.MarkdownFlavor.enum // [] | sort | join(", ")' ../schemastore-current.json)
           NEW_FLAVORS=$(jq -r '.definitions.MarkdownFlavor.enum // [] | sort | join(", ")' src/schemas/json/rumdl.json)
-
           CHANGELOG="- Synced with upstream rumdl schema"
           if [ "$OLD_FLAVORS" != "$NEW_FLAVORS" ]; then
             CHANGELOG="- Updated MarkdownFlavor enum: \`${NEW_FLAVORS}\`"
@@ -156,7 +150,12 @@ jobs:
           git commit -m "feat(rumdl): update schema to v${VERSION}"
           git push origin "${BRANCH}" --force
 
-          # Create PR with detailed body
+          # Create PR only if none exists
+          if [ -n "$EXISTING_PR_NUM" ]; then
+            echo "✅ Updated existing PR #${EXISTING_PR_NUM}"
+            exit 0
+          fi
+
           PR_BODY="Updates the rumdl JSON schema to v${VERSION}.
 
           ## Changes
