@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-02-03
+
+### Added
+
+- **CI: Automated SchemaStore sync workflow** - Schema updates are now automatically synced to SchemaStore on release
+
+### Fixed
+
+- **MD044: Check proper names in link text, image alt text, and WikiLinks** ([#369](https://github.com/rvben/rumdl/issues/369))
+  - Previously only checked regular text and YAML front matter
+  - Now also checks `[link text](url)`, `![alt text](url)`, and `[[WikiLinks]]`
+
+- **Schema: Remove non-standard 'uint' format** ([#368](https://github.com/rvben/rumdl/issues/368))
+  - Fixed JSON Schema validation errors in editors when using `flavor = "obsidian"`
+  - Schema now uses standard `integer` with `minimum: 0` instead of non-standard `uint` format
+
 ## [0.1.10] - 2026-02-02
 
 ### Added
