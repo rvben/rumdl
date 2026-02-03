@@ -1584,7 +1584,18 @@ impl<'a> LintContext<'a> {
 
                         // Extract link text directly from source bytes to preserve escaping
                         // Text events from pulldown-cmark unescape \] → ], which breaks MD039
-                        let link_text = if start_pos < content.len() {
+                        let link_text = if matches!(link_type, LinkType::WikiLink { .. }) {
+                            // WikiLinks: [[destination]] or [[destination|display text]]
+                            // pulldown-cmark's range excludes the final ]], so standard extraction fails
+                            // Use accumulated text chunks (from Text events) for accurate text
+                            if !text_chunks.is_empty() {
+                                let text: String = text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
+                                Cow::Owned(text)
+                            } else {
+                                // Fallback: use the URL as text (for simple [[destination]] links)
+                                Cow::Owned(url.to_string())
+                            }
+                        } else if start_pos < content.len() {
                             let link_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
 
                             // Find MATCHING ] by tracking bracket depth for nested brackets

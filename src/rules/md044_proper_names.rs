@@ -350,23 +350,57 @@ impl MD044ProperNames {
         false
     }
 
-    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
+    /// Check if a byte position is within a link URL (not link text)
+    ///
+    /// Link text should be checked for proper names, but URLs should be skipped.
+    /// For `[text](url)` - check text, skip url
+    /// For `[text][ref]` - check text, skip reference portion
+    /// For `[[text]]` (WikiLinks) - check text, skip brackets
     fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        // Check inline and reference links
+        use pulldown_cmark::LinkType;
+
+        // Check inline and reference links - only skip if position is in URL portion, not text portion
         for link in &ctx.links {
             if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
+                // Calculate where the link text starts based on link type
+                // WikiLinks [[text]] start with '[[' so text is at byte_offset + 2
+                // Regular links [text] start with '[' so text is at byte_offset + 1
+                let text_start = if matches!(link.link_type, LinkType::WikiLink { .. }) {
+                    link.byte_offset + 2
+                } else {
+                    link.byte_offset + 1
+                };
+                let text_end = text_start + link.text.len();
+
+                // If position is within the text portion, don't skip (return false)
+                if byte_pos >= text_start && byte_pos < text_end {
+                    return false;
+                }
+
+                // Position is in the URL/reference portion, skip it
                 return true;
             }
         }
 
-        // Check images (which use similar syntax)
+        // Check images - only skip URL portion, not alt text
         for image in &ctx.images {
             if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+                // Image starts with '![' so alt text starts at byte_offset + 2
+                let alt_start = image.byte_offset + 2;
+                let alt_end = alt_start + image.alt_text.len();
+
+                // If position is within the alt text portion, don't skip (return false)
+                if byte_pos >= alt_start && byte_pos < alt_end {
+                    return false;
+                }
+
+                // Position is in the URL/reference portion, skip it
                 return true;
             }
         }
 
         // Check reference definitions [ref]: url "title" using regex pattern
+        // Skip the entire reference definition line
         for m in REF_DEF_REGEX.find_iter(ctx.content) {
             if m.start() <= byte_pos && byte_pos < m.end() {
                 return true;
@@ -1054,7 +1088,7 @@ More JavaScript."#;
     }
 
     #[test]
-    fn test_proper_names_in_links_not_flagged() {
+    fn test_proper_names_in_link_text_are_flagged() {
         let rule = MD044ProperNames::new(
             vec!["JavaScript".to_string(), "Node.js".to_string(), "Python".to_string()],
             true,
@@ -1075,21 +1109,47 @@ Real python should be flagged too.
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        // Only the real standalone proper names should be flagged
-        assert_eq!(
-            result.len(),
-            2,
-            "Expected exactly 2 warnings for standalone proper names"
+        // Link text should be checked, URLs should not be checked
+        // Line 1: [javascript documentation] - "javascript" should be flagged
+        // Line 3: [node.js homepage] - "node.js" should be flagged (matches "Node.js")
+        // Line 3: [python tutorial] - "python" should be flagged
+        // Line 5: standalone javascript
+        // Line 9: standalone python
+        assert_eq!(result.len(), 5, "Expected 5 warnings: 3 in link text + 2 standalone");
+
+        // Verify line numbers for link text warnings
+        let line_1_warnings: Vec<_> = result.iter().filter(|w| w.line == 1).collect();
+        assert_eq!(line_1_warnings.len(), 1);
+        assert!(
+            line_1_warnings[0]
+                .message
+                .contains("'javascript' should be 'JavaScript'")
         );
-        assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
-        assert!(result[1].message.contains("'python' should be 'Python'"));
-        // Should be on lines with standalone instances
-        assert!(result[0].line == 5); // "Real javascript should be flagged."
-        assert!(result[1].line == 9); // "Real python should be flagged too."
+
+        let line_3_warnings: Vec<_> = result.iter().filter(|w| w.line == 3).collect();
+        assert_eq!(line_3_warnings.len(), 2); // node.js and python
+
+        // Standalone warnings
+        assert!(result.iter().any(|w| w.line == 5 && w.message.contains("'javascript'")));
+        assert!(result.iter().any(|w| w.line == 9 && w.message.contains("'python'")));
     }
 
     #[test]
-    fn test_proper_names_in_images_not_flagged() {
+    fn test_link_urls_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
+        // URL contains "javascript" but should NOT be flagged
+        let content = r#"[Link Text](https://javascript.info/guide)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // URL should not be checked
+        assert!(result.is_empty(), "URLs should not be checked for proper names");
+    }
+
+    #[test]
+    fn test_proper_names_in_image_alt_text_are_flagged() {
         let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
 
         let content = r#"Here is a ![javascript logo](javascript.png "javascript icon") image.
@@ -1099,14 +1159,32 @@ Real javascript should be flagged."#;
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        // Only the standalone proper name should be flagged
-        assert_eq!(result.len(), 1, "Expected exactly 1 warning for standalone proper name");
+        // Image alt text should be checked, URL and title should not be checked
+        // Line 1: ![javascript logo] - "javascript" should be flagged
+        // Line 3: standalone javascript
+        assert_eq!(result.len(), 2, "Expected 2 warnings: 1 in alt text + 1 standalone");
         assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
-        assert!(result[0].line == 3); // "Real javascript should be flagged."
+        assert!(result[0].line == 1); // "![javascript logo]"
+        assert!(result[1].message.contains("'javascript' should be 'JavaScript'"));
+        assert!(result[1].line == 3); // "Real javascript should be flagged."
     }
 
     #[test]
-    fn test_proper_names_in_reference_definitions_not_flagged() {
+    fn test_image_urls_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
+        // URL contains "javascript" but should NOT be flagged
+        let content = r#"![Logo](https://javascript.info/logo.png)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Image URL should not be checked
+        assert!(result.is_empty(), "Image URLs should not be checked for proper names");
+    }
+
+    #[test]
+    fn test_reference_link_text_flagged_but_definition_not() {
         let rule = MD044ProperNames::new(vec!["JavaScript".to_string(), "TypeScript".to_string()], true);
 
         let content = r#"Check the [javascript guide][js-ref] for details.
@@ -1118,9 +1196,52 @@ Real javascript should be flagged.
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        // Only the standalone proper name should be flagged
-        assert_eq!(result.len(), 1, "Expected exactly 1 warning for standalone proper name");
-        assert!(result[0].message.contains("'javascript' should be 'JavaScript'"));
-        assert!(result[0].line == 3); // "Real javascript should be flagged."
+        // Link text should be checked, reference definitions should not
+        // Line 1: [javascript guide] - should be flagged
+        // Line 3: standalone javascript - should be flagged
+        // Line 5: reference definition - should NOT be flagged
+        assert_eq!(result.len(), 2, "Expected 2 warnings: 1 in link text + 1 standalone");
+        assert!(result.iter().any(|w| w.line == 1 && w.message.contains("'javascript'")));
+        assert!(result.iter().any(|w| w.line == 3 && w.message.contains("'javascript'")));
+    }
+
+    #[test]
+    fn test_reference_definitions_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
+        // Reference definition should NOT be flagged
+        let content = r#"[js-ref]: https://javascript.info/guide"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Reference definition URLs should not be checked
+        assert!(result.is_empty(), "Reference definitions should not be checked");
+    }
+
+    #[test]
+    fn test_wikilinks_text_is_flagged() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string()], true);
+
+        // WikiLinks [[destination]] should have their text checked
+        let content = r#"[[javascript]]
+
+Regular javascript here.
+
+[[JavaScript|display text]]"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Line 1: [[javascript]] - should be flagged (WikiLink text)
+        // Line 3: standalone javascript - should be flagged
+        // Line 5: [[JavaScript|display text]] - correct capitalization, no flag
+        assert_eq!(result.len(), 2, "Expected 2 warnings: 1 in WikiLink + 1 standalone");
+        assert!(
+            result
+                .iter()
+                .any(|w| w.line == 1 && w.column == 3 && w.message.contains("'javascript'"))
+        );
+        assert!(result.iter().any(|w| w.line == 3 && w.message.contains("'javascript'")));
     }
 }

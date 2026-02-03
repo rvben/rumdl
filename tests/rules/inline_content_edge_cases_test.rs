@@ -635,12 +635,15 @@ Note: js-guide is not defined";
     let result052 = md052.check(&ctx).unwrap();
 
     // PRODUCTION REQUIREMENTS:
-    // With link filtering, only standalone proper names should be flagged
-    // Only "javascript" and "github" on line 1 should be flagged (not in links/URLs/filenames)
+    // Link/image TEXT should be checked, URLs should not be checked
+    // Line 1: "javascript" and "github" (standalone) = 2
+    // Line 5: "javascript" in [javascript guide] and "github" in [github] (link text) = 2
+    // Line 7: "github" in ![github logo] (image alt text) = 1
+    // Total = 5 warnings
     assert_eq!(
         result044.len(),
-        2,
-        "MD044: Must detect 2 standalone improper names (not in links)"
+        5,
+        "MD044: Must detect 5 improper names (2 standalone + 2 in link text + 1 in image alt)"
     );
     assert_eq!(result045.len(), 1, "MD045: Must detect 1 image without alt text");
     assert_eq!(
