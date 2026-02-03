@@ -55,6 +55,8 @@ jobs:
             end |
             # Update $ref paths
             walk(if type == "string" and startswith("#/$defs/") then sub("#/\\$defs/"; "#/definitions/") else . end) |
+            # Remove non-standard "format" fields (e.g., "uint" from schemars)
+            walk(if type == "object" and .format == "uint" then del(.format) else . end) |
             # Set SchemaStore metadata
             .["$schema"] = "http://json-schema.org/draft-07/schema#" |
             .["$id"] = "https://json.schemastore.org/rumdl.json"
