@@ -1,0 +1,169 @@
+name: Sync SchemaStore
+
+on:
+  # Run after successful release
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+  # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run mode (compare only, no PR)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  sync:
+    name: Sync schema to SchemaStore
+    runs-on: ubuntu-latest
+    # Only run if release succeeded (or manual trigger)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout rumdl
+        uses: actions/checkout@v4
+
+      - name: Fetch SchemaStore schema
+        id: fetch
+        run: |
+          # Fetch current SchemaStore schema
+          curl -s https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/rumdl.json > schemastore-current.json
+
+          # Check if fetch succeeded
+          if [ ! -s schemastore-current.json ]; then
+            echo "Failed to fetch SchemaStore schema"
+            exit 1
+          fi
+
+          echo "Fetched SchemaStore schema"
+
+      - name: Generate SchemaStore-compatible schema
+        run: |
+          # Convert local schema to SchemaStore format:
+          # - Use draft-07 (SchemaStore standard)
+          # - Use "definitions" instead of "$defs"
+          # - Set proper $id
+
+          jq '
+            # Convert $defs to definitions
+            if has("$defs") then
+              .definitions = .["$defs"] | del(.["$defs"])
+            else
+              .
+            end |
+            # Update $ref paths
+            walk(if type == "string" and startswith("#/$defs/") then sub("#/\\$defs/"; "#/definitions/") else . end) |
+            # Set SchemaStore metadata
+            .["$schema"] = "http://json-schema.org/draft-07/schema#" |
+            .["$id"] = "https://json.schemastore.org/rumdl.json"
+          ' rumdl.schema.json > rumdl-schemastore.json
+
+          echo "Generated SchemaStore-compatible schema"
+
+      - name: Compare schemas
+        id: compare
+        run: |
+          # Compare converted local schema with SchemaStore (both now in same format)
+          LOCAL_FLAVORS=$(jq -r '.definitions.MarkdownFlavor.enum | sort | join(",")' rumdl-schemastore.json)
+          REMOTE_FLAVORS=$(jq -r '.definitions.MarkdownFlavor.enum | sort | join(",")' schemastore-current.json)
+
+          echo "Local flavors: $LOCAL_FLAVORS"
+          echo "Remote flavors: $REMOTE_FLAVORS"
+
+          # Normalize both for comparison (sorted keys, ignore whitespace)
+          jq -S '.' rumdl-schemastore.json > local-normalized.json
+          jq -S '.' schemastore-current.json > remote-normalized.json
+
+          if diff -q local-normalized.json remote-normalized.json > /dev/null 2>&1; then
+            echo "schemas_match=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Schemas are in sync"
+          else
+            echo "schemas_match=false" >> "$GITHUB_OUTPUT"
+            echo "❌ Schemas differ"
+            echo ""
+            echo "=== Key differences ==="
+            # Show flavor differences specifically
+            echo "Flavor differences:"
+            diff <(jq -r '.definitions.MarkdownFlavor.enum[]' schemastore-current.json | sort) \
+                 <(jq -r '.definitions.MarkdownFlavor.enum[]' rumdl-schemastore.json | sort) || true
+          fi
+
+      - name: Create PR to SchemaStore
+        if: steps.compare.outputs.schemas_match == 'false' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.SCHEMASTORE_PAT }}
+        run: |
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Get rumdl version
+          VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          BRANCH="rumdl-v${VERSION}"
+
+          # Check if PR already exists for this version
+          if gh pr list --repo SchemaStore/schemastore --head "rvben:${BRANCH}" --state open | grep -q .; then
+            echo "PR already exists for this version, skipping"
+            exit 0
+          fi
+
+          # Sync fork with upstream first
+          echo "Syncing fork with upstream..."
+          gh repo sync rvben/schemastore --source SchemaStore/schemastore --force
+
+          # Clone the synced fork
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/rvben/schemastore.git" schemastore-repo
+          cd schemastore-repo
+
+          # Create branch from latest master
+          git checkout -b "${BRANCH}"
+
+          # Copy updated schema
+          cp ../rumdl-schemastore.json src/schemas/json/rumdl.json
+
+          # Check if there are actual changes
+          if git diff --quiet src/schemas/json/rumdl.json; then
+            echo "No changes to schema file after conversion, skipping PR"
+            exit 0
+          fi
+
+          # Commit and push
+          git add src/schemas/json/rumdl.json
+          git commit -m "feat(rumdl): update schema to v${VERSION}"
+          git push origin "${BRANCH}" --force
+
+          # Create PR
+          gh pr create \
+            --repo SchemaStore/schemastore \
+            --head "rvben:${BRANCH}" \
+            --title "feat(rumdl): update schema to v${VERSION}" \
+            --body "Updates the rumdl JSON schema to v${VERSION}.
+
+          **Changes:**
+          - Synced with upstream rumdl schema
+
+          **Source:** https://github.com/rvben/rumdl/blob/main/rumdl.schema.json
+
+          This PR was automatically generated by the rumdl release workflow."
+
+          echo "✅ Created PR to SchemaStore"
+
+      - name: Dry run summary
+        if: steps.compare.outputs.schemas_match == 'false' && inputs.dry_run == true
+        run: |
+          echo "## 🧪 Dry Run Summary"
+          echo ""
+          echo "Would create PR to SchemaStore with:"
+          echo ""
+          echo "### Schema changes:"
+          diff schemastore-current.json rumdl-schemastore.json || true
+          echo ""
+          echo "To create the PR, run this workflow without dry_run mode."
+
+      - name: Already in sync
+        if: steps.compare.outputs.schemas_match == 'true'
+        run: |
+          echo "✅ SchemaStore is already in sync with local schema"
+          echo "No action needed."
