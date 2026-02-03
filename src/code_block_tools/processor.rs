@@ -7,6 +7,7 @@ use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
+use crate::rule::{LintWarning, Severity};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 /// Information about a fenced code block for processing.
@@ -55,6 +56,28 @@ pub enum DiagnosticSeverity {
     Error,
     Warning,
     Info,
+}
+
+impl CodeBlockDiagnostic {
+    /// Convert to a LintWarning for integration with rumdl's warning system.
+    pub fn to_lint_warning(&self) -> LintWarning {
+        let severity = match self.severity {
+            DiagnosticSeverity::Error => Severity::Error,
+            DiagnosticSeverity::Warning => Severity::Warning,
+            DiagnosticSeverity::Info => Severity::Info,
+        };
+
+        LintWarning {
+            message: self.message.clone(),
+            line: self.file_line,
+            column: self.column.unwrap_or(1),
+            end_line: self.file_line,
+            end_column: self.column.unwrap_or(1),
+            severity,
+            fix: None, // External tool diagnostics don't provide fixes
+            rule_name: Some(self.tool.clone()),
+        }
+    }
 }
 
 /// Error during code block processing.
