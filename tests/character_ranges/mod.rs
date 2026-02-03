@@ -202,7 +202,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD012" => Some(Box::new(MD012NoMultipleBlanks::new(1))),
         "MD013" => Some(Box::new(MD013LineLength::new(80, true, true, true, false))),
         "MD014" => Some(Box::new(MD014CommandsShowOutput::with_show_output(true))),
-        "MD018" => Some(Box::new(MD018NoMissingSpaceAtx)),
+        "MD018" => Some(Box::new(MD018NoMissingSpaceAtx::new())),
         "MD019" => Some(Box::new(MD019NoMultipleSpaceAtx)),
         "MD020" => Some(Box::new(MD020NoMissingSpaceClosedAtx)),
         "MD021" => Some(Box::new(MD021NoMultipleSpaceClosedAtx)),

@@ -191,7 +191,7 @@ fn test_md014_fix_idempotent() {
 
 #[test]
 fn test_md018_fix_idempotent() {
-    let rule = MD018NoMissingSpaceAtx;
+    let rule = MD018NoMissingSpaceAtx::new();
     let content = "#Title\n\n##Subtitle\n";
     assert_fix_idempotent(&rule, content, "MD018");
 }

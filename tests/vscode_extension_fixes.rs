@@ -97,7 +97,7 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             Box::new(MD013LineLength::default()),
         )),
         "MD014" => Some(("```bash\n$ command\n```", Box::new(MD014CommandsShowOutput::default()))),
-        "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx))),
+        "MD018" => Some(("#Missing space", Box::new(MD018NoMissingSpaceAtx::new()))),
         "MD019" => Some(("##  Multiple spaces", Box::new(MD019NoMultipleSpaceAtx::new()))),
         "MD020" => Some(("##No space in closed##", Box::new(MD020NoMissingSpaceClosedAtx))),
         "MD021" => Some(("##  Multiple  spaces  ##", Box::new(MD021NoMultipleSpaceClosedAtx))),

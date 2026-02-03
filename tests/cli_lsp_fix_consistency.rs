@@ -134,7 +134,7 @@ fn test_md010_hard_tabs_consistency() {
 
 #[test]
 fn test_md018_missing_space_atx_consistency() {
-    let rule = MD018NoMissingSpaceAtx;
+    let rule = MD018NoMissingSpaceAtx::new();
 
     let test_cases = vec![
         ("#Missing space", "H1 missing space"),
@@ -297,7 +297,7 @@ fn test_comprehensive_rule_consistency() {
         ),
         (Box::new(MD019NoMultipleSpaceAtx), "##  Multiple spaces", "MD019"),
         (Box::new(MD009TrailingSpaces::default()), "Trailing spaces   ", "MD009"),
-        (Box::new(MD018NoMissingSpaceAtx), "#Missing space", "MD018"),
+        (Box::new(MD018NoMissingSpaceAtx::new()), "#Missing space", "MD018"),
         (Box::new(MD023HeadingStartLeft), "  # Indented", "MD023"),
         (Box::new(MD026NoTrailingPunctuation::default()), "# Heading!", "MD026"),
         (Box::new(MD038NoSpaceInCode::default()), "`code `", "MD038"),

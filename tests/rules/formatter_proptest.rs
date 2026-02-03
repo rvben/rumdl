@@ -130,7 +130,7 @@ proptest! {
             Box::new(MD012NoMultipleBlanks::default()),
             Box::new(MD013LineLength::default()),
             Box::new(MD014CommandsShowOutput::default()),
-            Box::new(MD018NoMissingSpaceAtx),
+            Box::new(MD018NoMissingSpaceAtx::new()),
             Box::new(MD019NoMultipleSpaceAtx),
             Box::new(MD020NoMissingSpaceClosedAtx),
             Box::new(MD021NoMultipleSpaceClosedAtx),
@@ -228,7 +228,7 @@ proptest! {
 
     #[test]
     fn test_md018_idempotent(content in markdown_content_strategy()) {
-        let rule = MD018NoMissingSpaceAtx;
+        let rule = MD018NoMissingSpaceAtx::new();
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
         let warnings1 = rule.check(&ctx1).unwrap_or_default();

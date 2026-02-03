@@ -2260,7 +2260,7 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD012NoMultipleBlanks::default()),
         Box::new(MD013LineLength::default()),
         Box::new(MD014CommandsShowOutput::default()),
-        Box::new(MD018NoMissingSpaceAtx {}),
+        Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD019NoMultipleSpaceAtx {}),
         Box::new(MD020NoMissingSpaceClosedAtx {}),
         Box::new(MD021NoMultipleSpaceClosedAtx {}),

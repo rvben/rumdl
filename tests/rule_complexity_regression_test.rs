@@ -484,7 +484,7 @@ fn test_md003_linear_complexity() {
 fn test_md018_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
-    let rule = MD018NoMissingSpaceAtx;
+    let rule = MD018NoMissingSpaceAtx::new();
 
     let durations: Vec<_> = sizes
         .iter()

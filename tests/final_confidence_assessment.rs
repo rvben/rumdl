@@ -41,7 +41,7 @@ fn validate_core_functionality() {
     let critical_rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD001HeadingIncrement::default()),
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD018NoMissingSpaceAtx),
+        Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD022BlanksAroundHeadings::default()),
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD040FencedCodeLanguage),
@@ -91,7 +91,7 @@ fn validate_cli_lsp_consistency() {
 
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(MD009TrailingSpaces::default()),
-        Box::new(MD018NoMissingSpaceAtx),
+        Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD022BlanksAroundHeadings::default()),
     ];
 

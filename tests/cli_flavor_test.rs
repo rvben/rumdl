@@ -301,6 +301,119 @@ fn test_obsidian_flavor_fix_preserves_tags() {
     );
 }
 
+/// End-to-end test: MD018 magiclink config option
+///
+/// Verifies that [MD018] magiclink = true skips MagicLink-style issue refs (#123)
+/// while still flagging non-numeric patterns (#Summary).
+#[test]
+fn test_md018_magiclink_config() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with magiclink enabled
+    let config_content = r#"
+[MD018]
+magiclink = true
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // Create markdown with MagicLink patterns and malformed headings
+    let md_content = r#"# Real Heading
+
+#10 discusses the issue
+
+#37 is another reference
+
+#Summary
+"#;
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // Run with magiclink config - should skip #10 and #37, flag #Summary
+    let (success, stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "test.md"]);
+    assert!(!success, "Should find issues (at least #Summary)");
+
+    // Count MD018 warnings
+    let md018_count = stdout.matches("MD018").count();
+    assert_eq!(
+        md018_count, 1,
+        "With magiclink=true, should flag exactly 1 MD018 issue (#Summary). Found {md018_count}. stdout: {stdout}"
+    );
+
+    // Verify #10 and #37 are NOT flagged (lines 3 and 5)
+    assert!(
+        !stdout.contains("test.md:3:"),
+        "#10 (line 3) should NOT be flagged with magiclink=true. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("test.md:5:"),
+        "#37 (line 5) should NOT be flagged with magiclink=true. stdout: {stdout}"
+    );
+}
+
+/// End-to-end test: MD018 without magiclink config flags all patterns
+#[test]
+fn test_md018_without_magiclink_config() {
+    let temp_dir = tempdir().unwrap();
+
+    // No config file - default behavior
+
+    // Create markdown with MagicLink patterns
+    let md_content = r#"# Real Heading
+
+#10 discusses the issue
+
+#Summary
+"#;
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // Run without magiclink config - should flag ALL patterns
+    let (success, stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "test.md"]);
+    assert!(!success, "Should find issues");
+
+    // Count MD018 warnings - should be 2 (#10 and #Summary)
+    let md018_count = stdout.matches("MD018").count();
+    assert_eq!(
+        md018_count, 2,
+        "Without magiclink config, should flag 2 MD018 issues (#10, #Summary). Found {md018_count}. stdout: {stdout}"
+    );
+}
+
+/// End-to-end test: MD018 magiclink fix preserves issue refs
+#[test]
+fn test_md018_magiclink_fix_preserves_refs() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with magiclink enabled
+    let config_content = r#"
+[MD018]
+magiclink = true
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // Create markdown with MagicLink ref and malformed heading
+    let md_content = "#10 is an issue\n\n#Summary\n";
+    let md_path = temp_dir.path().join("test.md");
+    fs::write(&md_path, md_content).unwrap();
+
+    // Run fix with magiclink config
+    let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--fix", "test.md"]);
+    assert!(success, "Fix command should succeed. stderr: {stderr}");
+
+    // Read the fixed content
+    let fixed_content = fs::read_to_string(&md_path).expect("Should read fixed file");
+
+    // #10 should be preserved (not changed to "# 10")
+    assert!(
+        fixed_content.contains("#10 is an issue"),
+        "#10 should be preserved with magiclink=true. Fixed content: {fixed_content}"
+    );
+
+    // #Summary should be fixed to "# Summary"
+    assert!(
+        fixed_content.contains("# Summary"),
+        "#Summary should be fixed to '# Summary'. Fixed content: {fixed_content}"
+    );
+}
+
 /// Regression test: Fix coordination must respect per-file-flavor configuration.
 ///
 /// Bug: FixCoordinator used config.markdown_flavor() (global) instead of

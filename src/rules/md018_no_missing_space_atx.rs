@@ -1,6 +1,10 @@
 /// Rule MD018: No missing space after ATX heading marker
 ///
 /// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
+mod md018_config;
+
+pub use md018_config::MD018Config;
+
 use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
@@ -22,7 +26,9 @@ const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
 const OBSIDIAN_TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
 
 #[derive(Clone)]
-pub struct MD018NoMissingSpaceAtx;
+pub struct MD018NoMissingSpaceAtx {
+    config: MD018Config,
+}
 
 impl Default for MD018NoMissingSpaceAtx {
     fn default() -> Self {
@@ -32,7 +38,13 @@ impl Default for MD018NoMissingSpaceAtx {
 
 impl MD018NoMissingSpaceAtx {
     pub fn new() -> Self {
-        Self
+        Self {
+            config: MD018Config::default(),
+        }
+    }
+
+    pub fn from_config_struct(config: MD018Config) -> Self {
+        Self { config }
     }
 
     /// Check if a line is a MagicLink-style issue/PR reference (e.g., #123, #10)
@@ -115,9 +127,9 @@ impl MD018NoMissingSpaceAtx {
                 return None;
             }
 
-            // MkDocs flavor: skip MagicLink-style issue/PR refs (#123, #10, etc.)
+            // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
             // MagicLink only uses single #, so check hash_count == 1
-            if flavor == MarkdownFlavor::MkDocs && hash_count == 1 && Self::is_magiclink_ref(line) {
+            if self.config.magiclink && hash_count == 1 && Self::is_magiclink_ref(line) {
                 return None;
             }
 
@@ -204,8 +216,8 @@ impl Rule for MD018NoMissingSpaceAtx {
                         continue;
                     }
 
-                    // MkDocs flavor: skip MagicLink-style issue/PR refs (#123, #10, etc.)
-                    if ctx.flavor == MarkdownFlavor::MkDocs && heading.level == 1 && Self::is_magiclink_ref(line) {
+                    // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
+                    if self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line) {
                         continue;
                     }
 
@@ -302,9 +314,8 @@ impl Rule for MD018NoMissingSpaceAtx {
                         .map(|re| re.is_match(trimmed))
                         .unwrap_or(false);
 
-                    // MkDocs flavor: skip MagicLink-style issue/PR refs (#123, #10, etc.)
-                    let is_magiclink =
-                        ctx.flavor == MarkdownFlavor::MkDocs && heading.level == 1 && Self::is_magiclink_ref(line);
+                    // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
+                    let is_magiclink = self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line);
 
                     // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
                     let is_obsidian_tag =
@@ -369,11 +380,20 @@ impl Rule for MD018NoMissingSpaceAtx {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD018NoMissingSpaceAtx::new())
+        let rule_config = crate::rule_config_serde::load_rule_config::<MD018Config>(config);
+        Box::new(MD018NoMissingSpaceAtx::from_config_struct(rule_config))
+    }
+
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let json_value = serde_json::to_value(&self.config).ok()?;
+        Some((
+            self.name().to_string(),
+            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+        ))
     }
 }
 
@@ -384,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_basic_functionality() {
-        let rule = MD018NoMissingSpaceAtx;
+        let rule = MD018NoMissingSpaceAtx::new();
 
         // Test with correct space
         let content = "# Heading 1\n## Heading 2\n### Heading 3";
@@ -971,62 +991,65 @@ More content.
 
     #[test]
     fn test_mkdocs_magiclink_skips_numeric_refs() {
-        // MkDocs flavor should skip MagicLink-style issue/PR refs (#123, #10, etc.)
-        let rule = MD018NoMissingSpaceAtx::new();
+        // With magiclink config enabled, should skip MagicLink-style issue/PR refs (#123, #10, etc.)
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
-        // These numeric patterns should be SKIPPED in MkDocs flavor
+        // These numeric patterns should be SKIPPED with magiclink enabled
         assert!(
-            rule.check_atx_heading_line("#10", MarkdownFlavor::MkDocs).is_none(),
-            "#10 should be skipped in MkDocs flavor (MagicLink issue ref)"
+            rule.check_atx_heading_line("#10", MarkdownFlavor::Standard).is_none(),
+            "#10 should be skipped with magiclink config (MagicLink issue ref)"
         );
         assert!(
-            rule.check_atx_heading_line("#123", MarkdownFlavor::MkDocs).is_none(),
-            "#123 should be skipped in MkDocs flavor (MagicLink issue ref)"
+            rule.check_atx_heading_line("#123", MarkdownFlavor::Standard).is_none(),
+            "#123 should be skipped with magiclink config (MagicLink issue ref)"
         );
         assert!(
-            rule.check_atx_heading_line("#10 discusses the issue", MarkdownFlavor::MkDocs)
+            rule.check_atx_heading_line("#10 discusses the issue", MarkdownFlavor::Standard)
                 .is_none(),
-            "#10 followed by text should be skipped in MkDocs flavor"
+            "#10 followed by text should be skipped with magiclink config"
         );
         assert!(
-            rule.check_atx_heading_line("#37.", MarkdownFlavor::MkDocs).is_none(),
-            "#37 followed by punctuation should be skipped in MkDocs flavor"
+            rule.check_atx_heading_line("#37.", MarkdownFlavor::Standard).is_none(),
+            "#37 followed by punctuation should be skipped with magiclink config"
         );
     }
 
     #[test]
     fn test_mkdocs_magiclink_still_flags_non_numeric() {
-        // MkDocs flavor should still flag non-numeric patterns
-        let rule = MD018NoMissingSpaceAtx::new();
+        // With magiclink config enabled, should still flag non-numeric patterns
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
-        // Non-numeric patterns should still be flagged even in MkDocs flavor
+        // Non-numeric patterns should still be flagged even with magiclink enabled
         assert!(
-            rule.check_atx_heading_line("#Summary", MarkdownFlavor::MkDocs)
+            rule.check_atx_heading_line("#Summary", MarkdownFlavor::Standard)
                 .is_some(),
-            "#Summary should still be flagged in MkDocs flavor"
+            "#Summary should still be flagged with magiclink config"
         );
         assert!(
-            rule.check_atx_heading_line("#hello", MarkdownFlavor::MkDocs).is_some(),
-            "#hello should still be flagged in MkDocs flavor"
+            rule.check_atx_heading_line("#hello", MarkdownFlavor::Standard)
+                .is_some(),
+            "#hello should still be flagged with magiclink config"
         );
         assert!(
-            rule.check_atx_heading_line("#10abc", MarkdownFlavor::MkDocs).is_some(),
-            "#10abc (mixed) should still be flagged in MkDocs flavor"
+            rule.check_atx_heading_line("#10abc", MarkdownFlavor::Standard)
+                .is_some(),
+            "#10abc (mixed) should still be flagged with magiclink config"
         );
     }
 
     #[test]
     fn test_mkdocs_magiclink_only_single_hash() {
         // MagicLink only uses single #, so ##10 should still be flagged
-        let rule = MD018NoMissingSpaceAtx::new();
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
         assert!(
-            rule.check_atx_heading_line("##10", MarkdownFlavor::MkDocs).is_some(),
-            "##10 should be flagged in MkDocs flavor (only single # is MagicLink)"
+            rule.check_atx_heading_line("##10", MarkdownFlavor::Standard).is_some(),
+            "##10 should be flagged with magiclink config (only single # is MagicLink)"
         );
         assert!(
-            rule.check_atx_heading_line("###123", MarkdownFlavor::MkDocs).is_some(),
-            "###123 should be flagged in MkDocs flavor"
+            rule.check_atx_heading_line("###123", MarkdownFlavor::Standard)
+                .is_some(),
+            "###123 should be flagged with magiclink config"
         );
     }
 
@@ -1047,8 +1070,8 @@ More content.
 
     #[test]
     fn test_mkdocs_magiclink_full_check() {
-        // Integration test: verify MkDocs flavor skips MagicLink refs through full check() flow
-        let rule = MD018NoMissingSpaceAtx::new();
+        // Integration test: verify magiclink config skips MagicLink refs through full check() flow
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
         let content = r#"# PRs that are helpful for context
 
@@ -1059,48 +1082,48 @@ More content.
 ##Introduction
 "#;
 
-        // MkDocs flavor - should skip #10 and #37, but flag #Summary and ##Introduction
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        // With magiclink enabled - should skip #10 and #37, but flag #Summary and ##Introduction
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
         assert!(
             !flagged_lines.contains(&3),
-            "#10 should NOT be flagged in MkDocs flavor"
+            "#10 should NOT be flagged with magiclink config"
         );
         assert!(
             flagged_lines.contains(&5),
-            "#Summary SHOULD be flagged in MkDocs flavor"
+            "#Summary SHOULD be flagged with magiclink config"
         );
         assert!(
             flagged_lines.contains(&7),
-            "##Introduction SHOULD be flagged in MkDocs flavor"
+            "##Introduction SHOULD be flagged with magiclink config"
         );
     }
 
     #[test]
     fn test_mkdocs_magiclink_fix_exact_output() {
-        // Verify fix() produces exact expected output
-        let rule = MD018NoMissingSpaceAtx::new();
+        // Verify fix() produces exact expected output with magiclink config
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
         let content = "#10 discusses the issue.\n\n#Summary";
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
         // Exact expected output: #10 preserved, #Summary fixed
         let expected = "#10 discusses the issue.\n\n# Summary";
         assert_eq!(
             fixed, expected,
-            "MkDocs fix should preserve MagicLink refs and fix non-numeric headings"
+            "magiclink config fix should preserve MagicLink refs and fix non-numeric headings"
         );
     }
 
     #[test]
     fn test_mkdocs_magiclink_edge_cases() {
         // Test various edge cases for MagicLink pattern matching
-        let rule = MD018NoMissingSpaceAtx::new();
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
-        // These should all be SKIPPED in MkDocs flavor (valid MagicLink refs)
+        // These should all be SKIPPED with magiclink config (valid MagicLink refs)
         // Note: #1 alone is skipped due to content length < 2, not MagicLink
         let valid_refs = [
             "#10",             // Two digits
@@ -1119,12 +1142,12 @@ More content.
 
         for ref_str in valid_refs {
             assert!(
-                rule.check_atx_heading_line(ref_str, MarkdownFlavor::MkDocs).is_none(),
-                "{ref_str:?} should be skipped as MagicLink ref in MkDocs flavor"
+                rule.check_atx_heading_line(ref_str, MarkdownFlavor::Standard).is_none(),
+                "{ref_str:?} should be skipped as MagicLink ref with magiclink config"
             );
         }
 
-        // These should still be FLAGGED in MkDocs flavor (not valid MagicLink refs)
+        // These should still be FLAGGED with magiclink config (not valid MagicLink refs)
         let invalid_refs = [
             "#10abc",   // Alphanumeric continuation
             "#10a",     // Single alpha continuation
@@ -1136,8 +1159,8 @@ More content.
 
         for ref_str in invalid_refs {
             assert!(
-                rule.check_atx_heading_line(ref_str, MarkdownFlavor::MkDocs).is_some(),
-                "{ref_str:?} should be flagged in MkDocs flavor (not a valid MagicLink ref)"
+                rule.check_atx_heading_line(ref_str, MarkdownFlavor::Standard).is_some(),
+                "{ref_str:?} should be flagged with magiclink config (not a valid MagicLink ref)"
             );
         }
     }
@@ -1146,31 +1169,31 @@ More content.
     fn test_mkdocs_magiclink_hyphenated_continuation() {
         // Hyphenated patterns like #10-related should still be flagged
         // because they're likely malformed headings, not MagicLink refs
-        let rule = MD018NoMissingSpaceAtx::new();
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
         // Hyphen is not alphanumeric, so #10- would match as MagicLink
         // But #10-related has alphanumeric after the hyphen
         // The regex ^#\d+(?:\s|[^a-zA-Z0-9]|$) would match #10- but not consume -related
         // So #10-related would match (the -r part is after the match)
         assert!(
-            rule.check_atx_heading_line("#10-", MarkdownFlavor::MkDocs).is_none(),
-            "#10- should be skipped (hyphen is non-alphanumeric terminator)"
+            rule.check_atx_heading_line("#10-", MarkdownFlavor::Standard).is_none(),
+            "#10- should be skipped with magiclink config (hyphen is non-alphanumeric terminator)"
         );
     }
 
     #[test]
     fn test_mkdocs_magiclink_standalone_number() {
         // #10 alone on a line (common in changelogs)
-        let rule = MD018NoMissingSpaceAtx::new();
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
 
         let content = "See issue:\n\n#10\n\nFor details.";
-        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // #10 alone should not be flagged in MkDocs flavor
+        // #10 alone should not be flagged with magiclink config
         assert!(
             result.is_empty(),
-            "Standalone #10 should not be flagged in MkDocs flavor"
+            "Standalone #10 should not be flagged with magiclink config"
         );
 
         // Verify fix doesn't modify it
@@ -1202,20 +1225,19 @@ More content.
 
     #[test]
     fn test_mkdocs_vs_standard_fix_comparison() {
-        // Compare fix output between MkDocs and Standard flavors
-        let rule = MD018NoMissingSpaceAtx::new();
-
+        // Compare fix output between magiclink enabled and disabled
         let content = "#10 is an issue\n#Summary";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
-        // MkDocs: preserves #10, fixes #Summary
-        let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let fixed_mkdocs = rule.fix(&ctx_mkdocs).unwrap();
-        assert_eq!(fixed_mkdocs, "#10 is an issue\n# Summary");
+        // With magiclink: preserves #10, fixes #Summary
+        let rule_magiclink = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let fixed_magiclink = rule_magiclink.fix(&ctx).unwrap();
+        assert_eq!(fixed_magiclink, "#10 is an issue\n# Summary");
 
-        // Standard: fixes both
-        let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
-        let fixed_standard = rule.fix(&ctx_standard).unwrap();
-        assert_eq!(fixed_standard, "# 10 is an issue\n# Summary");
+        // Without magiclink: fixes both
+        let rule_default = MD018NoMissingSpaceAtx::new();
+        let fixed_default = rule_default.fix(&ctx).unwrap();
+        assert_eq!(fixed_default, "# 10 is an issue\n# Summary");
     }
 
     // ==================== Obsidian flavor tests ====================

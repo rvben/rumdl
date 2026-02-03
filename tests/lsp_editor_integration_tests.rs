@@ -98,7 +98,7 @@ code block without language
 Final paragraph."#;
 
     let rules: Vec<Box<dyn Rule>> = vec![
-        Box::new(MD018NoMissingSpaceAtx),
+        Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD004UnorderedListStyle::new(
             rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
