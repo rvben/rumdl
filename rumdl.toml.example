@@ -41,9 +41,6 @@ respect_gitignore = true
 "generated/**/*.md" = ["MD041"]
 
 # Rule-specific configurations
-[MD002]
-level = 1  # Expected level for first heading
-
 [MD003]
 style = "atx"  # Heading style (atx, atx_closed, setext)
 
