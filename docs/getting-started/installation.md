@@ -64,20 +64,11 @@ Choose the installation method that works best for your workflow.
 
 ## Platform-Specific
 
-=== "Arch Linux (AUR)"
+=== "Arch Linux"
 
     ```bash
-    # Using yay
-    yay -Sy rumdl
-
-    # Or binary package
-    yay -Sy rumdl-bin
+    pacman -S rumdl
     ```
-
-    Available packages:
-
-    - [rumdl](https://aur.archlinux.org/packages/rumdl/) - release package
-    - [rumdl-bin](https://aur.archlinux.org/packages/rumdl-bin/) - binary package
 
 === "Android (Termux)"
 
