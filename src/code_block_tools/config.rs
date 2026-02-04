@@ -24,6 +24,15 @@ pub struct CodeBlockToolsConfig {
     #[serde(default)]
     pub on_error: OnError,
 
+    /// Behavior when a code block language has no tools configured for the current mode
+    /// (e.g., no lint tools for `rumdl check`, no format tools for `rumdl check --fix`)
+    #[serde(default)]
+    pub on_missing_language_definition: OnMissing,
+
+    /// Behavior when a configured tool's binary cannot be found (e.g., not in PATH)
+    #[serde(default)]
+    pub on_missing_tool_binary: OnMissing,
+
     /// Timeout per tool execution in milliseconds (default: 30000)
     #[serde(default = "default_timeout")]
     #[schemars(schema_with = "schema_timeout")]
@@ -61,6 +70,8 @@ impl Default for CodeBlockToolsConfig {
             enabled: false,
             normalize_language: NormalizeLanguage::default(),
             on_error: OnError::default(),
+            on_missing_language_definition: OnMissing::default(),
+            on_missing_tool_binary: OnMissing::default(),
             timeout: default_timeout(),
             languages: HashMap::new(),
             language_aliases: HashMap::new(),
@@ -91,6 +102,19 @@ pub enum OnError {
     Skip,
     /// Log a warning but continue processing
     Warn,
+}
+
+/// Behavior when a language has no tools configured or a tool binary is missing.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum OnMissing {
+    /// Silently skip and continue processing (default for backward compatibility)
+    #[default]
+    Ignore,
+    /// Record an error for that block, continue processing, exit non-zero at the end
+    Fail,
+    /// Stop immediately on the first occurrence, exit non-zero
+    FailFast,
 }
 
 /// Per-language tool configuration.
@@ -162,6 +186,8 @@ mod tests {
         assert!(!config.enabled);
         assert_eq!(config.normalize_language, NormalizeLanguage::Linguist);
         assert_eq!(config.on_error, OnError::Fail);
+        assert_eq!(config.on_missing_language_definition, OnMissing::Ignore);
+        assert_eq!(config.on_missing_tool_binary, OnMissing::Ignore);
         assert_eq!(config.timeout, 30_000);
         assert!(config.languages.is_empty());
         assert!(config.language_aliases.is_empty());
@@ -239,5 +265,54 @@ stdout = true
         assert!(toml.contains("enabled = true"));
         assert!(toml.contains("[languages.rust]"));
         assert!(toml.contains("rustfmt"));
+    }
+
+    #[test]
+    fn test_on_missing_options() {
+        let toml = r#"
+enabled = true
+on-missing-language-definition = "fail"
+on-missing-tool-binary = "fail-fast"
+"#;
+
+        let config: CodeBlockToolsConfig = toml::from_str(toml).expect("Failed to parse TOML");
+
+        assert_eq!(config.on_missing_language_definition, OnMissing::Fail);
+        assert_eq!(config.on_missing_tool_binary, OnMissing::FailFast);
+    }
+
+    #[test]
+    fn test_on_missing_default_ignore() {
+        let toml = r#"
+enabled = true
+"#;
+
+        let config: CodeBlockToolsConfig = toml::from_str(toml).expect("Failed to parse TOML");
+
+        // Both should default to Ignore for backward compatibility
+        assert_eq!(config.on_missing_language_definition, OnMissing::Ignore);
+        assert_eq!(config.on_missing_tool_binary, OnMissing::Ignore);
+    }
+
+    #[test]
+    fn test_on_missing_all_variants() {
+        // Test all variants deserialize correctly
+        for (input, expected) in [
+            ("ignore", OnMissing::Ignore),
+            ("fail", OnMissing::Fail),
+            ("fail-fast", OnMissing::FailFast),
+        ] {
+            let toml = format!(
+                r#"
+enabled = true
+on-missing-language-definition = "{input}"
+"#
+            );
+            let config: CodeBlockToolsConfig = toml::from_str(&toml).expect("Failed to parse TOML");
+            assert_eq!(
+                config.on_missing_language_definition, expected,
+                "Failed for variant: {input}"
+            );
+        }
     }
 }

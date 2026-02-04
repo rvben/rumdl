@@ -47,6 +47,8 @@
         "enabled": false,
         "normalize-language": "linguist",
         "on-error": "fail",
+        "on-missing-language-definition": "ignore",
+        "on-missing-tool-binary": "ignore",
         "timeout": 30000,
         "languages": {},
         "language-aliases": {},
@@ -197,6 +199,16 @@
           "$ref": "#/$defs/OnError",
           "default": "fail"
         },
+        "on-missing-language-definition": {
+          "description": "Behavior when a code block language has no tools configured for the current mode",
+          "$ref": "#/$defs/OnMissing",
+          "default": "ignore"
+        },
+        "on-missing-tool-binary": {
+          "description": "Behavior when a configured tool's binary cannot be found (e.g., not in PATH)",
+          "$ref": "#/$defs/OnMissing",
+          "default": "ignore"
+        },
         "timeout": {
           "description": "Timeout per tool execution in milliseconds (default: 30000)",
           "type": "integer",
@@ -261,6 +273,26 @@
           "description": "Log a warning but continue processing",
           "type": "string",
           "const": "warn"
+        }
+      ]
+    },
+    "OnMissing": {
+      "description": "Behavior when a language has no tools configured or a tool binary is missing.",
+      "oneOf": [
+        {
+          "description": "Silently skip and continue processing (default for backward compatibility)",
+          "type": "string",
+          "const": "ignore"
+        },
+        {
+          "description": "Record an error for that block, continue processing, exit non-zero at the end",
+          "type": "string",
+          "const": "fail"
+        },
+        {
+          "description": "Stop immediately on the first occurrence, exit non-zero",
+          "type": "string",
+          "const": "fail-fast"
         }
       ]
     },

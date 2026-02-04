@@ -730,10 +730,16 @@ pub fn process_file_with_formatter(
         if config.code_block_tools.enabled {
             let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools);
             match processor.format(&content) {
-                Ok(formatted) => {
-                    if formatted != content {
-                        content = formatted;
+                Ok(output) => {
+                    if output.content != content {
+                        content = output.content;
                         warnings_fixed += 1;
+                    }
+                    // Report any errors that occurred during formatting
+                    if output.had_errors && !silent {
+                        for msg in &output.error_messages {
+                            eprintln!("Warning: {msg}");
+                        }
                     }
                 }
                 Err(e) => {
@@ -781,10 +787,16 @@ pub fn process_file_with_formatter(
         if config.code_block_tools.enabled {
             let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools);
             match processor.format(&content) {
-                Ok(formatted) => {
-                    if formatted != content {
-                        content = formatted;
+                Ok(output) => {
+                    if output.content != content {
+                        content = output.content;
                         warnings_fixed += 1;
+                    }
+                    // Report any errors that occurred during formatting
+                    if output.had_errors && !silent {
+                        for msg in &output.error_messages {
+                            eprintln!("Warning: {msg}");
+                        }
                     }
                 }
                 Err(e) => {
@@ -1136,9 +1148,17 @@ pub fn process_file_with_index(
                 all_warnings.extend(tool_warnings);
             }
             Err(e) => {
-                if !silent {
-                    eprintln!("Warning: Code block tool linting failed: {e}");
-                }
+                // Convert processor error to a warning so it counts toward exit code
+                all_warnings.push(rumdl_lib::rule::LintWarning {
+                    message: e.to_string(),
+                    line: 1,
+                    column: 1,
+                    end_line: 1,
+                    end_column: 1,
+                    severity: rumdl_lib::rule::Severity::Error,
+                    fix: None,
+                    rule_name: Some("code-block-tools".to_string()),
+                });
             }
         }
     }

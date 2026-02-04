@@ -3,7 +3,7 @@
 //! This module coordinates language resolution, tool lookup, execution,
 //! and result collection for processing code blocks in markdown files.
 
-use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError};
+use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
@@ -89,6 +89,8 @@ pub enum ProcessorError {
     ToolError(ExecutorError),
     /// No tools configured for language.
     NoToolsConfigured { language: String },
+    /// Tool binary not found.
+    ToolBinaryNotFound { tool: String, language: String },
     /// Processing was aborted due to on_error = fail.
     Aborted { message: String },
 }
@@ -99,6 +101,9 @@ impl std::fmt::Display for ProcessorError {
             Self::ToolError(e) => write!(f, "{e}"),
             Self::NoToolsConfigured { language } => {
                 write!(f, "No tools configured for language '{language}'")
+            }
+            Self::ToolBinaryNotFound { tool, language } => {
+                write!(f, "Tool '{tool}' binary not found for language '{language}'")
             }
             Self::Aborted { message } => write!(f, "Processing aborted: {message}"),
         }
@@ -122,6 +127,17 @@ pub struct CodeBlockResult {
     pub formatted_content: Option<String>,
     /// Whether the code block was modified.
     pub was_modified: bool,
+}
+
+/// Result of formatting code blocks in a document.
+#[derive(Debug)]
+pub struct FormatOutput {
+    /// The formatted content (may be partially formatted if errors occurred).
+    pub content: String,
+    /// Whether any errors occurred during formatting.
+    pub had_errors: bool,
+    /// Error messages for blocks that couldn't be formatted.
+    pub error_messages: Vec<String>,
 }
 
 /// Main processor for code block tools.
@@ -311,13 +327,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             // Get lint tools for this language
             let lint_tools = match self.config.languages.get(&canonical_lang) {
-                Some(lc) => &lc.lint,
-                None => continue, // No config for this language
+                Some(lc) if !lc.lint.is_empty() => &lc.lint,
+                _ => {
+                    // No tools configured for this language in lint mode
+                    match self.config.on_missing_language_definition {
+                        OnMissing::Ignore => continue,
+                        OnMissing::Fail => {
+                            all_diagnostics.push(CodeBlockDiagnostic {
+                                file_line: block.start_line + 1,
+                                column: None,
+                                message: format!("No lint tools configured for language '{canonical_lang}'"),
+                                severity: DiagnosticSeverity::Error,
+                                tool: "code-block-tools".to_string(),
+                                code_block_start: block.start_line + 1,
+                            });
+                            continue;
+                        }
+                        OnMissing::FailFast => {
+                            return Err(ProcessorError::NoToolsConfigured {
+                                language: canonical_lang,
+                            });
+                        }
+                    }
+                }
             };
-
-            if lint_tools.is_empty() {
-                continue;
-            }
 
             // Extract code block content
             let code_content_raw = if block.content_start < block.content_end && block.content_end <= content.len() {
@@ -336,6 +369,34 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         continue;
                     }
                 };
+
+                // Check if tool binary exists before running
+                let tool_name = tool_def.command.first().map(String::as_str).unwrap_or("");
+                if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
+                    match self.config.on_missing_tool_binary {
+                        OnMissing::Ignore => {
+                            log::debug!("Tool binary '{tool_name}' not found, skipping");
+                            continue;
+                        }
+                        OnMissing::Fail => {
+                            all_diagnostics.push(CodeBlockDiagnostic {
+                                file_line: block.start_line + 1,
+                                column: None,
+                                message: format!("Tool binary '{tool_name}' not found in PATH"),
+                                severity: DiagnosticSeverity::Error,
+                                tool: "code-block-tools".to_string(),
+                                code_block_start: block.start_line + 1,
+                            });
+                            continue;
+                        }
+                        OnMissing::FailFast => {
+                            return Err(ProcessorError::ToolBinaryNotFound {
+                                tool: tool_name.to_string(),
+                                language: canonical_lang.clone(),
+                            });
+                        }
+                    }
+                }
 
                 match self.executor.lint(tool_def, &code_content, Some(self.config.timeout)) {
                     Ok(output) => {
@@ -368,16 +429,23 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
     /// Format all code blocks in the content.
     ///
-    /// Returns the modified content with formatted code blocks.
-    pub fn format(&self, content: &str) -> Result<String, ProcessorError> {
+    /// Returns the modified content with formatted code blocks and any errors that occurred.
+    /// With `on-missing-*` = `fail`, errors are collected but formatting continues.
+    /// With `on-missing-*` = `fail-fast`, returns Err immediately on first error.
+    pub fn format(&self, content: &str) -> Result<FormatOutput, ProcessorError> {
         let blocks = self.extract_code_blocks(content);
 
         if blocks.is_empty() {
-            return Ok(content.to_string());
+            return Ok(FormatOutput {
+                content: content.to_string(),
+                had_errors: false,
+                error_messages: Vec::new(),
+            });
         }
 
         // Process blocks in reverse order to maintain byte offsets
         let mut result = content.to_string();
+        let mut error_messages: Vec<String> = Vec::new();
 
         for block in blocks.into_iter().rev() {
             if block.language.is_empty() {
@@ -388,13 +456,26 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             // Get format tools for this language
             let format_tools = match self.config.languages.get(&canonical_lang) {
-                Some(lc) => &lc.format,
-                None => continue,
+                Some(lc) if !lc.format.is_empty() => &lc.format,
+                _ => {
+                    // No tools configured for this language in format mode
+                    match self.config.on_missing_language_definition {
+                        OnMissing::Ignore => continue,
+                        OnMissing::Fail => {
+                            error_messages.push(format!(
+                                "No format tools configured for language '{canonical_lang}' at line {}",
+                                block.start_line + 1
+                            ));
+                            continue;
+                        }
+                        OnMissing::FailFast => {
+                            return Err(ProcessorError::NoToolsConfigured {
+                                language: canonical_lang,
+                            });
+                        }
+                    }
+                }
             };
-
-            if format_tools.is_empty() {
-                continue;
-            }
 
             // Extract code block content
             if block.content_start >= block.content_end || block.content_end > result.len() {
@@ -405,6 +486,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             // Run format tools (use first successful one)
             let mut formatted = code_content.clone();
+            let mut tool_ran = false;
             for tool_id in format_tools {
                 let tool_def = match self.registry.get(tool_id) {
                     Some(t) => t,
@@ -413,6 +495,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         continue;
                     }
                 };
+
+                // Check if tool binary exists before running
+                let tool_name = tool_def.command.first().map(String::as_str).unwrap_or("");
+                if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
+                    match self.config.on_missing_tool_binary {
+                        OnMissing::Ignore => {
+                            log::debug!("Tool binary '{tool_name}' not found, skipping");
+                            continue;
+                        }
+                        OnMissing::Fail => {
+                            error_messages.push(format!(
+                                "Tool binary '{tool_name}' not found in PATH for language '{canonical_lang}' at line {}",
+                                block.start_line + 1
+                            ));
+                            continue;
+                        }
+                        OnMissing::FailFast => {
+                            return Err(ProcessorError::ToolBinaryNotFound {
+                                tool: tool_name.to_string(),
+                                language: canonical_lang.clone(),
+                            });
+                        }
+                    }
+                }
 
                 match self.executor.format(tool_def, &formatted, Some(self.config.timeout)) {
                     Ok(output) => {
@@ -423,6 +529,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         } else if !code_content.ends_with('\n') && formatted.ends_with('\n') {
                             formatted.pop();
                         }
+                        tool_ran = true;
                         break; // Use first successful formatter
                     }
                     Err(e) => {
@@ -438,8 +545,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 }
             }
 
-            // Replace content if changed
-            if formatted != code_content {
+            // Replace content if changed and a tool actually ran
+            if tool_ran && formatted != code_content {
                 let reindented = self.apply_indent_to_block(&formatted, &block.indent_prefix);
                 if reindented != code_content_raw {
                     result.replace_range(block.content_start..block.content_end, &reindented);
@@ -447,7 +554,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
         }
 
-        Ok(result)
+        Ok(FormatOutput {
+            content: result,
+            had_errors: !error_messages.is_empty(),
+            error_messages,
+        })
     }
 
     /// Parse tool output into diagnostics.
@@ -1006,6 +1117,203 @@ fn main() {}
 
         // Should succeed with unchanged content (no tools configured)
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), content);
+        let output = result.unwrap();
+        assert_eq!(output.content, content);
+        assert!(!output.had_errors);
+        assert!(output.error_messages.is_empty());
+    }
+
+    #[test]
+    fn test_lint_on_missing_language_definition_fail() {
+        let mut config = default_config();
+        config.on_missing_language_definition = OnMissing::Fail;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```\n\n```javascript\nconsole.log('hi');\n```";
+        let result = processor.lint(content);
+
+        // Should succeed but return diagnostics for both missing language definitions
+        assert!(result.is_ok());
+        let diagnostics = result.unwrap();
+        assert_eq!(diagnostics.len(), 2);
+        assert!(diagnostics[0].message.contains("No lint tools configured"));
+        assert!(diagnostics[0].message.contains("python"));
+        assert!(diagnostics[1].message.contains("javascript"));
+    }
+
+    #[test]
+    fn test_lint_on_missing_language_definition_fail_fast() {
+        let mut config = default_config();
+        config.on_missing_language_definition = OnMissing::FailFast;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```\n\n```javascript\nconsole.log('hi');\n```";
+        let result = processor.lint(content);
+
+        // Should fail immediately on first missing language
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ProcessorError::NoToolsConfigured { .. }));
+    }
+
+    #[test]
+    fn test_format_on_missing_language_definition_fail() {
+        let mut config = default_config();
+        config.on_missing_language_definition = OnMissing::Fail;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.format(content);
+
+        // Should succeed but report errors
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.content, content); // Content unchanged
+        assert!(output.had_errors);
+        assert!(!output.error_messages.is_empty());
+        assert!(output.error_messages[0].contains("No format tools configured"));
+    }
+
+    #[test]
+    fn test_format_on_missing_language_definition_fail_fast() {
+        let mut config = default_config();
+        config.on_missing_language_definition = OnMissing::FailFast;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.format(content);
+
+        // Should fail immediately
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ProcessorError::NoToolsConfigured { .. }));
+    }
+
+    #[test]
+    fn test_lint_on_missing_tool_binary_fail() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.on_missing_tool_binary = OnMissing::Fail;
+
+        // Configure a tool with a non-existent binary
+        let lang_config = LanguageToolConfig {
+            lint: vec!["nonexistent-linter".to_string()],
+            ..Default::default()
+        };
+        config.languages.insert("python".to_string(), lang_config);
+
+        let tool_def = ToolDefinition {
+            command: vec!["nonexistent-binary-xyz123".to_string()],
+            ..Default::default()
+        };
+        config.tools.insert("nonexistent-linter".to_string(), tool_def);
+
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.lint(content);
+
+        // Should succeed but return diagnostic for missing binary
+        assert!(result.is_ok());
+        let diagnostics = result.unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert!(diagnostics[0].message.contains("not found in PATH"));
+    }
+
+    #[test]
+    fn test_lint_on_missing_tool_binary_fail_fast() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.on_missing_tool_binary = OnMissing::FailFast;
+
+        // Configure a tool with a non-existent binary
+        let lang_config = LanguageToolConfig {
+            lint: vec!["nonexistent-linter".to_string()],
+            ..Default::default()
+        };
+        config.languages.insert("python".to_string(), lang_config);
+
+        let tool_def = ToolDefinition {
+            command: vec!["nonexistent-binary-xyz123".to_string()],
+            ..Default::default()
+        };
+        config.tools.insert("nonexistent-linter".to_string(), tool_def);
+
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.lint(content);
+
+        // Should fail immediately
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ProcessorError::ToolBinaryNotFound { .. }));
+    }
+
+    #[test]
+    fn test_format_on_missing_tool_binary_fail() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.on_missing_tool_binary = OnMissing::Fail;
+
+        // Configure a tool with a non-existent binary
+        let lang_config = LanguageToolConfig {
+            format: vec!["nonexistent-formatter".to_string()],
+            ..Default::default()
+        };
+        config.languages.insert("python".to_string(), lang_config);
+
+        let tool_def = ToolDefinition {
+            command: vec!["nonexistent-binary-xyz123".to_string()],
+            ..Default::default()
+        };
+        config.tools.insert("nonexistent-formatter".to_string(), tool_def);
+
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.format(content);
+
+        // Should succeed but report errors
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.content, content); // Content unchanged
+        assert!(output.had_errors);
+        assert!(!output.error_messages.is_empty());
+        assert!(output.error_messages[0].contains("not found in PATH"));
+    }
+
+    #[test]
+    fn test_format_on_missing_tool_binary_fail_fast() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.on_missing_tool_binary = OnMissing::FailFast;
+
+        // Configure a tool with a non-existent binary
+        let lang_config = LanguageToolConfig {
+            format: vec!["nonexistent-formatter".to_string()],
+            ..Default::default()
+        };
+        config.languages.insert("python".to_string(), lang_config);
+
+        let tool_def = ToolDefinition {
+            command: vec!["nonexistent-binary-xyz123".to_string()],
+            ..Default::default()
+        };
+        config.tools.insert("nonexistent-formatter".to_string(), tool_def);
+
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```python\nprint('hello')\n```";
+        let result = processor.format(content);
+
+        // Should fail immediately
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ProcessorError::ToolBinaryNotFound { .. }));
     }
 }

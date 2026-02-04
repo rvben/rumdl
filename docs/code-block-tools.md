@@ -42,10 +42,12 @@ rumdl check --fix file.md
 
 ```toml
 [code-block-tools]
-enabled = false                    # Master switch (default: false)
-normalize-language = "linguist"    # Language alias resolution (see below)
-on-error = "warn"                  # Error handling: "fail", "warn", or "skip"
-timeout = 30000                    # Tool timeout in milliseconds
+enabled = false                              # Master switch (default: false)
+normalize-language = "linguist"              # Language alias resolution (see below)
+on-error = "warn"                            # Error handling: "fail", "warn", or "skip"
+on-missing-language-definition = "ignore"   # See "Missing Language/Tool Handling" below
+on-missing-tool-binary = "ignore"            # See "Missing Language/Tool Handling" below
+timeout = 30000                              # Tool timeout in milliseconds
 ```
 
 ### Language Configuration
@@ -156,6 +158,51 @@ on-error = "warn"  # Global default
 [code-block-tools.languages]
 shell = { lint = ["shellcheck"], on-error = "skip" }  # Override for shell
 ```
+
+## Missing Language/Tool Handling
+
+Two additional options control behavior when configuration or tools are missing:
+
+### `on-missing-language-definition`
+
+Controls what happens when a code block has a language tag, but no tools are configured for that language in the current mode (`lint` for `rumdl check`, `format` for `rumdl check --fix`).
+
+| Value         | Behavior                                                     |
+| ------------- | ------------------------------------------------------------ |
+| `"ignore"`    | Silently skip the block (default, backward compatible)       |
+| `"fail"`      | Record an error, continue processing, exit non-zero at end   |
+| `"fail-fast"` | Stop immediately, exit non-zero                              |
+
+### `on-missing-tool-binary`
+
+Controls what happens when a configured tool's binary cannot be found in PATH.
+
+| Value         | Behavior                                                     |
+| ------------- | ------------------------------------------------------------ |
+| `"ignore"`    | Silently skip the tool (default, backward compatible)        |
+| `"fail"`      | Record an error, continue processing, exit non-zero at end   |
+| `"fail-fast"` | Stop immediately, exit non-zero                              |
+
+### Example: Strict Mode
+
+For CI environments where you want to ensure all code blocks are processed:
+
+```toml
+[code-block-tools]
+enabled = true
+on-missing-language-definition = "fail"
+on-missing-tool-binary = "fail-fast"
+
+[code-block-tools.languages]
+python = { lint = ["ruff:check"], format = ["ruff:format"] }
+shell = { lint = ["shellcheck"], format = ["shfmt"] }
+```
+
+With this configuration:
+
+- A Python code block without ruff installed will fail immediately
+- A JavaScript code block (no tools configured) will record an error but continue
+- The final exit code will be non-zero if any errors were recorded
 
 ## How It Works
 
