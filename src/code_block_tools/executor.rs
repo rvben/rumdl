@@ -231,10 +231,8 @@ impl ToolExecutor {
             }
         };
 
-        let stdout =
-            join_reader(stdout_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
-        let stderr =
-            join_reader(stderr_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
+        let stdout = join_reader(stdout_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
+        let stderr = join_reader(stderr_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
         let exit_code = status.code().unwrap_or(-1);
 
         Ok(ToolOutput {
@@ -289,9 +287,7 @@ fn read_pipe_to_string<R: Read>(mut pipe: R) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
-fn join_reader(
-    handle: Option<thread::JoinHandle<std::io::Result<String>>>,
-) -> Result<String, String> {
+fn join_reader(handle: Option<thread::JoinHandle<std::io::Result<String>>>) -> Result<String, String> {
     match handle {
         Some(handle) => match handle.join() {
             Ok(res) => res.map_err(|e| format!("Failed to read output: {e}")),

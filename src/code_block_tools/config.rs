@@ -202,14 +202,8 @@ stdout = true
         assert_eq!(json.format, vec!["prettier"]);
         assert_eq!(json.on_error, Some(OnError::Warn));
 
-        assert_eq!(
-            config.language_aliases.get("py").map(String::as_str),
-            Some("python")
-        );
-        assert_eq!(
-            config.language_aliases.get("bash").map(String::as_str),
-            Some("shell")
-        );
+        assert_eq!(config.language_aliases.get("py").map(String::as_str), Some("python"));
+        assert_eq!(config.language_aliases.get("bash").map(String::as_str), Some("shell"));
 
         let tool = config.tools.get("custom-tool").expect("Missing custom tool");
         assert_eq!(tool.command, vec!["my-tool", "--format"]);

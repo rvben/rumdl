@@ -1,5 +1,6 @@
 /// Tests for JSON schema validation of rumdl.toml configuration files
 use std::fs;
+use std::process::Command;
 
 /// Load the generated JSON schema
 fn load_schema() -> serde_json::Value {
@@ -316,4 +317,107 @@ force_exclude = true
         kebab_config.global.respect_gitignore,
         snake_config.global.respect_gitignore
     );
+}
+
+/// Test that rumdl.toml.example produces no config warnings when loaded
+///
+/// This catches issues like:
+/// - Deprecated rules (e.g., MD002)
+/// - Unknown rule names
+/// - Invalid configuration values
+/// - Typos in rule names
+/// - Invalid config key names
+#[test]
+fn test_example_config_produces_no_warnings() {
+    let example_path = concat!(env!("CARGO_MANIFEST_DIR"), "/rumdl.toml.example");
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create a test file with content that exercises various rules
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(
+        &test_file,
+        r#"# Test Heading
+
+Some content paragraph.
+
+- List item 1
+- List item 2
+
+```python
+x = 1
+```
+
+Another paragraph.
+"#,
+    )
+    .expect("Failed to write test file");
+
+    // Warning patterns that indicate config problems
+    let warning_patterns = [
+        "[config warning]",
+        "Unknown rule",
+        "deprecated",
+        "did you mean",
+        "unrecognized",
+        "invalid config",
+        "unknown key",
+        "unknown option",
+    ];
+
+    // Test both check and fix modes
+    for mode in ["check", "fix"] {
+        let args: Vec<&str> = if mode == "fix" {
+            vec!["check", "--fix", "--config", example_path, test_file.to_str().unwrap()]
+        } else {
+            vec!["check", "--config", example_path, test_file.to_str().unwrap()]
+        };
+
+        let output = Command::new(rumdl_exe)
+            .args(&args)
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let combined = format!("{stdout}\n{stderr}");
+        let combined_lower = combined.to_lowercase();
+
+        // Check for config warnings in both stdout and stderr
+        let mut found_warnings = Vec::new();
+        for pattern in &warning_patterns {
+            if combined_lower.contains(&pattern.to_lowercase()) {
+                found_warnings.push(*pattern);
+            }
+        }
+
+        if !found_warnings.is_empty() {
+            eprintln!("=== rumdl.toml.example produced config warnings in {mode} mode ===");
+            eprintln!("Matched patterns: {found_warnings:?}");
+            eprintln!("stdout: {stdout}");
+            eprintln!("stderr: {stderr}");
+            panic!(
+                "rumdl.toml.example should not produce any config warnings.\n\
+                 This usually means a deprecated or unknown rule is configured.\n\
+                 Please update rumdl.toml.example to remove invalid configurations."
+            );
+        }
+
+        // Verify the command didn't fail due to config loading errors
+        // Exit code 1 is OK (lint warnings found), but other non-zero codes may indicate problems
+        if !output.status.success() && output.status.code() != Some(1) {
+            eprintln!("=== rumdl failed unexpectedly in {mode} mode ===");
+            eprintln!("Exit code: {:?}", output.status.code());
+            eprintln!("stdout: {stdout}");
+            eprintln!("stderr: {stderr}");
+            panic!(
+                "rumdl.toml.example caused rumdl to fail with unexpected exit code.\n\
+                 This may indicate a config loading error."
+            );
+        }
+    }
+
+    // Verify config is actually being loaded by checking that a configured rule
+    // (MD013 with line_length=100) doesn't trigger on a line under 100 chars
+    // but the test file content is intentionally short so this is implicitly tested
 }
