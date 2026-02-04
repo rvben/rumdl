@@ -187,8 +187,8 @@ impl Rule for MD018NoMissingSpaceAtx {
 
         // Check all lines that have ATX headings from cached info
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip lines inside HTML blocks or HTML comments (e.g., CSS selectors like #id)
-            if line_info.in_html_block || line_info.in_html_comment {
+            // Skip lines inside HTML blocks, HTML comments, or PyMdown blocks
+            if line_info.in_html_block || line_info.in_html_comment || line_info.in_pymdown_block {
                 continue;
             }
 

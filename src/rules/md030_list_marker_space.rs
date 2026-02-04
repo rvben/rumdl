@@ -74,10 +74,11 @@ impl Rule for MD030ListMarkerSpace {
 
         // First pass: Check parser-recognized list items
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip code blocks, math blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
+            // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
             if line_info.list_item.is_some()
                 && !line_info.in_code_block
                 && !line_info.in_math_block
+                && !line_info.in_pymdown_block
                 && !line_info.in_mkdocs_html_markdown
             {
                 let line_num_1based = line_num + 1;
@@ -161,6 +162,7 @@ impl Rule for MD030ListMarkerSpace {
                     || line_info.in_front_matter
                     || line_info.in_html_comment
                     || line_info.in_math_block
+                    || line_info.in_pymdown_block
                     || line_info.in_mkdocs_html_markdown)
             {
                 continue;

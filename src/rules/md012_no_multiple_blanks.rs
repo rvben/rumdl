@@ -126,12 +126,12 @@ impl Rule for MD012NoMultipleBlanks {
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
 
-        // Use filtered_lines to automatically skip front-matter, code blocks, Quarto divs, and math blocks
+        // Use filtered_lines to automatically skip front-matter, code blocks, Quarto divs, math blocks,
+        // PyMdown blocks, and Obsidian comments.
         // The in_code_block field in LineInfo is pre-computed using pulldown-cmark
-        // and correctly handles both fenced code blocks and indented code blocks
-        // The in_quarto_div field is only set for Quarto flavor, so skip_quarto_divs() has no effect otherwise
-        // The in_math_block field tracks $$ delimited math blocks (Quarto/LaTeX)
-        // The in_obsidian_comment field tracks Obsidian %%...%% comments (Obsidian flavor only)
+        // and correctly handles both fenced code blocks and indented code blocks.
+        // Flavor-specific fields (in_quarto_div, in_pymdown_block, in_obsidian_comment) are only
+        // set for their respective flavors, so the skip filters have no effect otherwise.
         for filtered_line in ctx
             .filtered_lines()
             .skip_front_matter()
@@ -139,6 +139,7 @@ impl Rule for MD012NoMultipleBlanks {
             .skip_quarto_divs()
             .skip_math_blocks()
             .skip_obsidian_comments()
+            .skip_pymdown_blocks()
         {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;

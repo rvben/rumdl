@@ -466,8 +466,8 @@ impl Rule for MD025SingleTitle {
             if let Some(heading) = &line_info.heading
                 && heading.level as usize == self.config.level.as_usize()
             {
-                // Ignore if indented 4+ spaces (indented code block) or inside fenced code block
-                if line_info.visual_indent >= 4 || line_info.in_code_block {
+                // Ignore if indented 4+ spaces (indented code block), inside fenced code block, or PyMdown block
+                if line_info.visual_indent >= 4 || line_info.in_code_block || line_info.in_pymdown_block {
                     continue;
                 }
                 target_level_count += 1;

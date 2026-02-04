@@ -90,6 +90,11 @@ impl Rule for MD009TrailingSpaces {
         let lines: Vec<&str> = content.lines().collect();
 
         for (line_num, &line) in lines.iter().enumerate() {
+            // Skip lines inside PyMdown blocks (MkDocs flavor)
+            if ctx.line_info(line_num + 1).is_some_and(|info| info.in_pymdown_block) {
+                continue;
+            }
+
             let line_is_ascii = line.is_ascii();
             let trailing_spaces = if line_is_ascii {
                 Self::count_trailing_spaces_ascii(line)

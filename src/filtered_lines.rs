@@ -93,6 +93,8 @@ pub struct LineFilterConfig {
     pub skip_definition_lists: bool,
     /// Skip lines inside Obsidian comments (%%...%%)
     pub skip_obsidian_comments: bool,
+    /// Skip lines inside PyMdown Blocks (/// ... ///, MkDocs flavor only)
+    pub skip_pymdown_blocks: bool,
 }
 
 impl LineFilterConfig {
@@ -263,6 +265,17 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside PyMdown Blocks (/// ... ///)
+    ///
+    /// PyMdown Blocks are structured content blocks used by the PyMdown Extensions
+    /// library for captions, collapsible details, admonitions, and other features.
+    /// Rules may need to skip them for accurate processing.
+    #[must_use]
+    pub fn skip_pymdown_blocks(mut self) -> Self {
+        self.skip_pymdown_blocks = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         (self.skip_front_matter && line_info.in_front_matter)
@@ -280,6 +293,7 @@ impl LineFilterConfig {
             || (self.skip_mkdocs_html_markdown && line_info.in_mkdocs_html_markdown)
             || (self.skip_definition_lists && line_info.in_definition_list)
             || (self.skip_obsidian_comments && line_info.in_obsidian_comment)
+            || (self.skip_pymdown_blocks && line_info.in_pymdown_block)
     }
 }
 
@@ -510,6 +524,13 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_obsidian_comments(mut self) -> Self {
         self.config = self.config.skip_obsidian_comments();
+        self
+    }
+
+    /// Skip lines inside PyMdown Blocks (/// ... ///)
+    #[must_use]
+    pub fn skip_pymdown_blocks(mut self) -> Self {
+        self.config = self.config.skip_pymdown_blocks();
         self
     }
 }
@@ -1756,6 +1777,157 @@ After comment."#;
         assert!(
             !ctx.lines[4].in_obsidian_comment,
             "Line 4 should not be marked as in_obsidian_comment"
+        );
+    }
+
+    // ==================== PyMdown Blocks Filter Tests ====================
+
+    #[test]
+    fn test_skip_pymdown_blocks_basic() {
+        // Basic PyMdown block (caption)
+        let content = r#"# Heading
+
+/// caption
+Table caption here.
+///
+
+Content after."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_pymdown_blocks().into_iter().collect();
+
+        // Should include heading and content after
+        assert!(
+            lines.iter().any(|l| l.content.contains("# Heading")),
+            "Should include heading"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Content after")),
+            "Should include content after block"
+        );
+
+        // Should NOT include content inside the block
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Table caption")),
+            "Should exclude content inside block"
+        );
+    }
+
+    #[test]
+    fn test_skip_pymdown_blocks_details() {
+        // Details block with summary
+        let content = r#"# Heading
+
+/// details | Click to expand
+    open: True
+Hidden content here.
+More hidden content.
+///
+
+Visible content."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_pymdown_blocks().into_iter().collect();
+
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Hidden content")),
+            "Should exclude hidden content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("open: True")),
+            "Should exclude YAML options"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("Visible content")),
+            "Should include visible content"
+        );
+    }
+
+    #[test]
+    fn test_skip_pymdown_blocks_nested() {
+        // Nested blocks
+        let content = r#"# Title
+
+/// details | Outer
+Outer content.
+
+  /// caption
+  Inner caption.
+  ///
+
+More outer content.
+///
+
+After all blocks."#;
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let lines: Vec<_> = ctx.filtered_lines().skip_pymdown_blocks().into_iter().collect();
+
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Outer content")),
+            "Should exclude outer block content"
+        );
+        assert!(
+            !lines.iter().any(|l| l.content.contains("Inner caption")),
+            "Should exclude inner block content"
+        );
+        assert!(
+            lines.iter().any(|l| l.content.contains("After all blocks")),
+            "Should include content after all blocks"
+        );
+    }
+
+    #[test]
+    fn test_pymdown_block_line_info_field() {
+        // Verify the in_pymdown_block field is set correctly
+        let content = "visible\n/// caption\nhidden\n///\nvisible";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        // Line 0: visible - should NOT be in block
+        assert!(
+            !ctx.lines[0].in_pymdown_block,
+            "Line 0 should not be marked as in_pymdown_block"
+        );
+
+        // Line 1: /// caption - should be in block
+        assert!(
+            ctx.lines[1].in_pymdown_block,
+            "Line 1 (/// caption) should be marked as in_pymdown_block"
+        );
+
+        // Line 2: hidden - should be in block
+        assert!(
+            ctx.lines[2].in_pymdown_block,
+            "Line 2 (hidden) should be marked as in_pymdown_block"
+        );
+
+        // Line 3: /// - closing should still be in block range
+        assert!(
+            ctx.lines[3].in_pymdown_block,
+            "Line 3 (closing ///) should be marked as in_pymdown_block"
+        );
+
+        // Line 4: visible - should NOT be in block
+        assert!(
+            !ctx.lines[4].in_pymdown_block,
+            "Line 4 should not be marked as in_pymdown_block"
+        );
+    }
+
+    #[test]
+    fn test_pymdown_blocks_only_for_mkdocs_flavor() {
+        // PyMdown blocks should only be detected for MkDocs flavor
+        let content = "/// caption\nCaption text\n///";
+
+        // Test with MkDocs flavor - should detect block
+        let ctx_mkdocs = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        assert!(
+            ctx_mkdocs.lines[1].in_pymdown_block,
+            "MkDocs flavor should detect pymdown blocks"
+        );
+
+        // Test with Standard flavor - should NOT detect block
+        let ctx_standard = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(
+            !ctx_standard.lines[1].in_pymdown_block,
+            "Standard flavor should NOT detect pymdown blocks"
         );
     }
 }

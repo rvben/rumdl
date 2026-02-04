@@ -131,6 +131,8 @@ pub struct LineInfo {
     pub in_definition_list: bool,
     /// Whether this line is inside an Obsidian comment (%%...%% syntax, Obsidian flavor only)
     pub in_obsidian_comment: bool,
+    /// Whether this line is inside a PyMdown Blocks region (/// ... ///, MkDocs flavor only)
+    pub in_pymdown_block: bool,
 }
 
 impl LineInfo {
@@ -146,6 +148,15 @@ impl LineInfo {
     pub fn in_mkdocs_container(&self) -> bool {
         self.in_admonition || self.in_content_tab || self.in_mkdocs_html_markdown
     }
+}
+
+/// Grouped byte ranges for skip context detection
+/// Used to reduce parameter count in internal functions
+struct SkipByteRanges<'a> {
+    html_comment_ranges: &'a [crate::utils::skip_context::ByteRange],
+    autodoc_ranges: &'a [crate::utils::skip_context::ByteRange],
+    quarto_div_ranges: &'a [crate::utils::skip_context::ByteRange],
+    pymdown_block_ranges: &'a [crate::utils::skip_context::ByteRange],
 }
 
 /// Information about a list item
@@ -675,20 +686,27 @@ impl<'a> LintContext<'a> {
             }
         });
 
+        // Pre-compute PyMdown Blocks ranges for MkDocs flavor (/// ... ///)
+        let pymdown_block_ranges = profile_section!("PyMdown block ranges", profile, {
+            if flavor == MarkdownFlavor::MkDocs {
+                crate::utils::pymdown_blocks::detect_block_ranges(content)
+            } else {
+                Vec::new()
+            }
+        });
+
         // Pre-compute line information AND emphasis spans (without headings/blockquotes yet)
         // Emphasis spans are captured during the same pulldown-cmark parse as list detection
+        let skip_ranges = SkipByteRanges {
+            html_comment_ranges: &html_comment_ranges,
+            autodoc_ranges: &autodoc_ranges,
+            quarto_div_ranges: &quarto_div_ranges,
+            pymdown_block_ranges: &pymdown_block_ranges,
+        };
         let (mut lines, emphasis_spans) = profile_section!(
             "Basic line info",
             profile,
-            Self::compute_basic_line_info(
-                content,
-                &line_offsets,
-                &code_blocks,
-                flavor,
-                &html_comment_ranges,
-                &autodoc_ranges,
-                &quarto_div_ranges,
-            )
+            Self::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor, &skip_ranges,)
         );
 
         // Detect HTML blocks BEFORE heading detection
@@ -2448,9 +2466,7 @@ impl<'a> LintContext<'a> {
         line_offsets: &[usize],
         code_blocks: &[(usize, usize)],
         flavor: MarkdownFlavor,
-        html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-        autodoc_ranges: &[crate::utils::skip_context::ByteRange],
-        quarto_div_ranges: &[crate::utils::skip_context::ByteRange],
+        skip_ranges: &SkipByteRanges<'_>,
     ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
         let content_lines: Vec<&str> = content.lines().collect();
         let mut lines = Vec::with_capacity(content_lines.len());
@@ -2497,12 +2513,15 @@ impl<'a> LintContext<'a> {
 
             // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
             let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
-                && crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(autodoc_ranges, byte_offset);
+                && crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(
+                    skip_ranges.autodoc_ranges,
+                    byte_offset,
+                );
             // Check if the ENTIRE line is within an HTML comment (not just the line start)
             // This ensures content after `-->` on the same line is not incorrectly skipped
             let line_end_offset = byte_offset + line.len();
             let in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
-                html_comment_ranges,
+                skip_ranges.html_comment_ranges,
                 byte_offset,
                 line_end_offset,
             );
@@ -2531,7 +2550,11 @@ impl<'a> LintContext<'a> {
 
             // Check if line is inside a Quarto div block
             let in_quarto_div = flavor == MarkdownFlavor::Quarto
-                && crate::utils::quarto_divs::is_within_div_block_ranges(quarto_div_ranges, byte_offset);
+                && crate::utils::quarto_divs::is_within_div_block_ranges(skip_ranges.quarto_div_ranges, byte_offset);
+
+            // Check if line is inside a PyMdown Blocks region (/// ... ///)
+            let in_pymdown_block = flavor == MarkdownFlavor::MkDocs
+                && crate::utils::pymdown_blocks::is_within_block_ranges(skip_ranges.pymdown_block_ranges, byte_offset);
 
             lines.push(LineInfo {
                 byte_offset,
@@ -2561,6 +2584,7 @@ impl<'a> LintContext<'a> {
                 in_mkdocs_html_markdown: false, // Will be populated for MkDocs files
                 in_definition_list: false,      // Will be populated for MkDocs files
                 in_obsidian_comment: false,     // Will be populated for Obsidian files
+                in_pymdown_block,
             });
         }
 

@@ -328,7 +328,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
         let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
         let line_index = &ctx.line_index;
 
-        // Process content lines, automatically skipping front matter, code blocks, HTML, and Obsidian comments
+        // Process content lines, automatically skipping front matter, code blocks, HTML, PyMdown blocks, and Obsidian comments
         for line in ctx
             .filtered_lines()
             .skip_front_matter()
@@ -337,6 +337,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
             .skip_html_comments()
             .skip_mkdocstrings()
             .skip_esm_blocks()
+            .skip_pymdown_blocks()
             .skip_obsidian_comments()
         {
             // Quick check: skip if line doesn't contain double spaces

@@ -177,6 +177,11 @@ impl Rule for MD010NoHardTabs {
                 continue;
             }
 
+            // Skip lines inside PyMdown blocks (MkDocs flavor)
+            if ctx.line_info(line_num + 1).is_some_and(|info| info.in_pymdown_block) {
+                continue;
+            }
+
             // Process tabs directly without intermediate collection
             let tab_groups = Self::find_and_group_tabs(line);
             if tab_groups.is_empty() {

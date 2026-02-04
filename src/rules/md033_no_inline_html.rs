@@ -934,8 +934,11 @@ impl Rule for MD033NoInlineHtml {
             // Reconstruct tag string from byte offsets
             let tag = &content[html_tag.byte_offset..html_tag.byte_end];
 
-            // Skip tags in code blocks (uses proper code block detection from LintContext)
-            if ctx.line_info(line_num).is_some_and(|info| info.in_code_block) {
+            // Skip tags in code blocks or PyMdown blocks (uses proper detection from LintContext)
+            if ctx
+                .line_info(line_num)
+                .is_some_and(|info| info.in_code_block || info.in_pymdown_block)
+            {
                 continue;
             }
 

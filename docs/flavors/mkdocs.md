@@ -109,6 +109,33 @@ mkdocstrings autodoc syntax is recognized:
 
 **Affected rules**: MD031 (blanks around fences), MD038 (code spans)
 
+### PyMdown Blocks
+
+[PyMdown Blocks](https://facelessuser.github.io/pymdown-extensions/extensions/blocks/) syntax using `///` fences is recognized:
+
+```markdown
+/// details | Summary
+    type: warning
+
+Content inside the block.
+
+///
+
+/// caption
+Figure 1: Example diagram
+///
+
+/// html | div.custom-class
+
+Custom HTML content with markdown.
+
+///
+```
+
+Block types include: `admonition`, `details`, `caption`, `html`, `tab`, and custom blocks.
+
+**Affected rules**: MD012, MD018, MD022, MD025, MD030, MD033, MD036, MD057, MD059, MD064 (all skip content inside blocks)
+
 ### Extended Markdown Syntax
 
 MkDocs extensions for special formatting:
@@ -204,6 +231,7 @@ The MkDocs flavor provides lint-aware support for the common Python-Markdown and
 | [tasklist](https://facelessuser.github.io/pymdown-extensions/extensions/tasklist/) | ✅ Supported | Task lists `- [x] Task` (standard GFM) |
 | [betterem](https://facelessuser.github.io/pymdown-extensions/extensions/betterem/) | ✅ Supported | Standard emphasis handling applies |
 | [critic](https://facelessuser.github.io/pymdown-extensions/extensions/critic/) | ✅ Supported | Critic markup `{++add++}`, `{--del--}` |
+| [blocks](https://facelessuser.github.io/pymdown-extensions/extensions/blocks/) | ✅ Supported | PyMdown Blocks `/// type` with `///` fence syntax |
 
 ### mkdocstrings
 

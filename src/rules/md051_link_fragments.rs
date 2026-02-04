@@ -352,6 +352,11 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip links inside PyMdown blocks (MkDocs flavor)
+            if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
+                continue;
+            }
+
             // Skip wiki-links - they reference other files and may have their own fragment validation
             if matches!(link.link_type, LinkType::WikiLink { .. }) {
                 continue;
@@ -560,6 +565,11 @@ impl Rule for MD051LinkFragments {
         // Extract cross-file links (for validation against other files)
         for link in &ctx.links {
             if link.is_reference {
+                continue;
+            }
+
+            // Skip links inside PyMdown blocks (MkDocs flavor)
+            if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
                 continue;
             }
 

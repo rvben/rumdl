@@ -364,6 +364,11 @@ impl Rule for MD022BlanksAroundHeadings {
                 continue;
             }
 
+            // Skip headings inside PyMdown blocks (/// ... ///) - MkDocs flavor only
+            if line_info.in_pymdown_block {
+                continue;
+            }
+
             let heading = line_info.heading.as_ref().unwrap();
 
             // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)

@@ -353,6 +353,12 @@ impl Rule for MD057ExistingRelativeLinks {
                     continue;
                 }
 
+                // Skip lines inside PyMdown blocks (MkDocs flavor)
+                // This must be checked BEFORE processed_lines to skip the entire line
+                if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
+                    continue;
+                }
+
                 // Skip if we've already processed this line
                 if !processed_lines.insert(line_idx) {
                     continue;
@@ -472,6 +478,11 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Also process images - they have URLs already parsed
         for image in &ctx.images {
+            // Skip images inside PyMdown blocks (MkDocs flavor)
+            if ctx.line_info(image.line).is_some_and(|info| info.in_pymdown_block) {
+                continue;
+            }
+
             let url = image.url.as_ref();
 
             // Skip empty URLs

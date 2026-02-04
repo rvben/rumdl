@@ -240,6 +240,14 @@ impl Rule for MD031BlanksAroundFences {
 
         // Check blank lines around each fenced code block
         for (opening_line, closing_line) in &fenced_blocks {
+            // Skip fenced code blocks inside PyMdown blocks (MkDocs flavor)
+            if ctx
+                .line_info(*opening_line + 1)
+                .is_some_and(|info| info.in_pymdown_block)
+            {
+                continue;
+            }
+
             // Check for blank line before opening fence
             // Skip if right after frontmatter
             // Skip if right after Quarto div marker (Quarto flavor)
@@ -318,6 +326,12 @@ impl Rule for MD031BlanksAroundFences {
                 // Skip if this line is inside a fenced code block
                 let in_fenced_block = fenced_blocks.iter().any(|(start, end)| i >= *start && i <= *end);
                 if in_fenced_block {
+                    i += 1;
+                    continue;
+                }
+
+                // Skip if this line is inside a PyMdown block
+                if ctx.line_info(i + 1).is_some_and(|info| info.in_pymdown_block) {
                     i += 1;
                     continue;
                 }
