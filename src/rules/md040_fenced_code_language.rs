@@ -302,8 +302,7 @@ impl Rule for MD040FencedCodeLanguage {
             // Check for unknown language (only if not handled by allowlist)
             if canonical.is_none() {
                 if let Some((msg, severity)) = self.check_unknown_language(&block.language) {
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_line_range(block.line_idx + 1, line);
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -324,17 +323,15 @@ impl Rule for MD040FencedCodeLanguage {
                 && let Some(preferred) = preferred_labels.get(canonical.unwrap())
                 && &block.language != preferred
             {
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_line_range(block.line_idx + 1, line);
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
-                let fix = find_label_span(line, &block.fence_marker)
-                    .and_then(|(label_start, label_end)| {
-                        let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                        Some(Fix {
-                            range: (line_start_byte + label_start)..(line_start_byte + label_end),
-                            replacement: preferred.clone(),
-                        })
-                    });
+                let fix = find_label_span(line, &block.fence_marker).map(|(label_start, label_end)| {
+                    let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
+                    Fix {
+                        range: (line_start_byte + label_start)..(line_start_byte + label_end),
+                        replacement: preferred.clone(),
+                    }
+                });
                 let lang = &block.language;
                 let canonical = canonical.unwrap();
 
@@ -407,7 +404,6 @@ impl Rule for MD040FencedCodeLanguage {
                     block.line_idx,
                     FixAction::NormalizeLabel {
                         fence_marker: block.fence_marker.clone(),
-                        old_label: block.language.clone(),
                         new_label: preferred.clone(),
                     },
                 );
@@ -435,7 +431,6 @@ impl Rule for MD040FencedCodeLanguage {
                     }
                     FixAction::NormalizeLabel {
                         fence_marker,
-                        old_label: _,
                         new_label,
                     } => {
                         if let Some((label_start, label_end)) = find_label_span(line, fence_marker) {
@@ -504,15 +499,8 @@ impl Rule for MD040FencedCodeLanguage {
 
 #[derive(Debug, Clone)]
 enum FixAction {
-    AddLanguage {
-        fence_marker: String,
-        has_title_only: bool,
-    },
-    NormalizeLabel {
-        fence_marker: String,
-        old_label: String,
-        new_label: String,
-    },
+    AddLanguage { fence_marker: String, has_title_only: bool },
+    NormalizeLabel { fence_marker: String, new_label: String },
 }
 
 /// Detect fenced code blocks using pulldown-cmark, returning info about each block's opening fence
