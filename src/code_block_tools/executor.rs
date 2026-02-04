@@ -120,6 +120,13 @@ impl ToolExecutor {
                 .status()
                 .is_ok_and(|s| s.success())
         }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            // WASM and other platforms: external tools not available
+            let _ = tool_name;
+            false
+        }
     }
 
     /// Execute a tool with the given input.
