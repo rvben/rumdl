@@ -64,20 +64,23 @@ names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitaliz
 code-blocks = false  # Check code blocks for proper names (default: false, skips code blocks)
 
 # Code block tools (external linters/formatters for fenced code blocks)
+# Runs external tools on code blocks during `rumdl check` (lint) and `--fix` (format)
 [code-block-tools]
-enabled = false
-normalize-language = "linguist"
-on-error = "warn"
-timeout = 30000
+enabled = false                    # Enable to activate code block linting/formatting
+normalize-language = "linguist"    # Resolve language aliases (py -> python, bash -> shell)
+on-error = "warn"                  # How to handle tool failures: "fail", "warn", or "skip"
+timeout = 30000                    # Timeout per tool execution in milliseconds
 
+# Custom language aliases (in addition to built-in linguist aliases)
 [code-block-tools.language-aliases]
 py = "python"
-bash = "shell"
+sh = "shell"
 
-[code-block-tools.languages.python]
-lint = ["ruff:check"]
-format = ["ruff:format"]
-
-[code-block-tools.languages.shell]
-lint = ["shellcheck"]
-format = ["shfmt"]
+# Configure tools per language (inline table syntax for compact config)
+[code-block-tools.languages]
+python = { lint = ["ruff:check"], format = ["ruff:format"] }
+shell = { lint = ["shellcheck"], format = ["shfmt"] }
+javascript = { format = ["prettier"] }
+json = { format = ["jq"] }
+# rust = { format = ["rustfmt"] }
+# go = { format = ["gofmt"] }
