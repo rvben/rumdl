@@ -83,39 +83,39 @@ With `normalize-language = "linguist"` (default), common aliases are resolved au
 
 rumdl includes definitions for common tools:
 
-| Tool ID | Language | Type | Command |
-|---------|----------|------|---------|
-| `ruff:check` | Python | Lint | `ruff check --output-format=concise -` |
-| `ruff:format` | Python | Format | `ruff format -` |
-| `black` | Python | Format | `black --quiet -` |
-| `isort` | Python | Format | `isort -` |
-| `shellcheck` | Shell | Lint | `shellcheck -` |
-| `shfmt` | Shell | Format | `shfmt` |
-| `prettier` | Multi | Format | `prettier --stdin-filepath=_.EXT` |
-| `eslint` | JS/TS | Lint | `eslint --stdin --format=compact` |
-| `rustfmt` | Rust | Format | `rustfmt` |
-| `gofmt` | Go | Format | `gofmt` |
-| `goimports` | Go | Format | `goimports` |
-| `clang-format` | C/C++ | Format | `clang-format` |
-| `stylua` | Lua | Format | `stylua -` |
-| `taplo:format` | TOML | Format | `taplo format -` |
-| `yamlfmt` | YAML | Format | `yamlfmt -` |
-| `jq` | JSON | Format | `jq .` |
-| `sql-formatter` | SQL | Format | `sql-formatter` |
-| `pg_format` | SQL | Format | `pg_format` |
-| `nixfmt` | Nix | Format | `nixfmt` |
-| `terraform:fmt` | Terraform | Format | `terraform fmt -` |
-| `mix:format` | Elixir | Format | `mix format -` |
-| `dart:format` | Dart | Format | `dart format` |
-| `ktlint` | Kotlin | Both | `ktlint --format` / `ktlint` |
-| `scalafmt` | Scala | Format | `scalafmt --stdin` |
-| `ormolu` | Haskell | Format | `ormolu` |
-| `fourmolu` | Haskell | Format | `fourmolu` |
-| `latexindent` | LaTeX | Format | `latexindent` |
-| `markdownlint` | Markdown | Lint | `markdownlint --stdin` |
-| `typos` | Multi | Lint | `typos --format=brief -` |
-| `cljfmt` | Clojure | Format | `cljfmt fix -` |
-| `rubocop` | Ruby | Both | `rubocop -a` / `rubocop` |
+| Tool ID         | Language  | Type   | Command                                |
+| --------------- | --------- | ------ | -------------------------------------- |
+| `ruff:check`    | Python    | Lint   | `ruff check --output-format=concise -` |
+| `ruff:format`   | Python    | Format | `ruff format -`                        |
+| `black`         | Python    | Format | `black --quiet -`                      |
+| `isort`         | Python    | Format | `isort -`                              |
+| `shellcheck`    | Shell     | Lint   | `shellcheck -`                         |
+| `shfmt`         | Shell     | Format | `shfmt`                                |
+| `prettier`      | Multi     | Format | `prettier --stdin-filepath=_.EXT`      |
+| `eslint`        | JS/TS     | Lint   | `eslint --stdin --format=compact`      |
+| `rustfmt`       | Rust      | Format | `rustfmt`                              |
+| `gofmt`         | Go        | Format | `gofmt`                                |
+| `goimports`     | Go        | Format | `goimports`                            |
+| `clang-format`  | C/C++     | Format | `clang-format`                         |
+| `stylua`        | Lua       | Format | `stylua -`                             |
+| `taplo:format`  | TOML      | Format | `taplo format -`                       |
+| `yamlfmt`       | YAML      | Format | `yamlfmt -`                            |
+| `jq`            | JSON      | Format | `jq .`                                 |
+| `sql-formatter` | SQL       | Format | `sql-formatter`                        |
+| `pg_format`     | SQL       | Format | `pg_format`                            |
+| `nixfmt`        | Nix       | Format | `nixfmt`                               |
+| `terraform:fmt` | Terraform | Format | `terraform fmt -`                      |
+| `mix:format`    | Elixir    | Format | `mix format -`                         |
+| `dart:format`   | Dart      | Format | `dart format`                          |
+| `ktlint`        | Kotlin    | Both   | `ktlint --format` / `ktlint`           |
+| `scalafmt`      | Scala     | Format | `scalafmt --stdin`                     |
+| `ormolu`        | Haskell   | Format | `ormolu`                               |
+| `fourmolu`      | Haskell   | Format | `fourmolu`                             |
+| `latexindent`   | LaTeX     | Format | `latexindent`                          |
+| `markdownlint`  | Markdown  | Lint   | `markdownlint --stdin`                 |
+| `typos`         | Multi     | Lint   | `typos --format=brief -`               |
+| `cljfmt`        | Clojure   | Format | `cljfmt fix -`                         |
+| `rubocop`       | Ruby      | Both   | `rubocop -a` / `rubocop`               |
 
 **Note**: Tools must be installed separately. rumdl does not install them for you.
 
@@ -141,10 +141,10 @@ mylang = { format = ["my-formatter"] }
 
 The `on-error` option controls behavior when tools fail:
 
-| Value | Behavior |
-|-------|----------|
-| `"fail"` | Stop processing, return error |
-| `"warn"` | Log warning, continue processing |
+| Value    | Behavior                           |
+| -------- | ---------------------------------- |
+| `"fail"` | Stop processing, return error      |
+| `"warn"` | Log warning, continue processing   |
 | `"skip"` | Silently skip, continue processing |
 
 Set globally or per-language:
@@ -256,13 +256,13 @@ zsh = "shell"
 
 ## Comparison with mdsf
 
-| Feature | rumdl | mdsf |
-|---------|-------|------|
-| Built-in tools | 31 | 339 |
-| Custom tools | Yes | Yes |
-| Linting | Yes | No |
-| Formatting | Yes | Yes |
-| Language aliases | Yes (Linguist) | Yes |
-| Integration | Part of rumdl | Standalone |
+| Feature          | rumdl          | mdsf       |
+| ---------------- | -------------- | ---------- |
+| Built-in tools   | 31             | 339        |
+| Custom tools     | Yes            | Yes        |
+| Linting          | Yes            | No         |
+| Formatting       | Yes            | Yes        |
+| Language aliases | Yes (Linguist) | Yes        |
+| Integration      | Part of rumdl  | Standalone |
 
 rumdl focuses on common tools with the ability to add custom ones. mdsf has broader tool coverage but only formats (no linting).
