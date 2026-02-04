@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-02-04
+
+### Added
+
+- **Code Block Tools [preview]** - Run external linters and formatters on fenced code blocks ([#331](https://github.com/rvben/rumdl/issues/331))
+  - `rumdl check`: Run configured linters (ruff, shellcheck, eslint, etc.) on code blocks
+  - `rumdl check --fix`: Run configured formatters (ruff, prettier, shfmt, etc.) to auto-format code blocks
+  - 31 built-in tool definitions with support for custom tools
+  - Language resolution via GitHub Linguist aliases (e.g., `py` → `python`, `bash` → `shell`)
+  - Configurable error handling per language (`fail`, `warn`, `skip`)
+  - See [docs/code-block-tools.md](docs/code-block-tools.md) for configuration guide
+
+- **MD018: Per-rule magiclink configuration** - Control whether `magiclink` syntax is recognized per rule
+  - Add `magiclink = true` to MD018 config to skip email-like syntax
+
+- **MD033: Auto-fix for `<a>` and `<img>` tags** - Convert simple HTML links and images to Markdown
+  - `<a href="url">text</a>` → `[text](url)`
+  - `<img src="url" alt="text">` → `![text](url)`
+  - Requires `fix = true` in MD033 config (disabled by default)
+
+### Fixed
+
+- **MD013: Prevent infinite loop in MkDocs admonition reflow** - Fixed edge case causing reflow to hang on certain admonition content
+
+- **Config: Remove deprecated MD002 from example** - `rumdl.toml.example` no longer includes deprecated rules
+
+### Changed
+
+- **Config: Compact inline table syntax in example** - `rumdl.toml.example` now uses more readable inline tables for code-block-tools
+
 ## [0.1.11] - 2026-02-03
 
 ### Added
