@@ -21,3 +21,7 @@ uv.lock
 .cursor/
 .idea/
 site/
+
+# npm platform package binaries
+npm/cli-*/rumdl
+npm/cli-*/rumdl.exe
