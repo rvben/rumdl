@@ -60,8 +60,9 @@ headings = true  # Exclude headings from line length check
 names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
 code-blocks = false  # Check code blocks for proper names (default: false, skips code blocks)
 
-# Code block tools (external linters/formatters for fenced code blocks)
+# Code block tools [preview] - external linters/formatters for fenced code blocks
 # Runs external tools on code blocks during `rumdl check` (lint) and `--fix` (format)
+# Note: This feature is in preview and may change in future versions.
 [code-block-tools]
 enabled = false                    # Enable to activate code block linting/formatting
 normalize-language = "linguist"    # Resolve language aliases (py -> python, bash -> shell)
