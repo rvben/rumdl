@@ -137,7 +137,10 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
         "MD037" => Some(("Text with * spaces around * emphasis", Box::new(MD037NoSpaceInEmphasis))),
         "MD038" => Some(("`code `", Box::new(MD038NoSpaceInCode::default()))),
         "MD039" => Some(("[link text ]( url )", Box::new(MD039NoSpaceInLinks))),
-        "MD040" => Some(("```\ncode without language\n```", Box::new(MD040FencedCodeLanguage))),
+        "MD040" => Some((
+            "```\ncode without language\n```",
+            Box::new(MD040FencedCodeLanguage::default()),
+        )),
         "MD041" => Some(("Not a heading", Box::new(MD041FirstLineHeading::default()))),
         "MD042" => Some(("[]()", Box::new(MD042NoEmptyLinks::new()))),
         "MD043" => Some((

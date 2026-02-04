@@ -224,7 +224,7 @@ More content
         Box::new(MD009TrailingSpaces::default()),
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::default()),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
         Box::new(MD031BlanksAroundFences::default()),
     ];
 

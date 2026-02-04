@@ -819,7 +819,7 @@ fn test_md038_linear_complexity() {
 fn test_md040_linear_complexity() {
     let sizes = [500, 1000, 2000];
     let iterations = 5;
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
 
     let durations: Vec<_> = sizes
         .iter()

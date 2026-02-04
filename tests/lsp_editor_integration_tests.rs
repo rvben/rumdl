@@ -103,7 +103,7 @@ Final paragraph."#;
         Box::new(MD004UnorderedListStyle::new(
             rumdl_lib::rules::md004_unordered_list_style::UnorderedListStyle::Consistent,
         )),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
     ];
 
     // Phase 1: Initial check (editor save trigger)

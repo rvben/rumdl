@@ -119,7 +119,7 @@ fn test_malformed_markdown_edge_cases() {
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
         Box::new(MD032BlanksAroundLists::default()),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
     ];
 
     for (i, test_content) in test_cases.iter().enumerate() {
@@ -255,7 +255,7 @@ fn test_memory_intensive_scenarios() {
         Box::new(MD011NoReversedLinks),
         Box::new(MD022BlanksAroundHeadings::new()),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
         Box::new(MD042NoEmptyLinks::new()),
     ];
 
@@ -322,7 +322,7 @@ fn test_pathological_regex_patterns() {
         Box::new(MD034NoBareUrls),
         Box::new(MD039NoSpaceInLinks),
         Box::new(MD038NoSpaceInCode::default()),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
     ];
 
     for (i, test_content) in test_cases.iter().enumerate() {

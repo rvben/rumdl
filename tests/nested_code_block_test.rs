@@ -50,7 +50,7 @@ echo "hello"
 
 #[test]
 fn test_md040_respects_disable_comments_in_nested_blocks() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
 
     // Test that disable comments work correctly
     let content = r#"# Test
@@ -99,7 +99,7 @@ content
 #[test]
 fn test_documentation_example_preservation() {
     let md031 = MD031BlanksAroundFences::default();
-    let md040 = MD040FencedCodeLanguage;
+    let md040 = MD040FencedCodeLanguage::default();
 
     // Real documentation example that was getting corrupted
     let content = r#"### ✅ Correct

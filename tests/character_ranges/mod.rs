@@ -222,7 +222,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD037" => Some(Box::new(MD037NoSpaceInEmphasis)),
         "MD038" => Some(Box::new(MD038NoSpaceInCode::new())),
         "MD039" => Some(Box::new(MD039NoSpaceInLinks)),
-        "MD040" => Some(Box::new(MD040FencedCodeLanguage)),
+        "MD040" => Some(Box::new(MD040FencedCodeLanguage::default())),
         "MD041" => Some(Box::new(MD041FirstLineHeading::new(1, false))),
         "MD042" => Some(Box::new(MD042NoEmptyLinks::new())),
         "MD043" => Some(Box::new(MD043RequiredHeadings::new(vec![]))),

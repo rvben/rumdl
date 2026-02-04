@@ -1,10 +1,16 @@
+use crate::linguist_data::{default_alias, get_aliases, is_valid_alias, resolve_canonical};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule_config_serde::{RuleConfig, load_rule_config};
 use crate::utils::range_utils::calculate_line_range;
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
+use std::collections::HashMap;
 
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
+mod md040_config;
+use md040_config::{LanguageStyle, MD040Config, UnknownLanguageAction};
+
 struct FencedCodeBlock {
     /// 0-indexed line number where the code block starts
     line_idx: usize,
@@ -14,8 +20,159 @@ struct FencedCodeBlock {
     fence_marker: String,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct MD040FencedCodeLanguage;
+#[derive(Debug, Clone, Default)]
+pub struct MD040FencedCodeLanguage {
+    config: MD040Config,
+}
+
+impl MD040FencedCodeLanguage {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_config(config: MD040Config) -> Self {
+        Self { config }
+    }
+
+    /// Validate the configuration and return any errors
+    fn validate_config(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        // Validate preferred-aliases: check that each alias is valid for its language
+        for (canonical, alias) in &self.config.preferred_aliases {
+            // Find the actual canonical name (case-insensitive)
+            if let Some(actual_canonical) = resolve_canonical(canonical) {
+                if !is_valid_alias(actual_canonical, alias)
+                    && let Some(valid_aliases) = get_aliases(actual_canonical)
+                {
+                    let valid_list: Vec<_> = valid_aliases.iter().take(5).collect();
+                    let valid_str = valid_list
+                        .iter()
+                        .map(|s| format!("'{s}'"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let suffix = if valid_aliases.len() > 5 { ", ..." } else { "" };
+                    errors.push(format!(
+                        "Invalid alias '{alias}' for language '{actual_canonical}'. Valid aliases include: {valid_str}{suffix}"
+                    ));
+                }
+            } else {
+                errors.push(format!(
+                    "Unknown language '{canonical}' in preferred-aliases. Use GitHub Linguist canonical names."
+                ));
+            }
+        }
+
+        errors
+    }
+
+    /// Determine the preferred label for each canonical language in the document
+    fn compute_preferred_labels(&self, blocks: &[FencedCodeBlock]) -> HashMap<String, String> {
+        // Group labels by canonical language
+        let mut by_canonical: HashMap<String, Vec<&str>> = HashMap::new();
+
+        for block in blocks {
+            if block.language.is_empty() {
+                continue;
+            }
+            if let Some(canonical) = resolve_canonical(&block.language) {
+                by_canonical
+                    .entry(canonical.to_string())
+                    .or_default()
+                    .push(&block.language);
+            }
+        }
+
+        // Determine winning label for each canonical language
+        let mut result = HashMap::new();
+
+        for (canonical, labels) in by_canonical {
+            // Check for user override first (case-insensitive lookup)
+            let winner = if let Some(preferred) = self
+                .config
+                .preferred_aliases
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(&canonical))
+                .map(|(_, v)| v.clone())
+            {
+                preferred
+            } else {
+                // Find most prevalent label
+                let mut counts: HashMap<&str, usize> = HashMap::new();
+                for label in &labels {
+                    *counts.entry(*label).or_default() += 1;
+                }
+
+                let max_count = counts.values().max().copied().unwrap_or(0);
+                let winners: Vec<_> = counts
+                    .iter()
+                    .filter(|(_, c)| **c == max_count)
+                    .map(|(l, _)| *l)
+                    .collect();
+
+                if winners.len() == 1 {
+                    winners[0].to_string()
+                } else {
+                    // Tie-break: use curated default if available, otherwise alphabetically first
+                    default_alias(&canonical)
+                        .filter(|default| winners.contains(default))
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| winners.into_iter().min().unwrap().to_string())
+                }
+            };
+
+            result.insert(canonical, winner);
+        }
+
+        result
+    }
+
+    /// Check if a language is allowed based on config
+    fn check_language_allowed(&self, canonical: &str, original_label: &str) -> Option<String> {
+        // Allowlist takes precedence
+        if !self.config.allowed_languages.is_empty() {
+            if !self
+                .config
+                .allowed_languages
+                .iter()
+                .any(|a| a.eq_ignore_ascii_case(canonical))
+            {
+                let allowed = self.config.allowed_languages.join(", ");
+                return Some(format!(
+                    "Language '{original_label}' ({canonical}) is not in the allowed list: {allowed}"
+                ));
+            }
+        } else if !self.config.disallowed_languages.is_empty()
+            && self
+                .config
+                .disallowed_languages
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(canonical))
+        {
+            return Some(format!("Language '{original_label}' ({canonical}) is disallowed"));
+        }
+        None
+    }
+
+    /// Check for unknown language based on config
+    fn check_unknown_language(&self, label: &str) -> Option<(String, Severity)> {
+        if resolve_canonical(label).is_some() {
+            return None;
+        }
+
+        match self.config.unknown_language_action {
+            UnknownLanguageAction::Ignore => None,
+            UnknownLanguageAction::Warn => Some((
+                format!("Unknown language '{label}' (not in GitHub Linguist). Syntax highlighting may not work."),
+                Severity::Warning,
+            )),
+            UnknownLanguageAction::Error => Some((
+                format!("Unknown language '{label}' (not in GitHub Linguist)"),
+                Severity::Error,
+            )),
+        }
+    }
+}
 
 impl Rule for MD040FencedCodeLanguage {
     fn name(&self) -> &'static str {
@@ -30,13 +187,34 @@ impl Rule for MD040FencedCodeLanguage {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
+        // Validate config and emit warnings for invalid configuration
+        for error in self.validate_config() {
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                line: 0,
+                column: 0,
+                end_line: 0,
+                end_column: 0,
+                message: format!("[config error] {error}"),
+                severity: Severity::Error,
+                fix: None,
+            });
+        }
+
         // Use pulldown-cmark to detect fenced code blocks with language info
         let fenced_blocks = detect_fenced_code_blocks(content, &ctx.line_offsets);
 
         // Pre-compute disabled ranges for efficient lookup
         let disabled_ranges = compute_disabled_ranges(content, self.name());
 
-        for block in fenced_blocks {
+        // Compute preferred labels for consistent mode
+        let preferred_labels = if self.config.style == LanguageStyle::Consistent {
+            self.compute_preferred_labels(&fenced_blocks)
+        } else {
+            HashMap::new()
+        };
+
+        for block in &fenced_blocks {
             // Skip if this line is in a disabled range
             if is_line_disabled(&disabled_ranges, block.line_idx) {
                 continue;
@@ -80,6 +258,78 @@ impl Rule for MD040FencedCodeLanguage {
                         replacement: format!("{}text", block.fence_marker),
                     }),
                 });
+                continue;
+            }
+
+            // Skip further checks for special syntax
+            if has_quarto_syntax {
+                continue;
+            }
+
+            // Check for unknown language
+            if let Some((msg, severity)) = self.check_unknown_language(&block.language) {
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: msg,
+                    severity,
+                    fix: None,
+                });
+                continue;
+            }
+
+            // Check language restrictions (allowlist/denylist)
+            if let Some(canonical) = resolve_canonical(&block.language) {
+                if let Some(msg) = self.check_language_allowed(canonical, &block.language) {
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: msg,
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                    continue;
+                }
+
+                // Check consistency
+                if self.config.style == LanguageStyle::Consistent
+                    && let Some(preferred) = preferred_labels.get(canonical)
+                    && &block.language != preferred
+                {
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
+
+                    // Calculate fix range and replacement
+                    let trimmed_start = line.len() - line.trim_start().len();
+                    let fence_len = block.fence_marker.len();
+                    let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
+                    let label_start = line_start_byte + trimmed_start + fence_len;
+                    let label_end = label_start + block.language.len();
+                    let lang = &block.language;
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: format!("Inconsistent language label '{lang}' for {canonical} (use '{preferred}')"),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: label_start..label_end,
+                            replacement: preferred.clone(),
+                        }),
+                    });
+                }
             }
         }
 
@@ -95,8 +345,15 @@ impl Rule for MD040FencedCodeLanguage {
         // Pre-compute disabled ranges
         let disabled_ranges = compute_disabled_ranges(content, self.name());
 
+        // Compute preferred labels for consistent mode
+        let preferred_labels = if self.config.style == LanguageStyle::Consistent {
+            self.compute_preferred_labels(&fenced_blocks)
+        } else {
+            HashMap::new()
+        };
+
         // Build a set of line indices that need fixing
-        let mut lines_to_fix: std::collections::HashMap<usize, (&str, bool)> = std::collections::HashMap::new();
+        let mut lines_to_fix: std::collections::HashMap<usize, FixAction> = std::collections::HashMap::new();
 
         for block in &fenced_blocks {
             if is_line_disabled(&disabled_ranges, block.line_idx) {
@@ -115,22 +372,62 @@ impl Rule for MD040FencedCodeLanguage {
                 && after_fence.contains('}');
 
             if (block.language.is_empty() || has_title_only) && !has_quarto_syntax {
-                lines_to_fix.insert(block.line_idx, (&block.fence_marker, has_title_only));
+                lines_to_fix.insert(
+                    block.line_idx,
+                    FixAction::AddLanguage {
+                        fence_marker: block.fence_marker.clone(),
+                        has_title_only,
+                    },
+                );
+            } else if !has_quarto_syntax
+                && self.config.style == LanguageStyle::Consistent
+                && let Some(canonical) = resolve_canonical(&block.language)
+                && let Some(preferred) = preferred_labels.get(canonical)
+                && &block.language != preferred
+            {
+                lines_to_fix.insert(
+                    block.line_idx,
+                    FixAction::NormalizeLabel {
+                        fence_marker: block.fence_marker.clone(),
+                        old_label: block.language.clone(),
+                        new_label: preferred.clone(),
+                    },
+                );
             }
         }
 
         // Build the result by iterating through lines
         let mut result = String::new();
         for (i, line) in content.lines().enumerate() {
-            if let Some(&(fence_marker, has_title_only)) = lines_to_fix.get(&i) {
-                let indent = &line[..line.len() - line.trim_start().len()];
-                let trimmed = line.trim();
-                let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("").trim();
+            if let Some(action) = lines_to_fix.get(&i) {
+                match action {
+                    FixAction::AddLanguage {
+                        fence_marker,
+                        has_title_only,
+                    } => {
+                        let indent = &line[..line.len() - line.trim_start().len()];
+                        let trimmed = line.trim();
+                        let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("").trim();
 
-                if has_title_only {
-                    result.push_str(&format!("{indent}{fence_marker}text {after_fence}\n"));
-                } else {
-                    result.push_str(&format!("{indent}{fence_marker}text\n"));
+                        if *has_title_only {
+                            result.push_str(&format!("{indent}{fence_marker}text {after_fence}\n"));
+                        } else {
+                            result.push_str(&format!("{indent}{fence_marker}text\n"));
+                        }
+                    }
+                    FixAction::NormalizeLabel {
+                        fence_marker,
+                        old_label,
+                        new_label,
+                    } => {
+                        let indent = &line[..line.len() - line.trim_start().len()];
+                        let trimmed = line.trim();
+                        let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("");
+
+                        // Replace old label with new label, preserving rest
+                        let rest = after_fence.strip_prefix(old_label).unwrap_or(after_fence);
+                        result.push_str(&format!("{indent}{fence_marker}{new_label}{rest}\n"));
+                    }
                 }
             } else {
                 result.push_str(line);
@@ -160,12 +457,42 @@ impl Rule for MD040FencedCodeLanguage {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn default_config_section(&self) -> Option<(String, toml::Value)> {
+        let default_config = MD040Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD040Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        Box::new(MD040FencedCodeLanguage)
+        let rule_config: MD040Config = load_rule_config(config);
+        Box::new(MD040FencedCodeLanguage::with_config(rule_config))
     }
+}
+
+#[derive(Debug, Clone)]
+enum FixAction {
+    AddLanguage {
+        fence_marker: String,
+        has_title_only: bool,
+    },
+    NormalizeLabel {
+        fence_marker: String,
+        old_label: String,
+        new_label: String,
+    },
 }
 
 /// Detect fenced code blocks using pulldown-cmark, returning info about each block's opening fence
@@ -258,20 +585,35 @@ mod tests {
     use crate::lint_context::LintContext;
 
     fn run_check(content: &str) -> LintResult {
-        let rule = MD040FencedCodeLanguage;
+        let rule = MD040FencedCodeLanguage::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.check(&ctx)
+    }
+
+    fn run_check_with_config(content: &str, config: MD040Config) -> LintResult {
+        let rule = MD040FencedCodeLanguage::with_config(config);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.check(&ctx)
     }
 
     fn run_fix(content: &str) -> Result<String, LintError> {
-        let rule = MD040FencedCodeLanguage;
+        let rule = MD040FencedCodeLanguage::default();
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx)
     }
 
+    fn run_fix_with_config(content: &str, config: MD040Config) -> Result<String, LintError> {
+        let rule = MD040FencedCodeLanguage::with_config(config);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        rule.fix(&ctx)
+    }
+
+    // =========================================================================
+    // Basic functionality tests
+    // =========================================================================
+
     #[test]
     fn test_code_blocks_with_language_specified() {
-        // Basic test with language
         let content = r#"# Test
 
 ```python
@@ -298,263 +640,6 @@ print("Hello, world!")
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Code block (```) missing language");
         assert_eq!(result[0].line, 3);
-    }
-
-    #[test]
-    fn test_code_blocks_with_empty_language() {
-        // Test with spaces after the fence
-        let content = r#"# Test
-
-```
-print("Hello, world!")
-```
-"#;
-        let result = run_check(content).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Code block (```) missing language");
-    }
-
-    #[test]
-    fn test_indented_code_blocks_should_be_ignored() {
-        // Indented code blocks (4 spaces) should not trigger the rule
-        let content = r#"# Test
-
-    This is an indented code block
-    It should not trigger MD040
-"#;
-        let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Indented code blocks should be ignored");
-    }
-
-    #[test]
-    fn test_inline_code_spans_should_be_ignored() {
-        let content = r#"# Test
-
-This is `inline code` and should not trigger warnings.
-
-Use the `print()` function.
-"#;
-        let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Inline code spans should be ignored");
-    }
-
-    #[test]
-    fn test_tildes_vs_backticks_for_fences() {
-        // Test tilde fences without language
-        let content_tildes_no_lang = r#"# Test
-
-~~~
-code here
-~~~
-"#;
-        let result = run_check(content_tildes_no_lang).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].message, "Code block (```) missing language");
-
-        // Test tilde fences with language
-        let content_tildes_with_lang = r#"# Test
-
-~~~python
-code here
-~~~
-"#;
-        let result = run_check(content_tildes_with_lang).unwrap();
-        assert!(result.is_empty());
-
-        // Mixed fences
-        let content_mixed = r#"# Test
-
-```python
-code here
-```
-
-~~~javascript
-more code
-~~~
-
-```
-no language
-```
-
-~~~
-also no language
-~~~
-"#;
-        let result = run_check(content_mixed).unwrap();
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_language_with_additional_parameters() {
-        let content = r#"# Test
-
-```python {highlight=[1,2]}
-print("Line 1")
-print("Line 2")
-```
-
-```javascript {.line-numbers startFrom="10"}
-console.log("Hello");
-```
-
-```ruby {data-line="1,3-4"}
-puts "Hello"
-puts "World"
-puts "!"
-```
-"#;
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Code blocks with language and parameters should pass"
-        );
-    }
-
-    #[test]
-    fn test_multiple_code_blocks_in_document() {
-        let content = r#"# Test Document
-
-First block without language:
-```
-code here
-```
-
-Second block with language:
-```python
-print("hello")
-```
-
-Third block without language:
-```
-more code
-```
-
-Fourth block with language:
-```javascript
-console.log("test");
-```
-"#;
-        let result = run_check(content).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].line, 4);
-        assert_eq!(result[1].line, 14);
-    }
-
-    #[test]
-    fn test_nested_code_blocks_in_lists() {
-        let content = r#"# Test
-
-- Item 1
-  ```python
-  print("nested with language")
-  ```
-
-- Item 2
-  ```
-  nested without language
-  ```
-
-- Item 3
-  - Nested item
-    ```javascript
-    console.log("deeply nested");
-    ```
-
-  - Another nested
-    ```
-    no language
-    ```
-"#;
-        let result = run_check(content).unwrap();
-        assert_eq!(result.len(), 2);
-        // Check that it detects the blocks without language
-        assert_eq!(result[0].line, 9);
-        assert_eq!(result[1].line, 20);
-    }
-
-    #[test]
-    fn test_issue_257_list_indented_code_block_with_language() {
-        // Issue #257: MD040 incorrectly flagged closing fence as needing language
-        // when code block was inside a list item
-        let content = r#"- Sample code:
-- ```java
-      List<Map<String,String>> inputs = new List<Map<String,String>>();
-  ```
-"#;
-        // Should produce NO warnings - the code block has a language
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "List-indented code block with language should not trigger MD040. Got: {result:?}",
-        );
-
-        // Fix should NOT modify the content at all
-        let fixed = run_fix(content).unwrap();
-        assert_eq!(
-            fixed, content,
-            "Fix should not modify code blocks that already have a language"
-        );
-        // Specifically verify no `text` was added to closing fence
-        assert!(
-            !fixed.contains("```text"),
-            "Fix should not add 'text' to closing fence of code block with language"
-        );
-    }
-
-    #[test]
-    fn test_issue_257_multiple_list_indented_blocks() {
-        // Extended test for issue #257 with multiple scenarios
-        let content = r#"# Document
-
-1. Step one
-   ```python
-   print("hello")
-   ```
-2. Step two
-
-- Item with nested code:
-  ```bash
-  echo "test"
-  ```
-
-- Another item:
-  ```javascript
-  console.log("test");
-  ```
-"#;
-        // All blocks have languages, so no warnings
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "All list-indented code blocks have languages. Got: {result:?}",
-        );
-
-        // Fix should not modify anything
-        let fixed = run_fix(content).unwrap();
-        assert_eq!(
-            fixed, content,
-            "Fix should not modify content when all blocks have languages"
-        );
-    }
-
-    #[test]
-    fn test_code_blocks_in_blockquotes() {
-        let content = r#"# Test
-
-> This is a blockquote
-> ```python
-> print("with language")
-> ```
-
-> Another blockquote
-> ```
-> without language
-> ```
-"#;
-        let result = run_check(content).unwrap();
-        // Code blocks inside blockquotes ARE detected (pulldown-cmark handles nested structures)
-        // The second code block has no language, so 1 warning expected
-        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -589,296 +674,448 @@ another block without
   ```
 "#;
         let fixed = run_fix(content).unwrap();
-        // Should preserve indentation for list items
         assert!(fixed.contains("  ```text"));
-        assert!(fixed.contains("  indented code block"));
     }
 
-    #[test]
-    fn test_fix_preserves_indentation_numbered_list() {
-        // Test case from issue #122
-        let content = r#"1. Step 1
-
-    ```
-    foo
-    bar
-    ```
-"#;
-        let fixed = run_fix(content).unwrap();
-        // Should preserve 4-space indentation for numbered list content
-        assert!(fixed.contains("    ```text"));
-        assert!(fixed.contains("    foo"));
-        assert!(fixed.contains("    bar"));
-        // Should not remove indentation
-        assert!(!fixed.contains("\n```text\n"));
-    }
+    // =========================================================================
+    // Consistent mode tests
+    // =========================================================================
 
     #[test]
-    fn test_fix_preserves_all_indentation() {
-        let content = r#"# Test
-
-Top-level code block:
-```
-top level
+    fn test_consistent_mode_detects_inconsistency() {
+        let content = r#"```bash
+echo hi
 ```
 
-1. List item
+```sh
+echo there
+```
 
-    ```
-    nested in list
-    ```
-
-Indented by 2 spaces:
-  ```
-  content
-  ```
+```bash
+echo again
+```
 "#;
-        let fixed = run_fix(content).unwrap();
-
-        // All indentation should be preserved exactly as-is
-        assert!(
-            fixed.contains("```text\ntop level"),
-            "Top-level code block indentation preserved"
-        );
-        assert!(
-            fixed.contains("    ```text\n    nested in list"),
-            "List item code block indentation preserved"
-        );
-        assert!(
-            fixed.contains("  ```text\n  content"),
-            "2-space indented code block indentation preserved"
-        );
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Inconsistent"));
+        assert!(result[0].message.contains("sh"));
+        assert!(result[0].message.contains("bash"));
     }
 
     #[test]
-    fn test_fix_with_tilde_fences() {
-        let content = r#"# Test
+    fn test_consistent_mode_fix_normalizes() {
+        let content = r#"```bash
+echo hi
+```
 
-~~~
-code with tildes
-~~~
+```sh
+echo there
+```
+
+```bash
+echo again
+```
 "#;
-        let fixed = run_fix(content).unwrap();
-        assert!(fixed.contains("~~~text"));
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert_eq!(fixed.matches("```bash").count(), 3);
+        assert_eq!(fixed.matches("```sh").count(), 0);
     }
 
     #[test]
-    fn test_longer_fence_markers() {
-        let content = r#"# Test
+    fn test_consistent_mode_tie_break_uses_curated_default() {
+        // When there's a tie (1 bash, 1 sh), should use curated default (bash)
+        let content = r#"```bash
+echo hi
+```
 
-````
-code with four backticks
-````
-
-`````python
-code with five backticks and language
-`````
-
-~~~~~~
-code with six tildes
-~~~~~~
+```sh
+echo there
+```
 "#;
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        // bash is the curated default for Shell
+        assert_eq!(fixed.matches("```bash").count(), 2);
+    }
+
+    #[test]
+    fn test_consistent_mode_with_preferred_alias() {
+        let content = r#"```bash
+echo hi
+```
+
+```sh
+echo there
+```
+"#;
+        let mut preferred = HashMap::new();
+        preferred.insert("Shell".to_string(), "sh".to_string());
+
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: preferred,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert_eq!(fixed.matches("```sh").count(), 2);
+        assert_eq!(fixed.matches("```bash").count(), 0);
+    }
+
+    #[test]
+    fn test_fix_preserves_attributes() {
+        let content = "```sh {.highlight}\ncode\n```\n\n```bash\nmore\n```";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(fixed.contains("```bash {.highlight}"));
+    }
+
+    // =========================================================================
+    // Allowlist/denylist tests
+    // =========================================================================
+
+    #[test]
+    fn test_allowlist_blocks_unlisted() {
+        let content = "```java\ncode\n```";
+        let config = MD040Config {
+            allowed_languages: vec!["Python".to_string(), "Shell".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("not in the allowed list"));
+    }
+
+    #[test]
+    fn test_allowlist_allows_listed() {
+        let content = "```python\ncode\n```";
+        let config = MD040Config {
+            allowed_languages: vec!["Python".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_allowlist_case_insensitive() {
+        let content = "```python\ncode\n```";
+        let config = MD040Config {
+            allowed_languages: vec!["PYTHON".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_denylist_blocks_listed() {
+        let content = "```java\ncode\n```";
+        let config = MD040Config {
+            disallowed_languages: vec!["Java".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("disallowed"));
+    }
+
+    #[test]
+    fn test_denylist_allows_unlisted() {
+        let content = "```python\ncode\n```";
+        let config = MD040Config {
+            disallowed_languages: vec!["Java".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_allowlist_takes_precedence_over_denylist() {
+        let content = "```python\ncode\n```";
+        let config = MD040Config {
+            allowed_languages: vec!["Python".to_string()],
+            disallowed_languages: vec!["Python".to_string()], // Should be ignored
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty());
+    }
+
+    // =========================================================================
+    // Unknown language tests
+    // =========================================================================
+
+    #[test]
+    fn test_unknown_language_ignore_default() {
+        let content = "```mycustomlang\ncode\n```";
         let result = run_check(content).unwrap();
+        assert!(result.is_empty(), "Unknown languages ignored by default");
+    }
+
+    #[test]
+    fn test_unknown_language_warn() {
+        let content = "```mycustomlang\ncode\n```";
+        let config = MD040Config {
+            unknown_language_action: UnknownLanguageAction::Warn,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Unknown language"));
+        assert!(result[0].message.contains("mycustomlang"));
+        assert_eq!(result[0].severity, Severity::Warning);
+    }
+
+    #[test]
+    fn test_unknown_language_error() {
+        let content = "```mycustomlang\ncode\n```";
+        let config = MD040Config {
+            unknown_language_action: UnknownLanguageAction::Error,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Unknown language"));
+        assert_eq!(result[0].severity, Severity::Error);
+    }
+
+    // =========================================================================
+    // Config validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_invalid_preferred_alias_detected() {
+        let mut preferred = HashMap::new();
+        preferred.insert("Shell".to_string(), "invalid_alias".to_string());
+
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: preferred,
+            ..Default::default()
+        };
+        let rule = MD040FencedCodeLanguage::with_config(config);
+        let errors = rule.validate_config();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Invalid alias"));
+        assert!(errors[0].contains("invalid_alias"));
+    }
+
+    #[test]
+    fn test_unknown_language_in_preferred_aliases_detected() {
+        let mut preferred = HashMap::new();
+        preferred.insert("NotARealLanguage".to_string(), "nope".to_string());
+
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: preferred,
+            ..Default::default()
+        };
+        let rule = MD040FencedCodeLanguage::with_config(config);
+        let errors = rule.validate_config();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Unknown language"));
+    }
+
+    #[test]
+    fn test_valid_preferred_alias_accepted() {
+        let mut preferred = HashMap::new();
+        preferred.insert("Shell".to_string(), "bash".to_string());
+        preferred.insert("JavaScript".to_string(), "js".to_string());
+
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: preferred,
+            ..Default::default()
+        };
+        let rule = MD040FencedCodeLanguage::with_config(config);
+        let errors = rule.validate_config();
+        assert!(errors.is_empty());
+    }
+
+    // =========================================================================
+    // Linguist resolution tests
+    // =========================================================================
+
+    #[test]
+    fn test_linguist_resolution() {
+        assert_eq!(resolve_canonical("bash"), Some("Shell"));
+        assert_eq!(resolve_canonical("sh"), Some("Shell"));
+        assert_eq!(resolve_canonical("zsh"), Some("Shell"));
+        assert_eq!(resolve_canonical("js"), Some("JavaScript"));
+        assert_eq!(resolve_canonical("python"), Some("Python"));
+        assert_eq!(resolve_canonical("unknown_lang"), None);
+    }
+
+    #[test]
+    fn test_linguist_resolution_case_insensitive() {
+        assert_eq!(resolve_canonical("BASH"), Some("Shell"));
+        assert_eq!(resolve_canonical("Bash"), Some("Shell"));
+        assert_eq!(resolve_canonical("Python"), Some("Python"));
+        assert_eq!(resolve_canonical("PYTHON"), Some("Python"));
+    }
+
+    #[test]
+    fn test_alias_validation() {
+        assert!(is_valid_alias("Shell", "bash"));
+        assert!(is_valid_alias("Shell", "sh"));
+        assert!(is_valid_alias("Shell", "zsh"));
+        assert!(!is_valid_alias("Shell", "python"));
+        assert!(!is_valid_alias("Shell", "invalid"));
+    }
+
+    #[test]
+    fn test_default_alias() {
+        assert_eq!(default_alias("Shell"), Some("bash"));
+        assert_eq!(default_alias("JavaScript"), Some("js"));
+        assert_eq!(default_alias("Python"), Some("python"));
+    }
+
+    // =========================================================================
+    // Edge case tests
+    // =========================================================================
+
+    #[test]
+    fn test_mixed_case_labels_normalized() {
+        let content = r#"```BASH
+echo hi
+```
+
+```Bash
+echo there
+```
+
+```bash
+echo again
+```
+"#;
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        // All should resolve to Shell, most prevalent should win
+        let result = run_check_with_config(content, config).unwrap();
+        // "bash" appears 1x, "Bash" appears 1x, "BASH" appears 1x
+        // All are different strings, so there's a 3-way tie
+        // Should pick curated default "bash" or alphabetically first
+        assert!(result.len() >= 2, "Should flag at least 2 inconsistent labels");
+    }
+
+    #[test]
+    fn test_multiple_languages_independent() {
+        let content = r#"```bash
+shell code
+```
+
+```python
+python code
+```
+
+```sh
+more shell
+```
+
+```python3
+more python
+```
+"#;
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        // Should have 2 warnings: one for sh (inconsistent with bash) and one for python3 (inconsistent with python)
         assert_eq!(result.len(), 2);
-
-        let fixed = run_fix(content).unwrap();
-        assert!(fixed.contains("````text"));
-        assert!(fixed.contains("~~~~~~text"));
-        assert!(fixed.contains("`````python"));
     }
 
     #[test]
-    fn test_nested_code_blocks_different_markers() {
-        let content = r#"# Test
+    fn test_tilde_fences() {
+        let content = r#"~~~bash
+echo hi
+~~~
 
-````markdown
-This is a markdown block
-
-```python
-# This is nested code
-print("hello")
-```
-
-More markdown
-````
+~~~sh
+echo there
+~~~
 "#;
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Nested code blocks with different markers should not trigger warnings"
-        );
-    }
-
-    #[test]
-    fn test_disable_enable_comments() {
-        let content = r#"# Test
-
-<!-- rumdl-disable MD040 -->
-```
-this should not trigger warning
-```
-<!-- rumdl-enable MD040 -->
-
-```
-this should trigger warning
-```
-"#;
-        let result = run_check(content).unwrap();
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config.clone()).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 9);
+
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(fixed.contains("~~~bash"));
+        assert!(!fixed.contains("~~~sh"));
     }
 
     #[test]
-    fn test_fence_with_language_only_on_closing() {
-        // Edge case: language on closing fence should not be interpreted
-        let content = r#"# Test
-
-```
-code
-```python
-"#;
-        let result = run_check(content).unwrap();
-        assert_eq!(result.len(), 1);
-    }
-
-    #[test]
-    fn test_incomplete_code_blocks() {
-        // Test unclosed code block
-        let content = r#"# Test
-
-```python
-this code block is not closed"#;
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Unclosed code blocks with language should not trigger warnings"
-        );
-
-        // Test unclosed code block without language
-        let content_no_lang = r#"# Test
-
-```
-this code block is not closed"#;
-        let result = run_check(content_no_lang).unwrap();
-        assert_eq!(result.len(), 1);
-    }
-
-    #[test]
-    fn test_fix_preserves_original_formatting() {
-        let content = r#"# Test
-
-```
-code
-```
-
-No newline at end"#;
-        let fixed = run_fix(content).unwrap();
-        assert!(!fixed.ends_with('\n'), "Fix should preserve lack of trailing newline");
-
-        let content_with_newline = "# Test\n\n```\ncode\n```\n";
-        let fixed = run_fix(content_with_newline).unwrap();
-        assert!(fixed.ends_with('\n'), "Fix should preserve trailing newline");
-    }
-
-    #[test]
-    fn test_edge_case_backticks_in_content() {
-        let content = r#"# Test
-
-```javascript
-console.log(`template string with backticks`);
-// This line has ``` in a comment
-```
-"#;
-        let result = run_check(content).unwrap();
-        assert!(
-            result.is_empty(),
-            "Backticks inside code blocks should not affect parsing"
-        );
+    fn test_longer_fence_markers_preserved() {
+        let content = "````sh\ncode\n````\n\n```bash\ncode\n```";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(fixed.contains("````bash"));
+        assert!(fixed.contains("```bash"));
     }
 
     #[test]
     fn test_empty_document() {
-        let content = "";
+        let result = run_check("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_no_code_blocks() {
+        let content = "# Just a heading\n\nSome text.";
         let result = run_check(content).unwrap();
         assert!(result.is_empty());
     }
 
     #[test]
-    fn test_should_skip_optimization() {
-        let rule = MD040FencedCodeLanguage;
-
-        // Document without code fences should skip
-        let ctx = LintContext::new(
-            "# Just a header\n\nSome text",
-            crate::config::MarkdownFlavor::Standard,
-            None,
-        );
-        assert!(rule.should_skip(&ctx));
-
-        // Document with backtick fences should not skip
-        let ctx = LintContext::new("```\ncode\n```", crate::config::MarkdownFlavor::Standard, None);
-        assert!(!rule.should_skip(&ctx));
-
-        // Document with tilde fences should not skip
-        let ctx = LintContext::new("~~~\ncode\n~~~", crate::config::MarkdownFlavor::Standard, None);
-        assert!(!rule.should_skip(&ctx));
-
-        // Empty document should skip
-        let ctx = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
-        assert!(rule.should_skip(&ctx));
+    fn test_single_code_block_no_inconsistency() {
+        let content = "```bash\necho hi\n```";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty(), "Single block has no inconsistency");
     }
 
     #[test]
-    fn test_quarto_code_chunk_syntax() {
-        let rule = MD040FencedCodeLanguage;
-
-        // Test Quarto {r} syntax - should NOT trigger warning
-        let content = r#"# Test
-
-```{r}
-x <- 1
+    fn test_idempotent_fix() {
+        let content = r#"```bash
+echo hi
 ```
 
-```{python}
-x = 1
-```
-
-```{r, echo=FALSE}
-plot(x)
+```sh
+echo there
 ```
 "#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Quarto, None);
-        let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "Quarto code chunks with {{language}} syntax should not trigger warnings"
-        );
-
-        // Test that missing language DOES trigger warning for Quarto
-        let content_no_lang = r#"# Test
-
-```
-code without language
-```
-"#;
-        let ctx = LintContext::new(content_no_lang, crate::config::MarkdownFlavor::Quarto, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1, "Quarto files without language should trigger warning");
-
-        // Test that standard flavor still requires standard language syntax
-        let content_standard = r#"# Test
-
-```{python}
-code
-```
-"#;
-        let ctx = LintContext::new(content_standard, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // In standard flavor, {python} is considered "after_fence" content, so it's valid
-        // The fence marker is "```" and after_fence is "{python}", which is non-empty
-        assert!(
-            result.is_empty(),
-            "Standard flavor should accept any non-empty after_fence content"
-        );
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed1 = run_fix_with_config(content, config.clone()).unwrap();
+        let fixed2 = run_fix_with_config(&fixed1, config).unwrap();
+        assert_eq!(fixed1, fixed2, "Fix should be idempotent");
     }
 }

@@ -2282,7 +2282,7 @@ fn handle_explain_command(rule_query: &str) {
         Box::new(MD037NoSpaceInEmphasis),
         Box::new(MD038NoSpaceInCode::default()),
         Box::new(MD039NoSpaceInLinks),
-        Box::new(MD040FencedCodeLanguage {}),
+        Box::new(MD040FencedCodeLanguage::default()),
         Box::new(MD041FirstLineHeading::default()),
         Box::new(MD042NoEmptyLinks::new()),
         Box::new(MD043RequiredHeadings::new(Vec::new())),

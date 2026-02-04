@@ -4,7 +4,7 @@ use rumdl_lib::rules::MD040FencedCodeLanguage;
 
 #[test]
 fn test_valid_code_blocks() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```rust\nfn main() {}\n```\n```python\nprint('hello')\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -13,7 +13,7 @@ fn test_valid_code_blocks() {
 
 #[test]
 fn test_missing_language() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```\nsome code\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -24,7 +24,7 @@ fn test_missing_language() {
 
 #[test]
 fn test_multiple_code_blocks() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```rust\nfn main() {}\n```\n```\nsome code\n```\n```python\nprint('hello')\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -38,7 +38,7 @@ fn test_multiple_code_blocks() {
 
 #[test]
 fn test_empty_code_block() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -49,7 +49,7 @@ fn test_empty_code_block() {
 
 #[test]
 fn test_indented_code_block() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "  ```\n  some code\n  ```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -60,7 +60,7 @@ fn test_indented_code_block() {
 
 #[test]
 fn test_mixed_code_blocks() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```rust\nfn main() {}\n```\nSome text\n```\nmore code\n```\n```js\nconsole.log('hi');\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -74,7 +74,7 @@ fn test_mixed_code_blocks() {
 
 #[test]
 fn test_preserve_whitespace() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     let content = "```   \nsome code\n```";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -85,7 +85,7 @@ fn test_preserve_whitespace() {
 
 #[test]
 fn test_nested_code_blocks_no_false_positives() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     // Test the case where we have a markdown code block containing python code
     // The inner ```python and ``` should NOT be treated as separate code blocks
     // NOTE: Using 4-space indent so inner fences don't close the outer block (per CommonMark)
@@ -105,7 +105,7 @@ fn test_nested_code_blocks_no_false_positives() {
 
 #[test]
 fn test_indented_closing_fence_not_flagged() {
-    let rule = MD040FencedCodeLanguage;
+    let rule = MD040FencedCodeLanguage::default();
     // Test that 4-space indented fences are not treated as separate code blocks
     // NOTE: Per CommonMark, 0-3 space indent DOES close the outer block
     // Using 4-space indent to ensure content is treated as part of outer block

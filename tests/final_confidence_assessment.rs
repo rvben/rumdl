@@ -44,7 +44,7 @@ fn validate_core_functionality() {
         Box::new(MD018NoMissingSpaceAtx::new()),
         Box::new(MD022BlanksAroundHeadings::default()),
         Box::new(MD031BlanksAroundFences::default()),
-        Box::new(MD040FencedCodeLanguage),
+        Box::new(MD040FencedCodeLanguage::default()),
     ];
 
     let ctx = LintContext::new(&test_content, rumdl_lib::config::MarkdownFlavor::Standard, None);
