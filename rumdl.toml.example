@@ -62,3 +62,22 @@ headings = true  # Exclude headings from line length check
 [MD044]
 names = ["rumdl", "Markdown", "GitHub"]  # Proper names that should be capitalized correctly
 code-blocks = false  # Check code blocks for proper names (default: false, skips code blocks)
+
+# Code block tools (external linters/formatters for fenced code blocks)
+[code-block-tools]
+enabled = false
+normalize-language = "linguist"
+on-error = "warn"
+timeout = 30000
+
+[code-block-tools.language-aliases]
+py = "python"
+bash = "shell"
+
+[code-block-tools.languages.python]
+lint = ["ruff:check"]
+format = ["ruff:format"]
+
+[code-block-tools.languages.shell]
+lint = ["shellcheck"]
+format = ["shfmt"]

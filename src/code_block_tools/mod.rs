@@ -27,6 +27,10 @@
 //! [code-block-tools.languages.shell]
 //! lint = ["shellcheck"]
 //! format = ["shfmt"]
+//!
+//! [code-block-tools.language-aliases]
+//! py = "python"
+//! bash = "shell"
 //! ```
 //!
 //! # Built-in Tools

@@ -31,6 +31,8 @@ pub struct FencedCodeBlockInfo {
     pub fence_length: usize,
     /// Leading whitespace on the fence line.
     pub indent: usize,
+    /// Exact leading whitespace prefix from the fence line.
+    pub indent_prefix: String,
 }
 
 /// A diagnostic message from an external tool.
@@ -128,16 +130,23 @@ pub struct CodeBlockToolProcessor<'a> {
     linguist: LinguistResolver,
     registry: ToolRegistry,
     executor: ToolExecutor,
+    user_aliases: std::collections::HashMap<String, String>,
 }
 
 impl<'a> CodeBlockToolProcessor<'a> {
     /// Create a new processor with the given configuration.
     pub fn new(config: &'a CodeBlockToolsConfig) -> Self {
+        let user_aliases = config
+            .language_aliases
+            .iter()
+            .map(|(k, v)| (k.to_lowercase(), v.to_lowercase()))
+            .collect();
         Self {
             config,
             linguist: LinguistResolver::new(),
             registry: ToolRegistry::new(config.tools.clone()),
             executor: ToolExecutor::new(config.timeout),
+            user_aliases,
         }
     }
 
@@ -170,6 +179,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     let fence_line = lines.get(start_line).unwrap_or(&"");
                     let trimmed = fence_line.trim_start();
                     let indent = fence_line.len() - trimmed.len();
+                    let indent_prefix = fence_line.get(..indent).unwrap_or("").to_string();
                     let (fence_char, fence_length) = if trimmed.starts_with('~') {
                         ('~', trimmed.chars().take_while(|&c| c == '~').count())
                     } else {
@@ -184,6 +194,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         fence_char,
                         fence_length,
                         indent,
+                        indent_prefix,
                     });
                 }
                 Event::End(TagEnd::CodeBlock) => {
@@ -213,6 +224,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                                 fence_char: builder.fence_char,
                                 fence_length: builder.fence_length,
                                 indent: builder.indent,
+                                indent_prefix: builder.indent_prefix,
                             });
                         }
                     }
@@ -226,9 +238,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
     /// Resolve a language tag to its canonical name.
     fn resolve_language(&self, language: &str) -> String {
+        let lower = language.to_lowercase();
+        if let Some(mapped) = self.user_aliases.get(&lower) {
+            return mapped.clone();
+        }
         match self.config.normalize_language {
-            NormalizeLanguage::Linguist => self.linguist.resolve(language),
-            NormalizeLanguage::Exact => language.to_lowercase(),
+            NormalizeLanguage::Linguist => self.linguist.resolve(&lower),
+            NormalizeLanguage::Exact => lower,
         }
     }
 
@@ -239,6 +255,44 @@ impl<'a> CodeBlockToolProcessor<'a> {
             .get(language)
             .and_then(|lc| lc.on_error)
             .unwrap_or(self.config.on_error)
+    }
+
+    /// Strip the fence indentation prefix from each line of a code block.
+    fn strip_indent_from_block(&self, content: &str, indent_prefix: &str) -> String {
+        if indent_prefix.is_empty() {
+            return content.to_string();
+        }
+
+        let mut out = String::with_capacity(content.len());
+        for line in content.split_inclusive('\n') {
+            if let Some(stripped) = line.strip_prefix(indent_prefix) {
+                out.push_str(stripped);
+            } else {
+                out.push_str(line);
+            }
+        }
+        out
+    }
+
+    /// Re-apply the fence indentation prefix to each line of a code block.
+    fn apply_indent_to_block(&self, content: &str, indent_prefix: &str) -> String {
+        if indent_prefix.is_empty() {
+            return content.to_string();
+        }
+        if content.is_empty() {
+            return String::new();
+        }
+
+        let mut out = String::with_capacity(content.len() + indent_prefix.len());
+        for line in content.split_inclusive('\n') {
+            if line == "\n" {
+                out.push_str(line);
+            } else {
+                out.push_str(indent_prefix);
+                out.push_str(line);
+            }
+        }
+        out
     }
 
     /// Lint all code blocks in the content.
@@ -266,11 +320,12 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
 
             // Extract code block content
-            let code_content = if block.content_start < block.content_end && block.content_end <= content.len() {
+            let code_content_raw = if block.content_start < block.content_end && block.content_end <= content.len() {
                 &content[block.content_start..block.content_end]
             } else {
                 continue;
             };
+            let code_content = self.strip_indent_from_block(code_content_raw, &block.indent_prefix);
 
             // Run each lint tool
             for tool_id in lint_tools {
@@ -282,7 +337,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 };
 
-                match self.executor.lint(tool_def, code_content, Some(self.config.timeout)) {
+                match self
+                    .executor
+                    .lint(tool_def, &code_content, Some(self.config.timeout))
+                {
                     Ok(output) => {
                         // Parse tool output into diagnostics
                         let diagnostics = self.parse_tool_output(
@@ -345,7 +403,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
             if block.content_start >= block.content_end || block.content_end > result.len() {
                 continue;
             }
-            let code_content = result[block.content_start..block.content_end].to_string();
+            let code_content_raw = result[block.content_start..block.content_end].to_string();
+            let code_content = self.strip_indent_from_block(&code_content_raw, &block.indent_prefix);
 
             // Run format tools (use first successful one)
             let mut formatted = code_content.clone();
@@ -360,7 +419,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
                 match self.executor.format(tool_def, &formatted, Some(self.config.timeout)) {
                     Ok(output) => {
-                        // Ensure trailing newline matches original
+                        // Ensure trailing newline matches original (unindented)
                         formatted = output;
                         if code_content.ends_with('\n') && !formatted.ends_with('\n') {
                             formatted.push('\n');
@@ -384,7 +443,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             // Replace content if changed
             if formatted != code_content {
-                result.replace_range(block.content_start..block.content_end, &formatted);
+                let reindented = self.apply_indent_to_block(&formatted, &block.indent_prefix);
+                if reindented != code_content_raw {
+                    result.replace_range(block.content_start..block.content_end, &reindented);
+                }
             }
         }
 
@@ -402,6 +464,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         code_block_start_line: usize,
     ) -> Vec<CodeBlockDiagnostic> {
         let mut diagnostics = Vec::new();
+        let mut shellcheck_line: Option<usize> = None;
 
         // Combine stdout and stderr for parsing
         let stdout = &output.stdout;
@@ -420,6 +483,19 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 continue;
             }
 
+            if let Some(line_num) = self.parse_shellcheck_header(line) {
+                shellcheck_line = Some(line_num);
+                continue;
+            }
+
+            if let Some(line_num) = shellcheck_line
+                && let Some(diag) =
+                    self.parse_shellcheck_message(line, tool_id, code_block_start_line, line_num)
+            {
+                diagnostics.push(diag);
+                continue;
+            }
+
             // Try pattern: "file:line:col: message" or "file:line: message"
             if let Some(diag) = self.parse_standard_format(line, tool_id, code_block_start_line) {
                 diagnostics.push(diag);
@@ -432,7 +508,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 continue;
             }
 
-            // Try pattern: "In - line N: message" (shellcheck style)
+            // Try single-line shellcheck format fallback
             if let Some(diag) = self.parse_shellcheck_format(line, tool_id, code_block_start_line) {
                 diagnostics.push(diag);
             }
@@ -470,30 +546,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
         code_block_start_line: usize,
     ) -> Option<CodeBlockDiagnostic> {
         // Match patterns like "file.py:1:10: E501 message"
-        let parts: Vec<&str> = line.splitn(4, ':').collect();
-        if parts.len() >= 3 {
-            // parts[0] = filename, parts[1] = line, parts[2] = col or message
-            if let Ok(line_num) = parts[1].trim().parse::<usize>() {
-                let (column, message) = if parts.len() >= 4 {
-                    // Has column
-                    let col = parts[2].trim().parse::<usize>().ok();
-                    (col, parts[3].trim().to_string())
-                } else {
-                    // No column
-                    (None, parts[2].trim().to_string())
-                };
+        let mut parts = line.rsplitn(4, ':');
+        let message = parts.next()?.trim().to_string();
+        let part1 = parts.next()?.trim().to_string();
+        let part2 = parts.next()?.trim().to_string();
+        let part3 = parts.next().map(|s| s.trim().to_string());
 
-                if !message.is_empty() {
-                    let severity = self.infer_severity(&message);
-                    return Some(CodeBlockDiagnostic {
-                        file_line: code_block_start_line + line_num,
-                        column,
-                        message,
-                        severity,
-                        tool: tool_id.to_string(),
-                        code_block_start: code_block_start_line,
-                    });
-                }
+        let (line_part, col_part) = if part3.is_some() {
+            (part2, Some(part1))
+        } else {
+            (part1, None)
+        };
+
+        if let Ok(line_num) = line_part.parse::<usize>() {
+            let column = col_part.and_then(|s| s.parse::<usize>().ok());
+            if !message.is_empty() {
+                let severity = self.infer_severity(&message);
+                return Some(CodeBlockDiagnostic {
+                    file_line: code_block_start_line + line_num,
+                    column,
+                    message,
+                    severity,
+                    tool: tool_id.to_string(),
+                    code_block_start: code_block_start_line,
+                });
             }
         }
         None
@@ -521,9 +597,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 let message = if msg_part.is_empty() {
                     sev_part.to_string()
                 } else {
-                    format!("{sev_part} {msg_part}")
+                    msg_part.to_string()
                 };
-                let severity = self.infer_severity(&message);
+                let severity = match sev_part.to_lowercase().as_str() {
+                    "error" => DiagnosticSeverity::Error,
+                    "warning" | "warn" => DiagnosticSeverity::Warning,
+                    "info" => DiagnosticSeverity::Info,
+                    _ => self.infer_severity(&message),
+                };
                 return Some(CodeBlockDiagnostic {
                     file_line: code_block_start_line + line_num,
                     column: Some(col),
@@ -570,13 +651,73 @@ impl<'a> CodeBlockToolProcessor<'a> {
         None
     }
 
+    /// Parse shellcheck header line to capture line number context.
+    fn parse_shellcheck_header(&self, line: &str) -> Option<usize> {
+        if line.starts_with("In ")
+            && line.contains(" line ")
+            && let Some(line_start) = line.find(" line ")
+        {
+            let after_line = &line[line_start + 6..];
+            if let Some(colon_pos) = after_line.find(':') {
+                return after_line[..colon_pos].trim().parse::<usize>().ok();
+            }
+        }
+        None
+    }
+
+    /// Parse shellcheck message line containing SCXXXX codes.
+    fn parse_shellcheck_message(
+        &self,
+        line: &str,
+        tool_id: &str,
+        code_block_start_line: usize,
+        line_num: usize,
+    ) -> Option<CodeBlockDiagnostic> {
+        let sc_pos = line.find("SC")?;
+        let after_sc = &line[sc_pos + 2..];
+        let code_len = after_sc.chars().take_while(|c| c.is_ascii_digit()).count();
+        if code_len == 0 {
+            return None;
+        }
+        let after_code = &after_sc[code_len..];
+        let sev_start = after_code.find('(')? + 1;
+        let sev_end = after_code[sev_start..].find(')')? + sev_start;
+        let sev = after_code[sev_start..sev_end].trim().to_lowercase();
+        let message_start = after_code.find("):")? + 2;
+        let message = after_code[message_start..].trim().to_string();
+        if message.is_empty() {
+            return None;
+        }
+
+        let severity = match sev.as_str() {
+            "error" => DiagnosticSeverity::Error,
+            "warning" | "warn" => DiagnosticSeverity::Warning,
+            "info" | "style" => DiagnosticSeverity::Info,
+            _ => self.infer_severity(&message),
+        };
+
+        Some(CodeBlockDiagnostic {
+            file_line: code_block_start_line + line_num,
+            column: None,
+            message,
+            severity,
+            tool: tool_id.to_string(),
+            code_block_start: code_block_start_line,
+        })
+    }
+
     /// Infer severity from message content.
     fn infer_severity(&self, message: &str) -> DiagnosticSeverity {
         let lower = message.to_lowercase();
-        if lower.contains("error") || lower.starts_with("e") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+        if lower.contains("error")
+            || lower.starts_with("e") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+            || lower.starts_with("f") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
         {
             DiagnosticSeverity::Error
-        } else if lower.contains("warning") || lower.contains("warn") {
+        } else if lower.contains("warning")
+            || lower.contains("warn")
+            || lower.starts_with("w") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+        {
             DiagnosticSeverity::Warning
         } else {
             DiagnosticSeverity::Info
@@ -593,6 +734,7 @@ struct FencedCodeBlockBuilder {
     fence_char: char,
     fence_length: usize,
     indent: usize,
+    indent_prefix: String,
 }
 
 #[cfg(test)]
@@ -630,6 +772,8 @@ fn main() {}
         assert_eq!(blocks[0].fence_char, '`');
         assert_eq!(blocks[0].fence_length, 3);
         assert_eq!(blocks[0].start_line, 2);
+        assert_eq!(blocks[0].indent, 0);
+        assert_eq!(blocks[0].indent_prefix, "");
 
         assert_eq!(blocks[1].language, "rust");
         assert_eq!(blocks[1].fence_char, '`');
@@ -661,6 +805,19 @@ fn main() {}
         assert_eq!(blocks[0].language, "bash");
         assert_eq!(blocks[0].fence_char, '~');
         assert_eq!(blocks[0].fence_length, 3);
+        assert_eq!(blocks[0].indent_prefix, "");
+    }
+
+    #[test]
+    fn test_extract_code_blocks_with_indent_prefix() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "  - item\n    ```python\n    print('hi')\n    ```";
+        let blocks = processor.extract_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].indent_prefix, "    ");
     }
 
     #[test]
@@ -697,6 +854,29 @@ fn main() {}
     }
 
     #[test]
+    fn test_resolve_language_user_alias_override() {
+        let mut config = default_config();
+        config.language_aliases.insert("py".to_string(), "python".to_string());
+        config.normalize_language = NormalizeLanguage::Exact;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        assert_eq!(processor.resolve_language("PY"), "python");
+    }
+
+    #[test]
+    fn test_indent_strip_and_reapply_roundtrip() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let raw = "    def hello():\n        print('hi')";
+        let stripped = processor.strip_indent_from_block(raw, "    ");
+        assert_eq!(stripped, "def hello():\n    print('hi')");
+
+        let reapplied = processor.apply_indent_to_block(&stripped, "    ");
+        assert_eq!(reapplied, raw);
+    }
+
+    #[test]
     fn test_infer_severity() {
         let config = default_config();
         let processor = CodeBlockToolProcessor::new(&config);
@@ -704,6 +884,10 @@ fn main() {}
         assert_eq!(
             processor.infer_severity("E501 line too long"),
             DiagnosticSeverity::Error
+        );
+        assert_eq!(
+            processor.infer_severity("W291 trailing whitespace"),
+            DiagnosticSeverity::Warning
         );
         assert_eq!(
             processor.infer_severity("error: something failed"),
@@ -716,6 +900,67 @@ fn main() {}
         assert_eq!(
             processor.infer_severity("note: consider using"),
             DiagnosticSeverity::Info
+        );
+    }
+
+    #[test]
+    fn test_parse_standard_format_windows_path() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let output = ToolOutput {
+            stdout: "C:\\path\\file.py:2:5: E123 message".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "ruff:check", 10);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 12);
+        assert_eq!(diags[0].column, Some(5));
+        assert_eq!(diags[0].message, "E123 message");
+    }
+
+    #[test]
+    fn test_parse_eslint_severity() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let output = ToolOutput {
+            stdout: "1:2 error Unexpected token".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "eslint", 5);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 6);
+        assert_eq!(diags[0].column, Some(2));
+        assert_eq!(diags[0].severity, DiagnosticSeverity::Error);
+        assert_eq!(diags[0].message, "Unexpected token");
+    }
+
+    #[test]
+    fn test_parse_shellcheck_multiline() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let output = ToolOutput {
+            stdout: "In - line 3:\necho $var\n ^-- SC2086 (info): Double quote to prevent globbing".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "shellcheck", 10);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].file_line, 13);
+        assert_eq!(diags[0].severity, DiagnosticSeverity::Info);
+        assert_eq!(
+            diags[0].message,
+            "Double quote to prevent globbing"
         );
     }
 

@@ -882,6 +882,21 @@ names = ["rumdl", "Markdown", "GitHub"]
 
 [MD048]
 code-fence-style = "backtick"
+
+# Code block tools (optional)
+[code-block-tools]
+enabled = true
+normalize-language = "linguist"
+on-error = "warn"
+timeout = 30000
+
+[code-block-tools.language-aliases]
+py = "python"
+bash = "shell"
+
+[code-block-tools.languages.python]
+lint = ["ruff:check"]
+format = ["ruff:format"]
 ```
 
 ### Style Guide Presets

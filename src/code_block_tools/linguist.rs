@@ -49,7 +49,7 @@ impl Default for LinguistResolver {
 /// Embedded language alias map.
 ///
 /// Maps aliases and canonical names to canonical names.
-/// Generated from GitHub Linguist languages.yml.
+/// Curated subset inspired by GitHub Linguist languages.yml.
 ///
 /// The map includes:
 /// - Canonical name -> canonical name (identity)

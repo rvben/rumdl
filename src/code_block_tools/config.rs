@@ -32,6 +32,11 @@ pub struct CodeBlockToolsConfig {
     #[serde(default)]
     pub languages: HashMap<String, LanguageToolConfig>,
 
+    /// User-defined language aliases (override built-in resolution)
+    /// Example: { "py": "python", "bash": "shell" }
+    #[serde(default)]
+    pub language_aliases: HashMap<String, String>,
+
     /// Custom tool definitions (override built-ins)
     #[serde(default)]
     pub tools: HashMap<String, ToolDefinition>,
@@ -49,6 +54,7 @@ impl Default for CodeBlockToolsConfig {
             on_error: OnError::default(),
             timeout: default_timeout(),
             languages: HashMap::new(),
+            language_aliases: HashMap::new(),
             tools: HashMap::new(),
         }
     }
@@ -149,6 +155,7 @@ mod tests {
         assert_eq!(config.on_error, OnError::Fail);
         assert_eq!(config.timeout, 30_000);
         assert!(config.languages.is_empty());
+        assert!(config.language_aliases.is_empty());
         assert!(config.tools.is_empty());
     }
 
@@ -167,6 +174,10 @@ format = ["ruff:format"]
 [languages.json]
 format = ["prettier"]
 on-error = "warn"
+
+[language-aliases]
+py = "python"
+bash = "shell"
 
 [tools.custom-tool]
 command = ["my-tool", "--format"]
@@ -190,6 +201,15 @@ stdout = true
         assert!(json.lint.is_empty());
         assert_eq!(json.format, vec!["prettier"]);
         assert_eq!(json.on_error, Some(OnError::Warn));
+
+        assert_eq!(
+            config.language_aliases.get("py").map(String::as_str),
+            Some("python")
+        );
+        assert_eq!(
+            config.language_aliases.get("bash").map(String::as_str),
+            Some("shell")
+        );
 
         let tool = config.tools.get("custom-tool").expect("Missing custom tool");
         assert_eq!(tool.command, vec!["my-tool", "--format"]);

@@ -5,10 +5,11 @@
 
 use super::config::ToolDefinition;
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Result of executing a tool.
 #[derive(Debug, Clone)]
@@ -184,6 +185,15 @@ impl ToolExecutor {
             message: format!("Failed to spawn '{tool_name}': {e}"),
         })?;
 
+        let mut stdout_handle = child
+            .stdout
+            .take()
+            .map(|stdout| thread::spawn(move || read_pipe_to_string(stdout)));
+        let mut stderr_handle = child
+            .stderr
+            .take()
+            .map(|stderr| thread::spawn(move || read_pipe_to_string(stderr)));
+
         // Write stdin if required
         if tool_def.stdin
             && let Some(mut stdin) = child.stdin.take()
@@ -195,31 +205,43 @@ impl ToolExecutor {
 
         // Wait for completion with timeout
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(self.default_timeout_ms));
-
-        // Use wait_timeout crate pattern or simple blocking wait
-        // For now, use blocking wait (timeout handling would need threads or async)
-        let output = match child.wait_with_output() {
-            Ok(out) => out,
-            Err(e) => {
-                return Err(ExecutorError::IoError {
-                    message: format!("Failed to wait for '{tool_name}': {e}"),
-                });
+        let status = if timeout.is_zero() {
+            child.wait().map_err(|e| ExecutorError::IoError {
+                message: format!("Failed to wait for '{tool_name}': {e}"),
+            })?
+        } else {
+            let start = Instant::now();
+            loop {
+                if let Some(status) = child.try_wait().map_err(|e| ExecutorError::IoError {
+                    message: format!("Failed to poll '{tool_name}': {e}"),
+                })? {
+                    break status;
+                }
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = join_reader(stdout_handle.take());
+                    let _ = join_reader(stderr_handle.take());
+                    return Err(ExecutorError::Timeout {
+                        tool: tool_name.clone(),
+                        timeout_ms: timeout.as_millis() as u64,
+                    });
+                }
+                thread::sleep(Duration::from_millis(10));
             }
         };
 
-        // Note: Full timeout support would require spawning a thread or using async.
-        // For now, we rely on the tool's own timeout or system limits.
-        let _ = timeout; // Suppress unused warning
-
-        let exit_code = output.status.code().unwrap_or(-1);
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout =
+            join_reader(stdout_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
+        let stderr =
+            join_reader(stderr_handle.take()).map_err(|e| ExecutorError::IoError { message: e })?;
+        let exit_code = status.code().unwrap_or(-1);
 
         Ok(ToolOutput {
             stdout,
             stderr,
             exit_code,
-            success: output.status.success(),
+            success: status.success(),
         })
     }
 
@@ -258,6 +280,24 @@ impl ToolExecutor {
         timeout_ms: Option<u64>,
     ) -> Result<ToolOutput, ExecutorError> {
         self.execute(tool_def, input, false, timeout_ms)
+    }
+}
+
+fn read_pipe_to_string<R: Read>(mut pipe: R) -> std::io::Result<String> {
+    let mut buf = Vec::new();
+    pipe.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
+fn join_reader(
+    handle: Option<thread::JoinHandle<std::io::Result<String>>>,
+) -> Result<String, String> {
+    match handle {
+        Some(handle) => match handle.join() {
+            Ok(res) => res.map_err(|e| format!("Failed to read output: {e}")),
+            Err(_) => Err("Output reader thread panicked".to_string()),
+        },
+        None => Ok(String::new()),
     }
 }
 
@@ -327,5 +367,22 @@ mod tests {
         let output = result.expect("cat should succeed");
         assert!(output.success);
         assert_eq!(output.stdout.trim(), "hello world");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "requires 'sleep' to be available"]
+    fn test_timeout() {
+        let executor = ToolExecutor::new(5);
+        let tool_def = ToolDefinition {
+            command: vec!["sleep".to_string(), "1".to_string()],
+            stdin: false,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        };
+
+        let result = executor.execute(&tool_def, "", false, Some(5));
+        assert!(matches!(result, Err(ExecutorError::Timeout { .. })));
     }
 }
