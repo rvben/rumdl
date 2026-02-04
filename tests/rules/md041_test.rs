@@ -101,7 +101,7 @@ fn test_html_headings() {
 #[test]
 fn test_front_matter_title_pattern() {
     // Test custom pattern matching
-    let rule = MD041FirstLineHeading::with_pattern(1, true, Some("^(title|header):".to_string()));
+    let rule = MD041FirstLineHeading::with_pattern(1, true, Some("^(title|header):".to_string()), false);
 
     // Should pass with "title:"
     let content = "---\ntitle: My Document\n---\nContent";
@@ -122,7 +122,7 @@ fn test_front_matter_title_pattern() {
     assert_eq!(result.len(), 1, "Should fail with name: not matching pattern");
 
     // Test case-sensitive pattern
-    let rule = MD041FirstLineHeading::with_pattern(1, true, Some("^Title:".to_string()));
+    let rule = MD041FirstLineHeading::with_pattern(1, true, Some("^Title:".to_string()), false);
     let content = "---\nTitle: My Document\n---\nContent";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();

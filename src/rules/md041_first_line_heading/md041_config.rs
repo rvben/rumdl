@@ -19,6 +19,13 @@ pub struct MD041Config {
     /// If provided, checks for this pattern in front matter instead of "title:"
     #[serde(default, alias = "front_matter_title_pattern")]
     pub front_matter_title_pattern: Option<String>,
+
+    /// Enable auto-fix for MD041 (default: false)
+    /// When enabled, `rumdl check --fix` will:
+    /// - Rewrite headings to the correct level if the first content is a heading with wrong level
+    /// - Move the first heading above preamble (blank lines, HTML comments) if safe
+    #[serde(default)]
+    pub fix: bool,
 }
 
 fn default_front_matter_title() -> String {
@@ -31,6 +38,7 @@ impl Default for MD041Config {
             level: HeadingLevel::default(),
             front_matter_title: default_front_matter_title(),
             front_matter_title_pattern: None,
+            fix: false,
         }
     }
 }
@@ -82,6 +90,7 @@ mod tests {
             level: HeadingLevel::new(2).unwrap(),
             front_matter_title: "header".to_string(),
             front_matter_title_pattern: Some("^heading:".to_string()),
+            fix: false,
         };
 
         let toml_str = toml::to_string(&config).unwrap();

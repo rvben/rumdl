@@ -2,7 +2,8 @@ mod md041_config;
 
 pub use md041_config::MD041Config;
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::lint_context::HeadingStyle;
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::mkdocs_attr_list::is_mkdocs_anchor_line;
 use crate::utils::range_utils::calculate_line_range;
@@ -18,6 +19,7 @@ pub struct MD041FirstLineHeading {
     pub level: usize,
     pub front_matter_title: bool,
     pub front_matter_title_pattern: Option<Regex>,
+    pub fix_enabled: bool,
 }
 
 impl Default for MD041FirstLineHeading {
@@ -26,8 +28,18 @@ impl Default for MD041FirstLineHeading {
             level: 1,
             front_matter_title: true,
             front_matter_title_pattern: None,
+            fix_enabled: false,
         }
     }
+}
+
+/// Analysis result for fix eligibility (internal helper)
+struct FixAnalysis {
+    front_matter_end_idx: usize,
+    heading_idx: usize,
+    is_setext: bool,
+    current_level: usize,
+    needs_level_fix: bool,
 }
 
 impl MD041FirstLineHeading {
@@ -36,10 +48,11 @@ impl MD041FirstLineHeading {
             level,
             front_matter_title,
             front_matter_title_pattern: None,
+            fix_enabled: false,
         }
     }
 
-    pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>) -> Self {
+    pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>, fix_enabled: bool) -> Self {
         let front_matter_title_pattern = pattern.and_then(|p| match Regex::new(&p) {
             Ok(regex) => Some(regex),
             Err(e) => {
@@ -52,6 +65,7 @@ impl MD041FirstLineHeading {
             level,
             front_matter_title,
             front_matter_title_pattern,
+            fix_enabled,
         }
     }
 
@@ -176,6 +190,30 @@ impl MD041FirstLineHeading {
         Some(link_start + link_end + 1)
     }
 
+    /// Fix a heading line to use the specified level
+    fn fix_heading_level(&self, line: &str, _current_level: usize, target_level: usize) -> String {
+        let trimmed = line.trim_start();
+
+        // ATX-style heading (# Heading)
+        if trimmed.starts_with('#') {
+            let hashes = "#".repeat(target_level);
+            // Find where the content starts (after # and optional space)
+            let content_start = trimmed.chars().position(|c| c != '#').unwrap_or(trimmed.len());
+            let after_hashes = &trimmed[content_start..];
+            let content = after_hashes.trim_start();
+
+            // Preserve leading whitespace from original line
+            let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            format!("{leading_ws}{hashes} {content}")
+        } else {
+            // Setext-style heading - convert to ATX
+            // The underline would be on the next line, so we just convert the text line
+            let hashes = "#".repeat(target_level);
+            let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+            format!("{leading_ws}{hashes} {trimmed}")
+        }
+    }
+
     /// Check if a line is an HTML heading using the centralized HTML parser
     fn is_html_heading(ctx: &crate::lint_context::LintContext, first_line_idx: usize, level: usize) -> bool {
         // Check for single-line HTML heading using regex (fast path)
@@ -224,6 +262,81 @@ impl MD041FirstLineHeading {
         }
 
         false
+    }
+
+    /// Analyze document to determine if it can be fixed and gather metadata.
+    /// Returns None if not fixable, Some(analysis) if fixable.
+    fn analyze_for_fix(&self, ctx: &crate::lint_context::LintContext) -> Option<FixAnalysis> {
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        if lines.is_empty() {
+            return None;
+        }
+
+        // Find front matter end
+        let mut front_matter_end_idx = 0;
+        if lines.first().map(|l| l.trim()) == Some("---") {
+            for (idx, line) in lines.iter().enumerate().skip(1) {
+                if line.trim() == "---" {
+                    front_matter_end_idx = idx + 1;
+                    break;
+                }
+            }
+        }
+
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+        let mut has_non_preamble_before_heading = false;
+
+        for (idx, line_info) in ctx.lines.iter().enumerate().skip(front_matter_end_idx) {
+            let line_content = line_info.content(ctx.content);
+            let trimmed = line_content.trim();
+
+            // Check if this is preamble (skip these)
+            let is_preamble = trimmed.is_empty()
+                || line_info.in_html_comment
+                || Self::is_non_content_line(line_content)
+                || (is_mkdocs && is_mkdocs_anchor_line(line_content));
+
+            if is_preamble {
+                continue;
+            }
+
+            // Check for ATX or Setext heading (not HTML heading - we can't fix those)
+            if let Some(heading) = &line_info.heading {
+                // Can't fix if there's non-preamble content before the heading
+                if has_non_preamble_before_heading {
+                    return None;
+                }
+
+                let is_setext = matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                let current_level = heading.level as usize;
+                let needs_level_fix = current_level != self.level;
+                let needs_move = idx > front_matter_end_idx;
+
+                // Only return analysis if there's something to fix
+                if needs_level_fix || needs_move {
+                    return Some(FixAnalysis {
+                        front_matter_end_idx,
+                        heading_idx: idx,
+                        is_setext,
+                        current_level,
+                        needs_level_fix,
+                    });
+                } else {
+                    return None; // Already correct
+                }
+            } else {
+                // Non-heading, non-preamble content found before any heading
+                has_non_preamble_before_heading = true;
+            }
+        }
+
+        // No ATX/Setext heading found
+        None
+    }
+
+    /// Determine if this document can be auto-fixed.
+    fn can_fix(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        self.fix_enabled && self.analyze_for_fix(ctx).is_some()
     }
 }
 
@@ -305,6 +418,19 @@ impl Rule for MD041FirstLineHeading {
             let first_line_content = first_line_info.content(ctx.content);
             let (start_line, start_col, end_line, end_col) = calculate_line_range(first_line, first_line_content);
 
+            // Only provide fix suggestion if the fix is actually applicable
+            // can_fix checks: fix_enabled, heading exists, no content before heading, not HTML heading
+            let fix = if self.can_fix(ctx) {
+                let range_start = first_line_info.byte_offset;
+                let range_end = range_start + first_line_info.byte_len;
+                Some(Fix {
+                    range: range_start..range_end,
+                    replacement: String::new(), // Placeholder - fix() method handles actual replacement
+                })
+            } else {
+                None
+            };
+
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: start_line,
@@ -313,16 +439,76 @@ impl Rule for MD041FirstLineHeading {
                 end_column: end_col,
                 message: format!("First line in file should be a level {} heading", self.level),
                 severity: Severity::Warning,
-                fix: None, // MD041 no longer provides auto-fix suggestions
+                fix,
             });
         }
         Ok(warnings)
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // MD041 should not auto-fix - adding content/titles is a decision that should be made by the document author
-        // This rule now only detects and warns about missing titles, but does not automatically add them
-        Ok(ctx.content.to_string())
+        // Only fix if explicitly enabled via config
+        if !self.fix_enabled {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Skip if should_skip returns true (front matter title, empty content, etc.)
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
+        }
+
+        // Use shared analysis to determine what needs fixing
+        let Some(analysis) = self.analyze_for_fix(ctx) else {
+            return Ok(ctx.content.to_string());
+        };
+
+        let lines: Vec<&str> = ctx.content.lines().collect();
+        let heading_idx = analysis.heading_idx;
+        let front_matter_end_idx = analysis.front_matter_end_idx;
+        let is_setext = analysis.is_setext;
+
+        let heading_info = &ctx.lines[heading_idx];
+        let heading_line = heading_info.content(ctx.content);
+
+        // Prepare the heading (fix level if needed, always convert Setext to ATX)
+        let fixed_heading = if analysis.needs_level_fix || is_setext {
+            self.fix_heading_level(heading_line, analysis.current_level, self.level)
+        } else {
+            heading_line.to_string()
+        };
+
+        // Build the result
+        let mut result = String::new();
+
+        // Add front matter if present
+        for line in lines.iter().take(front_matter_end_idx) {
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        // Add the heading right after front matter
+        result.push_str(&fixed_heading);
+        result.push('\n');
+
+        // Add remaining content, skipping the original heading line and Setext underline
+        for (idx, line) in lines.iter().enumerate().skip(front_matter_end_idx) {
+            // Skip the original heading line
+            if idx == heading_idx {
+                continue;
+            }
+            // Skip the Setext underline (line after heading)
+            if is_setext && idx == heading_idx + 1 {
+                continue;
+            }
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        // Remove trailing newline if original didn't have one
+        if !ctx.content.ends_with('\n') && result.ends_with('\n') {
+            result.pop();
+        }
+
+        Ok(result)
     }
 
     /// Check if this rule should be skipped
@@ -362,6 +548,7 @@ impl Rule for MD041FirstLineHeading {
             md041_config.level.as_usize(),
             use_front_matter,
             md041_config.front_matter_title_pattern,
+            md041_config.fix,
         ))
     }
 
@@ -372,6 +559,7 @@ impl Rule for MD041FirstLineHeading {
                 level = 1
                 front-matter-title = "title"
                 front-matter-title-pattern = ""
+                fix = false
             }
             .into(),
         ))
@@ -1179,6 +1367,274 @@ mod tests {
         assert!(
             result.is_empty(),
             "MkDocs anchor with HTML comment should both be skipped in MkDocs flavor"
+        );
+    }
+
+    // Tests for auto-fix functionality (issue #359)
+
+    #[test]
+    fn test_fix_disabled_by_default() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading::default();
+
+        // Fix should not change content when disabled
+        let content = "## Wrong Level\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix should not change content when disabled");
+    }
+
+    #[test]
+    fn test_fix_wrong_heading_level() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // ## should become #
+        let content = "## Wrong Level\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# Wrong Level\n\nContent.\n", "Should fix heading level");
+    }
+
+    #[test]
+    fn test_fix_heading_after_preamble() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Heading after blank lines should be moved up
+        let content = "\n\n# Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("# Title\n"),
+            "Heading should be moved to first line, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_heading_after_html_comment() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Heading after HTML comment should be moved up
+        let content = "<!-- Comment -->\n# Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("# Title\n"),
+            "Heading should be moved above comment, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_heading_level_and_move() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Heading with wrong level after preamble should be fixed and moved
+        let content = "<!-- Comment -->\n\n## Wrong Level\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("# Wrong Level\n"),
+            "Heading should be fixed and moved, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_with_front_matter() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Heading after front matter and preamble
+        let content = "---\nauthor: John\n---\n\n<!-- Comment -->\n## Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("---\nauthor: John\n---\n# Title\n"),
+            "Heading should be right after front matter, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_cannot_fix_no_heading() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // No heading in document - cannot fix
+        let content = "Just some text.\n\nMore text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Should not change content when no heading exists");
+    }
+
+    #[test]
+    fn test_fix_cannot_fix_content_before_heading() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Real content before heading - cannot safely fix
+        let content = "Some intro text.\n\n# Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Should not change content when real content exists before heading"
+        );
+    }
+
+    #[test]
+    fn test_fix_already_correct() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Already correct - no changes needed
+        let content = "# Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Should not change already correct content");
+    }
+
+    #[test]
+    fn test_fix_setext_heading_removes_underline() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Setext heading (level 2 with --- underline)
+        let content = "Wrong Level\n-----------\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# Wrong Level\n\nContent.\n",
+            "Setext heading should be converted to ATX and underline removed"
+        );
+    }
+
+    #[test]
+    fn test_fix_setext_h1_heading() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Setext h1 heading (=== underline) after preamble - needs move but not level fix
+        let content = "<!-- comment -->\n\nTitle\n=====\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# Title\n<!-- comment -->\n\n\nContent.\n",
+            "Setext h1 should be moved and converted to ATX"
+        );
+    }
+
+    #[test]
+    fn test_html_heading_not_claimed_fixable() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // HTML heading - should NOT be claimed as fixable (we can't convert HTML to ATX)
+        let content = "<h2>Title</h2>\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].fix.is_none(),
+            "HTML heading should not be claimed as fixable"
+        );
+    }
+
+    #[test]
+    fn test_no_heading_not_claimed_fixable() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // No heading in document - should NOT be claimed as fixable
+        let content = "Just some text.\n\nMore text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].fix.is_none(),
+            "Document without heading should not be claimed as fixable"
+        );
+    }
+
+    #[test]
+    fn test_content_before_heading_not_claimed_fixable() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Content before heading - should NOT be claimed as fixable
+        let content = "Intro text.\n\n## Heading\n\nMore.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].fix.is_none(),
+            "Document with content before heading should not be claimed as fixable"
         );
     }
 }
