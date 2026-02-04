@@ -67,11 +67,18 @@ impl MD040FencedCodeLanguage {
     }
 
     /// Determine the preferred label for each canonical language in the document
-    fn compute_preferred_labels(&self, blocks: &[FencedCodeBlock]) -> HashMap<String, String> {
+    fn compute_preferred_labels(
+        &self,
+        blocks: &[FencedCodeBlock],
+        disabled_ranges: &[(usize, usize)],
+    ) -> HashMap<String, String> {
         // Group labels by canonical language
         let mut by_canonical: HashMap<String, Vec<&str>> = HashMap::new();
 
         for block in blocks {
+            if is_line_disabled(disabled_ranges, block.line_idx) {
+                continue;
+            }
             if block.language.is_empty() {
                 continue;
             }
@@ -128,27 +135,34 @@ impl MD040FencedCodeLanguage {
     }
 
     /// Check if a language is allowed based on config
-    fn check_language_allowed(&self, canonical: &str, original_label: &str) -> Option<String> {
+    fn check_language_allowed(&self, canonical: Option<&str>, original_label: &str) -> Option<String> {
         // Allowlist takes precedence
         if !self.config.allowed_languages.is_empty() {
+            let allowed = self.config.allowed_languages.join(", ");
+            let Some(canonical) = canonical else {
+                return Some(format!(
+                    "Language '{original_label}' is not in the allowed list: {allowed}"
+                ));
+            };
             if !self
                 .config
                 .allowed_languages
                 .iter()
                 .any(|a| a.eq_ignore_ascii_case(canonical))
             {
-                let allowed = self.config.allowed_languages.join(", ");
                 return Some(format!(
                     "Language '{original_label}' ({canonical}) is not in the allowed list: {allowed}"
                 ));
             }
         } else if !self.config.disallowed_languages.is_empty()
-            && self
-                .config
-                .disallowed_languages
-                .iter()
-                .any(|d| d.eq_ignore_ascii_case(canonical))
+            && canonical.is_some_and(|canonical| {
+                self.config
+                    .disallowed_languages
+                    .iter()
+                    .any(|d| d.eq_ignore_ascii_case(canonical))
+            })
         {
+            let canonical = canonical.unwrap_or("unknown");
             return Some(format!("Language '{original_label}' ({canonical}) is disallowed"));
         }
         None
@@ -209,7 +223,7 @@ impl Rule for MD040FencedCodeLanguage {
 
         // Compute preferred labels for consistent mode
         let preferred_labels = if self.config.style == LanguageStyle::Consistent {
-            self.compute_preferred_labels(&fenced_blocks)
+            self.compute_preferred_labels(&fenced_blocks, &disabled_ranges)
         } else {
             HashMap::new()
         };
@@ -266,8 +280,10 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            // Check for unknown language
-            if let Some((msg, severity)) = self.check_unknown_language(&block.language) {
+            let canonical = resolve_canonical(&block.language);
+
+            // Check language restrictions (allowlist/denylist)
+            if let Some(msg) = self.check_language_allowed(canonical, &block.language) {
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
                 warnings.push(LintWarning {
@@ -277,16 +293,17 @@ impl Rule for MD040FencedCodeLanguage {
                     end_line,
                     end_column: end_col,
                     message: msg,
-                    severity,
+                    severity: Severity::Warning,
                     fix: None,
                 });
                 continue;
             }
 
-            // Check language restrictions (allowlist/denylist)
-            if let Some(canonical) = resolve_canonical(&block.language) {
-                if let Some(msg) = self.check_language_allowed(canonical, &block.language) {
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
+            // Check for unknown language (only if not handled by allowlist)
+            if canonical.is_none() {
+                if let Some((msg, severity)) = self.check_unknown_language(&block.language) {
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(block.line_idx + 1, line);
 
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
@@ -295,41 +312,42 @@ impl Rule for MD040FencedCodeLanguage {
                         end_line,
                         end_column: end_col,
                         message: msg,
-                        severity: Severity::Warning,
+                        severity,
                         fix: None,
                     });
-                    continue;
                 }
+                continue;
+            }
 
-                // Check consistency
-                if self.config.style == LanguageStyle::Consistent
-                    && let Some(preferred) = preferred_labels.get(canonical)
-                    && &block.language != preferred
-                {
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
+            // Check consistency
+            if self.config.style == LanguageStyle::Consistent
+                && let Some(preferred) = preferred_labels.get(canonical.unwrap())
+                && &block.language != preferred
+            {
+                let (start_line, start_col, end_line, end_col) =
+                    calculate_line_range(block.line_idx + 1, line);
 
-                    // Calculate fix range and replacement
-                    let trimmed_start = line.len() - line.trim_start().len();
-                    let fence_len = block.fence_marker.len();
-                    let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                    let label_start = line_start_byte + trimmed_start + fence_len;
-                    let label_end = label_start + block.language.len();
-                    let lang = &block.language;
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!("Inconsistent language label '{lang}' for {canonical} (use '{preferred}')"),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: label_start..label_end,
+                let fix = find_label_span(line, &block.fence_marker)
+                    .and_then(|(label_start, label_end)| {
+                        let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
+                        Some(Fix {
+                            range: (line_start_byte + label_start)..(line_start_byte + label_end),
                             replacement: preferred.clone(),
-                        }),
+                        })
                     });
-                }
+                let lang = &block.language;
+                let canonical = canonical.unwrap();
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Inconsistent language label '{lang}' for {canonical} (use '{preferred}')"),
+                    severity: Severity::Warning,
+                    fix,
+                });
             }
         }
 
@@ -347,7 +365,7 @@ impl Rule for MD040FencedCodeLanguage {
 
         // Compute preferred labels for consistent mode
         let preferred_labels = if self.config.style == LanguageStyle::Consistent {
-            self.compute_preferred_labels(&fenced_blocks)
+            self.compute_preferred_labels(&fenced_blocks, &disabled_ranges)
         } else {
             HashMap::new()
         };
@@ -417,16 +435,18 @@ impl Rule for MD040FencedCodeLanguage {
                     }
                     FixAction::NormalizeLabel {
                         fence_marker,
-                        old_label,
+                        old_label: _,
                         new_label,
                     } => {
-                        let indent = &line[..line.len() - line.trim_start().len()];
-                        let trimmed = line.trim();
-                        let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("");
-
-                        // Replace old label with new label, preserving rest
-                        let rest = after_fence.strip_prefix(old_label).unwrap_or(after_fence);
-                        result.push_str(&format!("{indent}{fence_marker}{new_label}{rest}\n"));
+                        if let Some((label_start, label_end)) = find_label_span(line, fence_marker) {
+                            result.push_str(&line[..label_start]);
+                            result.push_str(new_label);
+                            result.push_str(&line[label_end..]);
+                            result.push('\n');
+                        } else {
+                            result.push_str(line);
+                            result.push('\n');
+                        }
                     }
                 }
             } else {
@@ -577,6 +597,32 @@ fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)
 /// Check if a line index is within a disabled range
 fn is_line_disabled(ranges: &[(usize, usize)], line_idx: usize) -> bool {
     ranges.iter().any(|&(start, end)| line_idx >= start && line_idx < end)
+}
+
+/// Find the byte span of the language label in a fence line.
+fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
+    let trimmed_start = line.len() - line.trim_start().len();
+    let after_indent = &line[trimmed_start..];
+    if !after_indent.starts_with(fence_marker) {
+        return None;
+    }
+    let after_fence = &after_indent[fence_marker.len()..];
+
+    let label_start_rel = after_fence
+        .char_indices()
+        .find(|&(_, ch)| !ch.is_whitespace())
+        .map(|(idx, _)| idx)?;
+    let after_label = &after_fence[label_start_rel..];
+    let label_end_rel = after_label
+        .char_indices()
+        .find(|&(_, ch)| ch.is_whitespace())
+        .map(|(idx, _)| label_start_rel + idx)
+        .unwrap_or(after_fence.len());
+
+    Some((
+        trimmed_start + fence_marker.len() + label_start_rel,
+        trimmed_start + fence_marker.len() + label_end_rel,
+    ))
 }
 
 #[cfg(test)]
@@ -773,6 +819,28 @@ echo there
     }
 
     #[test]
+    fn test_consistent_mode_ignores_disabled_blocks() {
+        let content = r#"```bash
+echo hi
+```
+<!-- rumdl-disable MD040 -->
+```sh
+echo there
+```
+```sh
+echo again
+```
+<!-- rumdl-enable MD040 -->
+"#;
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert!(result.is_empty(), "Disabled blocks should not affect consistency");
+    }
+
+    #[test]
     fn test_fix_preserves_attributes() {
         let content = "```sh {.highlight}\ncode\n```\n\n```bash\nmore\n```";
         let config = MD040Config {
@@ -781,6 +849,18 @@ echo there
         };
         let fixed = run_fix_with_config(content, config).unwrap();
         assert!(fixed.contains("```bash {.highlight}"));
+    }
+
+    #[test]
+    fn test_fix_preserves_spacing_before_label() {
+        let content = "```bash\ncode\n```\n\n```  sh {.highlight}\ncode\n```";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(fixed.contains("```  bash {.highlight}"));
+        assert!(!fixed.contains("```  sh {.highlight}"));
     }
 
     // =========================================================================
@@ -808,6 +888,18 @@ echo there
         };
         let result = run_check_with_config(content, config).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_allowlist_blocks_unknown_language() {
+        let content = "```mysterylang\ncode\n```";
+        let config = MD040Config {
+            allowed_languages: vec!["Python".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("allowed list"));
     }
 
     #[test]
