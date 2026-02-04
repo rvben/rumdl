@@ -653,7 +653,7 @@ pub fn process_file_with_formatter(
     }
 
     // In fix mode with no warnings to fix, check if there are embedded markdown blocks to format
-    // If not, return early to avoid the re-lint which doesn't apply per-file-ignores or inline config
+    // or code block tools to run. If not, return early.
     if total_warnings == 0 && fix_mode != crate::FixMode::Check && !diff {
         // Check if there's any embedded markdown to format
         let has_embedded = has_fenced_code_blocks(&content)
@@ -661,7 +661,10 @@ pub fn process_file_with_formatter(
                 .iter()
                 .any(|b| !content[b.content_start..b.content_end].trim().is_empty());
 
-        if !has_embedded {
+        // Check if code block tools are enabled
+        let has_code_block_tools = config.code_block_tools.enabled;
+
+        if !has_embedded && !has_code_block_tools {
             return (false, 0, 0, 0, Vec::new(), file_index);
         }
     }
