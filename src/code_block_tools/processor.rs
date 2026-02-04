@@ -337,10 +337,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 };
 
-                match self
-                    .executor
-                    .lint(tool_def, &code_content, Some(self.config.timeout))
-                {
+                match self.executor.lint(tool_def, &code_content, Some(self.config.timeout)) {
                     Ok(output) => {
                         // Parse tool output into diagnostics
                         let diagnostics = self.parse_tool_output(
@@ -489,8 +486,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
 
             if let Some(line_num) = shellcheck_line
-                && let Some(diag) =
-                    self.parse_shellcheck_message(line, tool_id, code_block_start_line, line_num)
+                && let Some(diag) = self.parse_shellcheck_message(line, tool_id, code_block_start_line, line_num)
             {
                 diagnostics.push(diag);
                 continue;
@@ -560,6 +556,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         if let Ok(line_num) = line_part.parse::<usize>() {
             let column = col_part.and_then(|s| s.parse::<usize>().ok());
+            let message = Self::strip_fixable_markers(&message);
             if !message.is_empty() {
                 let severity = self.infer_severity(&message);
                 return Some(CodeBlockDiagnostic {
@@ -599,6 +596,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 } else {
                     msg_part.to_string()
                 };
+                let message = Self::strip_fixable_markers(&message);
                 let severity = match sev_part.to_lowercase().as_str() {
                     "error" => DiagnosticSeverity::Error,
                     "warning" | "warn" => DiagnosticSeverity::Warning,
@@ -634,7 +632,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             if let Some(colon_pos) = after_line.find(':')
                 && let Ok(line_num) = after_line[..colon_pos].trim().parse::<usize>()
             {
-                let message = after_line[colon_pos + 1..].trim().to_string();
+                let message = Self::strip_fixable_markers(after_line[colon_pos + 1..].trim());
                 if !message.is_empty() {
                     let severity = self.infer_severity(&message);
                     return Some(CodeBlockDiagnostic {
@@ -684,7 +682,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         let sev_end = after_code[sev_start..].find(')')? + sev_start;
         let sev = after_code[sev_start..sev_end].trim().to_lowercase();
         let message_start = after_code.find("):")? + 2;
-        let message = after_code[message_start..].trim().to_string();
+        let message = Self::strip_fixable_markers(after_code[message_start..].trim());
         if message.is_empty() {
             return None;
         }
@@ -722,6 +720,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
         } else {
             DiagnosticSeverity::Info
         }
+    }
+
+    /// Strip "fixable" markers from external tool messages.
+    ///
+    /// External tools like ruff show `[*]` to indicate fixable issues, but in rumdl's
+    /// context these markers can be misleading - the lint tool's fix capability may
+    /// differ from what our configured formatter can fix. We strip these markers
+    /// to avoid making promises we can't keep.
+    fn strip_fixable_markers(message: &str) -> String {
+        message
+            .replace(" [*]", "")
+            .replace("[*] ", "")
+            .replace("[*]", "")
+            .replace(" (fixable)", "")
+            .replace("(fixable) ", "")
+            .replace("(fixable)", "")
+            .replace(" [fix available]", "")
+            .replace("[fix available] ", "")
+            .replace("[fix available]", "")
+            .replace(" [autofix]", "")
+            .replace("[autofix] ", "")
+            .replace("[autofix]", "")
+            .trim()
+            .to_string()
     }
 }
 
@@ -958,10 +980,7 @@ fn main() {}
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].file_line, 13);
         assert_eq!(diags[0].severity, DiagnosticSeverity::Info);
-        assert_eq!(
-            diags[0].message,
-            "Double quote to prevent globbing"
-        );
+        assert_eq!(diags[0].message, "Double quote to prevent globbing");
     }
 
     #[test]
