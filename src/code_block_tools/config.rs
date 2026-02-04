@@ -26,6 +26,7 @@ pub struct CodeBlockToolsConfig {
 
     /// Timeout per tool execution in milliseconds (default: 30000)
     #[serde(default = "default_timeout")]
+    #[schemars(schema_with = "schema_timeout")]
     pub timeout: u64,
 
     /// Per-language tool configuration
@@ -44,6 +45,14 @@ pub struct CodeBlockToolsConfig {
 
 fn default_timeout() -> u64 {
     30_000
+}
+
+/// Generate a JSON Schema for timeout using standard integer type.
+fn schema_timeout(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "integer",
+        "minimum": 0
+    })
 }
 
 impl Default for CodeBlockToolsConfig {

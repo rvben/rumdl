@@ -200,7 +200,6 @@
         "timeout": {
           "description": "Timeout per tool execution in milliseconds (default: 30000)",
           "type": "integer",
-          "format": "uint64",
           "minimum": 0,
           "default": 30000
         },

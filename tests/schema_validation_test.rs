@@ -282,6 +282,23 @@ fn test_schema_globalconfig_uses_kebab_case() {
     }
 }
 
+/// Regression test: Schema must not use "uint64" format which Ajv doesn't recognize
+///
+/// The schemars library generates "format": "uint64" for u64 fields, but this is not
+/// a valid JSON Schema format recognized by validators like Ajv (used by SchemaStore).
+/// Use custom schema_with attributes for u64 fields to avoid this.
+#[test]
+fn test_schema_no_invalid_uint64_format() {
+    let schema = load_schema();
+    let schema_str = serde_json::to_string_pretty(&schema).expect("Failed to serialize schema");
+
+    assert!(
+        !schema_str.contains(r#""format": "uint64""#),
+        "Schema contains invalid 'format: uint64' which Ajv doesn't recognize. \
+         Use #[schemars(schema_with = ...)] for u64 fields to generate valid schemas."
+    );
+}
+
 /// Test that config files can use both kebab-case and snake_case (backward compatibility)
 /// This tests parsing directly without schema validation (which has unrelated issues)
 #[test]
