@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `<img src="url" alt="text">` → `![text](url)`
   - Requires `fix = true` in MD033 config (disabled by default)
 
+- **MkDocs: Support for markdown-enabled HTML blocks** - Properly handle `<div markdown>` grid cards and similar patterns
+  - Supports 10 HTML5 sectioning elements (div, section, article, aside, details, figure, footer, header, main, nav)
+  - MD030 and MD035 now skip content inside markdown-enabled HTML blocks
+  - Added `skip_mkdocs_html_markdown()` filter to filtered_lines API
+
 ### Fixed
 
 - **MD013: Prevent infinite loop in MkDocs admonition reflow** - Fixed edge case causing reflow to hang on certain admonition content

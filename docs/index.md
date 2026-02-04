@@ -65,11 +65,11 @@ rumdl fmt .
 
 rumdl is designed for speed. Benchmarked on the [Rust Book](https://github.com/rust-lang/book) repository (478 markdown files):
 
-| Linter | Cold Start | Warm Cache |
-|--------|------------|------------|
-| **rumdl** | **0.15s** | **0.02s** |
-| markdownlint-cli2 | 2.8s | 2.8s |
-| markdownlint-cli | 5.2s | 5.2s |
+| Linter            | Cold Start | Warm Cache |
+| ----------------- | ---------- | ---------- |
+| **rumdl**         | **0.15s**  | **0.02s**  |
+| markdownlint-cli2 | 2.8s       | 2.8s       |
+| markdownlint-cli  | 5.2s       | 5.2s       |
 
 With intelligent caching, subsequent runs are even faster - rumdl only re-lints files that have changed.
 

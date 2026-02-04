@@ -133,11 +133,11 @@ Each line shows:
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success (no issues, or `fmt` mode) |
-| `1` | Violations found |
-| `2` | Configuration or runtime error |
+| Code | Meaning                            |
+| ---- | ---------------------------------- |
+| `0`  | Success (no issues, or `fmt` mode) |
+| `1`  | Violations found                   |
+| `2`  | Configuration or runtime error     |
 
 ## Next Steps
 

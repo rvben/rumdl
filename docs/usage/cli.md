@@ -20,18 +20,18 @@ rumdl check --fix .              # Lint and auto-fix issues
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--fix` | Auto-fix issues (exits 1 if unfixable issues remain) |
-| `--config <PATH>` | Path to configuration file |
-| `--disable <RULES>` | Disable specific rules (e.g., `MD013,MD033`) |
-| `--enable <RULES>` | Enable only specific rules |
-| `--exclude <PATTERNS>` | Exclude files matching patterns |
-| `--include <PATTERNS>` | Include only files matching patterns |
-| `--watch` | Watch for changes and re-lint |
-| `--verbose` | Show detailed output |
-| `--quiet` | Suppress output except errors |
-| `--force-exclude` | Enforce exclude patterns for explicit files |
+| Option                 | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `--fix`                | Auto-fix issues (exits 1 if unfixable issues remain) |
+| `--config <PATH>`      | Path to configuration file                           |
+| `--disable <RULES>`    | Disable specific rules (e.g., `MD013,MD033`)         |
+| `--enable <RULES>`     | Enable only specific rules                           |
+| `--exclude <PATTERNS>` | Exclude files matching patterns                      |
+| `--include <PATTERNS>` | Include only files matching patterns                 |
+| `--watch`              | Watch for changes and re-lint                        |
+| `--verbose`            | Show detailed output                                 |
+| `--quiet`              | Suppress output except errors                        |
+| `--force-exclude`      | Enforce exclude patterns for explicit files          |
 
 ### `fmt [PATHS...]`
 
@@ -45,12 +45,12 @@ rumdl fmt -                      # Format stdin to stdout
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--config <PATH>` | Path to configuration file |
-| `--stdin` | Read from stdin |
+| Option                    | Description                             |
+| ------------------------- | --------------------------------------- |
+| `--config <PATH>`         | Path to configuration file              |
+| `--stdin`                 | Read from stdin                         |
 | `--stdin-filename <NAME>` | Filename for stdin (for error messages) |
-| `--quiet` | Suppress diagnostic output |
+| `--quiet`                 | Suppress diagnostic output              |
 
 ### `init [OPTIONS]`
 
@@ -64,9 +64,9 @@ rumdl init --output custom.toml  # Custom output path
 
 **Options:**
 
-| Option | Description |
-|--------|-------------|
-| `--preset <NAME>` | Use a style preset (`google`, `default`) |
+| Option            | Description                               |
+| ----------------- | ----------------------------------------- |
+| `--preset <NAME>` | Use a style preset (`google`, `default`)  |
 | `--output <PATH>` | Output file path (default: `.rumdl.toml`) |
 
 ### `import <FILE>`
@@ -131,22 +131,22 @@ rumdl version                    # Detailed version info
 
 These options work with all commands:
 
-| Option | Description |
-|--------|-------------|
-| `--help`, `-h` | Show help |
-| `--version`, `-V` | Show version |
-| `--verbose`, `-v` | Verbose output |
-| `--quiet`, `-q` | Quiet output |
-| `--color <WHEN>` | Color output (`auto`, `always`, `never`) |
-| `--output-format <FMT>` | Output format (`text`, `json`) |
+| Option                  | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `--help`, `-h`          | Show help                                |
+| `--version`, `-V`       | Show version                             |
+| `--verbose`, `-v`       | Verbose output                           |
+| `--quiet`, `-q`         | Quiet output                             |
+| `--color <WHEN>`        | Color output (`auto`, `always`, `never`) |
+| `--output-format <FMT>` | Output format (`text`, `json`)           |
 
 ## Exit Codes
 
-| Code | Meaning |
-|------|---------|
-| `0` | Success |
-| `1` | Lint violations found |
-| `2` | Configuration or runtime error |
+| Code | Meaning                        |
+| ---- | ------------------------------ |
+| `0`  | Success                        |
+| `1`  | Lint violations found          |
+| `2`  | Configuration or runtime error |
 
 !!! note "fmt vs check --fix"
     - `rumdl fmt` always exits 0 (formatter mode)

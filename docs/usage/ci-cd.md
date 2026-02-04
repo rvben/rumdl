@@ -26,12 +26,12 @@ The `v0` tag always points to the latest stable release.
 
 ### Action Inputs
 
-| Input | Description | Default |
-|-------|-------------|---------|
-| `version` | rumdl version to install | `latest` |
-| `path` | Path to lint | workspace root |
-| `config` | Config file path | auto-detected |
-| `report-type` | `logs` or `annotations` | `logs` |
+| Input         | Description              | Default        |
+| ------------- | ------------------------ | -------------- |
+| `version`     | rumdl version to install | `latest`       |
+| `path`        | Path to lint             | workspace root |
+| `config`      | Config file path         | auto-detected  |
+| `report-type` | `logs` or `annotations`  | `logs`         |
 
 ### Examples
 
@@ -134,11 +134,11 @@ steps:
 
 rumdl uses standard exit codes for CI:
 
-| Code | Meaning | CI Result |
-|------|---------|-----------|
-| `0` | No issues | Pass |
-| `1` | Issues found | Fail |
-| `2` | Error | Fail |
+| Code | Meaning      | CI Result |
+| ---- | ------------ | --------- |
+| `0`  | No issues    | Pass      |
+| `1`  | Issues found | Fail      |
+| `2`  | Error        | Fail      |
 
 ## Best Practices
 
