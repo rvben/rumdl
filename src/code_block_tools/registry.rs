@@ -63,6 +63,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             command: vec![
                 "ruff".to_string(),
                 "check".to_string(),
+                "--output-format=concise".to_string(),
                 "--stdin-filename=_.py".to_string(),
                 "-".to_string(),
             ],

@@ -5350,8 +5350,13 @@ fn parse_rumdl_toml(content: &str, path: &str, source: ConfigSource) -> Result<S
     if let Some(cbt_item) = doc.get("code-block-tools")
         && let Some(cbt_table) = cbt_item.as_table()
     {
-        // Convert the table to a TOML string and then deserialize into CodeBlockToolsConfig
-        let cbt_toml_str = cbt_table.to_string();
+        // Convert the table to a proper TOML document for deserialization
+        // We need to create a new document with just this section, properly formatted
+        let mut cbt_doc = toml_edit::DocumentMut::new();
+        for (key, value) in cbt_table.iter() {
+            cbt_doc[key] = value.clone();
+        }
+        let cbt_toml_str = cbt_doc.to_string();
         match toml::from_str::<crate::code_block_tools::CodeBlockToolsConfig>(&cbt_toml_str) {
             Ok(cbt_config) => {
                 fragment
