@@ -54,11 +54,6 @@ style = "leading_and_trailing"
 enabled = true
 style = "aligned"
 
-# Per-file rule ignores
-[per-file-ignores]
-# Skip MD060 for md060.md since it contains intentional example tables in code fences
-"docs/md060.md" = ["MD060"]
-# Zensical/MkDocs Material uses custom syntax that triggers these rules
-"docs/index.md" = ["MD030", "MD035", "MD060"]
-"docs/getting-started/*.md" = ["MD046", "MD060"]
-"docs/usage/*.md" = ["MD046", "MD060"]
+# Per-file flavor configuration
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"

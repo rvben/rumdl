@@ -24,6 +24,7 @@ pub mod mkdocs_critic;
 pub mod mkdocs_definition_lists;
 pub mod mkdocs_extensions;
 pub mod mkdocs_footnotes;
+pub mod mkdocs_html_markdown;
 pub mod mkdocs_icons;
 pub mod mkdocs_patterns;
 pub mod mkdocs_snippets;

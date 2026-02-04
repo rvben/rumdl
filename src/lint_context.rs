@@ -3,6 +3,7 @@ use crate::inline_config::InlineConfig;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockContext, CodeBlockUtils};
 use crate::utils::element_cache::ElementCache;
+use crate::utils::mkdocs_html_markdown::MarkdownHtmlTracker;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 use regex::Regex;
@@ -124,6 +125,8 @@ pub struct LineInfo {
     pub in_admonition: bool,
     /// Whether this line is inside an MkDocs content tab block (===)
     pub in_content_tab: bool,
+    /// Whether this line is inside an HTML block with markdown attribute (MkDocs grid cards, etc.)
+    pub in_mkdocs_html_markdown: bool,
     /// Whether this line is a definition list item (: definition)
     pub in_definition_list: bool,
     /// Whether this line is inside an Obsidian comment (%%...%% syntax, Obsidian flavor only)
@@ -136,12 +139,12 @@ impl LineInfo {
         &source[self.byte_offset..self.byte_offset + self.byte_len]
     }
 
-    /// Check if this line is inside MkDocs-specific indented content (admonitions or tabs).
+    /// Check if this line is inside MkDocs-specific indented content (admonitions, tabs, or markdown HTML).
     /// This content uses 4-space indentation which pulldown-cmark would interpret as code blocks,
     /// but in MkDocs flavor it's actually container content that should be preserved.
     #[inline]
     pub fn in_mkdocs_container(&self) -> bool {
-        self.in_admonition || self.in_content_tab
+        self.in_admonition || self.in_content_tab || self.in_mkdocs_html_markdown
     }
 }
 
@@ -2549,14 +2552,15 @@ impl<'a> LintContext<'a> {
                 is_horizontal_rule: is_hr,
                 in_math_block,
                 in_quarto_div,
-                in_jsx_expression: false,   // Will be populated for MDX files
-                in_mdx_comment: false,      // Will be populated for MDX files
-                in_jsx_component: false,    // Will be populated for MDX files
-                in_jsx_fragment: false,     // Will be populated for MDX files
-                in_admonition: false,       // Will be populated for MkDocs files
-                in_content_tab: false,      // Will be populated for MkDocs files
-                in_definition_list: false,  // Will be populated for MkDocs files
-                in_obsidian_comment: false, // Will be populated for Obsidian files
+                in_jsx_expression: false,       // Will be populated for MDX files
+                in_mdx_comment: false,          // Will be populated for MDX files
+                in_jsx_component: false,        // Will be populated for MDX files
+                in_jsx_fragment: false,         // Will be populated for MDX files
+                in_admonition: false,           // Will be populated for MkDocs files
+                in_content_tab: false,          // Will be populated for MkDocs files
+                in_mkdocs_html_markdown: false, // Will be populated for MkDocs files
+                in_definition_list: false,      // Will be populated for MkDocs files
+                in_obsidian_comment: false,     // Will be populated for Obsidian files
             });
         }
 
@@ -3258,8 +3262,15 @@ impl<'a> LintContext<'a> {
         let mut in_tab = false;
         let mut tab_indent = 0;
 
+        // Track fenced code blocks within MkDocs containers (separate from pulldown-cmark detection)
+        let mut in_mkdocs_fenced_code = false;
+        let mut mkdocs_fence_marker: Option<String> = None;
+
         // Track definition list context
         let mut in_definition = false;
+
+        // Track markdown-enabled HTML block context (grid cards, etc.)
+        let mut markdown_html_tracker = MarkdownHtmlTracker::new();
 
         for (i, line) in content_lines.iter().enumerate() {
             if i >= lines.len() {
@@ -3302,19 +3313,57 @@ impl<'a> LintContext<'a> {
                 in_tab = true;
                 tab_indent = mkdocs_tabs::get_tab_indent(line).unwrap_or(0);
                 lines[i].in_content_tab = true;
+                // Reset fenced code tracking when entering new tab
+                in_mkdocs_fenced_code = false;
+                mkdocs_fence_marker = None;
             } else if in_tab {
+                let trimmed = line.trim();
+
+                // Track fenced code blocks within tabs
+                if !in_mkdocs_fenced_code {
+                    // Check for fence start (``` or ~~~)
+                    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                        let fence_char = trimmed.chars().next().unwrap();
+                        let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+                        if fence_len >= 3 {
+                            in_mkdocs_fenced_code = true;
+                            mkdocs_fence_marker = Some(fence_char.to_string().repeat(fence_len));
+                        }
+                    }
+                } else if let Some(ref marker) = mkdocs_fence_marker {
+                    // Check for fence end (same or more chars)
+                    let fence_char = marker.chars().next().unwrap();
+                    if trimmed.starts_with(marker.as_str())
+                        && trimmed
+                            .chars()
+                            .skip(marker.len())
+                            .all(|c| c == fence_char || c.is_whitespace())
+                    {
+                        in_mkdocs_fenced_code = false;
+                        mkdocs_fence_marker = None;
+                    }
+                }
+
                 // Check if still in tab content
                 if line.trim().is_empty() {
                     // Blank lines are part of tabs
                     lines[i].in_content_tab = true;
-                    lines[i].in_code_block = false;
+                    // Only override code block if not in a fenced code block
+                    if !in_mkdocs_fenced_code {
+                        lines[i].in_code_block = false;
+                    }
                 } else if mkdocs_tabs::is_tab_content(line, tab_indent) {
                     lines[i].in_content_tab = true;
-                    // Override code block detection - this is tab content, not code
-                    lines[i].in_code_block = false;
+                    // Override INDENTED code block detection - this is tab content, not code
+                    // But preserve fenced code block detection (```...```)
+                    if !in_mkdocs_fenced_code {
+                        lines[i].in_code_block = false;
+                    }
                 } else {
                     // End of tab content
                     in_tab = false;
+                    in_mkdocs_fenced_code = false;
+                    mkdocs_fence_marker = None;
                     // Check if this line starts a new tab
                     if mkdocs_tabs::is_tab_marker(line) {
                         in_tab = true;
@@ -3323,6 +3372,11 @@ impl<'a> LintContext<'a> {
                     }
                 }
             }
+
+            // Check for markdown-enabled HTML blocks (grid cards, etc.)
+            // Supports div, section, article, aside, details, figure, footer, header, main, nav
+            // with markdown, markdown="1", or markdown="block" attributes
+            lines[i].in_mkdocs_html_markdown = markdown_html_tracker.process_line(line);
 
             // Skip remaining detection for lines in actual code blocks
             if lines[i].in_code_block {

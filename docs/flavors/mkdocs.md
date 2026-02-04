@@ -59,15 +59,23 @@ MkDocs snippets for including external files:
 
 ### HTML with Markdown Attribute
 
-Allows `markdown="1"` to enable Markdown processing inside HTML:
+Allows `markdown`, `markdown="1"`, or `markdown="block"` to enable Markdown processing inside HTML elements. This includes Material for MkDocs grid cards pattern:
 
 ```markdown
-<div markdown="1">
-**This** is processed as Markdown.
+<div class="grid cards" markdown>
+
+-   :zap:{ .lg .middle } **Built for speed**
+
+    ---
+
+    Written in Rust for blazing fast performance.
+
 </div>
 ```
 
-**Affected rules**: MD033 (inline HTML)
+Supported elements: `div`, `section`, `article`, `aside`, `details`, `figure`, `footer`, `header`, `main`, `nav`.
+
+**Affected rules**: MD030 (list marker space), MD033 (inline HTML), MD035 (HR style)
 
 ### Code Block Title Attribute
 
@@ -117,19 +125,21 @@ MkDocs extensions for special formatting:
 
 ## Rule Behavior Changes
 
-| Rule  | Standard Behavior                | MkDocs Behavior                     |
-| ----- | -------------------------------- | ----------------------------------- |
-| MD024 | Flag duplicate headings          | Skip headings in snippet sections   |
-| MD031 | Require blanks around all fences | Respect admonition/tab/mkdocstrings |
-| MD033 | Flag all inline HTML             | Allow `markdown="1"` attribute      |
-| MD038 | Flag spaces in code spans        | Handle keys/caret/mark syntax       |
-| MD040 | Require language on code blocks  | Allow `title=` without language     |
-| MD042 | Flag empty links `[]()`          | Allow auto-references `[Class][]`   |
-| MD046 | Detect code block style globally | Account for admonition/tab context  |
-| MD049 | Check emphasis consistency       | Handle mark/inserted syntax         |
-| MD050 | Check strong consistency         | Handle mark/caret/tilde syntax      |
-| MD052 | Flag undefined references        | Allow auto-references and snippets  |
-| MD056 | Strict column count              | Handle MkDocs table extensions      |
+| Rule  | Standard Behavior                | MkDocs Behavior                         |
+| ----- | -------------------------------- | --------------------------------------- |
+| MD024 | Flag duplicate headings          | Skip headings in snippet sections       |
+| MD030 | Check list marker spacing        | Skip inside markdown-enabled HTML       |
+| MD031 | Require blanks around all fences | Respect admonition/tab/mkdocstrings     |
+| MD033 | Flag all inline HTML             | Allow `markdown` attribute on elements  |
+| MD035 | Check horizontal rule style      | Skip inside markdown-enabled HTML       |
+| MD038 | Flag spaces in code spans        | Handle keys/caret/mark syntax           |
+| MD040 | Require language on code blocks  | Allow `title=` without language         |
+| MD042 | Flag empty links `[]()`          | Allow auto-references `[Class][]`       |
+| MD046 | Detect code block style globally | Account for admonition/tab context      |
+| MD049 | Check emphasis consistency       | Handle mark/inserted syntax             |
+| MD050 | Check strong consistency         | Handle mark/caret/tilde syntax          |
+| MD052 | Flag undefined references        | Allow auto-references and snippets      |
+| MD056 | Strict column count              | Handle MkDocs table extensions          |
 
 ## Configuration
 

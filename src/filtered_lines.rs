@@ -87,6 +87,8 @@ pub struct LineFilterConfig {
     pub skip_admonitions: bool,
     /// Skip lines inside MkDocs content tabs (=== "Tab")
     pub skip_content_tabs: bool,
+    /// Skip lines inside HTML blocks with markdown attribute (MkDocs grid cards, etc.)
+    pub skip_mkdocs_html_markdown: bool,
     /// Skip lines inside definition lists (:  definition)
     pub skip_definition_lists: bool,
     /// Skip lines inside Obsidian comments (%%...%%)
@@ -219,15 +221,25 @@ impl LineFilterConfig {
         self
     }
 
-    /// Skip lines inside any MkDocs container (admonitions or content tabs)
+    /// Skip lines inside HTML blocks with markdown attribute (MkDocs grid cards, etc.)
     ///
-    /// This is a convenience method that enables both `skip_admonitions` and
-    /// `skip_content_tabs`. MkDocs containers use 4-space indented content
-    /// which may need special handling to preserve structure.
+    /// These blocks contain markdown-enabled HTML which may have custom styling rules.
+    #[must_use]
+    pub fn skip_mkdocs_html_markdown(mut self) -> Self {
+        self.skip_mkdocs_html_markdown = true;
+        self
+    }
+
+    /// Skip lines inside any MkDocs container (admonitions, content tabs, or markdown HTML divs)
+    ///
+    /// This is a convenience method that enables `skip_admonitions`,
+    /// `skip_content_tabs`, and `skip_mkdocs_html_markdown`. MkDocs containers use
+    /// 4-space indented content which may need special handling to preserve structure.
     #[must_use]
     pub fn skip_mkdocs_containers(mut self) -> Self {
         self.skip_admonitions = true;
         self.skip_content_tabs = true;
+        self.skip_mkdocs_html_markdown = true;
         self
     }
 
@@ -265,6 +277,7 @@ impl LineFilterConfig {
             || (self.skip_mdx_comments && line_info.in_mdx_comment)
             || (self.skip_admonitions && line_info.in_admonition)
             || (self.skip_content_tabs && line_info.in_content_tab)
+            || (self.skip_mkdocs_html_markdown && line_info.in_mkdocs_html_markdown)
             || (self.skip_definition_lists && line_info.in_definition_list)
             || (self.skip_obsidian_comments && line_info.in_obsidian_comment)
     }
@@ -468,11 +481,18 @@ impl<'a> FilteredLinesBuilder<'a> {
         self
     }
 
-    /// Skip lines inside any MkDocs container (admonitions or content tabs)
+    /// Skip lines inside HTML blocks with markdown attribute (MkDocs grid cards, etc.)
+    #[must_use]
+    pub fn skip_mkdocs_html_markdown(mut self) -> Self {
+        self.config = self.config.skip_mkdocs_html_markdown();
+        self
+    }
+
+    /// Skip lines inside any MkDocs container (admonitions, content tabs, or markdown HTML divs)
     ///
-    /// This is a convenience method that enables both `skip_admonitions` and
-    /// `skip_content_tabs`. MkDocs containers use 4-space indented content
-    /// which may need special handling to preserve structure.
+    /// This is a convenience method that enables `skip_admonitions`,
+    /// `skip_content_tabs`, and `skip_mkdocs_html_markdown`. MkDocs containers use
+    /// 4-space indented content which may need special handling to preserve structure.
     #[must_use]
     pub fn skip_mkdocs_containers(mut self) -> Self {
         self.config = self.config.skip_mkdocs_containers();
