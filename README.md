@@ -78,7 +78,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using mise](#using-mise)
   - [Using Nix (macOS/Linux)](#using-nix-macoslinux)
   - [Using Termux User Repository (TUR) (Android)](#using-termux-user-repository-tur-android)
-  - [Using Archlinux User Repository](#using-archlinux-user-repository)
+  - [Using pacman (Arch Linux)](<#using-pacman-(arch-linux)>)
   - [Download binary](#download-binary)
   - [Editor Plugins](#editor-plugins)
 - [Usage](#usage)
@@ -211,22 +211,12 @@ pkg install tur-repo
 pkg install rumdl
 ```
 
-### Using Archlinux User Repository
+### Using pacman (Arch Linux)
 
-[![rumdl on AUR](https://img.shields.io/aur/version/rumdl?label=rumdl)](https://aur.archlinux.org/packages/rumdl/)
-[![rumdl-bin on AUR](https://img.shields.io/aur/version/rumdl-bin?label=rumdl-bin)](https://aur.archlinux.org/packages/rumdl-bin/)
-
-rumdl is available on the [AUR](https://wiki.archlinux.org/index.php/Arch_User_Repository):
-
-- [rumdl](https://aur.archlinux.org/packages/rumdl/) (release package)
-- [rumdl-bin](https://aur.archlinux.org/packages/rumdl-bin/) (binary package)
-
-You can install it using your [AUR helper](https://wiki.archlinux.org/index.php/AUR_helpers) of choice.
+rumdl is available in the [official Arch Linux repositories](https://archlinux.org/packages/extra/x86_64/rumdl/):
 
 ```bash
-yay -Sy rumdl
-# OR
-yay -Sy rumdl-bin
+pacman -S rumdl
 ```
 
 ### Download binary
