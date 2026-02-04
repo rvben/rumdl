@@ -79,7 +79,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using mise](#using-mise)
   - [Using Nix (macOS/Linux)](#using-nix-macoslinux)
   - [Using Termux User Repository (TUR) (Android)](#using-termux-user-repository-tur-android)
-  - [Using pacman (Arch Linux)](<#using-pacman-(arch-linux)>)
+  - [Using pacman (Arch Linux)](#using-pacman-arch-linux)
   - [Download binary](#download-binary)
   - [Editor Plugins](#editor-plugins)
 - [Usage](#usage)
