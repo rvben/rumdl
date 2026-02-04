@@ -357,9 +357,159 @@ jobs:
           rumdl check test.md
           echo "✅ Binary works correctly"
 
+  build-npm-cli:
+    name: Build npm CLI packages
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: archives
+
+      - name: Prepare npm packages
+        run: |
+          # Extract version from ref (e.g., refs/tags/v0.0.97 -> 0.0.97)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Version: $VERSION"
+
+          # Update versions in all package.json files
+          for pkg in npm/cli-*/package.json npm/rumdl/package.json; do
+            jq --arg v "$VERSION" '.version = $v' "$pkg" > tmp.json && mv tmp.json "$pkg"
+          done
+
+          # Update optionalDependencies in main package
+          jq --arg v "$VERSION" '.optionalDependencies |= with_entries(.value = $v)' \
+            npm/rumdl/package.json > tmp.json && mv tmp.json npm/rumdl/package.json
+
+          # Extract binaries to platform packages
+          # macOS
+          tar -xzf archives/release-x86_64-apple-darwin/rumdl-*.tar.gz -C npm/cli-darwin-x64/
+          tar -xzf archives/release-aarch64-apple-darwin/rumdl-*.tar.gz -C npm/cli-darwin-arm64/
+
+          # Linux glibc
+          tar -xzf archives/release-x86_64-unknown-linux-gnu/rumdl-*.tar.gz -C npm/cli-linux-x64/
+          tar -xzf archives/release-aarch64-unknown-linux-gnu/rumdl-*.tar.gz -C npm/cli-linux-arm64/
+
+          # Linux musl
+          tar -xzf archives/release-x86_64-unknown-linux-musl/rumdl-*.tar.gz -C npm/cli-linux-x64-musl/
+          tar -xzf archives/release-aarch64-unknown-linux-musl/rumdl-*.tar.gz -C npm/cli-linux-arm64-musl/
+
+          # Windows
+          unzip -o archives/release-x86_64-pc-windows-msvc/rumdl-*.zip -d npm/cli-win32-x64/
+
+          # List package contents for verification
+          echo "Package contents:"
+          for dir in npm/cli-*/; do
+            echo "  $dir:"
+            ls -la "$dir"
+          done
+
+      - name: Upload npm packages artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-cli-packages
+          path: npm/
+
+  test-npm-cli:
+    name: Test npm CLI (${{ matrix.os }})
+    needs: build-npm-cli
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform-pkg: cli-linux-x64
+          - os: macos-latest
+            platform-pkg: cli-darwin-arm64
+          - os: macos-14
+            platform-pkg: cli-darwin-x64
+          - os: windows-latest
+            platform-pkg: cli-win32-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download npm packages
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-packages
+          path: npm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install packages locally
+        shell: bash
+        run: |
+          # Create test directory
+          mkdir test-install
+          cd test-install
+
+          # Initialize package.json
+          npm init -y
+
+          # Install platform package first (local file)
+          npm install ../npm/${{ matrix.platform-pkg }}
+
+          # Install main package (local file)
+          npm install ../npm/rumdl
+
+      - name: Test rumdl binary
+        shell: bash
+        run: |
+          cd test-install
+
+          echo "# Test Heading" > test.md
+          echo "" >> test.md
+          echo "This is a test." >> test.md
+
+          # Test version
+          npx rumdl --version
+          # Test linting
+          npx rumdl check test.md
+
+          echo "✅ npm CLI package works correctly"
+
+  test-npm-cli-musl:
+    name: Test npm CLI (linux-musl)
+    needs: build-npm-cli
+    runs-on: ubuntu-latest
+    container: node:20-alpine
+    steps:
+      - name: Download npm packages
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-packages
+          path: npm
+
+      - name: Install packages locally
+        shell: sh
+        run: |
+          mkdir test-install
+          cd test-install
+          npm init -y
+          npm install ../npm/cli-linux-x64-musl
+          npm install ../npm/rumdl
+
+      - name: Test rumdl binary
+        shell: sh
+        run: |
+          cd test-install
+          printf '# Test Heading\n\nThis is a test.\n' > test.md
+          npx rumdl --version
+          npx rumdl check test.md
+          echo "✅ npm CLI package works correctly"
+
   release:
     runs-on: ubuntu-latest
-    needs: [build, sdist, test-python-package, build-wasm]
+    needs: [build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
@@ -423,7 +573,7 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Publish to npm
+      - name: Publish WASM to npm
         if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
         run: |
           cd wasm-pkg
@@ -431,11 +581,47 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Test npm publish (dry run)
+      - name: Test WASM npm publish (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_npm != true }}
         run: |
-          echo "DRY RUN: Would publish to npm:"
+          echo "DRY RUN: Would publish WASM to npm:"
           jq '{name, version}' wasm-pkg/package.json
+
+      - name: Download npm CLI packages
+        if: ${{ inputs.skip_npm != true }}
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-cli-packages
+          path: npm-cli
+
+      - name: Publish CLI platform packages to npm
+        if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Publish platform packages first (they're dependencies of the main package)
+          for pkg in npm-cli/cli-*/; do
+            echo "Publishing $(basename "$pkg")..."
+            cd "$pkg"
+            npm publish --access public
+            cd ../..
+          done
+
+      - name: Publish CLI main package to npm
+        if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd npm-cli/rumdl
+          npm publish --access public
+
+      - name: Test CLI npm publish (dry run)
+        if: ${{ inputs.dry_run == true && inputs.skip_npm != true }}
+        run: |
+          echo "DRY RUN: Would publish CLI packages to npm:"
+          for pkg in npm-cli/cli-*/package.json npm-cli/rumdl/package.json; do
+            echo "  - $(jq -r '.name + "@" + .version' "$pkg")"
+          done
 
       - name: Skip npm publishing
         if: ${{ inputs.skip_npm == true }}

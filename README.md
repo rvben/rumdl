@@ -73,6 +73,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 - [Installation](#installation)
   - [Using Homebrew (macOS/Linux)](#using-homebrew-macoslinux)
   - [Using Cargo (Rust)](#using-cargo-rust)
+  - [Using npm](#using-npm)
   - [Using pip (Python)](#using-pip-python)
   - [Using uv](#using-uv)
   - [Using mise](#using-mise)
@@ -151,6 +152,18 @@ brew install rumdl
 
 ```bash
 cargo install rumdl
+```
+
+### Using npm
+
+```bash
+npm install -g rumdl
+```
+
+Or as a dev dependency:
+
+```bash
+npm install --save-dev rumdl
 ```
 
 ### Using pip (Python)

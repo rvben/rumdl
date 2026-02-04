@@ -1,0 +1,44 @@
+{
+  "name": "rumdl",
+  "version": "0.1.12",
+  "description": "A fast Markdown linter written in Rust",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rvben/rumdl.git"
+  },
+  "homepage": "https://rumdl.dev",
+  "bugs": {
+    "url": "https://github.com/rvben/rumdl/issues"
+  },
+  "keywords": [
+    "markdown",
+    "linter",
+    "lint",
+    "markdown-linter",
+    "static-analysis",
+    "documentation",
+    "markdownlint",
+    "mdlint",
+    "md"
+  ],
+  "bin": {
+    "rumdl": "bin/rumdl"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "optionalDependencies": {
+    "@rumdl/cli-darwin-x64": "0.1.12",
+    "@rumdl/cli-darwin-arm64": "0.1.12",
+    "@rumdl/cli-linux-x64": "0.1.12",
+    "@rumdl/cli-linux-arm64": "0.1.12",
+    "@rumdl/cli-linux-x64-musl": "0.1.12",
+    "@rumdl/cli-linux-arm64-musl": "0.1.12",
+    "@rumdl/cli-win32-x64": "0.1.12"
+  }
+}

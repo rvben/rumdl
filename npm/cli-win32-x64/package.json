@@ -1,0 +1,24 @@
+{
+  "name": "@rumdl/cli-win32-x64",
+  "version": "0.1.12",
+  "description": "rumdl binary for Windows x64",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rvben/rumdl.git"
+  },
+  "homepage": "https://rumdl.dev",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "rumdl.exe"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "preferUnplugged": true
+}

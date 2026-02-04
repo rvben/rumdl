@@ -1,0 +1,326 @@
+#!/usr/bin/env node
+
+/**
+ * rumdl - A fast Markdown linter written in Rust
+ *
+ * This is a JavaScript wrapper that detects the platform and spawns
+ * the appropriate native binary from the platform-specific package.
+ *
+ * Supports: npm, yarn, pnpm, and Yarn PnP (Plug'n'Play)
+ */
+
+const { spawnSync } = require("child_process");
+const { createRequire } = require("module");
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
+
+const DEBUG = process.env.RUMDL_DEBUG === "1";
+
+function debug(message) {
+  if (DEBUG) {
+    console.error(`[rumdl-debug] ${message}`);
+  }
+}
+
+/**
+ * Detect if we're running on musl libc (Alpine Linux, etc.)
+ */
+function isMusl() {
+  // Check for Alpine Linux
+  if (fs.existsSync("/etc/alpine-release")) {
+    debug("Detected Alpine Linux via /etc/alpine-release");
+    return true;
+  }
+
+  // Check ldd output for musl (musl outputs to stderr, glibc to stdout)
+  try {
+    const result = spawnSync("ldd", ["--version"], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const output = (result.stdout || "") + (result.stderr || "");
+    if (output.toLowerCase().includes("musl")) {
+      debug("Detected musl via ldd --version");
+      return true;
+    }
+  } catch {
+    // ldd not available or failed
+  }
+
+  // Check if libc.musl-* or ld-musl-* exists in /lib
+  try {
+    const libDirs = ["/lib", "/lib64"];
+    for (const libDir of libDirs) {
+      if (fs.existsSync(libDir)) {
+        const files = fs.readdirSync(libDir);
+        if (files.some((f) => f.startsWith("libc.musl-") || f.startsWith("ld-musl-"))) {
+          debug(`Detected musl via ${libDir} directory scan`);
+          return true;
+        }
+      }
+    }
+  } catch {
+    // Can't read /lib
+  }
+
+  // Check LD_LIBRARY_PATH for musl
+  const ldPath = process.env.LD_LIBRARY_PATH || "";
+  if (ldPath.includes("musl")) {
+    debug("Detected musl via LD_LIBRARY_PATH");
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Get the platform-specific package name
+ */
+function getPlatformPackage() {
+  const platform = os.platform();
+  const arch = os.arch();
+
+  debug(`Platform: ${platform}, Architecture: ${arch}`);
+
+  // Map Node.js platform/arch to our package names
+  const platformMap = {
+    darwin: {
+      x64: "@rumdl/cli-darwin-x64",
+      arm64: "@rumdl/cli-darwin-arm64",
+    },
+    linux: {
+      x64: isMusl() ? "@rumdl/cli-linux-x64-musl" : "@rumdl/cli-linux-x64",
+      arm64: isMusl() ? "@rumdl/cli-linux-arm64-musl" : "@rumdl/cli-linux-arm64",
+    },
+    win32: {
+      x64: "@rumdl/cli-win32-x64",
+      arm64: "@rumdl/cli-win32-x64", // Use x64 via emulation on Windows ARM64
+    },
+  };
+
+  const platformPackages = platformMap[platform];
+  if (!platformPackages) {
+    throw new Error(
+      `Unsupported platform: ${platform}\n` +
+        `Supported platforms: darwin (macOS), linux, win32 (Windows)\n` +
+        `Set RUMDL_DEBUG=1 for more information.`
+    );
+  }
+
+  const packageName = platformPackages[arch];
+  if (!packageName) {
+    throw new Error(
+      `Unsupported architecture: ${arch} on ${platform}\n` +
+        `Supported architectures: ${Object.keys(platformPackages).join(", ")}\n` +
+        `Set RUMDL_DEBUG=1 for more information.`
+    );
+  }
+
+  debug(`Selected package: ${packageName}`);
+  return packageName;
+}
+
+/**
+ * Check if running under Yarn PnP (Plug'n'Play)
+ */
+function isYarnPnP() {
+  // Yarn PnP sets this when running via yarn
+  return !!process.versions.pnp;
+}
+
+/**
+ * Try to resolve binary using Yarn PnP API
+ */
+function findBinaryYarnPnP(packageName, binaryName) {
+  try {
+    // Yarn PnP provides a require function that handles PnP resolution
+    const pnpApi = require("pnpapi");
+    const packagePath = pnpApi.resolveToUnqualified(`${packageName}/package.json`, __filename);
+    if (packagePath) {
+      const binaryPath = path.join(path.dirname(packagePath), binaryName);
+      debug(`Yarn PnP resolved: ${binaryPath}`);
+      if (fs.existsSync(binaryPath)) {
+        return binaryPath;
+      }
+    }
+  } catch {
+    debug("Yarn PnP resolution failed");
+  }
+  return null;
+}
+
+/**
+ * Find the binary path from the platform package
+ */
+function findBinary() {
+  const attemptedPaths = [];
+
+  // Allow override via environment variable
+  const envBinary = process.env.RUMDL_BINARY;
+  if (envBinary) {
+    debug(`RUMDL_BINARY override: ${envBinary}`);
+    if (fs.existsSync(envBinary)) {
+      return envBinary;
+    }
+    throw new Error(`RUMDL_BINARY path does not exist: ${envBinary}`);
+  }
+
+  const packageName = getPlatformPackage();
+  const binaryName = process.platform === "win32" ? "rumdl.exe" : "rumdl";
+
+  // Strategy 0: Yarn PnP (Plug'n'Play)
+  // Must check first as PnP has its own module resolution
+  if (isYarnPnP()) {
+    debug("Detected Yarn PnP environment");
+    const pnpPath = findBinaryYarnPnP(packageName, binaryName);
+    if (pnpPath) {
+      return pnpPath;
+    }
+    attemptedPaths.push("Yarn PnP resolution");
+  }
+
+  // Strategy 1: Use createRequire from the current working directory
+  // This works for project-level installations
+  try {
+    const cwdRequire = createRequire(path.join(process.cwd(), "package.json"));
+    const packagePath = cwdRequire.resolve(`${packageName}/package.json`);
+    const binaryPath = path.join(path.dirname(packagePath), binaryName);
+    debug(`Strategy 1 (cwd createRequire): ${binaryPath}`);
+    attemptedPaths.push(binaryPath);
+    if (fs.existsSync(binaryPath)) {
+      return binaryPath;
+    }
+  } catch (e) {
+    debug(`Strategy 1 failed: ${e.message}`);
+  }
+
+  // Strategy 2: Look in sibling @rumdl directory relative to this package
+  // This works when packages are installed as siblings in node_modules
+  try {
+    // __dirname is npm/rumdl/bin, go up to find node_modules/@rumdl
+    const nodeModulesDir = path.resolve(__dirname, "..", "..");
+    const platformDir = path.join(nodeModulesDir, "@rumdl", packageName.replace("@rumdl/", ""));
+    const binaryPath = path.join(platformDir, binaryName);
+    debug(`Strategy 2 (sibling path): ${binaryPath}`);
+    attemptedPaths.push(binaryPath);
+    if (fs.existsSync(binaryPath)) {
+      return binaryPath;
+    }
+  } catch (e) {
+    debug(`Strategy 2 failed: ${e.message}`);
+  }
+
+  // Strategy 3: Use standard require.resolve
+  // This works for global installations
+  try {
+    const packagePath = require.resolve(`${packageName}/package.json`);
+    const binaryPath = path.join(path.dirname(packagePath), binaryName);
+    debug(`Strategy 3 (require.resolve): ${binaryPath}`);
+    attemptedPaths.push(binaryPath);
+    if (fs.existsSync(binaryPath)) {
+      return binaryPath;
+    }
+  } catch (e) {
+    debug(`Strategy 3 failed: ${e.message}`);
+  }
+
+  // Strategy 4: Look relative to this script (for global npm installs)
+  try {
+    const globalPath = path.resolve(__dirname, "..", "..", packageName.replace("@rumdl/", "@rumdl" + path.sep), binaryName);
+    debug(`Strategy 4 (global relative): ${globalPath}`);
+    attemptedPaths.push(globalPath);
+    if (fs.existsSync(globalPath)) {
+      return globalPath;
+    }
+  } catch (e) {
+    debug(`Strategy 4 failed: ${e.message}`);
+  }
+
+  // Build helpful error message
+  const debugHint = DEBUG ? "" : "\nSet RUMDL_DEBUG=1 for detailed resolution info.";
+  const pathsInfo = DEBUG ? `\n\nAttempted paths:\n  ${attemptedPaths.join("\n  ")}` : "";
+
+  throw new Error(
+    `Platform package ${packageName} is not installed or binary not found.\n\n` +
+      `Try one of the following:\n` +
+      `  npm install rumdl\n` +
+      `  npm install ${packageName}\n` +
+      `  yarn add rumdl\n` +
+      `  pnpm add rumdl` +
+      pathsInfo +
+      debugHint
+  );
+}
+
+/**
+ * Verify the binary is executable
+ */
+function verifyBinary(binaryPath) {
+  try {
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    return true;
+  } catch {
+    // On Windows, X_OK check may fail but binary can still run
+    if (process.platform === "win32") {
+      return fs.existsSync(binaryPath);
+    }
+    return false;
+  }
+}
+
+/**
+ * Main entry point
+ */
+function main() {
+  try {
+    const binaryPath = findBinary();
+    debug(`Using binary: ${binaryPath}`);
+
+    // Verify the binary is executable
+    if (!verifyBinary(binaryPath)) {
+      throw new Error(
+        `Binary found but not executable: ${binaryPath}\n` +
+          `Try: chmod +x "${binaryPath}"`
+      );
+    }
+
+    // Spawn the binary with all arguments
+    const result = spawnSync(binaryPath, process.argv.slice(2), {
+      stdio: "inherit",
+      shell: false,
+    });
+
+    // Handle spawn errors
+    if (result.error) {
+      if (result.error.code === "ENOENT") {
+        throw new Error(
+          `Binary not found: ${binaryPath}\n` +
+            `The file may have been deleted or the package is corrupted.\n` +
+            `Try reinstalling: npm install rumdl`
+        );
+      }
+      if (result.error.code === "EACCES") {
+        throw new Error(
+          `Permission denied: ${binaryPath}\n` +
+            `Try: chmod +x "${binaryPath}"`
+        );
+      }
+      throw result.error;
+    }
+
+    // Handle signals (e.g., SIGINT, SIGTERM)
+    if (result.signal) {
+      debug(`Process terminated by signal: ${result.signal}`);
+      process.kill(process.pid, result.signal);
+    }
+
+    // Exit with the same code as the binary
+    process.exit(result.status ?? 1);
+  } catch (error) {
+    console.error(`rumdl: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+main();

@@ -88,7 +88,73 @@ else
     ((ERRORS++))
 fi
 
-# Check 6: Verify README.md has correct mise version
+# Check 6: Verify npm package versions match Cargo.toml
+echo -n "Checking npm package versions... "
+if [[ -d "npm" ]]; then
+    NPM_MISMATCHES=""
+
+    # Check main package version
+    if [[ -f "npm/rumdl/package.json" ]]; then
+        MAIN_NPM_VERSION=$(jq -r '.version // empty' npm/rumdl/package.json 2>/dev/null || echo "")
+        if [[ -z "$MAIN_NPM_VERSION" ]]; then
+            NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: unreadable, "
+        elif [[ "$MAIN_NPM_VERSION" != "$CARGO_VERSION" ]]; then
+            NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: $MAIN_NPM_VERSION, "
+        fi
+    else
+        NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: missing, "
+    fi
+
+    # Check platform package versions
+    PLATFORM_PACKAGES=(
+        "npm/cli-darwin-x64/package.json"
+        "npm/cli-darwin-arm64/package.json"
+        "npm/cli-linux-x64/package.json"
+        "npm/cli-linux-arm64/package.json"
+        "npm/cli-linux-x64-musl/package.json"
+        "npm/cli-linux-arm64-musl/package.json"
+        "npm/cli-win32-x64/package.json"
+    )
+
+    for pkg in "${PLATFORM_PACKAGES[@]}"; do
+        if [[ ! -f "$pkg" ]]; then
+            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): missing, "
+            continue
+        fi
+
+        PKG_VERSION=$(jq -r '.version // empty' "$pkg" 2>/dev/null || echo "")
+        if [[ -z "$PKG_VERSION" ]]; then
+            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): unreadable, "
+        elif [[ "$PKG_VERSION" != "$CARGO_VERSION" ]]; then
+            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): $PKG_VERSION, "
+        fi
+    done
+
+    # Check optionalDependencies versions in main package
+    if [[ -f "npm/rumdl/package.json" ]]; then
+        for dep_version in $(jq -r '.optionalDependencies // {} | values[]' npm/rumdl/package.json 2>/dev/null); do
+            if [[ "$dep_version" != "$CARGO_VERSION" ]]; then
+                NPM_MISMATCHES="${NPM_MISMATCHES}optionalDependencies: $dep_version, "
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "$NPM_MISMATCHES" ]]; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: npm package version mismatch${NC}"
+        echo "Expected: $CARGO_VERSION"
+        echo "Mismatches: ${NPM_MISMATCHES%, }"
+        echo "Run: scripts/update-npm-versions.sh"
+        ((ERRORS++))
+    fi
+else
+    echo -e "${YELLOW}⚠${NC} (npm directory not found)"
+fi
+
+# Check 7: Verify README.md has correct mise version
 echo -n "Checking README.md mise version... "
 if grep -q "mise use rumdl@" README.md; then
     README_MISE_VERSION=$(grep -o "mise use rumdl@[0-9.]*" README.md | sed 's/mise use rumdl@//')
@@ -105,7 +171,7 @@ else
     echo -e "${YELLOW}⚠${NC} (no mise example found)"
 fi
 
-# Check 7: Verify we're on main branch
+# Check 8: Verify we're on main branch
 echo -n "Checking current branch... "
 CURRENT_BRANCH=$(git branch --show-current)
 if [[ "$CURRENT_BRANCH" == "main" ]]; then
@@ -115,7 +181,7 @@ else
     echo -e "${YELLOW}WARNING: Not on main branch (currently on: $CURRENT_BRANCH)${NC}"
 fi
 
-# Check 8: Verify tag doesn't already exist
+# Check 9: Verify tag doesn't already exist
 echo -n "Checking if tag v$CARGO_VERSION exists... "
 if git rev-parse "v$CARGO_VERSION" &>/dev/null; then
     echo -e "${RED}✗${NC}"
@@ -126,7 +192,7 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# Check 9: Verify documented rule count matches actual rule count
+# Check 10: Verify documented rule count matches actual rule count
 echo -n "Checking rule count in docs... "
 ACTUAL_RULE_COUNT=$(grep -cE '^\s*\("MD[0-9]+", ' src/rules/mod.rs)
 DOCS_MISMATCHES=""
@@ -156,7 +222,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 10: Verify rules.json is up-to-date
+# Check 11: Verify rules.json is up-to-date
 echo -n "Checking rules.json is up-to-date... "
 if [[ -f "rules.json" ]]; then
     TEMP_RULES=$(mktemp)
@@ -177,7 +243,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 11: Check if schema changed since last release (SchemaStore reminder)
+# Check 12: Check if schema changed since last release (SchemaStore reminder)
 echo -n "Checking if schema changed since last release... "
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 if [[ -n "$LAST_TAG" ]]; then
@@ -194,7 +260,7 @@ else
     echo -e "${YELLOW}⚠${NC} (no previous tag found)"
 fi
 
-# Check 12: Verify opt-in rules are documented
+# Check 13: Verify opt-in rules are documented
 echo -n "Checking opt-in rules are documented... "
 # Find rules with enabled: false as default (opt-in rules)
 # Pattern 1: explicit "enabled: false" in Default impl
@@ -238,7 +304,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 13: Verify no config validation warnings for rule options
+# Check 14: Verify no config validation warnings for rule options
 echo -n "Checking config validation for rule options... "
 # Create a test config with all configurable rules enabled
 TEMP_CONFIG=$(mktemp)

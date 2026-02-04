@@ -1,0 +1,27 @@
+{
+  "name": "@rumdl/cli-linux-arm64-musl",
+  "version": "0.1.12",
+  "description": "rumdl binary for Linux ARM64 (musl/Alpine)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rvben/rumdl.git"
+  },
+  "homepage": "https://rumdl.dev",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "musl"
+  ],
+  "files": [
+    "rumdl"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "preferUnplugged": true
+}
