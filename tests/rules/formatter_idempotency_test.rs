@@ -339,14 +339,17 @@ fn test_md032_fix_idempotent() {
 // MD032 - Blanks Around Lists - Edge Cases
 // ============================================================================
 
-// TODO: Known idempotency bug found by proptest
-// The fix keeps adding blank lines on subsequent passes
 #[test]
-#[ignore = "MD032 idempotency bug - discovered by proptest"]
 fn test_md032_edge_case_proptest_found() {
     let rule = MD032BlanksAroundLists::default();
-    // This specific input triggers the bug
     let content = "- \n# \n**\n2. \n# ";
+    assert_fix_idempotent(&rule, content, "MD032");
+}
+
+#[test]
+fn test_md032_edge_case_code_fence_after_ordered_non1() {
+    let rule = MD032BlanksAroundLists::default();
+    let content = "- \n# \n**\n2. \n```\n\n```";
     assert_fix_idempotent(&rule, content, "MD032");
 }
 

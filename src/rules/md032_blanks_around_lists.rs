@@ -700,9 +700,7 @@ impl MD032BlanksAroundLists {
                     if line_idx + 1 < num_lines {
                         let next_line = lines[line_idx + 1];
                         let next_is_blank = is_blank_in_context(next_line);
-                        let next_excluded = ctx
-                            .line_info(line_idx + 2)
-                            .is_some_and(|info| info.in_code_block || info.in_front_matter);
+                        let next_excluded = ctx.line_info(line_idx + 2).is_some_and(|info| info.in_front_matter);
 
                         if !next_is_blank && !next_excluded && !next_line.trim().is_empty() {
                             // Check if next line is part of this potential list (continuation or another item)

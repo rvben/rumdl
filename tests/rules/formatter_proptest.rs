@@ -286,11 +286,6 @@ proptest! {
         prop_assert_eq!(fixed1, fixed2, "MD031 fix not idempotent");
     }
 
-    // TODO: This test found a real idempotency bug in MD032 with input like:
-    // "- \n# \n**\n2. \n# "
-    // The fix is not idempotent - it keeps adding blank lines.
-    // See formatter_idempotency_test for specific regression test.
-    #[ignore = "MD032 has known idempotency issues - see issue"]
     #[test]
     fn test_md032_idempotent(content in markdown_content_strategy()) {
         let rule = MD032BlanksAroundLists::default();
