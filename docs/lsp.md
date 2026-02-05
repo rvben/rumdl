@@ -26,6 +26,34 @@ The rumdl LSP server provides:
 - **Code actions**: Quick fixes for auto-fixable issues
 - **Document formatting**: Format entire document (`rumdl fmt`)
 - **Range formatting**: Format selected text
+- **Completion**: Language suggestions for fenced code blocks
+
+### Code block language completion
+
+When typing a fenced code block, rumdl provides intelligent completions for language labels.
+Type `` ```py `` and completions will appear for languages starting with "py" (Python, etc.).
+
+The completion uses GitHub Linguist data (799+ languages) and respects your MD040 configuration:
+
+```toml
+[MD040]
+# Only suggest these languages
+allowed-languages = ["Python", "JavaScript", "Rust"]
+
+# Or exclude specific languages
+disallowed-languages = ["HTML"]
+
+# Prefer specific aliases
+preferred-aliases = { Python = "py", JavaScript = "js" }
+```
+
+Features:
+
+- Triggers after `` ``` `` or `~~~` fence markers
+- Supports extended fences (4+ backticks for nested blocks)
+- Filters by `allowed-languages` and `disallowed-languages`
+- Prioritizes `preferred-aliases` in results
+- Shows canonical language name in completion details
 
 ## Editor configuration
 

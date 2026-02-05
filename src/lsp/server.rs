@@ -4279,4 +4279,27 @@ disallowed-languages = ["Python"]
         let result = server.completion(params).await.unwrap();
         assert!(result.is_none(), "Should NOT offer completion on closing fence");
     }
+
+    #[tokio::test]
+    async fn test_completion_graceful_when_document_not_found() {
+        let server = create_test_server();
+
+        // Use a URI for a document that doesn't exist and isn't opened
+        let uri = Url::parse("file:///nonexistent/path/test.md").unwrap();
+
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position { line: 0, character: 3 },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+
+        // Should return Ok(None), not an error
+        let result = server.completion(params).await;
+        assert!(result.is_ok(), "Completion should not error for missing document");
+        assert!(result.unwrap().is_none(), "Should return None for missing document");
+    }
 }
