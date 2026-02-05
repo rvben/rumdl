@@ -98,11 +98,11 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
     Get up and running with rumdl in minutes.
 
--   [:octicons-book-24: **Rules Reference**](rules/index.md)
+-   [:octicons-book-24: **Rules Reference**](RULES.md)
 
     Explore all 67 linting rules with examples.
 
--   [:octicons-gear-24: **Configuration**](configuration/global-settings.md)
+-   [:octicons-gear-24: **Configuration**](global-settings.md)
 
     Customize rumdl for your project.
 
