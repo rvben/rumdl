@@ -8,7 +8,7 @@ use std::collections::HashMap;
 /// Rule MD040: Fenced code blocks should have a language
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
-mod md040_config;
+pub mod md040_config;
 use md040_config::{LanguageStyle, MD040Config, UnknownLanguageAction};
 
 struct FencedCodeBlock {

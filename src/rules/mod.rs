@@ -34,7 +34,7 @@ pub mod md036_no_emphasis_only_first;
 mod md037_spaces_around_emphasis;
 mod md038_no_space_in_code;
 mod md039_no_space_in_links;
-mod md040_fenced_code_language;
+pub mod md040_fenced_code_language;
 mod md041_first_line_heading;
 mod md042_no_empty_links;
 mod md043_required_headings;

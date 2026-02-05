@@ -15,6 +15,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::{Config, is_valid_rule_name};
+use crate::linguist_data::{CANONICAL_TO_ALIASES, default_alias};
 use crate::lint;
 use crate::lsp::index_worker::IndexWorker;
 use crate::lsp::types::{
@@ -22,7 +23,9 @@ use crate::lsp::types::{
     warning_to_diagnostic,
 };
 use crate::rule::{FixCapability, Rule};
+use crate::rule_config_serde::load_rule_config;
 use crate::rules;
+use crate::rules::md040_fenced_code_language::md040_config::MD040Config;
 use crate::workspace_index::WorkspaceIndex;
 
 /// Supported markdown file extensions (without leading dot)
@@ -1073,6 +1076,220 @@ impl RumdlLanguageServer {
 
         config
     }
+
+    /// Detect if the cursor is at a fenced code block language position
+    ///
+    /// Returns Some((start_column, current_text)) if the cursor is after ``` or ~~~
+    /// where language completion should be provided.
+    ///
+    /// Handles:
+    /// - Standard fences (``` and ~~~)
+    /// - Extended fences (4+ backticks/tildes for nested code blocks)
+    /// - Indented fences
+    /// - Distinguishes opening vs closing fences
+    fn detect_code_fence_language_position(text: &str, position: Position) -> Option<(u32, String)> {
+        let line_num = position.line as usize;
+        let char_pos = position.character as usize;
+
+        // Get the line content
+        let lines: Vec<&str> = text.lines().collect();
+        if line_num >= lines.len() {
+            return None;
+        }
+        let line = lines[line_num];
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+
+        // Detect fence character and count consecutive fence chars
+        let (fence_char, fence_len) = if trimmed.starts_with('`') {
+            let count = trimmed.chars().take_while(|&c| c == '`').count();
+            if count >= 3 {
+                ('`', count)
+            } else {
+                return None;
+            }
+        } else if trimmed.starts_with('~') {
+            let count = trimmed.chars().take_while(|&c| c == '~').count();
+            if count >= 3 {
+                ('~', count)
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        let fence_start = indent;
+        let fence_end = fence_start + fence_len;
+
+        // The cursor must be after the fence
+        if char_pos < fence_end {
+            return None;
+        }
+
+        // Check if this is an opening or closing fence by scanning previous lines
+        // A closing fence has no content after it and matches an unclosed opening fence
+        let is_closing_fence = Self::is_closing_fence(&lines[..line_num], fence_char, fence_len);
+        if is_closing_fence {
+            return None;
+        }
+
+        // Extract the current language text (from fence end to cursor position)
+        let current_text = if char_pos <= line.len() {
+            &line[fence_end..char_pos]
+        } else {
+            &line[fence_end..]
+        };
+
+        // Don't complete if there's a space (info string contains more than just language)
+        if current_text.contains(' ') {
+            return None;
+        }
+
+        Some((fence_end as u32, current_text.to_string()))
+    }
+
+    /// Check if we're inside an unclosed code block (meaning current fence is closing)
+    fn is_closing_fence(previous_lines: &[&str], fence_char: char, fence_len: usize) -> bool {
+        let mut open_fences: Vec<(char, usize)> = Vec::new();
+
+        for line in previous_lines {
+            let trimmed = line.trim_start();
+
+            // Check for fence
+            let (line_fence_char, line_fence_len) = if trimmed.starts_with('`') {
+                let count = trimmed.chars().take_while(|&c| c == '`').count();
+                if count >= 3 { ('`', count) } else { continue }
+            } else if trimmed.starts_with('~') {
+                let count = trimmed.chars().take_while(|&c| c == '~').count();
+                if count >= 3 { ('~', count) } else { continue }
+            } else {
+                continue;
+            };
+
+            // Check if this closes an existing fence
+            if let Some(pos) = open_fences
+                .iter()
+                .rposition(|(c, len)| *c == line_fence_char && line_fence_len >= *len)
+            {
+                // Check if this is a closing fence (no content after fence chars)
+                let after_fence = &trimmed[line_fence_len..].trim();
+                if after_fence.is_empty() {
+                    open_fences.truncate(pos);
+                    continue;
+                }
+            }
+
+            // This is an opening fence
+            open_fences.push((line_fence_char, line_fence_len));
+        }
+
+        // Check if current fence would close any open fence
+        open_fences.iter().any(|(c, len)| *c == fence_char && fence_len >= *len)
+    }
+
+    /// Get language completion items for fenced code blocks
+    ///
+    /// Uses GitHub Linguist data and respects MD040 config for filtering
+    async fn get_language_completions(
+        &self,
+        uri: &Url,
+        current_text: &str,
+        start_col: u32,
+        position: Position,
+    ) -> Vec<CompletionItem> {
+        // Resolve config for this file to get MD040 settings
+        let file_path = uri.to_file_path().ok();
+        let config = if let Some(ref path) = file_path {
+            self.resolve_config_for_file(path).await
+        } else {
+            self.rumdl_config.read().await.clone()
+        };
+
+        // Load MD040 config
+        let md040_config: MD040Config = load_rule_config(&config);
+
+        let mut items = Vec::new();
+        let current_lower = current_text.to_lowercase();
+
+        // Collect all canonical languages and their aliases
+        let mut language_entries: Vec<(String, String, bool)> = Vec::new(); // (canonical, alias, is_default)
+
+        for (canonical, aliases) in CANONICAL_TO_ALIASES.iter() {
+            // Check if language is allowed
+            if !md040_config.allowed_languages.is_empty()
+                && !md040_config
+                    .allowed_languages
+                    .iter()
+                    .any(|a| a.eq_ignore_ascii_case(canonical))
+            {
+                continue;
+            }
+
+            // Check if language is disallowed
+            if md040_config
+                .disallowed_languages
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(canonical))
+            {
+                continue;
+            }
+
+            // Get preferred alias from config, or use default
+            let preferred = md040_config
+                .preferred_aliases
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(canonical))
+                .map(|(_, v)| v.clone())
+                .or_else(|| default_alias(canonical).map(|s| s.to_string()))
+                .unwrap_or_else(|| (*canonical).to_string());
+
+            // Add the preferred alias as primary completion
+            language_entries.push(((*canonical).to_string(), preferred.clone(), true));
+
+            // Add other aliases as secondary completions
+            for &alias in aliases.iter() {
+                if alias != preferred {
+                    language_entries.push(((*canonical).to_string(), alias.to_string(), false));
+                }
+            }
+        }
+
+        // Filter by current text prefix
+        for (canonical, alias, is_default) in language_entries {
+            if !current_text.is_empty() && !alias.to_lowercase().starts_with(&current_lower) {
+                continue;
+            }
+
+            let sort_priority = if is_default { "0" } else { "1" };
+
+            let item = CompletionItem {
+                label: alias.clone(),
+                kind: Some(CompletionItemKind::VALUE),
+                detail: Some(format!("{canonical} (GitHub Linguist)")),
+                documentation: None,
+                sort_text: Some(format!("{sort_priority}{alias}")),
+                filter_text: Some(alias.clone()),
+                insert_text: Some(alias.clone()),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: position.line,
+                            character: start_col,
+                        },
+                        end: position,
+                    },
+                    new_text: alias,
+                })),
+                ..Default::default()
+            };
+            items.push(item);
+        }
+
+        // Limit results to prevent overwhelming the editor
+        items.truncate(100);
+        items
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1151,6 +1368,13 @@ impl LanguageServer for RumdlLanguageServer {
                     workspace_diagnostics: false,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec!["`".to_string()]),
+                    resolve_provider: Some(false),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                    all_commit_characters: None,
+                    completion_item: None,
+                }),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -1239,6 +1463,39 @@ impl LanguageServer for RumdlLanguageServer {
 
         if self.client.register_capability(vec![registration]).await.is_err() {
             log::debug!("Client does not support file watching capability");
+        }
+    }
+
+    async fn completion(&self, params: CompletionParams) -> JsonRpcResult<Option<CompletionResponse>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        // Get document content
+        let Some(text) = self.get_document_content(&uri).await else {
+            return Ok(None);
+        };
+
+        // Check if we're at a fenced code block language position
+        let Some((start_col, current_text)) = Self::detect_code_fence_language_position(&text, position) else {
+            return Ok(None);
+        };
+
+        log::debug!(
+            "Code fence completion triggered at {}:{}, current text: '{}'",
+            position.line,
+            position.character,
+            current_text
+        );
+
+        // Get completion items
+        let items = self
+            .get_language_completions(&uri, &current_text, start_col, position)
+            .await;
+
+        if items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(CompletionResponse::Array(items)))
         }
     }
 
@@ -3511,5 +3768,515 @@ disable = ["MD022"]
                 .as_str()
                 .starts_with(CodeActionKind::SOURCE_FIX_ALL.as_str())
         );
+    }
+
+    // ==================== Completion Tests ====================
+
+    #[test]
+    fn test_detect_code_fence_language_position_basic() {
+        // Basic case: cursor right after ```
+        let text = "```\ncode\n```";
+        let pos = Position { line: 0, character: 3 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 3);
+        assert_eq!(current_text, "");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_partial_lang() {
+        // Cursor in the middle of typing a language
+        let text = "```py\ncode\n```";
+        let pos = Position { line: 0, character: 5 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 3);
+        assert_eq!(current_text, "py");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_full_lang() {
+        // Cursor at end of language tag
+        let text = "```python\ncode\n```";
+        let pos = Position { line: 0, character: 9 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 3);
+        assert_eq!(current_text, "python");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_tilde_fence() {
+        // Using ~~~ instead of ```
+        let text = "~~~rust\ncode\n~~~";
+        let pos = Position { line: 0, character: 7 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 3);
+        assert_eq!(current_text, "rust");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_indented() {
+        // Indented code fence
+        let text = "  ```js\ncode\n  ```";
+        let pos = Position { line: 0, character: 7 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 5); // 2 spaces + 3 backticks
+        assert_eq!(current_text, "js");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_not_fence_line() {
+        // Not on a fence line (inside code block content)
+        let text = "```python\ncode\n```";
+        let pos = Position { line: 1, character: 2 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_closing_fence() {
+        // On closing fence - should NOT trigger completion
+        let text = "```python\ncode\n```";
+        let pos = Position { line: 2, character: 3 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        // Closing fence should return None (no completion on closing fences)
+        assert!(result.is_none(), "Should not offer completion on closing fence");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_extended_fence() {
+        // Extended fence with 4 backticks
+        let text = "````python\ncode\n````";
+        let pos = Position { line: 0, character: 10 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 4); // 4 backticks
+        assert_eq!(current_text, "python");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_extended_fence_5_backticks() {
+        // Extended fence with 5 backticks
+        let text = "`````js\ncode\n`````";
+        let pos = Position { line: 0, character: 7 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (start_col, current_text) = result.unwrap();
+        assert_eq!(start_col, 5);
+        assert_eq!(current_text, "js");
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_nested_code_blocks() {
+        // Nested code block (documenting markdown in markdown)
+        // Outer: 4 backticks, Inner: 3 backticks
+        let text = "````markdown\n```python\ncode\n```\n````";
+
+        // Opening fence of outer block
+        let pos = Position { line: 0, character: 12 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_some());
+        let (_, current_text) = result.unwrap();
+        assert_eq!(current_text, "markdown");
+
+        // Inner opening fence - should be treated as content (we're inside outer block)
+        // Note: This is actually content of the outer block, not a real code fence
+        // The detection is line-based and doesn't have full context, so it will detect it
+        // This is acceptable behavior - editors typically don't complete inside code blocks anyway
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_extended_closing_fence() {
+        // Extended closing fence should not trigger completion
+        let text = "````python\ncode here\n````";
+        let pos = Position { line: 2, character: 4 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(
+            result.is_none(),
+            "Should not offer completion on extended closing fence"
+        );
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_cursor_before_fence() {
+        // Cursor before the fence characters
+        let text = "```python\ncode\n```";
+        let pos = Position { line: 0, character: 2 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_with_info_string() {
+        // Info string with space (should not complete after space)
+        let text = "```python filename.py\ncode\n```";
+        let pos = Position { line: 0, character: 15 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        // Should return None because cursor is after a space
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_regular_text() {
+        // Regular markdown text (not a code fence)
+        let text = "# Heading\n\nSome text.";
+        let pos = Position { line: 0, character: 5 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_detect_code_fence_language_position_inline_code() {
+        // Inline code (not a fenced block)
+        let text = "Use `code` here.";
+        let pos = Position { line: 0, character: 5 };
+        let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_completion_provides_language_items() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "```py\ncode\n```").unwrap();
+
+        let server = create_test_server();
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Open the document
+        let content = "```py\ncode\n```".to_string();
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.clone(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+
+        // Get completions at position after ```
+        let items = server
+            .get_language_completions(&uri, "py", 3, Position { line: 0, character: 5 })
+            .await;
+
+        // Should have python-related items
+        assert!(!items.is_empty(), "Should return completion items");
+
+        // Check that python is in the results
+        let has_python = items.iter().any(|item| item.label.to_lowercase() == "python");
+        assert!(has_python, "Should include 'python' as a completion item");
+    }
+
+    #[tokio::test]
+    async fn test_completion_filters_by_prefix() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        std::fs::write(&test_file, "```ru\ncode\n```").unwrap();
+
+        let server = create_test_server();
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Get completions filtered by "ru"
+        let items = server
+            .get_language_completions(&uri, "ru", 3, Position { line: 0, character: 5 })
+            .await;
+
+        // All items should start with "ru"
+        for item in &items {
+            assert!(
+                item.label.to_lowercase().starts_with("ru"),
+                "Completion '{}' should start with 'ru'",
+                item.label
+            );
+        }
+
+        // Should include rust and ruby
+        let has_rust = items.iter().any(|item| item.label.to_lowercase() == "rust");
+        let has_ruby = items.iter().any(|item| item.label.to_lowercase() == "ruby");
+        assert!(has_rust, "Should include 'rust'");
+        assert!(has_ruby, "Should include 'ruby'");
+    }
+
+    #[tokio::test]
+    async fn test_completion_empty_prefix_returns_all() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        std::fs::write(&test_file, "```\ncode\n```").unwrap();
+
+        let server = create_test_server();
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Get completions with empty prefix
+        let items = server
+            .get_language_completions(&uri, "", 3, Position { line: 0, character: 3 })
+            .await;
+
+        // Should have many items (up to the limit of 100)
+        assert!(items.len() >= 10, "Should return multiple language options");
+        assert!(items.len() <= 100, "Should be limited to 100 items");
+    }
+
+    #[tokio::test]
+    async fn test_completion_respects_md040_allowed_languages() {
+        use std::fs;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "```\ncode\n```").unwrap();
+
+        // Create config with allowed_languages
+        let config_file = temp_dir.path().join(".rumdl.toml");
+        fs::write(
+            &config_file,
+            r#"
+[MD040]
+allowed-languages = ["Python", "Rust", "Go"]
+"#,
+        )
+        .unwrap();
+
+        let server = create_test_server();
+
+        // Set workspace root so config is discovered
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(temp_dir.path().to_path_buf());
+        }
+
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Get completions
+        let items = server
+            .get_language_completions(&uri, "", 3, Position { line: 0, character: 3 })
+            .await;
+
+        // Should only have items for Python, Rust, Go and their aliases
+        for item in &items {
+            let label_lower = item.label.to_lowercase();
+            let detail = item.detail.as_ref().map(|d| d.to_lowercase()).unwrap_or_default();
+
+            // Check that the canonical language (in detail) is one of the allowed ones
+            let is_allowed = detail.contains("python") || detail.contains("rust") || detail.contains("go");
+            assert!(
+                is_allowed,
+                "Completion '{label_lower}' (detail: '{detail}') should be for Python, Rust, or Go"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_completion_respects_md040_disallowed_languages() {
+        use std::fs;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        fs::write(&test_file, "```py\ncode\n```").unwrap();
+
+        // Create config with disallowed_languages
+        let config_file = temp_dir.path().join(".rumdl.toml");
+        fs::write(
+            &config_file,
+            r#"
+[MD040]
+disallowed-languages = ["Python"]
+"#,
+        )
+        .unwrap();
+
+        let server = create_test_server();
+
+        // Set workspace root so config is discovered
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(temp_dir.path().to_path_buf());
+        }
+
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Get completions filtered by "py"
+        let items = server
+            .get_language_completions(&uri, "py", 3, Position { line: 0, character: 5 })
+            .await;
+
+        // Should NOT include Python or py
+        for item in &items {
+            let detail = item.detail.as_ref().map(|d| d.to_lowercase()).unwrap_or_default();
+            assert!(
+                !detail.contains("python"),
+                "Completion '{}' should not include Python (disallowed)",
+                item.label
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_closing_fence_basic() {
+        // Opening fence only - the next fence IS a closing fence
+        // (markdown spec: opening fence creates a code block that needs closing)
+        let lines = vec!["```python"];
+        assert!(
+            RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "After opening fence, next fence is closing"
+        );
+    }
+
+    #[test]
+    fn test_is_closing_fence_with_content() {
+        // Opening fence with content - next fence would be closing
+        let lines = vec!["```python", "some code"];
+        assert!(
+            RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "After opening fence with content, next fence is closing"
+        );
+    }
+
+    #[test]
+    fn test_is_closing_fence_no_prior_fence() {
+        // No prior fence - next fence is opening
+        let lines: Vec<&str> = vec!["# Hello", "Some text"];
+        assert!(
+            !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "With no prior fence, next fence is opening"
+        );
+    }
+
+    #[test]
+    fn test_is_closing_fence_already_closed() {
+        // Closed code block - next fence would be opening
+        let lines = vec!["```python", "some code", "```"];
+        assert!(
+            !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "After closed code block, next fence is opening"
+        );
+    }
+
+    #[test]
+    fn test_is_closing_fence_extended() {
+        // Extended fence - needs matching or longer fence to close
+        let lines = vec!["````python", "some code"];
+        // 3 backticks won't close 4-backtick fence
+        assert!(
+            !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "3 backticks cannot close 4-backtick fence"
+        );
+        // 4 backticks will close
+        assert!(
+            RumdlLanguageServer::is_closing_fence(&lines, '`', 4),
+            "4 backticks can close 4-backtick fence"
+        );
+        // 5 backticks will also close (>= rule)
+        assert!(
+            RumdlLanguageServer::is_closing_fence(&lines, '`', 5),
+            "5 backticks can close 4-backtick fence"
+        );
+    }
+
+    #[test]
+    fn test_is_closing_fence_mixed_chars() {
+        // Tilde fence cannot be closed by backtick fence
+        let lines = vec!["~~~python", "some code"];
+        assert!(
+            !RumdlLanguageServer::is_closing_fence(&lines, '`', 3),
+            "Backtick fence cannot close tilde fence"
+        );
+        assert!(
+            RumdlLanguageServer::is_closing_fence(&lines, '~', 3),
+            "Tilde fence can close tilde fence"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_completion_method_integration() {
+        use std::fs;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let content = "# Hello\n\n```py\nprint('hi')\n```";
+        fs::write(&test_file, content).unwrap();
+
+        let server = create_test_server();
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Open the document
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+
+        // Call completion method directly
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 5 }, // After ```py
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+
+        let result = server.completion(params).await.unwrap();
+        assert!(result.is_some(), "Completion should return items");
+
+        if let Some(CompletionResponse::Array(items)) = result {
+            assert!(!items.is_empty(), "Should have completion items");
+            // Check python is in the results
+            let has_python = items.iter().any(|i| i.label.to_lowercase() == "python");
+            assert!(has_python, "Should include python as completion");
+        } else {
+            panic!("Expected CompletionResponse::Array");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_completion_not_triggered_on_closing_fence() {
+        use std::fs;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let test_file = temp_dir.path().join("test.md");
+        let content = "```python\nprint('hi')\n```";
+        fs::write(&test_file, content).unwrap();
+
+        let server = create_test_server();
+        let uri = Url::from_file_path(&test_file).unwrap();
+
+        // Open the document
+        server.documents.write().await.insert(
+            uri.clone(),
+            DocumentEntry {
+                content: content.to_string(),
+                version: Some(1),
+                from_disk: false,
+            },
+        );
+
+        // Call completion method on closing fence
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position { line: 2, character: 3 }, // On closing ```
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        };
+
+        let result = server.completion(params).await.unwrap();
+        assert!(result.is_none(), "Should NOT offer completion on closing fence");
     }
 }
