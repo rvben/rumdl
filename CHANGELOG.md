@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] - 2026-02-05
+
+### Added
+
+- **LSP: Code block language completion** - Autocomplete fenced code block languages
+  - Type ` ``` ` and press Ctrl+Space for language suggestions
+  - Includes 100+ languages from GitHub Linguist
+  - Added documentation in [docs/lsp.md](docs/lsp.md)
+
+- **MD041: Opt-in auto-fix** - Add missing first-line heading with `--fix`
+  - Disabled by default to prevent unwanted changes
+  - Enable with `fix = true` in MD041 config
+  - Uses document title or filename as heading text
+
+- **MD040: GitHub Linguist integration** - Normalize code block languages
+  - Recognizes language aliases (e.g., `py` → `python`)
+  - Uses GitHub Linguist database for accurate normalization
+
+- **Code Block Tools: Additional built-in tools**
+  - Added djlint (Jinja/HTML), beautysh (bash), tombi (TOML), oxfmt (Jinja)
+  - 35 total built-in tool definitions
+
+- **Code Block Tools: Configurable missing tool handling**
+  - `on-missing-language-definition`: What to do when language has no tools (`skip`, `warn`, `fail`)
+  - `on-missing-tool-binary`: What to do when tool binary not found (`skip`, `warn`, `fail`)
+
+- **MkDocs: PyMdown Blocks support** - Recognize PyMdown extension syntax
+  - Supports `/// note`, `/// warning`, `/// details` and other block types
+
+- **npm: CLI distribution** - Install via npm/npx
+  - `npx rumdl check .` - Run without global install
+  - Platform-specific packages for macOS, Linux, Windows
+
+### Fixed
+
+- **Code Block Tools: Embedded markdown linting is now opt-in** ([#380](https://github.com/rvben/rumdl/issues/380))
+  - Linting markdown inside code blocks was unexpectedly enabled by default
+  - Now requires explicit `[code-block-tools.languages.md]` configuration
+
+- **MD040: Skip disabled lines when computing preferred labels**
+  - Fixed incorrect suggestions when some code blocks are disabled
+
+- **Schema: Use standard integer type for timeout field** ([#374](https://github.com/rvben/rumdl/issues/374))
+  - Fixed JSON Schema validation in editors
+
 ## [0.1.12] - 2026-02-04
 
 ### Added

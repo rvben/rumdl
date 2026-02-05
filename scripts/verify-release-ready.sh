@@ -263,8 +263,8 @@ fi
 # Check 13: Verify opt-in rules are documented
 echo -n "Checking opt-in rules are documented... "
 # Find rules with enabled: false as default (opt-in rules)
-# Pattern 1: explicit "enabled: false" in Default impl
-OPT_IN_EXPLICIT=$(grep -rl "enabled: false" src/rules/ 2>/dev/null | \
+# Pattern 1: explicit "enabled: false" in Default impl (but not fix_enabled, etc.)
+OPT_IN_EXPLICIT=$(grep -rlE '[^_]enabled: false' src/rules/ 2>/dev/null | \
     grep -oE "md[0-9]+" | tr '[:lower:]' '[:upper:]' | sort -u)
 
 # Pattern 2: fn default_enabled() -> bool { false }
