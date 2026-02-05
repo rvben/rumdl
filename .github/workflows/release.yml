@@ -406,6 +406,14 @@ jobs:
           # Windows
           unzip -o archives/release-x86_64-pc-windows-msvc/rumdl-*.zip -d npm/cli-win32-x64/
 
+          # Make binaries executable (artifacts don't preserve permissions)
+          chmod +x npm/cli-darwin-x64/rumdl
+          chmod +x npm/cli-darwin-arm64/rumdl
+          chmod +x npm/cli-linux-x64/rumdl
+          chmod +x npm/cli-linux-arm64/rumdl
+          chmod +x npm/cli-linux-x64-musl/rumdl
+          chmod +x npm/cli-linux-arm64-musl/rumdl
+
           # List package contents for verification
           echo "Package contents:"
           for dir in npm/cli-*/; do
