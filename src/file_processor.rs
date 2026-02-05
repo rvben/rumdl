@@ -2324,7 +2324,7 @@ mod tests {
         );
 
         // Test 2: WITHOUT MD022 rule (simulating per-file-ignores) - should NOT add blank line
-        let filtered_rules: Vec<Box<dyn crate::Rule>> = all_rules
+        let filtered_rules: Vec<Box<dyn Rule>> = all_rules
             .iter()
             .filter(|rule| rule.name() != "MD022")
             .map(|r| dyn_clone::clone_box(&**r))
