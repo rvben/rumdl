@@ -74,6 +74,6 @@ pub use executor::{ExecutorError, ToolExecutor, ToolOutput};
 pub use linguist::LinguistResolver;
 pub use processor::{
     CodeBlockDiagnostic, CodeBlockResult, CodeBlockToolProcessor, DiagnosticSeverity, FencedCodeBlockInfo,
-    FormatOutput, ProcessorError,
+    FormatOutput, ProcessorError, RUMDL_BUILTIN_TOOL,
 };
 pub use registry::ToolRegistry;

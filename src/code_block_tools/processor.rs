@@ -3,12 +3,24 @@
 //! This module coordinates language resolution, tool lookup, execution,
 //! and result collection for processing code blocks in markdown files.
 
+#[cfg(test)]
+use super::config::LanguageToolConfig;
 use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
 use crate::rule::{LintWarning, Severity};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+
+/// Special built-in tool name for rumdl's own markdown linting.
+/// When this tool is configured for markdown blocks, the processor skips
+/// external execution since it's handled by embedded markdown linting.
+pub const RUMDL_BUILTIN_TOOL: &str = "rumdl";
+
+/// Check if a language is markdown (handles common variations).
+fn is_markdown_language(lang: &str) -> bool {
+    matches!(lang.to_lowercase().as_str(), "markdown" | "md")
+}
 
 /// Information about a fenced code block for processing.
 #[derive(Debug, Clone)]
@@ -362,6 +374,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
             // Run each lint tool
             for tool_id in lint_tools {
+                // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown linting
+                if tool_id == RUMDL_BUILTIN_TOOL && is_markdown_language(&canonical_lang) {
+                    continue;
+                }
+
                 let tool_def = match self.registry.get(tool_id) {
                     Some(t) => t,
                     None => {
@@ -488,6 +505,11 @@ impl<'a> CodeBlockToolProcessor<'a> {
             let mut formatted = code_content.clone();
             let mut tool_ran = false;
             for tool_id in format_tools {
+                // Skip built-in "rumdl" tool for markdown - handled separately by embedded markdown formatting
+                if tool_id == RUMDL_BUILTIN_TOOL && is_markdown_language(&canonical_lang) {
+                    continue;
+                }
+
                 let tool_def = match self.registry.get(tool_id) {
                     Some(t) => t,
                     None => {
@@ -1315,5 +1337,66 @@ fn main() {}
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(matches!(err, ProcessorError::ToolBinaryNotFound { .. }));
+    }
+
+    #[test]
+    fn test_lint_rumdl_builtin_skipped_for_markdown() {
+        // Configure the built-in "rumdl" tool for markdown
+        // The processor should skip it (handled by embedded markdown linting)
+        let mut config = default_config();
+        config.languages.insert(
+            "markdown".to_string(),
+            LanguageToolConfig {
+                lint: vec![RUMDL_BUILTIN_TOOL.to_string()],
+                format: vec![],
+                on_error: None,
+            },
+        );
+        config.on_missing_language_definition = OnMissing::Fail;
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```markdown\n# Hello\n```";
+        let result = processor.lint(content);
+
+        // Should succeed with no diagnostics - "rumdl" tool is skipped, not treated as unknown
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_format_rumdl_builtin_skipped_for_markdown() {
+        // Configure the built-in "rumdl" tool for markdown
+        let mut config = default_config();
+        config.languages.insert(
+            "markdown".to_string(),
+            LanguageToolConfig {
+                lint: vec![],
+                format: vec![RUMDL_BUILTIN_TOOL.to_string()],
+                on_error: None,
+            },
+        );
+        let processor = CodeBlockToolProcessor::new(&config);
+
+        let content = "```markdown\n# Hello\n```";
+        let result = processor.format(content);
+
+        // Should succeed with unchanged content - "rumdl" tool is skipped
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.content, content);
+        assert!(!output.had_errors);
+    }
+
+    #[test]
+    fn test_is_markdown_language() {
+        // Test the helper function
+        assert!(is_markdown_language("markdown"));
+        assert!(is_markdown_language("Markdown"));
+        assert!(is_markdown_language("MARKDOWN"));
+        assert!(is_markdown_language("md"));
+        assert!(is_markdown_language("MD"));
+        assert!(!is_markdown_language("python"));
+        assert!(!is_markdown_language("rust"));
+        assert!(!is_markdown_language(""));
     }
 }

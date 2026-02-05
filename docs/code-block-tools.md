@@ -122,8 +122,25 @@ rumdl includes definitions for common tools:
 | `cljfmt`          | Clojure    | Format | `cljfmt fix -`                         |
 | `rubocop`         | Ruby       | Both   | `rubocop -a` / `rubocop`               |
 | `djlint`          | Jinja/HTML | Both   | `djlint -` / `djlint - --reformat`     |
+| `rumdl`           | Markdown   | Lint   | (built-in, see below)                  |
 
 **Note**: Tools must be installed separately. rumdl does not install them for you.
+
+### Embedded Markdown Linting
+
+The special `rumdl` tool enables linting of markdown content inside fenced code blocks:
+
+```toml
+[code-block-tools]
+enabled = true
+
+[code-block-tools.languages.markdown]
+lint = ["rumdl"]
+```
+
+This runs rumdl's own lint rules on markdown code blocks, useful for documentation that includes markdown examples. Unlike external tools, `rumdl` is built-in and requires no additional installation.
+
+**Note**: This feature is opt-in. Without this configuration, markdown code blocks are not linted, allowing you to show intentionally "broken" markdown examples in documentation.
 
 ## Custom Tools
 
