@@ -124,10 +124,10 @@ rumdl vscode
 rumdl vscode --status
 ```
 
-See [VS Code Integration](../integrations/vscode.md) for more details.
+See [VS Code Integration](../vscode-extension.md) for more details.
 
 ## Next Steps
 
 - [Quick Start](quickstart.md) - Get started with rumdl
 - [CLI Commands](../usage/cli.md) - Learn all available commands
-- [Configuration](../configuration/global-settings.md) - Customize rumdl for your project
+- [Configuration](../global-settings.md) - Customize rumdl for your project

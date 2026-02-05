@@ -22,7 +22,7 @@ icon: lucide/file-check
 
     Comprehensive coverage of common Markdown issues with detailed error messages.
 
-    [:octicons-arrow-right-24: View rules](rules/index.md)
+    [:octicons-arrow-right-24: View rules](RULES.md)
 
 -   :wrench:{ .lg .middle } **Auto-formatting**
 

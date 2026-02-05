@@ -23,7 +23,7 @@ This automatically detects your editor and installs the appropriate extension.
 - Code formatting on save
 - Hover tooltips with rule documentation
 
-See [VS Code Integration](../integrations/vscode.md) for detailed setup.
+See [VS Code Integration](../vscode-extension.md) for detailed setup.
 
 ## Neovim
 

@@ -14,7 +14,7 @@ exclude = [
     "docs/markdownlint-comparison.md"
 ]
 # Globally disable specific rules
-disable = ["MD033", "MD057"]
+disable = ["MD033"]
 respect-gitignore = true
 
 [MD013]

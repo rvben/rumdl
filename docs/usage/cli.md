@@ -106,7 +106,7 @@ Start the LSP server.
 rumdl server                     # Start Language Server Protocol server
 ```
 
-See [LSP Integration](../integrations/lsp.md) for details.
+See [LSP Integration](../lsp.md) for details.
 
 ### `vscode`
 
