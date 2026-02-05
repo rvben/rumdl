@@ -47,7 +47,7 @@ use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 /// - [Python-Markdown attr_list](https://python-markdown.github.io/extensions/attr_list/)
 /// - [MkDocs discussion](https://github.com/mkdocs/mkdocs/discussions/3754)
 ///
-/// **Implementation:** See [`is_mkdocs_attribute_anchor`](Self::is_mkdocs_attribute_anchor)
+/// **Implementation:** See `is_mkdocs_attribute_anchor` method
 #[derive(Clone, Default)]
 pub struct MD042NoEmptyLinks {}
 

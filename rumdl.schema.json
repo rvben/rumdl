@@ -135,7 +135,7 @@
           "default": "standard"
         },
         "force-exclude": {
-          "description": "[DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths.\nThis option is deprecated as of v0.0.156 and has no effect.\nExclude patterns are now always respected, even for explicitly provided files.\nThis prevents duplication between rumdl config and tool configs like pre-commit.",
+          "description": "\\[DEPRECATED\\] Whether to enforce exclude patterns for explicitly passed paths.\nThis option is deprecated as of v0.0.156 and has no effect.\nExclude patterns are now always respected, even for explicitly provided files.\nThis prevents duplication between rumdl config and tool configs like pre-commit.",
           "type": "boolean",
           "deprecated": true,
           "default": false
@@ -200,7 +200,7 @@
           "default": "fail"
         },
         "on-missing-language-definition": {
-          "description": "Behavior when a code block language has no tools configured for the current mode",
+          "description": "Behavior when a code block language has no tools configured for the current mode\n(e.g., no lint tools for `rumdl check`, no format tools for `rumdl check --fix`)",
           "$ref": "#/$defs/OnMissing",
           "default": "ignore"
         },

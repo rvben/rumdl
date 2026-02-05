@@ -271,7 +271,7 @@ pub struct FileIndex {
     pub reference_links: Vec<ReferenceLinkIndex>,
     /// Cross-file links in this file (for MD051 cross-file validation)
     pub cross_file_links: Vec<CrossFileLinkIndex>,
-    /// Defined reference IDs (e.g., from [ref]: url definitions)
+    /// Defined reference IDs (e.g., from `[ref]: url` definitions)
     /// Used to filter out reference links that have explicit definitions
     pub defined_references: HashSet<String>,
     /// Content hash for change detection
@@ -279,7 +279,7 @@ pub struct FileIndex {
     /// O(1) anchor lookup: lowercased anchor → heading index
     /// Includes both auto-generated and custom anchors
     anchor_to_heading: HashMap<String, usize>,
-    /// HTML anchors defined via <a id="..."> or <element id="..."> tags
+    /// HTML anchors defined via `<a id="...">` or `<element id="...">` tags
     /// Stored lowercase for case-insensitive matching
     html_anchors: HashSet<String>,
     /// Attribute anchors defined via { #id } syntax (kramdown/MkDocs attr_list)
@@ -310,7 +310,7 @@ pub struct HeadingIndex {
 /// Information about a reference link for cross-file analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReferenceLinkIndex {
-    /// The reference ID (the part in [text][ref])
+    /// The reference ID (the part in `[text][ref]`)
     pub reference_id: String,
     /// Line number (1-indexed)
     pub line: usize,
@@ -700,7 +700,7 @@ impl FileIndex {
     /// Returns true if the anchor matches any of:
     /// - Auto-generated heading anchors
     /// - Custom heading anchors (from {#id} syntax on headings)
-    /// - HTML anchors (from <a id="..."> or <element id="...">)
+    /// - HTML anchors (from `<a id="...">` or `<element id="...">`)
     /// - Attribute anchors (from { #id } syntax on non-heading elements)
     ///
     /// Matching is case-insensitive. URL-encoded anchors (e.g., CJK characters
@@ -729,7 +729,7 @@ impl FileIndex {
         false
     }
 
-    /// Add an HTML anchor (from <a id="..."> or <element id="..."> tags)
+    /// Add an HTML anchor (from `<a id="...">` or `<element id="...">` tags)
     pub fn add_html_anchor(&mut self, anchor: String) {
         if !anchor.is_empty() {
             self.html_anchors.insert(anchor.to_lowercase());
@@ -787,7 +787,7 @@ impl FileIndex {
         }
     }
 
-    /// Add a defined reference ID (e.g., from [ref]: url)
+    /// Add a defined reference ID (e.g., from `[ref]: url`)
     pub fn add_defined_reference(&mut self, ref_id: String) {
         self.defined_references.insert(ref_id);
     }

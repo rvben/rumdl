@@ -355,7 +355,7 @@ pub fn is_list_item(line: &str) -> Option<(ListType, String, usize)> {
     None
 }
 
-/// Returns true if the list item at lines[current_idx] is a multi-line item
+/// Returns true if the list item at `lines[current_idx]` is a multi-line item
 pub fn is_multi_line_item(lines: &[&str], current_idx: usize) -> bool {
     if current_idx >= lines.len() - 1 {
         return false;

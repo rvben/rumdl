@@ -230,7 +230,7 @@ pub struct Config {
     /// - MD003: style ("atx", "atx_closed", "setext")
     /// - MD044: names (array of proper names to check)
     ///
-    /// See https://github.com/rvben/rumdl for full rule documentation.
+    /// See <https://github.com/rvben/rumdl> for full rule documentation.
     #[serde(flatten)]
     pub rules: BTreeMap<String, RuleConfig>,
 
@@ -542,7 +542,7 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub flavor: MarkdownFlavor,
 
-    /// [DEPRECATED] Whether to enforce exclude patterns for explicitly passed paths.
+    /// \[DEPRECATED\] Whether to enforce exclude patterns for explicitly passed paths.
     /// This option is deprecated as of v0.0.156 and has no effect.
     /// Exclude patterns are now always respected, even for explicitly provided files.
     /// This prevents duplication between rumdl config and tool configs like pre-commit.

@@ -34,7 +34,7 @@ pub trait OutputFormatter {
 pub enum OutputFormat {
     /// Default human-readable format with colors and context
     Text,
-    /// Concise format: file:line:col: [RULE] message
+    /// Concise format: `file:line:col: [RULE] message`
     Concise,
     /// Grouped format: violations grouped by file
     Grouped,

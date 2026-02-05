@@ -4,7 +4,7 @@
 //! of lint results to avoid re-checking unchanged files.
 //!
 //! Cache key: (file_content_hash, config_hash, rumdl_version)
-//! Cache value: Vec<LintWarning>
+//! Cache value: `Vec<LintWarning>`
 //! Storage: .rumdl_cache/{version}/{hash}.json
 
 use rumdl_lib::rule::LintWarning;

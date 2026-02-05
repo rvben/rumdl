@@ -202,7 +202,7 @@ pub struct ParsedLink<'a> {
     pub text: Cow<'a, str>,
     /// Link URL or reference
     pub url: Cow<'a, str>,
-    /// Whether this is a reference link [text][ref] vs inline [text](url)
+    /// Whether this is a reference link `[text][ref]` vs inline `[text](url)`
     pub is_reference: bool,
     /// Reference ID for reference links
     pub reference_id: Option<Cow<'a, str>>,
@@ -257,7 +257,7 @@ pub struct ParsedImage<'a> {
     pub link_type: LinkType,
 }
 
-/// Reference definition [ref]: url "title"
+/// Reference definition `[ref]: url "title"`
 #[derive(Debug, Clone)]
 pub struct ReferenceDef {
     /// Line number (1-indexed)
@@ -1260,7 +1260,7 @@ impl<'a> LintContext<'a> {
         &self.mdx_comment_ranges
     }
 
-    /// Check if a byte position is within a Pandoc/Quarto citation (@key or [@key])
+    /// Check if a byte position is within a Pandoc/Quarto citation (`@key` or `[@key]`)
     /// Only active in Quarto flavor
     #[inline]
     pub fn is_in_citation(&self, byte_pos: usize) -> bool {

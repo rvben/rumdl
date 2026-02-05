@@ -250,7 +250,7 @@ pub fn has_citations(text: &str) -> bool {
 }
 
 /// Find all citation ranges in content (byte ranges)
-/// Returns ranges for both bracketed [@key] and inline @key citations
+/// Returns ranges for both bracketed `[@key]` and inline `@key` citations
 pub fn find_citation_ranges(content: &str) -> Vec<ByteRange> {
     let mut ranges = Vec::new();
 

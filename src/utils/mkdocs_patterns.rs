@@ -12,29 +12,29 @@
 ///
 /// ### Module/Class References
 /// - Format: `module.Class`, `package.module.function`
-/// - Example: [`module.MyClass`][], [`api.endpoints.get_user`][]
+/// - Example: `[module.MyClass][]`, `[api.endpoints.get_user][]`
 /// - Used for: Python API documentation cross-references
 ///
 /// ### Header Anchors
 /// - Format: `getting-started`, `api-reference`
-/// - Example: [getting-started][], [installation-guide][]
+/// - Example: `[getting-started][]`, `[installation-guide][]`
 /// - Used for: Cross-references to documentation sections
 ///
 /// ### API Paths
 /// - Format: `api/v1/endpoints`, `docs/reference/guide`
-/// - Example: [api/module.Class][], [docs/getting-started][]
+/// - Example: `[api/module.Class][]`, `[docs/getting-started][]`
 /// - Used for: Navigation and documentation structure references
 ///
 /// ## References
 ///
-/// - [mkdocs-autorefs](https://mkdocstrings.github.io/autorefs/)
-/// - [mkdocstrings](https://mkdocstrings.github.io/)
-/// - [MkDocs discussions](https://github.com/mkdocs/mkdocs/discussions/3754)
+/// - <https://mkdocstrings.github.io/autorefs/>
+/// - <https://mkdocstrings.github.io/>
+/// - <https://github.com/mkdocs/mkdocs/discussions/3754>
 ///
 /// ## See Also
 ///
 /// - [`MD042NoEmptyLinks`](crate::rules::MD042NoEmptyLinks) - Handles MkDocs auto-references
-/// - [`is_mkdocs_attribute_anchor`](crate::rules::md042_no_empty_links::MD042NoEmptyLinks::is_mkdocs_attribute_anchor) - Handles attr_list anchors
+/// - `is_mkdocs_attribute_anchor` method - Handles attr_list anchors
 pub fn is_mkdocs_auto_reference(reference: &str) -> bool {
     // Reject empty or excessively long references for performance
     if reference.is_empty() || reference.len() > 200 {
