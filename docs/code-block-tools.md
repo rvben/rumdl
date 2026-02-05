@@ -85,39 +85,43 @@ With `normalize-language = "linguist"` (default), common aliases are resolved au
 
 rumdl includes definitions for common tools:
 
-| Tool ID         | Language  | Type   | Command                                |
-| --------------- | --------- | ------ | -------------------------------------- |
-| `ruff:check`    | Python    | Lint   | `ruff check --output-format=concise -` |
-| `ruff:format`   | Python    | Format | `ruff format -`                        |
-| `black`         | Python    | Format | `black --quiet -`                      |
-| `isort`         | Python    | Format | `isort -`                              |
-| `shellcheck`    | Shell     | Lint   | `shellcheck -`                         |
-| `shfmt`         | Shell     | Format | `shfmt`                                |
-| `prettier`      | Multi     | Format | `prettier --stdin-filepath=_.EXT`      |
-| `eslint`        | JS/TS     | Lint   | `eslint --stdin --format=compact`      |
-| `rustfmt`       | Rust      | Format | `rustfmt`                              |
-| `gofmt`         | Go        | Format | `gofmt`                                |
-| `goimports`     | Go        | Format | `goimports`                            |
-| `clang-format`  | C/C++     | Format | `clang-format`                         |
-| `stylua`        | Lua       | Format | `stylua -`                             |
-| `taplo:format`  | TOML      | Format | `taplo format -`                       |
-| `yamlfmt`       | YAML      | Format | `yamlfmt -`                            |
-| `jq`            | JSON      | Format | `jq .`                                 |
-| `sql-formatter` | SQL       | Format | `sql-formatter`                        |
-| `pg_format`     | SQL       | Format | `pg_format`                            |
-| `nixfmt`        | Nix       | Format | `nixfmt`                               |
-| `terraform:fmt` | Terraform | Format | `terraform fmt -`                      |
-| `mix:format`    | Elixir    | Format | `mix format -`                         |
-| `dart:format`   | Dart      | Format | `dart format`                          |
-| `ktlint`        | Kotlin    | Both   | `ktlint --format` / `ktlint`           |
-| `scalafmt`      | Scala     | Format | `scalafmt --stdin`                     |
-| `ormolu`        | Haskell   | Format | `ormolu`                               |
-| `fourmolu`      | Haskell   | Format | `fourmolu`                             |
-| `latexindent`   | LaTeX     | Format | `latexindent`                          |
-| `markdownlint`  | Markdown  | Lint   | `markdownlint --stdin`                 |
-| `typos`         | Multi     | Lint   | `typos --format=brief -`               |
-| `cljfmt`        | Clojure   | Format | `cljfmt fix -`                         |
-| `rubocop`       | Ruby      | Both   | `rubocop -a` / `rubocop`               |
+| Tool ID           | Language   | Type   | Command                                |
+| ----------------- | ---------- | ------ | -------------------------------------- |
+| `ruff:check`      | Python     | Lint   | `ruff check --output-format=concise -` |
+| `ruff:format`     | Python     | Format | `ruff format -`                        |
+| `black`           | Python     | Format | `black --quiet -`                      |
+| `isort`           | Python     | Format | `isort -`                              |
+| `shellcheck`      | Shell      | Lint   | `shellcheck -`                         |
+| `shfmt`           | Shell      | Format | `shfmt`                                |
+| `beautysh`        | Shell      | Both   | `beautysh -`                           |
+| `prettier`        | Multi      | Format | `prettier --stdin-filepath=_.EXT`      |
+| `eslint`          | JS/TS      | Lint   | `eslint --stdin --format=compact`      |
+| `oxfmt`           | JS/TS/JSON | Format | `oxfmt --stdin-filepath=_.EXT`         |
+| `rustfmt`         | Rust       | Format | `rustfmt`                              |
+| `gofmt`           | Go         | Format | `gofmt`                                |
+| `goimports`       | Go         | Format | `goimports`                            |
+| `clang-format`    | C/C++      | Format | `clang-format`                         |
+| `stylua`          | Lua        | Format | `stylua -`                             |
+| `taplo`           | TOML       | Format | `taplo format -`                       |
+| `tombi`           | TOML       | Both   | `tombi format -` / `tombi lint -`      |
+| `yamlfmt`         | YAML       | Format | `yamlfmt -`                            |
+| `jq`              | JSON       | Format | `jq .`                                 |
+| `sql-formatter`   | SQL        | Format | `sql-formatter`                        |
+| `pg_format`       | SQL        | Format | `pg_format`                            |
+| `nixfmt`          | Nix        | Format | `nixfmt`                               |
+| `terraform-fmt`   | Terraform  | Format | `terraform fmt -`                      |
+| `mix:format`      | Elixir     | Format | `mix format -`                         |
+| `dart-format`     | Dart       | Format | `dart format`                          |
+| `ktfmt`           | Kotlin     | Format | `ktfmt --stdin`                        |
+| `scalafmt`        | Scala      | Format | `scalafmt --stdin`                     |
+| `ormolu`          | Haskell    | Format | `ormolu`                               |
+| `fourmolu`        | Haskell    | Format | `fourmolu`                             |
+| `latexindent`     | LaTeX      | Format | `latexindent`                          |
+| `markdownlint`    | Markdown   | Lint   | `markdownlint --stdin`                 |
+| `typos`           | Multi      | Lint   | `typos --format=brief -`               |
+| `cljfmt`          | Clojure    | Format | `cljfmt fix -`                         |
+| `rubocop`         | Ruby       | Both   | `rubocop -a` / `rubocop`               |
+| `djlint`          | Jinja/HTML | Both   | `djlint -` / `djlint - --reformat`     |
 
 **Note**: Tools must be installed separately. rumdl does not install them for you.
 

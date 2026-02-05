@@ -436,6 +436,164 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
+    // Jinja/HTML - djlint
+    m.insert(
+        "djlint",
+        ToolDefinition {
+            command: vec!["djlint".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec!["--reformat".to_string()],
+        },
+    );
+
+    m.insert(
+        "djlint:lint",
+        ToolDefinition {
+            command: vec!["djlint".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "djlint:reformat",
+        ToolDefinition {
+            command: vec!["djlint".to_string(), "-".to_string(), "--reformat".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    // Shell - beautysh
+    m.insert(
+        "beautysh",
+        ToolDefinition {
+            command: vec!["beautysh".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    // TOML - tombi
+    m.insert(
+        "tombi",
+        ToolDefinition {
+            command: vec!["tombi".to_string(), "format".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "tombi:format",
+        ToolDefinition {
+            command: vec!["tombi".to_string(), "format".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "tombi:lint",
+        ToolDefinition {
+            command: vec!["tombi".to_string(), "lint".to_string(), "-".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    // JavaScript/CSS/HTML/JSON - oxfmt (OXC formatter)
+    m.insert(
+        "oxfmt",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.js".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:js",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.js".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:ts",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.ts".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:jsx",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.jsx".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:tsx",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.tsx".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:json",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.json".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "oxfmt:css",
+        ToolDefinition {
+            command: vec!["oxfmt".to_string(), "--stdin-filepath=_.css".to_string()],
+            stdin: true,
+            stdout: true,
+            lint_args: vec!["--check".to_string()],
+            format_args: vec![],
+        },
+    );
+
     m
 });
 
@@ -511,5 +669,36 @@ mod tests {
 
         assert!(tools.contains(&"my-custom-tool"));
         assert!(tools.contains(&"ruff:check")); // Built-in still available
+    }
+
+    #[test]
+    fn test_new_builtin_tools() {
+        let registry = ToolRegistry::default();
+
+        // djlint
+        let tool = registry.get("djlint").expect("Should find djlint");
+        assert!(tool.command.contains(&"djlint".to_string()));
+        assert!(tool.stdin);
+
+        // beautysh
+        let tool = registry.get("beautysh").expect("Should find beautysh");
+        assert!(tool.command.contains(&"beautysh".to_string()));
+        assert!(tool.stdin);
+
+        // tombi
+        let tool = registry.get("tombi").expect("Should find tombi");
+        assert!(tool.command.contains(&"tombi".to_string()));
+        assert!(tool.stdin);
+
+        let tool = registry.get("tombi:lint").expect("Should find tombi:lint");
+        assert!(tool.command.contains(&"lint".to_string()));
+
+        // oxfmt
+        let tool = registry.get("oxfmt").expect("Should find oxfmt");
+        assert!(tool.command.contains(&"oxfmt".to_string()));
+        assert!(tool.stdin);
+
+        let tool = registry.get("oxfmt:ts").expect("Should find oxfmt:ts");
+        assert!(tool.command.iter().any(|s| s.contains("_.ts")));
     }
 }
