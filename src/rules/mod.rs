@@ -67,6 +67,7 @@ mod md070_nested_code_fence;
 mod md071_blank_line_after_frontmatter;
 mod md072_frontmatter_key_sort;
 mod md073_toc_validation;
+mod md074_mkdocs_nav;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -131,6 +132,7 @@ pub use md070_nested_code_fence::MD070NestedCodeFence;
 pub use md071_blank_line_after_frontmatter::MD071BlankLineAfterFrontmatter;
 pub use md072_frontmatter_key_sort::MD072FrontmatterKeySort;
 pub use md073_toc_validation::MD073TocValidation;
+pub use md074_mkdocs_nav::MD074MkDocsNav;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -232,6 +234,7 @@ const RULES: &[(&str, RuleCtor)] = &[
     ("MD071", MD071BlankLineAfterFrontmatter::from_config),
     ("MD072", MD072FrontmatterKeySort::from_config),
     ("MD073", MD073TocValidation::from_config),
+    ("MD074", MD074MkDocsNav::from_config),
 ];
 
 /// Returns all rule instances for config validation and CLI

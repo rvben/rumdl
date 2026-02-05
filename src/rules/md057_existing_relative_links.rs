@@ -14,7 +14,8 @@ use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 mod md057_config;
-use md057_config::MD057Config;
+use crate::rule_config_serde::RuleConfig;
+use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
 static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
@@ -106,10 +107,21 @@ const MARKDOWN_EXTENSIONS: &[&str] = &[
 ];
 
 /// Rule MD057: Existing relative links should point to valid files or directories.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MD057ExistingRelativeLinks {
     /// Base directory for resolving relative links
     base_path: Arc<Mutex<Option<PathBuf>>>,
+    /// Configuration for the rule
+    config: MD057Config,
+}
+
+impl Default for MD057ExistingRelativeLinks {
+    fn default() -> Self {
+        Self {
+            base_path: Arc::new(Mutex::new(None)),
+            config: MD057Config::default(),
+        }
+    }
 }
 
 impl MD057ExistingRelativeLinks {
@@ -133,9 +145,11 @@ impl MD057ExistingRelativeLinks {
         self
     }
 
-    #[allow(unused_variables)]
     pub fn from_config_struct(config: MD057Config) -> Self {
-        Self::default()
+        Self {
+            base_path: Arc::new(Mutex::new(None)),
+            config,
+        }
     }
 
     /// Check if a URL is external or should be skipped for validation.
@@ -182,13 +196,6 @@ impl MD057ExistingRelativeLinks {
             return true;
         }
 
-        // Absolute URL paths (e.g., /api/docs, /blog/post.html) are treated as web paths
-        // and skipped. These are typically routes for published documentation sites,
-        // not filesystem paths that can be validated locally.
-        if url.starts_with('/') {
-            return true;
-        }
-
         // Framework path aliases (resolved by build tools like Vite, webpack, etc.)
         // These are not filesystem paths but module/asset aliases
         // Examples: ~/assets/image.png, @images/photo.jpg, @/components/Button.vue
@@ -204,6 +211,13 @@ impl MD057ExistingRelativeLinks {
     #[inline]
     fn is_fragment_only_link(&self, url: &str) -> bool {
         url.starts_with('#')
+    }
+
+    /// Check if the URL is an absolute path (starts with /)
+    /// These are typically routes for published documentation sites.
+    #[inline]
+    fn is_absolute_path(url: &str) -> bool {
+        url.starts_with('/')
     }
 
     /// Decode URL percent-encoded sequences in a path.
@@ -417,8 +431,30 @@ impl Rule for MD057ExistingRelativeLinks {
                             continue;
                         }
 
-                        // Skip external URLs, absolute paths, and fragment-only links
+                        // Skip external URLs and fragment-only links
                         if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                            continue;
+                        }
+
+                        // Handle absolute paths based on config
+                        if Self::is_absolute_path(url) {
+                            match self.config.absolute_links {
+                                AbsoluteLinksOption::Warn => {
+                                    let url_start = url_group.start();
+                                    let url_end = url_group.end();
+                                    warnings.push(LintWarning {
+                                        rule_name: Some(self.name().to_string()),
+                                        line: link.line,
+                                        column: url_start + 1,
+                                        end_line: link.line,
+                                        end_column: url_end + 1,
+                                        message: format!("Absolute link '{url}' cannot be validated locally"),
+                                        severity: Severity::Warning,
+                                        fix: None,
+                                    });
+                                }
+                                AbsoluteLinksOption::Ignore => {}
+                            }
                             continue;
                         }
 
@@ -490,8 +526,28 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
-            // Skip external URLs, absolute paths, and fragment-only links
+            // Skip external URLs and fragment-only links
             if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            // Handle absolute paths based on config
+            if Self::is_absolute_path(url) {
+                match self.config.absolute_links {
+                    AbsoluteLinksOption::Warn => {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: image.line,
+                            column: image.start_col + 1,
+                            end_line: image.line,
+                            end_column: image.start_col + 1 + url.len(),
+                            message: format!("Absolute link '{url}' cannot be validated locally"),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
+                    AbsoluteLinksOption::Ignore => {}
+                }
                 continue;
             }
 
@@ -551,8 +607,32 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
-            // Skip external URLs, absolute paths, and fragment-only links
+            // Skip external URLs and fragment-only links
             if self.is_external_url(url) || self.is_fragment_only_link(url) {
+                continue;
+            }
+
+            // Handle absolute paths based on config
+            if Self::is_absolute_path(url) {
+                match self.config.absolute_links {
+                    AbsoluteLinksOption::Warn => {
+                        let line_idx = ref_def.line - 1;
+                        let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                            line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                        });
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            line: ref_def.line,
+                            column,
+                            end_line: ref_def.line,
+                            end_column: column + url.len(),
+                            message: format!("Absolute link '{url}' cannot be validated locally"),
+                            severity: Severity::Warning,
+                            fix: None,
+                        });
+                    }
+                    AbsoluteLinksOption::Ignore => {}
+                }
                 continue;
             }
 
@@ -621,8 +701,19 @@ impl Rule for MD057ExistingRelativeLinks {
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        // No configurable options for this rule
-        None
+        let default_config = MD057Config::default();
+        let json_value = serde_json::to_value(&default_config).ok()?;
+        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
+
+        if let toml::Value::Table(table) = toml_value {
+            if !table.is_empty() {
+                Some((MD057Config::RULE_NAME.to_string(), toml::Value::Table(table)))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
@@ -960,15 +1051,22 @@ mod tests {
         assert!(rule.is_external_url("{{% include %}}")); // Jinja2/Hugo shortcode
         assert!(rule.is_external_url("{{")); // Even partial matches (regex edge case)
 
-        // Absolute web URL paths should be skipped (not validated)
-        // These are typically routes for published documentation sites
-        assert!(rule.is_external_url("/api/v1/users"));
-        assert!(rule.is_external_url("/blog/2024/release.html"));
-        assert!(rule.is_external_url("/react/hooks/use-state.html"));
-        assert!(rule.is_external_url("/pkg/runtime"));
-        assert!(rule.is_external_url("/doc/go1compat"));
-        assert!(rule.is_external_url("/index.html"));
-        assert!(rule.is_external_url("/assets/logo.png"));
+        // Absolute paths are NOT external (handled separately via is_absolute_path)
+        // By default they are ignored, but can be configured to warn
+        assert!(!rule.is_external_url("/api/v1/users"));
+        assert!(!rule.is_external_url("/blog/2024/release.html"));
+        assert!(!rule.is_external_url("/react/hooks/use-state.html"));
+        assert!(!rule.is_external_url("/pkg/runtime"));
+        assert!(!rule.is_external_url("/doc/go1compat"));
+        assert!(!rule.is_external_url("/index.html"));
+        assert!(!rule.is_external_url("/assets/logo.png"));
+
+        // But is_absolute_path should detect them
+        assert!(MD057ExistingRelativeLinks::is_absolute_path("/api/v1/users"));
+        assert!(MD057ExistingRelativeLinks::is_absolute_path("/blog/2024/release.html"));
+        assert!(MD057ExistingRelativeLinks::is_absolute_path("/index.html"));
+        assert!(!MD057ExistingRelativeLinks::is_absolute_path("./relative.md"));
+        assert!(!MD057ExistingRelativeLinks::is_absolute_path("relative.md"));
 
         // Framework path aliases should be skipped (resolved by build tools)
         // Tilde prefix (common in Vite, Nuxt, Astro for project root)
@@ -2336,6 +2434,132 @@ A footnote[^1] and a [ref link][myref].
         assert!(
             result[0].message.contains("missing-file.md"),
             "Should warn about missing-file.md in reference definition"
+        );
+    }
+
+    #[test]
+    fn test_absolute_links_ignore_by_default() {
+        // By default, absolute links are ignored (not validated)
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        let content = r#"# Links
+
+[API docs](/api/v1/users)
+[Blog post](/blog/2024/release.html)
+![Logo](/assets/logo.png)
+
+[ref]: /docs/reference.md
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // No warnings - absolute links are ignored by default
+        assert!(
+            result.is_empty(),
+            "Absolute links should be ignored by default. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_absolute_links_warn_config() {
+        // When configured to warn, absolute links should generate warnings
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::Warn,
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = r#"# Links
+
+[API docs](/api/v1/users)
+[Blog post](/blog/2024/release.html)
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Should have 2 warnings for the 2 absolute links
+        assert_eq!(
+            result.len(),
+            2,
+            "Should warn about both absolute links. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("cannot be validated locally"),
+            "Warning should explain why: {}",
+            result[0].message
+        );
+        assert!(
+            result[0].message.contains("/api/v1/users"),
+            "Warning should include the link path"
+        );
+    }
+
+    #[test]
+    fn test_absolute_links_warn_images() {
+        // Images with absolute paths should also warn when configured
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::Warn,
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = r#"# Images
+
+![Logo](/assets/logo.png)
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn about absolute image path. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("/assets/logo.png"),
+            "Warning should include the image path"
+        );
+    }
+
+    #[test]
+    fn test_absolute_links_warn_reference_definitions() {
+        // Reference definitions with absolute paths should also warn when configured
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::Warn,
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = r#"# Reference
+
+See the [docs][ref].
+
+[ref]: /docs/reference.md
+"#;
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should warn about absolute reference definition. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("/docs/reference.md"),
+            "Warning should include the reference path"
         );
     }
 }
