@@ -437,7 +437,7 @@ jobs:
             platform-pkg: cli-linux-x64
           - os: macos-latest
             platform-pkg: cli-darwin-arm64
-          - os: macos-14
+          - os: macos-15-intel
             platform-pkg: cli-darwin-x64
           - os: windows-latest
             platform-pkg: cli-win32-x64
@@ -452,6 +452,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Make binary executable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: chmod +x npm/${{ matrix.platform-pkg }}/rumdl
 
       - name: Install packages locally
         shell: bash
@@ -496,6 +501,10 @@ jobs:
         with:
           name: npm-cli-packages
           path: npm
+
+      - name: Make binary executable
+        shell: sh
+        run: chmod +x npm/cli-linux-x64-musl/rumdl
 
       - name: Install packages locally
         shell: sh
