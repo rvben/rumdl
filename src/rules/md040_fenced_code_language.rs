@@ -9,6 +9,29 @@ use std::collections::HashMap;
 ///
 /// See [docs/md040.md](../../docs/md040.md) for full documentation, configuration, and examples.
 pub mod md040_config;
+
+// ============================================================================
+// MkDocs Superfences Attribute Detection
+// ============================================================================
+
+/// Prefixes that indicate MkDocs superfences attributes rather than language identifiers.
+/// These are valid in MkDocs flavor without a language specification.
+/// See: https://facelessuser.github.io/pymdown-extensions/extensions/superfences/
+const MKDOCS_SUPERFENCES_ATTR_PREFIXES: &[&str] = &[
+    "title=",    // Block title
+    "hl_lines=", // Highlighted lines
+    "linenums=", // Line numbers
+    ".",         // CSS class (e.g., .annotate)
+    "#",         // CSS id
+];
+
+/// Check if a string starts with a MkDocs superfences attribute prefix
+#[inline]
+fn is_superfences_attribute(s: &str) -> bool {
+    MKDOCS_SUPERFENCES_ATTR_PREFIXES
+        .iter()
+        .any(|prefix| s.starts_with(prefix))
+}
 use md040_config::{LanguageStyle, MD040Config, UnknownLanguageAction};
 
 struct FencedCodeBlock {
@@ -239,17 +262,21 @@ impl Rule for MD040FencedCodeLanguage {
             let trimmed = line.trim();
             let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 
-            // Check if it has MkDocs title attribute but no language
-            let has_title_only =
-                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+            // Check if fence has MkDocs superfences attributes but no language
+            let has_mkdocs_attrs_only =
+                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_superfences_attribute(after_fence);
 
             // Check for Quarto/RMarkdown code chunk syntax: {language} or {language, options}
             let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
                 && after_fence.starts_with('{')
                 && after_fence.contains('}');
 
-            // Warn if no language and not using special syntax
-            if (block.language.is_empty() || has_title_only) && !has_quarto_syntax {
+            // Determine if this block needs a language specification
+            // In MkDocs flavor, superfences attributes without language are acceptable
+            let needs_language =
+                !has_mkdocs_attrs_only && (block.language.is_empty() || is_superfences_attribute(&block.language));
+
+            if needs_language && !has_quarto_syntax {
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(block.line_idx + 1, line);
 
                 warnings.push(LintWarning {
@@ -379,19 +406,22 @@ impl Rule for MD040FencedCodeLanguage {
             let trimmed = line.trim();
             let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 
-            let has_title_only =
-                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && after_fence.starts_with("title=");
+            let has_mkdocs_attrs_only =
+                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_superfences_attribute(after_fence);
 
             let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
                 && after_fence.starts_with('{')
                 && after_fence.contains('}');
 
-            if (block.language.is_empty() || has_title_only) && !has_quarto_syntax {
+            let needs_language =
+                !has_mkdocs_attrs_only && (block.language.is_empty() || is_superfences_attribute(&block.language));
+
+            if needs_language && !has_quarto_syntax {
                 lines_to_fix.insert(
                     block.line_idx,
                     FixAction::AddLanguage {
                         fence_marker: block.fence_marker.clone(),
-                        has_title_only,
+                        has_mkdocs_attrs_only,
                     },
                 );
             } else if !has_quarto_syntax
@@ -417,13 +447,13 @@ impl Rule for MD040FencedCodeLanguage {
                 match action {
                     FixAction::AddLanguage {
                         fence_marker,
-                        has_title_only,
+                        has_mkdocs_attrs_only,
                     } => {
                         let indent = &line[..line.len() - line.trim_start().len()];
                         let trimmed = line.trim();
                         let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("").trim();
 
-                        if *has_title_only {
+                        if *has_mkdocs_attrs_only {
                             result.push_str(&format!("{indent}{fence_marker}text {after_fence}\n"));
                         } else {
                             result.push_str(&format!("{indent}{fence_marker}text\n"));
@@ -499,8 +529,14 @@ impl Rule for MD040FencedCodeLanguage {
 
 #[derive(Debug, Clone)]
 enum FixAction {
-    AddLanguage { fence_marker: String, has_title_only: bool },
-    NormalizeLabel { fence_marker: String, new_label: String },
+    AddLanguage {
+        fence_marker: String,
+        has_mkdocs_attrs_only: bool,
+    },
+    NormalizeLabel {
+        fence_marker: String,
+        new_label: String,
+    },
 }
 
 /// Detect fenced code blocks using pulldown-cmark, returning info about each block's opening fence
@@ -640,6 +676,12 @@ mod tests {
         let rule = MD040FencedCodeLanguage::with_config(config);
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         rule.fix(&ctx)
+    }
+
+    fn run_check_mkdocs(content: &str) -> LintResult {
+        let rule = MD040FencedCodeLanguage::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        rule.check(&ctx)
     }
 
     // =========================================================================
@@ -1197,5 +1239,107 @@ echo there
         let fixed1 = run_fix_with_config(content, config.clone()).unwrap();
         let fixed2 = run_fix_with_config(&fixed1, config).unwrap();
         assert_eq!(fixed1, fixed2, "Fix should be idempotent");
+    }
+
+    // =========================================================================
+    // MkDocs superfences tests
+    // =========================================================================
+
+    #[test]
+    fn test_mkdocs_superfences_title_only() {
+        // title= attribute without language should not warn in MkDocs flavor
+        let content = r#"```title="Example"
+echo hi
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences with title= should not require language"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_superfences_hl_lines() {
+        // hl_lines= attribute without language should not warn
+        let content = r#"```hl_lines="1 2"
+line 1
+line 2
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences with hl_lines= should not require language"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_superfences_linenums() {
+        // linenums= attribute without language should not warn
+        let content = r#"```linenums="1"
+line 1
+line 2
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences with linenums= should not require language"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_superfences_class() {
+        // Custom class (starting with .) should not warn
+        let content = r#"```.my-class
+some text
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences with .class should not require language"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_superfences_id() {
+        // Custom ID (starting with #) should not warn
+        let content = r#"```#my-id
+some text
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences with #id should not require language"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_superfences_with_language() {
+        // Language with superfences attributes should work fine
+        let content = r#"```python title="Example" hl_lines="1"
+print("hello")
+```
+"#;
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(result.is_empty(), "Code block with language and attrs should pass");
+    }
+
+    #[test]
+    fn test_standard_flavor_no_special_handling() {
+        // In Standard flavor, title= should still warn
+        let content = r#"```title="Example"
+echo hi
+```
+"#;
+        let result = run_check(content).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Standard flavor should warn about title= without language"
+        );
     }
 }
