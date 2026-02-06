@@ -2,19 +2,11 @@ use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use fancy_regex::Regex;
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 
 mod md044_config;
 use md044_config::MD044Config;
-
-static HTML_COMMENT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--([\s\S]*?)-->").unwrap());
-// Reference definition pattern - matches [ref]: url "title"
-static REF_DEF_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap()
-});
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
@@ -196,19 +188,20 @@ impl MD044ProperNames {
         variants.into_iter().collect()
     }
 
-    // Find all name violations in the content and return positions
-    fn find_name_violations(&self, content: &str, ctx: &crate::lint_context::LintContext) -> Vec<WarningPosition> {
+    // Find all name violations in the content and return positions.
+    // `content_lower` is the pre-computed lowercase version of `content` to avoid redundant allocations.
+    fn find_name_violations(
+        &self,
+        content: &str,
+        ctx: &crate::lint_context::LintContext,
+        content_lower: &str,
+    ) -> Vec<WarningPosition> {
         // Early return: if no names configured or content is empty
         if self.config.names.is_empty() || content.is_empty() || self.combined_pattern.is_none() {
             return Vec::new();
         }
 
         // Early return: quick check if any of the configured names might be in content
-        let content_lower = if content.is_ascii() {
-            content.to_ascii_lowercase()
-        } else {
-            content.to_lowercase()
-        };
         let has_potential_matches = self.name_variants.iter().any(|name| content_lower.contains(name));
 
         if !has_potential_matches {
@@ -258,15 +251,8 @@ impl MD044ProperNames {
                 continue;
             }
 
-            // Check if we should skip HTML comments
-            let in_html_comment = if !self.config.html_comments {
-                // Check if this position is within an HTML comment
-                self.is_in_html_comment(content, line_info.byte_offset)
-            } else {
-                false
-            };
-
-            if in_html_comment {
+            // Skip HTML comments using pre-computed line flag
+            if !self.config.html_comments && line_info.in_html_comment {
                 continue;
             }
 
@@ -298,8 +284,8 @@ impl MD044ProperNames {
                         let start_pos = cap.start();
                         let end_pos = cap.end();
 
-                        if !self.is_at_word_boundary(line, start_pos, true)
-                            || !self.is_at_word_boundary(line, end_pos, false)
+                        if !Self::is_at_word_boundary(line, start_pos, true)
+                            || !Self::is_at_word_boundary(line, end_pos, false)
                         {
                             continue; // Not at word boundary
                         }
@@ -312,9 +298,9 @@ impl MD044ProperNames {
                             }
                         }
 
-                        // Skip if in link (inline links, reference links, or reference definitions)
+                        // Skip if in link URL or reference definition
                         let byte_pos = line_info.byte_offset + cap.start();
-                        if self.is_in_link(ctx, byte_pos) {
+                        if Self::is_in_link(ctx, byte_pos) {
                             continue;
                         }
 
@@ -340,23 +326,13 @@ impl MD044ProperNames {
         violations
     }
 
-    // Check if a byte position is within an HTML comment
-    fn is_in_html_comment(&self, content: &str, byte_pos: usize) -> bool {
-        for m in HTML_COMMENT_REGEX.find_iter(content).flatten() {
-            if m.start() <= byte_pos && byte_pos < m.end() {
-                return true;
-            }
-        }
-        false
-    }
-
     /// Check if a byte position is within a link URL (not link text)
     ///
     /// Link text should be checked for proper names, but URLs should be skipped.
     /// For `[text](url)` - check text, skip url
     /// For `[text][ref]` - check text, skip reference portion
     /// For `[[text]]` (WikiLinks) - check text, skip brackets
-    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+    fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         use pulldown_cmark::LinkType;
 
         // Check inline and reference links - only skip if position is in URL portion, not text portion
@@ -399,15 +375,8 @@ impl MD044ProperNames {
             }
         }
 
-        // Check reference definitions [ref]: url "title" using regex pattern
-        // Skip the entire reference definition line
-        for m in REF_DEF_REGEX.find_iter(ctx.content) {
-            if m.start() <= byte_pos && byte_pos < m.end() {
-                return true;
-            }
-        }
-
-        false
+        // Use pre-computed reference definitions from LintContext
+        ctx.is_in_reference_def(byte_pos)
     }
 
     // Check if a character is a word boundary (handles Unicode)
@@ -415,30 +384,26 @@ impl MD044ProperNames {
         !c.is_alphanumeric()
     }
 
-    // Check if position is at a word boundary
-    fn is_at_word_boundary(&self, content: &str, pos: usize, is_start: bool) -> bool {
-        let chars: Vec<char> = content.chars().collect();
-        let char_indices: Vec<(usize, char)> = content.char_indices().collect();
-
-        // Find the character position
-        let char_pos = char_indices.iter().position(|(idx, _)| *idx == pos);
-        if char_pos.is_none() {
-            return true; // If we can't find position, assume boundary
-        }
-        let char_pos = char_pos.unwrap();
-
+    // Check if position is at a word boundary using O(1) byte-level lookups
+    fn is_at_word_boundary(content: &str, pos: usize, is_start: bool) -> bool {
         if is_start {
-            // Check character before position
-            if char_pos == 0 {
-                return true; // Start of string
+            if pos == 0 {
+                return true;
             }
-            Self::is_word_boundary_char(chars[char_pos - 1])
+            // Get the character immediately before `pos`
+            match content[..pos].chars().next_back() {
+                None => true,
+                Some(c) => Self::is_word_boundary_char(c),
+            }
         } else {
-            // Check character after position
-            if char_pos >= chars.len() {
-                return true; // End of string
+            if pos >= content.len() {
+                return true;
             }
-            Self::is_word_boundary_char(chars[char_pos])
+            // Get the character at `pos`
+            match content[pos..].chars().next() {
+                None => true,
+                Some(c) => Self::is_word_boundary_char(c),
+            }
         }
     }
 
@@ -482,13 +447,13 @@ impl Rule for MD044ProperNames {
         if self.config.names.is_empty() {
             return true;
         }
-        // Quick check if any configured names exist (case-insensitive)
-        let content_lower = ctx.content.to_lowercase();
-        !self
-            .config
-            .names
-            .iter()
-            .any(|name| content_lower.contains(&name.to_lowercase()))
+        // Quick check if any configured name variants exist (case-insensitive)
+        let content_lower = if ctx.content.is_ascii() {
+            ctx.content.to_ascii_lowercase()
+        } else {
+            ctx.content.to_lowercase()
+        };
+        !self.name_variants.iter().any(|name| content_lower.contains(name))
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
@@ -497,39 +462,22 @@ impl Rule for MD044ProperNames {
             return Ok(Vec::new());
         }
 
-        // Early return: quick check if any of the configured names might be in content
-        let content_lower = content.to_lowercase();
-        let has_potential_matches = self.config.names.iter().any(|name| {
-            let name_lower = name.to_lowercase();
-            let name_no_dots = name_lower.replace('.', "");
+        // Compute lowercase content once and reuse across all checks
+        let content_lower = if content.is_ascii() {
+            content.to_ascii_lowercase()
+        } else {
+            content.to_lowercase()
+        };
 
-            // Check direct match
-            if content_lower.contains(&name_lower) || content_lower.contains(&name_no_dots) {
-                return true;
-            }
-
-            // Also check ASCII-normalized version
-            let ascii_normalized = Self::ascii_normalize(&name_lower);
-
-            if ascii_normalized != name_lower {
-                if content_lower.contains(&ascii_normalized) {
-                    return true;
-                }
-                let ascii_no_dots = ascii_normalized.replace('.', "");
-                if ascii_normalized != ascii_no_dots && content_lower.contains(&ascii_no_dots) {
-                    return true;
-                }
-            }
-
-            false
-        });
+        // Early return: use pre-computed name_variants for the quick check
+        let has_potential_matches = self.name_variants.iter().any(|name| content_lower.contains(name));
 
         if !has_potential_matches {
             return Ok(Vec::new());
         }
 
         let line_index = &ctx.line_index;
-        let violations = self.find_name_violations(content, ctx);
+        let violations = self.find_name_violations(content, ctx, &content_lower);
 
         let warnings = violations
             .into_iter()
@@ -559,7 +507,12 @@ impl Rule for MD044ProperNames {
             return Ok(content.to_string());
         }
 
-        let violations = self.find_name_violations(content, ctx);
+        let content_lower = if content.is_ascii() {
+            content.to_ascii_lowercase()
+        } else {
+            content.to_lowercase()
+        };
+        let violations = self.find_name_violations(content, ctx, &content_lower);
         if violations.is_empty() {
             return Ok(content.to_string());
         }
