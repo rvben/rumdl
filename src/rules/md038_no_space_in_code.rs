@@ -222,6 +222,19 @@ impl Rule for MD038NoSpaceInCode {
         // Use centralized code spans from LintContext
         let code_spans = ctx.code_spans();
         for (i, code_span) in code_spans.iter().enumerate() {
+            // Skip code spans that are inside fenced/indented code blocks
+            if let Some(line_info) = ctx.lines.get(code_span.line - 1) {
+                if line_info.in_code_block {
+                    continue;
+                }
+                // Skip multi-line code spans inside MkDocs containers where pulldown-cmark
+                // misinterprets indented fenced code block markers as code spans.
+                // Covers admonitions, tabs, HTML markdown blocks, and PyMdown blocks.
+                if (line_info.in_mkdocs_container() || line_info.in_pymdown_block) && code_span.content.contains('\n') {
+                    continue;
+                }
+            }
+
             let code_content = &code_span.content;
 
             // Skip empty code spans

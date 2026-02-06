@@ -695,6 +695,14 @@ impl FileIndex {
         self.headings.push(heading);
     }
 
+    /// Add an alternative anchor that resolves to an existing heading.
+    /// Used for platform-specific anchor conventions (e.g., Python-Markdown `_N` dedup).
+    pub fn add_anchor_alias(&mut self, anchor: String, heading_index: usize) {
+        if heading_index < self.headings.len() {
+            self.anchor_to_heading.insert(anchor.to_lowercase(), heading_index);
+        }
+    }
+
     /// Check if an anchor exists in this file (O(1) lookup)
     ///
     /// Returns true if the anchor matches any of:

@@ -2632,6 +2632,373 @@ mod regression_tests {
         let warnings = lint_mkdocs(content);
         assert!(warnings.is_empty(), "Emoji shortcodes should work: {warnings:?}");
     }
+
+    // =========================================================================
+    // Real-world validation regression tests
+    // Found during multi-project validation against mkdocs-material, FastAPI,
+    // Pydantic, MkDocs, mkdocs-macros-plugin, and mkdocstrings
+    // =========================================================================
+
+    #[test]
+    fn test_md038_indented_fenced_code_in_admonition() {
+        // Indented fenced code blocks inside admonitions are misinterpreted by
+        // pulldown-cmark as multi-line code spans. MD038 should not flag these.
+        // Found in: mkdocstrings docs/usage/index.md
+        let content = concat!(
+            "# Test\n\n",
+            "!!! example\n",
+            "    ```yaml title=\"mkdocs.yml\"\n",
+            "    plugins:\n",
+            "    - mkdocstrings:\n",
+            "        enabled: true\n",
+            "    ```\n",
+        );
+        let warnings = lint_mkdocs(content);
+        let md038: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD038"))
+            .collect();
+        assert!(
+            md038.is_empty(),
+            "Indented fenced code in admonition should not trigger MD038: {md038:?}"
+        );
+    }
+
+    #[test]
+    fn test_md038_indented_fenced_code_in_tabs() {
+        // Tabbed content with indented fenced code blocks
+        // Found in: mkdocstrings docs/usage/index.md
+        let content = concat!(
+            "# Test\n\n",
+            "=== \"Markdown\"\n",
+            "    ```md\n",
+            "    See [installer.records][] to learn about records.\n",
+            "    ```\n\n",
+            "=== \"Result (HTML)\"\n",
+            "    ```html\n",
+            "    <p>See <a href=\"url\">installer.records</a></p>\n",
+            "    ```\n",
+        );
+        let warnings = lint_mkdocs(content);
+        let md038: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD038"))
+            .collect();
+        assert!(
+            md038.is_empty(),
+            "Indented fenced code in tabs should not trigger MD038: {md038:?}"
+        );
+    }
+
+    #[test]
+    fn test_md038_real_issue_still_caught_in_admonition() {
+        // Real MD038 violations inside admonitions should still be detected
+        let content = "# Test\n\n!!! note\n    Use `  code  ` in your config.\n";
+        let warnings = lint_mkdocs(content);
+        let md038: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD038"))
+            .collect();
+        assert!(
+            !md038.is_empty(),
+            "Real MD038 violations in admonitions should still be caught"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_headings_generate_anchors() {
+        // Headings inside blockquotes should generate valid anchors
+        // Found in: mkdocs docs/dev-guide/themes.md (> #### locale)
+        // and mkdocs docs/user-guide/configuration.md
+        let content = concat!(
+            "# Main\n\n",
+            "> #### locale\n",
+            ">\n",
+            "> A code representing the language.\n\n",
+            "[link](#locale)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        let md051: Vec<_> = warnings.iter().filter(|w| w.message.contains("locale")).collect();
+        assert!(
+            md051.is_empty(),
+            "Blockquote heading anchor '#locale' should be recognized: {md051:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_heading_with_custom_id() {
+        // Blockquote headings with custom IDs should also work
+        let content = concat!(
+            "# Main\n\n",
+            "> ## Settings {#my-settings}\n\n",
+            "[link](#my-settings)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Blockquote heading custom anchor should be recognized: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_nested_blockquote_heading() {
+        // Headings inside nested blockquotes
+        let content = concat!("# Main\n\n", ">> ### deep-heading\n\n", "[link](#deep-heading)\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Nested blockquote heading anchor should be recognized: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_mkdocs_duplicate_heading_underscore_dedup() {
+        // Python-Markdown uses _N suffix for duplicate headings, not -N
+        // Found in: mkdocstrings docs/usage/handlers.md (#templates_1)
+        let content = concat!(
+            "# Main\n\n",
+            "## Templates\n\n",
+            "First section.\n\n",
+            "## Templates\n\n",
+            "Second section.\n\n",
+            "[first](#templates)\n",
+            "[second-github](#templates-1)\n",
+            "[second-mkdocs](#templates_1)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD051LinkFragments::with_anchor_style(
+            rumdl_lib::utils::anchor_styles::AnchorStyle::PythonMarkdown,
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MkDocs _1 dedup suffix should be accepted: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_standard_flavor_no_underscore_dedup() {
+        // Without MkDocs flavor, _N suffix should NOT be accepted
+        let content = concat!(
+            "# Main\n\n",
+            "## Templates\n\n",
+            "First section.\n\n",
+            "## Templates\n\n",
+            "Second section.\n\n",
+            "[second-mkdocs](#templates_1)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "Standard flavor should NOT accept _1 dedup suffix"
+        );
+    }
+
+    #[test]
+    fn test_md051_mkdocs_triple_duplicate_heading() {
+        // Three duplicate headings: original, _1, _2
+        let content = concat!(
+            "# Main\n\n",
+            "## API\n\n",
+            "First.\n\n",
+            "## API\n\n",
+            "Second.\n\n",
+            "## API\n\n",
+            "Third.\n\n",
+            "[first](#api)\n",
+            "[second](#api_1)\n",
+            "[third](#api_2)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD051LinkFragments::with_anchor_style(
+            rumdl_lib::utils::anchor_styles::AnchorStyle::PythonMarkdown,
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MkDocs triple duplicate dedup should work: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_heading_with_closing_hashes() {
+        // CommonMark allows closing hash sequences: > ## Heading ##
+        // The trailing ## should be stripped when generating the anchor
+        let content = concat!("# Main\n\n", "> ## Settings ##\n\n", "[link](#settings)\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Blockquote heading with closing hashes should generate correct anchor: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_heading_closing_hashes_different_count() {
+        // Closing hash count doesn't need to match opening hash count
+        let content = concat!("# Main\n\n", "> ### Info ###########\n\n", "[link](#info)\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Closing hashes with different count should still generate correct anchor: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_heading_hash_in_text_not_stripped() {
+        // A hash that's part of the heading text (not preceded by space) should NOT be stripped
+        let content = concat!("# Main\n\n", "> ## C# Language\n\n", "[link](#c-language)\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Hash in heading text (C#) should not be treated as closing sequence: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_heading_only_closing_hashes() {
+        // Edge case: heading text is entirely closing hashes (should result in empty after strip)
+        // This is degenerate but shouldn't crash
+        let content = concat!("# Main\n\n", "> ## ##\n\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        // Should not crash
+        let _warnings = rule.check(&ctx).unwrap();
+    }
+
+    #[test]
+    fn test_md038_indented_fenced_code_in_pymdown_block() {
+        // PyMdown blocks (///) with indented fenced code inside
+        let content = concat!(
+            "# Test\n\n",
+            "/// details | Summary\n",
+            "    ```python\n",
+            "    def foo():\n",
+            "        pass\n",
+            "    ```\n",
+            "///\n",
+        );
+        let warnings = lint_mkdocs(content);
+        let md038: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD038"))
+            .collect();
+        assert!(
+            md038.is_empty(),
+            "Indented fenced code in PyMdown block should not trigger MD038: {md038:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_mkdocs_slash_in_heading_collapses_separators() {
+        // Python-Markdown collapses consecutive separators caused by removed punctuation
+        // Found in: mkdocstrings docs/usage/index.md
+        // Heading: "### Cross-references to other projects / inventories"
+        // The `/` is removed and the resulting double space collapsed to single `-`
+        let content = concat!(
+            "# Main\n\n",
+            "### Cross-references to other projects / inventories\n\n",
+            "[link](#cross-references-to-other-projects-inventories)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD051LinkFragments::with_anchor_style(
+            rumdl_lib::utils::anchor_styles::AnchorStyle::PythonMarkdown,
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MkDocs slash-in-heading should collapse separators: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_mkdocs_via_lint_mkdocs_auto_anchor_style() {
+        // Verify that lint_mkdocs() automatically uses PythonMarkdown anchor style
+        let content = concat!(
+            "# Main\n\n",
+            "### Cross-references to other projects / inventories\n\n",
+            "[link](#cross-references-to-other-projects-inventories)\n",
+        );
+        let warnings = lint_mkdocs(content);
+        let md051: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD051"))
+            .collect();
+        assert!(
+            md051.is_empty(),
+            "lint_mkdocs should auto-use PythonMarkdown anchor style: {md051:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_mkdocs_cjk_heading_generates_underscore_anchor() {
+        // Python-Markdown: CJK-only headings produce empty slug → unique() gives _1, _2, _3
+        let content = concat!(
+            "# Main\n\n",
+            "## 你好世界\n\n",
+            "## こんにちは\n\n",
+            "## 안녕하세요\n\n",
+            "[first](#_1)\n",
+            "[second](#_2)\n",
+            "[third](#_3)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD051LinkFragments::with_anchor_style(
+            rumdl_lib::utils::anchor_styles::AnchorStyle::PythonMarkdown,
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MkDocs CJK headings should generate _1, _2, _3 anchors: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_standard_cjk_heading_preserves_unicode() {
+        // GitHub style preserves Unicode characters in anchors
+        let content = concat!("# Main\n\n", "## 你好世界\n\n", "[link](#你好世界)\n",);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = rumdl_lib::MD051LinkFragments::new();
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "GitHub style should preserve CJK anchors: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md051_blockquote_empty_heading_text() {
+        // CommonMark: `> ## ` is a valid empty heading
+        // Python-Markdown generates _1 for it
+        let content = concat!(
+            "# Main\n\n",
+            "> ## \n\n",
+            "> ## Real Heading\n\n",
+            "[link](#real-heading)\n",
+        );
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD051LinkFragments::with_anchor_style(
+            rumdl_lib::utils::anchor_styles::AnchorStyle::PythonMarkdown,
+        );
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Empty blockquote heading should not break subsequent anchor generation: {warnings:?}"
+        );
+    }
 }
 
 // =============================================================================

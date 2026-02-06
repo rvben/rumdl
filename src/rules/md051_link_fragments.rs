@@ -67,6 +67,143 @@ impl MD051LinkFragments {
         Self { anchor_style: style }
     }
 
+    /// Parse ATX heading content from blockquote inner text.
+    /// Strips the leading `# ` marker, optional closing hash sequence, and extracts custom IDs.
+    /// Returns `(clean_text, custom_id)` or None if not a heading.
+    fn parse_blockquote_heading(bq_content: &str) -> Option<(String, Option<String>)> {
+        static BQ_ATX_HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.*)$").unwrap());
+
+        let trimmed = bq_content.trim();
+        let caps = BQ_ATX_HEADING_RE.captures(trimmed)?;
+        let mut rest = caps.get(2).map_or("", |m| m.as_str()).to_string();
+
+        // Strip optional closing hash sequence (CommonMark: trailing `#`s preceded by a space)
+        let rest_trimmed = rest.trim_end();
+        if let Some(last_hash_pos) = rest_trimmed.rfind('#') {
+            let after_hashes = &rest_trimmed[last_hash_pos..];
+            if after_hashes.chars().all(|c| c == '#') {
+                // Find where the consecutive trailing hashes start
+                let mut hash_start = last_hash_pos;
+                while hash_start > 0 && rest_trimmed.as_bytes()[hash_start - 1] == b'#' {
+                    hash_start -= 1;
+                }
+                // Must be preceded by whitespace (or be the entire content)
+                if hash_start == 0
+                    || rest_trimmed
+                        .as_bytes()
+                        .get(hash_start - 1)
+                        .is_some_and(|b| b.is_ascii_whitespace())
+                {
+                    rest = rest_trimmed[..hash_start].trim_end().to_string();
+                }
+            }
+        }
+
+        let (clean_text, custom_id) = crate::utils::header_id_utils::extract_header_id(&rest);
+        Some((clean_text, custom_id))
+    }
+
+    /// Insert a heading fragment with deduplication.
+    /// When `use_underscore_dedup` is true (Python-Markdown/MkDocs), the primary suffix
+    /// uses `_N` and `-N` is registered as a fallback. Otherwise, only `-N` is used.
+    ///
+    /// Empty fragments (from CJK-only headings) are handled specially for Python-Markdown:
+    /// the first empty slug gets `_1`, the second `_2`, etc. (matching Python-Markdown's
+    /// `unique()` function which always enters the dedup loop for falsy IDs).
+    fn insert_deduplicated_fragment(
+        fragment: String,
+        fragment_counts: &mut HashMap<String, usize>,
+        markdown_headings: &mut HashSet<String>,
+        use_underscore_dedup: bool,
+    ) {
+        if fragment.is_empty() {
+            if !use_underscore_dedup {
+                return;
+            }
+            // Python-Markdown: empty slug → _1, _2, _3, ...
+            let count = fragment_counts.entry(fragment).or_insert(0);
+            *count += 1;
+            markdown_headings.insert(format!("_{count}"));
+            return;
+        }
+        if let Some(count) = fragment_counts.get_mut(&fragment) {
+            let suffix = *count;
+            *count += 1;
+            if use_underscore_dedup {
+                // Python-Markdown primary: heading_1, heading_2
+                markdown_headings.insert(format!("{fragment}_{suffix}"));
+                // Also accept GitHub-style for compatibility
+                markdown_headings.insert(format!("{fragment}-{suffix}"));
+            } else {
+                // GitHub-style: heading-1, heading-2
+                markdown_headings.insert(format!("{fragment}-{suffix}"));
+            }
+        } else {
+            fragment_counts.insert(fragment.clone(), 1);
+            markdown_headings.insert(fragment);
+        }
+    }
+
+    /// Add a heading to the cross-file index with proper deduplication.
+    /// When `use_underscore_dedup` is true (Python-Markdown/MkDocs), the primary anchor
+    /// uses `_N` and `-N` is registered as a fallback alias.
+    ///
+    /// Empty fragments (from CJK-only headings) get `_1`, `_2`, etc. in Python-Markdown mode.
+    fn add_heading_to_index(
+        fragment: &str,
+        text: &str,
+        custom_anchor: Option<String>,
+        line: usize,
+        fragment_counts: &mut HashMap<String, usize>,
+        file_index: &mut FileIndex,
+        use_underscore_dedup: bool,
+    ) {
+        if fragment.is_empty() {
+            if !use_underscore_dedup {
+                return;
+            }
+            // Python-Markdown: empty slug → _1, _2, _3, ...
+            let count = fragment_counts.entry(fragment.to_string()).or_insert(0);
+            *count += 1;
+            file_index.add_heading(HeadingIndex {
+                text: text.to_string(),
+                auto_anchor: format!("_{count}"),
+                custom_anchor,
+                line,
+            });
+            return;
+        }
+        if let Some(count) = fragment_counts.get_mut(fragment) {
+            let suffix = *count;
+            *count += 1;
+            let (primary, alias) = if use_underscore_dedup {
+                // Python-Markdown primary: heading_1; GitHub fallback: heading-1
+                (format!("{fragment}_{suffix}"), Some(format!("{fragment}-{suffix}")))
+            } else {
+                // GitHub-style primary: heading-1
+                (format!("{fragment}-{suffix}"), None)
+            };
+            file_index.add_heading(HeadingIndex {
+                text: text.to_string(),
+                auto_anchor: primary,
+                custom_anchor,
+                line,
+            });
+            if let Some(alias_anchor) = alias {
+                let heading_idx = file_index.headings.len() - 1;
+                file_index.add_anchor_alias(alias_anchor, heading_idx);
+            }
+        } else {
+            fragment_counts.insert(fragment.to_string(), 1);
+            file_index.add_heading(HeadingIndex {
+                text: text.to_string(),
+                auto_anchor: fragment.to_string(),
+                custom_anchor,
+                line,
+            });
+        }
+    }
+
     /// Extract all valid heading anchors from the document
     /// Returns (markdown_anchors, html_anchors) where markdown_anchors are lowercased
     /// for case-insensitive matching, and html_anchors are case-sensitive
@@ -77,6 +214,7 @@ impl MD051LinkFragments {
         let mut markdown_headings = HashSet::with_capacity(32);
         let mut html_anchors = HashSet::with_capacity(16);
         let mut fragment_counts = std::collections::HashMap::new();
+        let use_underscore_dedup = self.anchor_style == AnchorStyle::PythonMarkdown;
 
         for line_info in &ctx.lines {
             if line_info.in_front_matter {
@@ -136,6 +274,25 @@ impl MD051LinkFragments {
                 }
             }
 
+            // Extract heading anchors from blockquote content
+            // Blockquote headings (e.g., "> ## Heading") are not detected by the main heading parser
+            // because the regex operates on the full line, but they still generate valid anchors
+            if line_info.heading.is_none()
+                && let Some(bq) = &line_info.blockquote
+                && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
+            {
+                if let Some(id) = custom_id {
+                    markdown_headings.insert(id.to_lowercase());
+                }
+                let fragment = self.anchor_style.generate_fragment(&clean_text);
+                Self::insert_deduplicated_fragment(
+                    fragment,
+                    &mut fragment_counts,
+                    &mut markdown_headings,
+                    use_underscore_dedup,
+                );
+            }
+
             // Extract markdown heading anchors
             if let Some(heading) = &line_info.heading {
                 // Custom ID from {#custom-id} syntax
@@ -148,18 +305,12 @@ impl MD051LinkFragments {
                 // like <-> and placeholders like <FILE>. The anchor styles handle these correctly.
                 let fragment = self.anchor_style.generate_fragment(&heading.text);
 
-                if !fragment.is_empty() {
-                    // Handle duplicate headings by appending -1, -2, etc.
-                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&fragment) {
-                        let suffix = *count;
-                        *count += 1;
-                        format!("{fragment}-{suffix}")
-                    } else {
-                        fragment_counts.insert(fragment.clone(), 1);
-                        fragment
-                    };
-                    markdown_headings.insert(final_fragment);
-                }
+                Self::insert_deduplicated_fragment(
+                    fragment,
+                    &mut fragment_counts,
+                    &mut markdown_headings,
+                    use_underscore_dedup,
+                );
             }
         }
 
@@ -477,20 +628,27 @@ impl Rule for MD051LinkFragments {
         Self: Sized,
     {
         // Config keys are normalized to kebab-case by the config system
-        let anchor_style = if let Some(rule_config) = config.rules.get("MD051") {
-            if let Some(style_str) = rule_config.values.get("anchor-style").and_then(|v| v.as_str()) {
-                match style_str.to_lowercase().as_str() {
-                    "kramdown" => AnchorStyle::Kramdown,
-                    "kramdown-gfm" => AnchorStyle::KramdownGfm,
-                    "jekyll" => AnchorStyle::KramdownGfm, // Backward compatibility alias
-                    _ => AnchorStyle::GitHub,
-                }
+        let explicit_style = config
+            .rules
+            .get("MD051")
+            .and_then(|rc| rc.values.get("anchor-style"))
+            .and_then(|v| v.as_str())
+            .map(|style_str| match style_str.to_lowercase().as_str() {
+                "kramdown" => AnchorStyle::Kramdown,
+                "kramdown-gfm" | "jekyll" => AnchorStyle::KramdownGfm,
+                "python-markdown" | "python_markdown" | "mkdocs" => AnchorStyle::PythonMarkdown,
+                _ => AnchorStyle::GitHub,
+            });
+
+        // When MkDocs flavor is active and no explicit anchor style is configured,
+        // default to PythonMarkdown (since MkDocs uses Python-Markdown's toc extension)
+        let anchor_style = explicit_style.unwrap_or_else(|| {
+            if config.global.flavor == crate::config::MarkdownFlavor::MkDocs {
+                AnchorStyle::PythonMarkdown
             } else {
                 AnchorStyle::GitHub
             }
-        } else {
-            AnchorStyle::GitHub
-        };
+        });
 
         Box::new(MD051LinkFragments::with_anchor_style(anchor_style))
     }
@@ -505,6 +663,7 @@ impl Rule for MD051LinkFragments {
 
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, file_index: &mut FileIndex) {
         let mut fragment_counts = HashMap::new();
+        let use_underscore_dedup = self.anchor_style == AnchorStyle::PythonMarkdown;
 
         // Extract headings, HTML anchors, and attribute anchors (for other files to reference)
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
@@ -554,28 +713,36 @@ impl Rule for MD051LinkFragments {
                 }
             }
 
+            // Extract heading anchors from blockquote content
+            if line_info.heading.is_none()
+                && let Some(bq) = &line_info.blockquote
+                && let Some((clean_text, custom_id)) = Self::parse_blockquote_heading(&bq.content)
+            {
+                let fragment = self.anchor_style.generate_fragment(&clean_text);
+                Self::add_heading_to_index(
+                    &fragment,
+                    &clean_text,
+                    custom_id,
+                    line_idx + 1,
+                    &mut fragment_counts,
+                    file_index,
+                    use_underscore_dedup,
+                );
+            }
+
             // Extract heading anchors
             if let Some(heading) = &line_info.heading {
                 let fragment = self.anchor_style.generate_fragment(&heading.text);
 
-                if !fragment.is_empty() {
-                    // Handle duplicate headings
-                    let final_fragment = if let Some(count) = fragment_counts.get_mut(&fragment) {
-                        let suffix = *count;
-                        *count += 1;
-                        format!("{fragment}-{suffix}")
-                    } else {
-                        fragment_counts.insert(fragment.clone(), 1);
-                        fragment
-                    };
-
-                    file_index.add_heading(HeadingIndex {
-                        text: heading.text.clone(),
-                        auto_anchor: final_fragment,
-                        custom_anchor: heading.custom_id.clone(),
-                        line: line_idx + 1, // 1-indexed
-                    });
-                }
+                Self::add_heading_to_index(
+                    &fragment,
+                    &heading.text,
+                    heading.custom_id.clone(),
+                    line_idx + 1,
+                    &mut fragment_counts,
+                    file_index,
+                    use_underscore_dedup,
+                );
 
                 // Extract Material for MkDocs setting anchors from headings.
                 // These are rendered as anchors at build time by Material's JS.

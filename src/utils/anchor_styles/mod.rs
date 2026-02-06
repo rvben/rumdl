@@ -16,6 +16,7 @@ pub mod common;
 pub mod github;
 pub mod kramdown;
 pub mod kramdown_gfm; // Renamed from jekyll for clarity
+pub mod python_markdown;
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,9 @@ pub enum AnchorStyle {
     /// Pure kramdown style: removes underscores and punctuation
     #[serde(rename = "kramdown")]
     Kramdown,
+    /// Python-Markdown style: used by MkDocs (NFKD → ASCII, collapse separators)
+    #[serde(rename = "python-markdown", alias = "python_markdown", alias = "mkdocs")]
+    PythonMarkdown,
 }
 
 impl AnchorStyle {
@@ -44,6 +48,7 @@ impl AnchorStyle {
             AnchorStyle::GitHub => github::heading_to_fragment(heading),
             AnchorStyle::KramdownGfm => kramdown_gfm::heading_to_fragment(heading),
             AnchorStyle::Kramdown => kramdown::heading_to_fragment(heading),
+            AnchorStyle::PythonMarkdown => python_markdown::heading_to_fragment(heading),
         }
     }
 }
@@ -61,6 +66,10 @@ mod tests {
             "\"kramdown-gfm\""
         );
         assert_eq!(serde_json::to_string(&AnchorStyle::Kramdown).unwrap(), "\"kramdown\"");
+        assert_eq!(
+            serde_json::to_string(&AnchorStyle::PythonMarkdown).unwrap(),
+            "\"python-markdown\""
+        );
 
         // Test deserialization with primary names (kebab-case)
         assert_eq!(
@@ -75,17 +84,29 @@ mod tests {
             serde_json::from_str::<AnchorStyle>("\"kramdown\"").unwrap(),
             AnchorStyle::Kramdown
         );
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"python-markdown\"").unwrap(),
+            AnchorStyle::PythonMarkdown
+        );
 
         // Test snake_case alias
         assert_eq!(
             serde_json::from_str::<AnchorStyle>("\"kramdown_gfm\"").unwrap(),
             AnchorStyle::KramdownGfm
         );
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"python_markdown\"").unwrap(),
+            AnchorStyle::PythonMarkdown
+        );
 
-        // Test backward compatibility: "jekyll" alias still works
+        // Test backward compatibility aliases
         assert_eq!(
             serde_json::from_str::<AnchorStyle>("\"jekyll\"").unwrap(),
             AnchorStyle::KramdownGfm
+        );
+        assert_eq!(
+            serde_json::from_str::<AnchorStyle>("\"mkdocs\"").unwrap(),
+            AnchorStyle::PythonMarkdown
         );
     }
 
@@ -102,11 +123,13 @@ mod tests {
             let github = AnchorStyle::GitHub.generate_fragment(case);
             let kramdown_gfm = AnchorStyle::KramdownGfm.generate_fragment(case);
             let kramdown = AnchorStyle::Kramdown.generate_fragment(case);
+            let python_md = AnchorStyle::PythonMarkdown.generate_fragment(case);
 
             // Each style should produce a valid non-empty result
             assert!(!github.is_empty(), "GitHub style failed for: {case}");
             assert!(!kramdown_gfm.is_empty(), "KramdownGfm style failed for: {case}");
             assert!(!kramdown.is_empty(), "Kramdown style failed for: {case}");
+            assert!(!python_md.is_empty(), "PythonMarkdown style failed for: {case}");
         }
     }
 }
