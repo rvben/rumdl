@@ -642,7 +642,7 @@ impl MD005ListIndent {
         for list_block in group {
             for &item_line in &list_block.item_lines {
                 if let Some(line_info) = ctx.line_info(item_line)
-                    && let Some(list_item) = &line_info.list_item
+                    && let Some(list_item) = line_info.list_item.as_deref()
                 {
                     // Calculate the effective indentation (considering blockquotes)
                     let effective_indent = if let Some(blockquote) = &line_info.blockquote {

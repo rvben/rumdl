@@ -196,7 +196,7 @@ impl MD029OrderedListPrefix {
 
         for line_num in 1..=ctx.lines.len() {
             if let Some(line_info) = ctx.line_info(line_num)
-                && let Some(list_item) = &line_info.list_item
+                && let Some(list_item) = line_info.list_item.as_deref()
                 && list_item.is_ordered
             {
                 // Get the list ID from pulldown-cmark's grouping

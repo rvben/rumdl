@@ -63,15 +63,15 @@ pub(super) fn compute_basic_line_info(
         let list_item =
             list_item_map
                 .get(&byte_offset)
-                .map(
-                    |(is_ordered, marker, marker_column, content_column, number)| ListItemInfo {
+                .map(|(is_ordered, marker, marker_column, content_column, number)| {
+                    Box::new(ListItemInfo {
                         marker: marker.clone(),
                         is_ordered: *is_ordered,
                         number: *number,
                         marker_column: *marker_column,
                         content_column: *content_column,
-                    },
-                );
+                    })
+                });
 
         let in_front_matter = front_matter_end > 0 && i < front_matter_end;
         let is_hr = !in_code_block && !in_front_matter && is_horizontal_rule_line(line);

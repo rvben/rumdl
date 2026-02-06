@@ -25,11 +25,14 @@ pub struct LineInfo {
     /// Whether this line is inside an HTML comment
     pub in_html_comment: bool,
     /// List item information if this line starts a list item
-    pub list_item: Option<ListItemInfo>,
+    /// Boxed to reduce LineInfo size: most lines are not list items
+    pub list_item: Option<Box<ListItemInfo>>,
     /// Heading information if this line is a heading
-    pub heading: Option<HeadingInfo>,
+    /// Boxed to reduce LineInfo size: most lines are not headings
+    pub heading: Option<Box<HeadingInfo>>,
     /// Blockquote information if this line is a blockquote
-    pub blockquote: Option<BlockquoteInfo>,
+    /// Boxed to reduce LineInfo size: most lines are not blockquotes
+    pub blockquote: Option<Box<BlockquoteInfo>>,
     /// Whether this line is inside a mkdocstrings autodoc block
     pub in_mkdocstrings: bool,
     /// Whether this line is part of an ESM import/export block (MDX only)
@@ -310,7 +313,7 @@ impl<'a> Iterator for ValidHeadingsIter<'a> {
             self.current_index += 1;
 
             let line_info = &self.lines[idx];
-            if let Some(heading) = &line_info.heading
+            if let Some(heading) = line_info.heading.as_deref()
                 && heading.is_valid
             {
                 return Some(ValidHeading {
@@ -494,22 +497,22 @@ pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
         return false;
     }
 
-    // Check for three or more consecutive -, *, or _ characters (with optional spaces)
-    let chars: Vec<char> = trimmed.chars().collect();
-    if let Some(&first_char) = chars.first()
-        && (first_char == '-' || first_char == '*' || first_char == '_')
-    {
-        let mut count = 0;
-        for &ch in &chars {
-            if ch == first_char {
-                count += 1;
-            } else if ch != ' ' && ch != '\t' {
-                return false; // Non-matching, non-whitespace character
-            }
+    let mut chars = trimmed.chars();
+    let first_char = match chars.next() {
+        Some(c @ ('-' | '*' | '_')) => c,
+        _ => return false,
+    };
+
+    // Count occurrences of the rule character, rejecting non-whitespace interlopers
+    let mut count = 1; // Already matched the first character
+    for ch in chars {
+        if ch == first_char {
+            count += 1;
+        } else if ch != ' ' && ch != '\t' {
+            return false;
         }
-        return count >= 3;
     }
-    false
+    count >= 3
 }
 
 /// Backwards-compatible alias for `is_horizontal_rule_content`

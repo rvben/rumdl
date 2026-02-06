@@ -83,7 +83,7 @@ pub(super) fn detect_headings_and_blockquotes(
             let has_multiple_spaces = bq.spaces_after.chars().filter(|&c| c == ' ').count() > 1;
             let needs_md028_fix = bq.content.is_empty() && bq.spaces_after.is_empty();
 
-            lines[i].blockquote = Some(BlockquoteInfo {
+            lines[i].blockquote = Some(Box::new(BlockquoteInfo {
                 nesting_level,
                 indent: bq.indent.to_string(),
                 marker_column,
@@ -92,7 +92,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 has_no_space_after_marker: has_no_space,
                 has_multiple_spaces_after_marker: has_multiple_spaces,
                 needs_md028_fix,
-            });
+            }));
 
             // Update is_horizontal_rule for blockquote content
             if !lines[i].in_code_block && is_horizontal_rule_content(bq.content.trim()) {
@@ -216,7 +216,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 || level > 1
                 || rest.trim().chars().next().is_some_and(|c| c.is_uppercase());
 
-            lines[i].heading = Some(HeadingInfo {
+            lines[i].heading = Some(Box::new(HeadingInfo {
                 level,
                 style: HeadingStyle::ATX,
                 marker: hashes.to_string(),
@@ -228,7 +228,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 has_closing_sequence: has_closing,
                 closing_sequence: closing_seq,
                 is_valid,
-            });
+            }));
         }
         // Check for Setext headings (need to look at next line)
         else if i + 1 < content_lines.len() && i + 1 < lines.len() {
@@ -310,7 +310,7 @@ pub(super) fn detect_headings_and_blockquotes(
                     }
                 }
 
-                lines[i].heading = Some(HeadingInfo {
+                lines[i].heading = Some(Box::new(HeadingInfo {
                     level,
                     style,
                     marker: underline.to_string(),
@@ -322,7 +322,7 @@ pub(super) fn detect_headings_and_blockquotes(
                     has_closing_sequence: false,
                     closing_sequence: String::new(),
                     is_valid: true,
-                });
+                }));
             }
         }
     }
