@@ -1761,3 +1761,123 @@ fn test_absolute_links_config_deserialization() {
     let toml_default: MD057Config = toml::from_str("").unwrap();
     assert_eq!(toml_default.absolute_links, AbsoluteLinksOption::Ignore);
 }
+
+#[test]
+fn test_relative_to_docs_html_fallback() {
+    // /page.html should resolve when page.md exists (HTML-to-markdown source fallback)
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    fs::write(docs_dir.join("about.md"), "# About").unwrap();
+
+    let content = "[About](/about.html)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "HTML link should resolve via markdown source fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_html_fallback_missing() {
+    // /page.html should warn when neither page.html nor page.md exists
+    let temp_dir = tempdir().unwrap();
+    let _docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let content = "[Missing](/nonexistent.html)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
+        .with_path(temp_dir.path().join("docs"));
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Missing HTML link should warn, got: {result:?}");
+    assert!(result[0].message.contains("does not exist"));
+}
+
+#[test]
+fn test_relative_to_docs_query_parameter() {
+    // Query parameters should be stripped before checking file existence
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    fs::write(docs_dir.join("page.md"), "# Page").unwrap();
+
+    let content = "[Page](/page.md?v=2&ref=nav)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Query parameters should be stripped, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_mixed_links() {
+    // Multiple absolute links: some valid, some broken
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    fs::write(docs_dir.join("exists.md"), "# Exists").unwrap();
+
+    let content = "\
+[Valid](/exists.md)
+[Missing1](/does-not-exist.md)
+[Missing2](/also-missing)
+";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected 2 warnings for broken links, valid link should pass, got: {result:?}"
+    );
+    assert!(result.iter().any(|w| w.message.contains("does-not-exist")));
+    assert!(result.iter().any(|w| w.message.contains("also-missing")));
+}
+
+#[test]
+fn test_relative_to_docs_reference_definition_missing() {
+    // Reference definition with broken absolute link
+    let temp_dir = tempdir().unwrap();
+    let _docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let content = "[missing-ref]: /nonexistent-page.md\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
+        .with_path(temp_dir.path().join("docs"));
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Missing ref def absolute link should warn, got: {result:?}"
+    );
+    assert!(result[0].message.contains("does not exist"));
+}
