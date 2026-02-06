@@ -17,7 +17,7 @@ rumdl is **fully compatible** with markdownlint while offering significant perfo
 
 ### Implemented Rules
 
-rumdl implements **67 rules total**: all 53 markdownlint rules plus 14 unique rules.
+rumdl implements **68 rules total**: all 53 markdownlint rules plus 15 unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](RULES.md) for the complete list.
 
@@ -347,7 +347,7 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Feature                  | markdownlint       | rumdl                       |
 | ------------------------ | ------------------ | --------------------------- |
 | **Core Functionality**   |                    |                             |
-| Rule count               | 53 implemented     | 67 (53 compatible + 14 new) |
+| Rule count               | 53 implemented     | 68 (53 compatible + 15 new) |
 | Auto-fix                 | ✅                 | ✅                          |
 | Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML           |
 | Inline config            | ✅                 | ✅ (compatible)             |

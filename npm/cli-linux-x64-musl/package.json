@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-linux-x64-musl",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "rumdl binary for Linux x64 (musl/Alpine)",
   "license": "MIT",
   "repository": {

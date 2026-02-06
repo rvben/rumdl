@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 67 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 68 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).

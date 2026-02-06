@@ -674,5 +674,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md073/"
+  },
+  {
+    "code": "MD074",
+    "name": "mkdocs-nav",
+    "aliases": [],
+    "summary": "MkDocs nav entries should point to existing files",
+    "category": "other",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md074/"
   }
 ]

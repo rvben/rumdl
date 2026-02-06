@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-win32-x64",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "rumdl binary for Windows x64",
   "license": "MIT",
   "repository": {

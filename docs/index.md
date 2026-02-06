@@ -16,7 +16,7 @@ icon: lucide/file-check
 
     [:octicons-arrow-right-24: Benchmarks](#performance)
 
--   :mag:{ .lg .middle } **67 lint rules**
+-   :mag:{ .lg .middle } **68 lint rules**
 
     ---
 
@@ -76,7 +76,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 ## Features
 
 - :zap: **Built for speed** with Rust - significantly faster than alternatives
-- :mag: **67 lint rules** covering common Markdown issues
+- :mag: **68 lint rules** covering common Markdown issues
 - :wrench: **Automatic formatting** with `--fix` for files and stdin/stdout
 - :package: **Zero dependencies** - single binary with no runtime requirements
 - :gear: **Highly configurable** with TOML-based config files
@@ -100,7 +100,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
 -   [:octicons-book-24: **Rules Reference**](RULES.md)
 
-    Explore all 67 linting rules with examples.
+    Explore all 68 linting rules with examples.
 
 -   [:octicons-gear-24: **Configuration**](global-settings.md)
 

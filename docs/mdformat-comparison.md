@@ -7,7 +7,7 @@ This document compares rumdl and mdformat, focusing on their formatting capabili
 Both tools format Markdown files, but serve different purposes:
 
 - **mdformat**: Pure formatter focused on consistent Markdown output
-- **rumdl**: Combined linter and formatter with 67 rules plus formatting
+- **rumdl**: Combined linter and formatter with 68 rules plus formatting
 
 **Key Differences:**
 
@@ -16,7 +16,7 @@ Both tools format Markdown files, but serve different purposes:
 | Primary purpose | Formatting only           | Linting + formatting            |
 | Language        | Python                    | Rust                            |
 | Performance     | Good                      | Faster (native + caching)       |
-| Linting rules   | ❌                        | ✅ 67 rules                     |
+| Linting rules   | ❌                        | ✅ 68 rules                     |
 | Extensibility   | Plugin ecosystem          | Built-in flavors                |
 | CommonMark      | Strict compliance         | Strict compliance               |
 
@@ -47,7 +47,7 @@ Both tools format Markdown to a consistent style:
 
 ### Linting (rumdl only)
 
-rumdl provides 67 linting rules that mdformat does not have:
+rumdl provides 68 linting rules that mdformat does not have:
 
 - **Broken link detection** (MD051, MD052, MD057)
 - **Accessibility checks** (MD045 - image alt text)
@@ -261,7 +261,7 @@ Some teams use mdformat for formatting and a separate linter. With rumdl, you ca
 | Capability              | mdformat           | rumdl                  |
 | ----------------------- | ------------------ | ---------------------- |
 | Markdown formatting     | ✅ Primary focus   | ✅ Via `rumdl fmt`     |
-| Markdown linting        | ❌                 | ✅ 67 rules            |
+| Markdown linting        | ❌                 | ✅ 68 rules            |
 | Performance             | Good               | Faster (native binary) |
 | Extended syntax         | Plugins            | Built-in flavors       |
 | Editor integration      | Basic              | LSP + VS Code          |

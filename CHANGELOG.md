@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] - 2026-02-06
+
+### Added
+
+- **MD074: MkDocs nav validation** - Validate that `mkdocs.yml` navigation entries
+  point to existing files (requires `flavor = "mkdocs"`)
+  - `not-found = "warn"` (default): Report nav entries pointing to non-existent files
+  - `omitted-files = "ignore"` (default): Optionally report markdown files not in nav
+  - `absolute-links = "ignore"` (default): Optionally warn about absolute paths
+  - Smart handling of directory nav entries, `docs_dir` setting, and session caching
+
+- **MD057: Absolute links configuration** - New `absolute-links` config option
+  for controlling how absolute link paths are handled
+
+- **MkDocs flavor: Extension-aware support** - Recognize Python-Markdown and
+  pymdown-extensions syntax to prevent false positives
+  - Python-Markdown anchor style (`{#custom-id}` header attributes)
+  - Unified PyMdown markup detection with span-based architecture
+
+### Fixed
+
+- **Tables in list items lose indentation** ([#383](https://github.com/rvben/rumdl/issues/383))
+  - `rumdl fmt` now preserves indentation for tables on list continuation lines
+  - Stack-based list context tracking handles nested lists, mixed ordered/unordered,
+    and respects CommonMark code block boundaries
+
+- **MD065: Fix idempotency for consecutive horizontal rules** - Running `--fix`
+  twice on consecutive `---` rules no longer produces different output
+
+- **MD032: Fix idempotency for ordered-non-1 items with code fences** - Fix mode
+  no longer produces different output on repeated runs for this edge case
+
+### Changed
+
+- **Codebase modularization** - Major internal restructuring for maintainability
+  - LSP server extracted into configuration, completion, and linting submodules
+  - File processor extracted into module directory with 3 submodules
+  - Config extracted into module directory with 8 submodules
+  - CLI extracted into commands directory with separate command handlers
+  - LintContext extracted into module directory with 8 submodules
+
 ## [0.1.13] - 2026-02-05
 
 ### Added
