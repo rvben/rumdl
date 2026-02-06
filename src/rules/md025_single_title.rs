@@ -280,14 +280,16 @@ impl Rule for MD025SingleTitle {
                             replacement: {
                                 let leading_spaces = line_content.len() - line_content.trim_start().len();
                                 let indentation = " ".repeat(leading_spaces);
-                                if heading_text.is_empty() {
+                                // Use raw_text to preserve inline attribute lists like { #id .class }
+                                let raw = &heading.raw_text;
+                                if raw.is_empty() {
                                     format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
                                 } else {
                                     format!(
                                         "{}{} {}",
                                         indentation,
                                         "#".repeat(self.config.level.as_usize() + 1),
-                                        heading_text
+                                        raw
                                     )
                                 }
                             },
@@ -394,7 +396,7 @@ impl Rule for MD025SingleTitle {
                                 }
                             } else {
                                 crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                                    &heading.text,
+                                    &heading.raw_text,
                                     (self.config.level.as_usize() + 1) as u32,
                                     style,
                                 )
@@ -695,6 +697,32 @@ mod tests {
         assert!(
             fixed.contains("## Second Title"),
             "Fix should demote the actual second heading"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_attribute_lists() {
+        let rule = MD025SingleTitle::strict();
+
+        // Duplicate H1 with attribute list - fix should demote to H2 while preserving attrs
+        let content = "# First Title\n\n# Second Title { #custom-id .special }";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Should flag the second H1
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let fix = warnings[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("{ #custom-id .special }"),
+            "check() fix should preserve attribute list, got: {}",
+            fix.replacement
+        );
+
+        // Verify fix() also preserves attribute list
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("## Second Title { #custom-id .special }"),
+            "fix() should demote to H2 while preserving attribute list, got: {fixed}"
         );
     }
 }

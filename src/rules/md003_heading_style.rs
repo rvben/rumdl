@@ -176,9 +176,9 @@ impl Rule for MD003HeadingStyle {
                     let fix = {
                         use crate::rules::heading_utils::HeadingUtils;
 
-                        // Convert heading to target style
+                        // Convert heading to target style, preserving inline attribute lists
                         let converted_heading =
-                            HeadingUtils::convert_heading_style(&heading.text, level as u32, expected_style);
+                            HeadingUtils::convert_heading_style(&heading.raw_text, level as u32, expected_style);
 
                         // Preserve original indentation (including tabs)
                         let line = line_info.content(ctx.content);
@@ -407,6 +407,35 @@ mod tests {
             result_wrong.len(),
             2,
             "Should flag ATX headings for h1/h2 with setext_with_atx style"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_attribute_lists() {
+        // ATX closed heading with attribute list, converted to ATX
+        let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+        let content = "# Heading { #custom-id .class } #";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Should flag: found ATX closed, expected ATX
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let fix = warnings[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("{ #custom-id .class }"),
+            "check() fix should preserve attribute list, got: {}",
+            fix.replacement
+        );
+
+        // Verify fix() also preserves attribute list
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("{ #custom-id .class }"),
+            "fix() should preserve attribute list, got: {fixed}"
+        );
+        assert!(
+            !fixed.contains(" #\n") && !fixed.ends_with(" #"),
+            "fix() should remove ATX closed trailing hashes, got: {fixed}"
         );
     }
 

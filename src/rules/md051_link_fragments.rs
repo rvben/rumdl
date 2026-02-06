@@ -17,6 +17,11 @@ static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
 static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\{\s*#([a-zA-Z][a-zA-Z0-9_-]*)[^}]*\}"#).unwrap());
 
+// Material for MkDocs setting anchor pattern: <!-- md:setting NAME -->
+// Used in headings to generate anchors for configuration option references
+static MD_SETTING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<!--\s*md:setting\s+([^\s]+)\s*-->").unwrap());
+
 /// Normalize a path by resolving . and .. components
 fn normalize_path(path: &Path) -> PathBuf {
     let mut result = PathBuf::new();
@@ -419,6 +424,18 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // Skip MkDocs runtime-generated anchors:
+            // - #fn:NAME, #fnref:NAME from the footnotes extension
+            // - #+key.path or #+key:value from Material for MkDocs option references
+            //   (e.g., #+type:abstract, #+toc.slugify, #+pymdownx.highlight.anchor_linenums)
+            if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
+                && (fragment.starts_with("fn:")
+                    || fragment.starts_with("fnref:")
+                    || (fragment.starts_with('+') && (fragment.contains('.') || fragment.contains(':'))))
+            {
+                continue;
+            }
+
             // Validate fragment against document headings
             // HTML anchors are case-sensitive, markdown anchors are case-insensitive
             let found = if html_anchors.contains(fragment) {
@@ -558,6 +575,17 @@ impl Rule for MD051LinkFragments {
                         custom_anchor: heading.custom_id.clone(),
                         line: line_idx + 1, // 1-indexed
                     });
+                }
+
+                // Extract Material for MkDocs setting anchors from headings.
+                // These are rendered as anchors at build time by Material's JS.
+                // Most references use #+key.path format (handled by the skip logic in check()),
+                // but this extraction enables cross-file validation for direct #key.path references.
+                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
+                    && let Some(caps) = MD_SETTING_PATTERN.captures(content)
+                    && let Some(name) = caps.get(1)
+                {
+                    file_index.add_html_anchor(name.as_str().to_string());
                 }
             }
         }

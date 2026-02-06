@@ -170,8 +170,6 @@ impl Rule for MD001HeadingIncrement {
                 // Preserve original indentation (including tabs)
                 let line = line_info.content(ctx.content);
                 let original_indent = &line[..line_info.indent];
-                let heading_text = &heading.text;
-
                 // Map heading style
                 let style = match heading.style {
                     crate::lint_context::HeadingStyle::ATX => HeadingStyle::Atx,
@@ -181,7 +179,8 @@ impl Rule for MD001HeadingIncrement {
 
                 // Create a fix with the correct heading level
                 let fixed_level = prev + 1;
-                let replacement = HeadingUtils::convert_heading_style(heading_text, fixed_level as u32, style);
+                // Use raw_text to preserve inline attribute lists like { #id .class }
+                let replacement = HeadingUtils::convert_heading_style(&heading.raw_text, fixed_level as u32, style);
 
                 // Calculate precise range: highlight the entire heading
                 let line_content = line_info.content(ctx.content);
@@ -256,7 +255,8 @@ impl Rule for MD001HeadingIncrement {
                     }
                 };
 
-                let replacement = HeadingUtils::convert_heading_style(&heading.text, fixed_level as u32, style);
+                // Use raw_text to preserve inline attribute lists like { #id .class }
+                let replacement = HeadingUtils::convert_heading_style(&heading.raw_text, fixed_level as u32, style);
                 // Preserve original indentation (including tabs)
                 let line = line_info.content(ctx.content);
                 let original_indent = &line[..line_info.indent];
@@ -455,6 +455,32 @@ mod tests {
         assert!(
             result.is_empty(),
             "First heading (even if H2) has no predecessor to compare against"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_attribute_lists() {
+        let rule = MD001HeadingIncrement::default();
+
+        // H1 followed by H3 with attribute list - fix should preserve { #custom-id }
+        let content = "# Heading 1\n\n### Heading 3 { #custom-id .special }";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Verify fix() preserves attribute list
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("## Heading 3 { #custom-id .special }"),
+            "fix() should preserve attribute list, got: {fixed}"
+        );
+
+        // Verify check() fix output also preserves attribute list
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1);
+        let fix = warnings[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("{ #custom-id .special }"),
+            "check() fix should preserve attribute list, got: {}",
+            fix.replacement
         );
     }
 }

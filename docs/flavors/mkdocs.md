@@ -165,6 +165,7 @@ MkDocs extensions for special formatting:
 | MD046 | Detect code block style globally | Account for admonition/tab context      |
 | MD049 | Check emphasis consistency       | Handle mark/inserted syntax             |
 | MD050 | Check strong consistency         | Handle mark/caret/tilde syntax          |
+| MD051 | Validate all fragment links       | Skip footnote and option anchors        |
 | MD052 | Flag undefined references        | Allow auto-references and snippets      |
 | MD056 | Strict column count              | Handle MkDocs table extensions          |
 
@@ -193,52 +194,62 @@ Use the MkDocs flavor when:
 
 ## Extension Support Reference
 
-The MkDocs flavor provides lint-aware support for the common Python-Markdown and PyMdown Extensions used in the MkDocs ecosystem. This means rumdl will not flag valid extension syntax as errors and will preserve extension constructs during auto-fix.
+The MkDocs flavor provides lint-aware support for the common Python-Markdown and PyMdown Extensions used in the MkDocs ecosystem.
+
+### Support Levels
+
+Each extension has one of these support levels:
+
+| Level | Meaning |
+|-------|---------|
+| Lint-safe | rumdl won't flag valid extension syntax as violations |
+| Fix-safe | `--fix` preserves extension constructs unchanged |
+| Format-aware | Reflow/formatting respects extension structure (e.g., preserves indentation during MD013 reflow) |
 
 ### Python-Markdown Extensions
 
-| Extension | Status | Description |
-|-----------|--------|-------------|
-| [abbr](https://python-markdown.github.io/extensions/abbreviations/) | ✅ Supported | Abbreviation definitions `*[HTML]: Hypertext Markup Language` |
-| [admonition](https://python-markdown.github.io/extensions/admonition/) | ✅ Supported | Admonition blocks `!!! note` |
-| [attr_list](https://python-markdown.github.io/extensions/attr_list/) | ✅ Supported | Attribute lists `{#id .class}` |
-| [def_list](https://python-markdown.github.io/extensions/definition_lists/) | ✅ Supported | Definition lists with `:` markers |
-| [footnotes](https://python-markdown.github.io/extensions/footnotes/) | ✅ Supported | Footnotes `[^1]` and definitions |
-| [md_in_html](https://python-markdown.github.io/extensions/md_in_html/) | ✅ Supported | `markdown="1"` attribute on HTML |
-| [toc](https://python-markdown.github.io/extensions/toc/) | ✅ Supported | `[TOC]` markers are preserved |
-| [tables](https://python-markdown.github.io/extensions/tables/) | ✅ Supported | Standard table support |
-| [meta](https://python-markdown.github.io/extensions/meta_data/) | ✅ Supported | YAML frontmatter detection |
-| [fenced_code](https://python-markdown.github.io/extensions/fenced_code_blocks/) | ✅ Supported | Fenced code blocks with attributes |
-| [codehilite](https://python-markdown.github.io/extensions/code_hilite/) | N/A | Rendering-only (no linting needed) |
+| Extension | Level | Description |
+|-----------|-------|-------------|
+| [abbr](https://python-markdown.github.io/extensions/abbreviations/) | Lint-safe, Fix-safe | Abbreviation definitions `*[HTML]: Hypertext Markup Language` |
+| [admonition](https://python-markdown.github.io/extensions/admonition/) | Format-aware | Admonition blocks `!!! note` with indentation-aware reflow |
+| [attr_list](https://python-markdown.github.io/extensions/attr_list/) | Lint-safe, Fix-safe | Attribute lists `{#id .class}` |
+| [def_list](https://python-markdown.github.io/extensions/definition_lists/) | Lint-safe, Fix-safe | Definition lists with `:` markers |
+| [footnotes](https://python-markdown.github.io/extensions/footnotes/) | Lint-safe, Fix-safe | Footnotes `[^1]`, definitions, and anchor links `#fn:1` |
+| [md_in_html](https://python-markdown.github.io/extensions/md_in_html/) | Lint-safe, Fix-safe | `markdown="1"` attribute on HTML elements |
+| [toc](https://python-markdown.github.io/extensions/toc/) | Lint-safe, Fix-safe | `[TOC]` markers are preserved |
+| [tables](https://python-markdown.github.io/extensions/tables/) | Lint-safe, Fix-safe | Standard table support |
+| [meta](https://python-markdown.github.io/extensions/meta_data/) | Lint-safe, Fix-safe | YAML frontmatter detection |
+| [fenced_code](https://python-markdown.github.io/extensions/fenced_code_blocks/) | Lint-safe, Fix-safe | Fenced code blocks with attributes |
+| [codehilite](https://python-markdown.github.io/extensions/code_hilite/) | N/A | Rendering-only (no linting impact) |
 
 ### PyMdown Extensions
 
-| Extension | Status | Description |
-|-----------|--------|-------------|
-| [arithmatex](https://facelessuser.github.io/pymdown-extensions/extensions/arithmatex/) | ✅ Supported | Math blocks `$$ ... $$` and inline `$...$` |
-| [caret](https://facelessuser.github.io/pymdown-extensions/extensions/caret/) | ✅ Supported | Superscript `^text^` and insert `^^text^^` |
-| [mark](https://facelessuser.github.io/pymdown-extensions/extensions/mark/) | ✅ Supported | Highlighted text `==text==` |
-| [tilde](https://facelessuser.github.io/pymdown-extensions/extensions/tilde/) | ✅ Supported | Subscript `~text~` and strikethrough `~~text~~` |
-| [details](https://facelessuser.github.io/pymdown-extensions/extensions/details/) | ✅ Supported | Collapsible blocks `??? note` and `???+ note` |
-| [emoji](https://facelessuser.github.io/pymdown-extensions/extensions/emoji/) | ✅ Supported | Emoji/icon shortcodes `:material-check:` |
-| [highlight](https://facelessuser.github.io/pymdown-extensions/extensions/highlight/) | N/A | Rendering-only (no linting needed) |
-| [inlinehilite](https://facelessuser.github.io/pymdown-extensions/extensions/inlinehilite/) | ✅ Supported | Inline code highlighting `` `#!python code` `` |
-| [keys](https://facelessuser.github.io/pymdown-extensions/extensions/keys/) | ✅ Supported | Keyboard keys `++ctrl+alt+del++` |
-| [smartsymbols](https://facelessuser.github.io/pymdown-extensions/extensions/smartsymbols/) | ✅ Supported | Smart symbols `(c)`, `(tm)`, `-->` |
-| [snippets](https://facelessuser.github.io/pymdown-extensions/extensions/snippets/) | ✅ Supported | File inclusion `--8<-- "file.md"` |
-| [superfences](https://facelessuser.github.io/pymdown-extensions/extensions/superfences/) | ✅ Supported | Custom fences with language + attributes |
-| [tabbed](https://facelessuser.github.io/pymdown-extensions/extensions/tabbed/) | ✅ Supported | Content tabs `=== "Tab"` |
-| [tasklist](https://facelessuser.github.io/pymdown-extensions/extensions/tasklist/) | ✅ Supported | Task lists `- [x] Task` (standard GFM) |
-| [betterem](https://facelessuser.github.io/pymdown-extensions/extensions/betterem/) | ✅ Supported | Standard emphasis handling applies |
-| [critic](https://facelessuser.github.io/pymdown-extensions/extensions/critic/) | ✅ Supported | Critic markup `{++add++}`, `{--del--}` |
-| [blocks](https://facelessuser.github.io/pymdown-extensions/extensions/blocks/) | ✅ Supported | PyMdown Blocks `/// type` with `///` fence syntax |
+| Extension | Level | Description |
+|-----------|-------|-------------|
+| [arithmatex](https://facelessuser.github.io/pymdown-extensions/extensions/arithmatex/) | Lint-safe, Fix-safe | Math blocks `$$ ... $$` and inline `$...$` |
+| [betterem](https://facelessuser.github.io/pymdown-extensions/extensions/betterem/) | Lint-safe, Fix-safe | Standard emphasis handling applies |
+| [blocks](https://facelessuser.github.io/pymdown-extensions/extensions/blocks/) | Lint-safe, Fix-safe | PyMdown Blocks `/// type` with `///` fence syntax |
+| [caret](https://facelessuser.github.io/pymdown-extensions/extensions/caret/) | Lint-safe, Fix-safe | Superscript `^text^` and insert `^^text^^` |
+| [critic](https://facelessuser.github.io/pymdown-extensions/extensions/critic/) | Lint-safe, Fix-safe | Critic markup `{++add++}`, `{--del--}` |
+| [details](https://facelessuser.github.io/pymdown-extensions/extensions/details/) | Lint-safe, Fix-safe | Collapsible blocks `??? note` and `???+ note` |
+| [emoji](https://facelessuser.github.io/pymdown-extensions/extensions/emoji/) | Lint-safe, Fix-safe | Emoji/icon shortcodes `:material-check:` |
+| [highlight](https://facelessuser.github.io/pymdown-extensions/extensions/highlight/) | N/A | Rendering-only (no linting impact) |
+| [inlinehilite](https://facelessuser.github.io/pymdown-extensions/extensions/inlinehilite/) | Lint-safe, Fix-safe | Inline code highlighting `` `#!python code` `` |
+| [keys](https://facelessuser.github.io/pymdown-extensions/extensions/keys/) | Lint-safe, Fix-safe | Keyboard keys `++ctrl+alt+del++` |
+| [mark](https://facelessuser.github.io/pymdown-extensions/extensions/mark/) | Lint-safe, Fix-safe | Highlighted text `==text==` |
+| [smartsymbols](https://facelessuser.github.io/pymdown-extensions/extensions/smartsymbols/) | Lint-safe, Fix-safe | Smart symbols `(c)`, `(tm)`, `-->` |
+| [snippets](https://facelessuser.github.io/pymdown-extensions/extensions/snippets/) | Lint-safe, Fix-safe | File inclusion `--8<-- "file.md"` |
+| [superfences](https://facelessuser.github.io/pymdown-extensions/extensions/superfences/) | Lint-safe, Fix-safe | Custom fences with language + attributes |
+| [tabbed](https://facelessuser.github.io/pymdown-extensions/extensions/tabbed/) | Format-aware | Content tabs `=== "Tab"` with indentation-aware reflow |
+| [tasklist](https://facelessuser.github.io/pymdown-extensions/extensions/tasklist/) | Lint-safe, Fix-safe | Task lists `- [x] Task` (standard GFM) |
+| [tilde](https://facelessuser.github.io/pymdown-extensions/extensions/tilde/) | Lint-safe, Fix-safe | Subscript `~text~` and strikethrough `~~text~~` |
 
 ### mkdocstrings
 
-| Feature | Status | Description |
-|---------|--------|-------------|
-| [Auto-doc blocks](https://mkdocstrings.github.io/) | ✅ Supported | `::: module.Class` with YAML options |
-| [Cross-references](https://mkdocstrings.github.io/) | ✅ Supported | `[module.Class][]` reference links |
+| Feature | Level | Description |
+|---------|-------|-------------|
+| [Auto-doc blocks](https://mkdocstrings.github.io/) | Format-aware | `::: module.Class` with YAML options, indentation-aware reflow |
+| [Cross-references](https://mkdocstrings.github.io/) | Lint-safe, Fix-safe | `[module.Class][]` reference links |
 
 ## See Also
 
