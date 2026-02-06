@@ -10,6 +10,8 @@ pub enum AbsoluteLinksOption {
     Ignore,
     /// Warn about absolute links (they can't be validated as local paths)
     Warn,
+    /// Resolve absolute links relative to MkDocs docs_dir and validate
+    RelativeToDocs,
 }
 
 /// Configuration for MD057 (relative link validation)
@@ -21,6 +23,7 @@ pub struct MD057Config {
     /// How to handle absolute links (paths starting with /)
     /// - "ignore" (default): Skip validation for absolute links
     /// - "warn": Report a warning for absolute links
+    /// - "relative_to_docs": Resolve relative to MkDocs docs_dir and validate
     #[serde(alias = "absolute_links")]
     pub absolute_links: AbsoluteLinksOption,
 }

@@ -20,6 +20,7 @@ pub mod mkdocs_abbreviations;
 pub mod mkdocs_admonitions;
 pub mod mkdocs_attr_list;
 pub mod mkdocs_common;
+pub mod mkdocs_config;
 pub mod mkdocs_critic;
 pub mod mkdocs_definition_lists;
 pub mod mkdocs_extensions;

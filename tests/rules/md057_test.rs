@@ -1302,3 +1302,462 @@ fn test_latex_consecutive_math_spans() {
     );
     assert!(result[0].message.contains("missing.md"));
 }
+
+// --- Tests for AbsoluteLinksOption::RelativeToDocs ---
+
+use rumdl_lib::rules::{AbsoluteLinksOption, MD057Config};
+use std::fs;
+
+/// Helper to create a MkDocs project structure with mkdocs.yml and docs_dir.
+/// Returns the path to the docs directory.
+fn setup_mkdocs_project(temp_dir: &std::path::Path, docs_dir_name: &str) -> std::path::PathBuf {
+    let mkdocs_content = if docs_dir_name != "docs" {
+        format!("site_name: test\ndocs_dir: {docs_dir_name}\n")
+    } else {
+        "site_name: test\n".to_string()
+    };
+    fs::write(temp_dir.join("mkdocs.yml"), mkdocs_content).unwrap();
+
+    let docs_dir = temp_dir.join(docs_dir_name);
+    fs::create_dir_all(&docs_dir).unwrap();
+    docs_dir
+}
+
+#[test]
+fn test_relative_to_docs_resolves_valid_link() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Create the target file
+    fs::write(docs_dir.join("getting-started.md"), "# Getting Started").unwrap();
+
+    let content = "[Guide](/getting-started.md)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Expected no warnings for valid absolute link, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_flags_missing_link() {
+    let temp_dir = tempdir().unwrap();
+    let _docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let content = "[Missing](/nonexistent.md)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
+        .with_path(temp_dir.path().join("docs"));
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Expected 1 warning, got: {result:?}");
+    assert!(
+        result[0].message.contains("does not exist"),
+        "Expected 'does not exist' in message, got: {}",
+        result[0].message
+    );
+    assert!(
+        result[0].message.contains("/nonexistent.md"),
+        "Expected '/nonexistent.md' in message, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_relative_to_docs_extensionless_link() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Create the target file with .md extension
+    fs::write(docs_dir.join("guide.md"), "# Guide").unwrap();
+
+    let content = "[Guide](/guide)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Extensionless link should resolve to guide.md, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_fallback_without_mkdocs_yml() {
+    // Create a temp dir without mkdocs.yml
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[Link](/some-page)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected 1 warning (fallback to warn), got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("no mkdocs.yml found"),
+        "Expected fallback message, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_relative_to_docs_custom_docs_dir() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "documentation");
+
+    // Create the target file
+    fs::write(docs_dir.join("index.md"), "# Home").unwrap();
+
+    let content = "[Home](/index.md)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Custom docs_dir should be respected, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_with_fragment() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Create the target file
+    fs::write(docs_dir.join("guide.md"), "# Guide\n## Section").unwrap();
+
+    let content = "[Guide Section](/guide.md#section)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Fragment should be stripped before file check, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_image() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Create an image file
+    let img_dir = docs_dir.join("assets");
+    fs::create_dir_all(&img_dir).unwrap();
+    fs::write(img_dir.join("logo.png"), "PNG").unwrap();
+
+    let content = "![Logo](/assets/logo.png)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Image absolute link should resolve via docs_dir, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_image_missing() {
+    let temp_dir = tempdir().unwrap();
+    let _docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let content = "![Missing](/assets/missing.png)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
+        .with_path(temp_dir.path().join("docs"));
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1, "Expected 1 warning for missing image, got: {result:?}");
+    assert!(result[0].message.contains("does not exist"));
+}
+
+#[test]
+fn test_relative_to_docs_reference_definition() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    fs::write(docs_dir.join("api.md"), "# API").unwrap();
+
+    let content = "[api]: /api.md\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Reference definition with valid absolute link should pass, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_directory_index() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Create a directory with index.md
+    let sub_dir = docs_dir.join("getting-started");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("index.md"), "# Getting Started").unwrap();
+
+    let content = "[Getting Started](/getting-started/)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Directory link with index.md should pass, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_directory_without_index() {
+    // Directory exists but has no index.md — should warn
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let sub_dir = docs_dir.join("empty-section");
+    fs::create_dir_all(&sub_dir).unwrap();
+    // No index.md inside
+
+    let content = "[Empty](/empty-section/)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Directory without index.md should warn, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("no index.md"),
+        "Message should mention missing index.md, got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_relative_to_docs_directory_without_trailing_slash() {
+    // Link to directory path without trailing slash — directory has index.md
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let sub_dir = docs_dir.join("guide");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("index.md"), "# Guide").unwrap();
+
+    let content = "[Guide](/guide)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Directory link without trailing slash should resolve via index.md, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_nested_subdirectory() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    let nested = docs_dir.join("api").join("v2");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("reference.md"), "# API v2 Reference").unwrap();
+
+    let content = "[API Ref](/api/v2/reference.md)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Nested subdirectory link should resolve, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_url_encoded_path() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    fs::write(docs_dir.join("my guide.md"), "# My Guide").unwrap();
+
+    let content = "[Guide](/my%20guide.md)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL-encoded absolute link should resolve, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_root_link() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+
+    // Root link "/" should check for docs/index.md
+    fs::write(docs_dir.join("index.md"), "# Home").unwrap();
+
+    let content = "[Home](/)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Root link '/' should resolve to docs/index.md, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_docs_root_link_missing_index() {
+    let temp_dir = tempdir().unwrap();
+    let _docs_dir = setup_mkdocs_project(temp_dir.path(), "docs");
+    // No index.md in docs/
+
+    let content = "[Home](/)\n";
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToDocs,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
+        .with_path(temp_dir.path().join("docs"));
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Root link without index.md should warn, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_existing_ignore_and_warn_unchanged() {
+    // Regression test: existing ignore/warn behavior unchanged
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[Link](/absolute-path)\n";
+
+    // Test ignore (default)
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::Ignore,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Ignore should produce no warnings, got: {result:?}");
+
+    // Test warn
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::Warn,
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Warn should produce 1 warning, got: {result:?}");
+    assert!(
+        result[0].message.contains("cannot be validated locally"),
+        "Warn message should say 'cannot be validated locally', got: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_absolute_links_config_deserialization() {
+    // Verify all AbsoluteLinksOption variants deserialize correctly from TOML
+    let toml_ignore: MD057Config = toml::from_str(r#"absolute-links = "ignore""#).unwrap();
+    assert_eq!(toml_ignore.absolute_links, AbsoluteLinksOption::Ignore);
+
+    let toml_warn: MD057Config = toml::from_str(r#"absolute-links = "warn""#).unwrap();
+    assert_eq!(toml_warn.absolute_links, AbsoluteLinksOption::Warn);
+
+    let toml_rtd: MD057Config = toml::from_str(r#"absolute-links = "relative_to_docs""#).unwrap();
+    assert_eq!(toml_rtd.absolute_links, AbsoluteLinksOption::RelativeToDocs);
+
+    // Also verify the snake_case alias works
+    let toml_alias: MD057Config = toml::from_str(r#"absolute_links = "relative_to_docs""#).unwrap();
+    assert_eq!(toml_alias.absolute_links, AbsoluteLinksOption::RelativeToDocs);
+
+    // Default should be Ignore
+    let toml_default: MD057Config = toml::from_str("").unwrap();
+    assert_eq!(toml_default.absolute_links, AbsoluteLinksOption::Ignore);
+}

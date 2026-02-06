@@ -15,7 +15,8 @@ use std::sync::{Arc, Mutex};
 
 mod md057_config;
 use crate::rule_config_serde::RuleConfig;
-use md057_config::{AbsoluteLinksOption, MD057Config};
+use crate::utils::mkdocs_config::resolve_docs_dir;
+pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
 static FILE_EXISTENCE_CACHE: LazyLock<Arc<Mutex<HashMap<PathBuf, bool>>>> =
@@ -280,6 +281,73 @@ impl MD057ExistingRelativeLinks {
     fn resolve_link_path_with_base(link: &str, base_path: &Path) -> PathBuf {
         base_path.join(link)
     }
+
+    /// Validate an absolute link by resolving it relative to MkDocs docs_dir.
+    ///
+    /// Returns `Some(warning_message)` if the link is broken, `None` if valid.
+    /// Falls back to a generic warning if no mkdocs.yml is found.
+    fn validate_absolute_link_via_docs_dir(url: &str, source_path: &Path) -> Option<String> {
+        let Some(docs_dir) = resolve_docs_dir(source_path) else {
+            // No mkdocs.yml found — fall back to warn behavior
+            return Some(format!(
+                "Absolute link '{url}' cannot be validated locally (no mkdocs.yml found)"
+            ));
+        };
+
+        // Strip leading / and resolve relative to docs_dir
+        let relative_url = url.trim_start_matches('/');
+
+        // Strip query/fragment before checking existence
+        let file_path = Self::strip_query_and_fragment(relative_url);
+        let decoded = Self::url_decode(file_path);
+        let resolved_path = docs_dir.join(&decoded);
+
+        // For directory-style links (ending with /, bare path to a directory, or empty
+        // decoded path like "/"), check for index.md inside the directory.
+        // This must be checked BEFORE file_exists_or_markdown_extension because
+        // path.exists() returns true for directories — we need to verify index.md exists.
+        let is_directory_link = url.ends_with('/') || decoded.is_empty();
+        if is_directory_link || resolved_path.is_dir() {
+            let index_path = resolved_path.join("index.md");
+            if file_exists_with_cache(&index_path) {
+                return None; // Valid directory link with index.md
+            }
+            // Directory exists but no index.md — fall through to error
+            if resolved_path.is_dir() {
+                return Some(format!(
+                    "Absolute link '{url}' resolves to directory '{}' which has no index.md",
+                    resolved_path.display()
+                ));
+            }
+        }
+
+        // Check existence (with markdown extension fallback for extensionless links)
+        if file_exists_or_markdown_extension(&resolved_path) {
+            return None; // Valid link
+        }
+
+        // For .html/.htm links, check for corresponding markdown source
+        if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+            && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+            && let (Some(stem), Some(parent)) = (
+                resolved_path.file_stem().and_then(|s| s.to_str()),
+                resolved_path.parent(),
+            )
+        {
+            let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                let source_path = parent.join(format!("{stem}{md_ext}"));
+                file_exists_with_cache(&source_path)
+            });
+            if has_md_source {
+                return None; // Markdown source exists
+            }
+        }
+
+        Some(format!(
+            "Absolute link '{url}' resolves to '{}' which does not exist",
+            resolved_path.display()
+        ))
+    }
 }
 
 impl Rule for MD057ExistingRelativeLinks {
@@ -453,6 +521,22 @@ impl Rule for MD057ExistingRelativeLinks {
                                         fix: None,
                                     });
                                 }
+                                AbsoluteLinksOption::RelativeToDocs => {
+                                    if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
+                                        let url_start = url_group.start();
+                                        let url_end = url_group.end();
+                                        warnings.push(LintWarning {
+                                            rule_name: Some(self.name().to_string()),
+                                            line: link.line,
+                                            column: url_start + 1,
+                                            end_line: link.line,
+                                            end_column: url_end + 1,
+                                            message: msg,
+                                            severity: Severity::Warning,
+                                            fix: None,
+                                        });
+                                    }
+                                }
                                 AbsoluteLinksOption::Ignore => {}
                             }
                             continue;
@@ -546,6 +630,20 @@ impl Rule for MD057ExistingRelativeLinks {
                             fix: None,
                         });
                     }
+                    AbsoluteLinksOption::RelativeToDocs => {
+                        if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: image.line,
+                                column: image.start_col + 1,
+                                end_line: image.line,
+                                end_column: image.start_col + 1 + url.len(),
+                                message: msg,
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
                     AbsoluteLinksOption::Ignore => {}
                 }
                 continue;
@@ -630,6 +728,24 @@ impl Rule for MD057ExistingRelativeLinks {
                             severity: Severity::Warning,
                             fix: None,
                         });
+                    }
+                    AbsoluteLinksOption::RelativeToDocs => {
+                        if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
+                            let line_idx = ref_def.line - 1;
+                            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                            });
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: ref_def.line,
+                                column,
+                                end_line: ref_def.line,
+                                end_column: column + url.len(),
+                                message: msg,
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
                     }
                     AbsoluteLinksOption::Ignore => {}
                 }
@@ -752,7 +868,9 @@ impl Rule for MD057ExistingRelativeLinks {
             // The stored path is URL-encoded (e.g., "%F0%9F%91%A4" for emoji 👤)
             let decoded_target = Self::url_decode(&cross_link.target_path);
 
-            // Skip absolute/protocol-relative paths (web paths, not filesystem paths)
+            // Skip absolute paths — they are already handled by check()
+            // which validates them according to the absolute_links config.
+            // Handling them here too would produce duplicate warnings.
             if decoded_target.starts_with('/') {
                 continue;
             }

@@ -156,7 +156,7 @@ pub use md023_heading_start_left::MD023HeadingStartLeft;
 
 mod md057_existing_relative_links;
 
-pub use md057_existing_relative_links::MD057ExistingRelativeLinks;
+pub use md057_existing_relative_links::{AbsoluteLinksOption, MD057Config, MD057ExistingRelativeLinks};
 
 use crate::rule::Rule;
 

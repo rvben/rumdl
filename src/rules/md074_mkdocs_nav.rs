@@ -5,6 +5,7 @@
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::mkdocs_config::find_mkdocs_yml;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -49,32 +50,6 @@ impl MD074MkDocsNav {
         if let Ok(mut cache) = VALIDATED_PROJECTS.lock() {
             cache.clear();
         }
-    }
-
-    /// Find mkdocs.yml or mkdocs.yaml in the directory or parent directories
-    fn find_mkdocs_yml(start_path: &Path) -> Option<PathBuf> {
-        let mut current = if start_path.is_file() {
-            start_path.parent()?.to_path_buf()
-        } else {
-            start_path.to_path_buf()
-        };
-
-        loop {
-            // Check both .yml and .yaml extensions
-            for filename in &["mkdocs.yml", "mkdocs.yaml"] {
-                let mkdocs_path = current.join(filename);
-                if mkdocs_path.exists() {
-                    // Canonicalize to get consistent path for caching
-                    return mkdocs_path.canonicalize().ok();
-                }
-            }
-
-            if !current.pop() {
-                break;
-            }
-        }
-
-        None
     }
 
     /// Parse mkdocs.yml and extract configuration
@@ -464,7 +439,7 @@ impl Rule for MD074MkDocsNav {
         };
 
         // Find mkdocs.yml (returns canonicalized path for consistent caching)
-        let Some(mkdocs_path) = Self::find_mkdocs_yml(source_file) else {
+        let Some(mkdocs_path) = find_mkdocs_yml(source_file) else {
             return Ok(Vec::new());
         };
 
@@ -556,7 +531,7 @@ mod tests {
         fs::create_dir_all(&subdir).unwrap();
         let file_in_subdir = subdir.join("test.md");
 
-        let found = MD074MkDocsNav::find_mkdocs_yml(&file_in_subdir);
+        let found = find_mkdocs_yml(&file_in_subdir);
         assert!(found.is_some());
         // Canonicalized paths should match
         assert_eq!(found.unwrap(), mkdocs_path.canonicalize().unwrap());
@@ -573,7 +548,7 @@ mod tests {
         fs::create_dir_all(&docs_dir).unwrap();
         let file_in_docs = docs_dir.join("test.md");
 
-        let found = MD074MkDocsNav::find_mkdocs_yml(&file_in_docs);
+        let found = find_mkdocs_yml(&file_in_docs);
         assert!(found.is_some(), "Should find mkdocs.yaml");
         assert_eq!(found.unwrap(), mkdocs_path.canonicalize().unwrap());
     }
