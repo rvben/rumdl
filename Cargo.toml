@@ -28,7 +28,7 @@ path = "src/main.rs"
 [profile.release]
 lto = true           # Enable Link-Time Optimization
 strip = true         # Strip symbols from binary
-opt-level = "z"      # Optimize for size (alternative: "s" for small, "3" for speed)
+opt-level = 3        # Optimize for speed
 codegen-units = 1    # Better optimization but slower compile times
 
 [profile.profiling]
