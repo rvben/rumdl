@@ -43,6 +43,9 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         };
     }
 
+    // Cache debug env var to avoid repeated mutex acquisitions per line
+    let debug_list = std::env::var("RUMDL_DEBUG_LIST").is_ok();
+
     // Pre-size based on lines that could be list items
     let mut list_blocks = Vec::with_capacity(lines.len() / 10); // Estimate ~10% of lines might start list blocks
     let mut current_block: Option<ListBlock> = None;
@@ -194,7 +197,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
         let is_valid_continuation = effective_continuation_indent >= adjusted_min_continuation_for_tracking
             || (line_info.indent == 0 && !line_info.is_blank && !is_structural_element);
 
-        if std::env::var("RUMDL_DEBUG_LIST").is_ok() && line_info.list_item.is_none() && !line_info.is_blank {
+        if debug_list && line_info.list_item.is_none() && !line_info.is_blank {
             eprintln!(
                 "[DEBUG] Line {}: checking continuation - indent={}, min_cont={}, is_valid={}, in_code_span={}, in_code_block={}, has_block={}",
                 line_num,
@@ -214,7 +217,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             && is_valid_continuation
             && let Some(ref mut block) = current_block
         {
-            if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+            if debug_list {
                 eprintln!(
                     "[DEBUG] Line {}: extending block.end_line from {} to {}",
                     line_num, block.end_line, line_num
@@ -223,13 +226,17 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             block.end_line = line_num;
         }
 
+        // Flag to signal that current_block should be finalized after the borrow scope ends.
+        // This avoids cloning the block just to push it and then set current_block to None.
+        let mut finalize_current_block = false;
+
         // Check if this line is a list item
         if let Some(list_item) = &line_info.list_item {
             // Calculate nesting level based on indentation
             let item_indent = list_item.marker_column;
             let nesting = item_indent / 2; // Assume 2-space indentation for nesting
 
-            if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+            if debug_list {
                 eprintln!(
                     "[DEBUG] Line {}: list item found, marker={:?}, indent={}",
                     line_num, list_item.marker, item_indent
@@ -263,7 +270,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     same_type && same_context && reasonable_distance && marker_compatible && !has_non_list_content
                 };
 
-                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                if debug_list {
                     eprintln!(
                         "[DEBUG] Line {}: continues_list={}, is_nested={}, same_type={}, same_context={}, reasonable_distance={}, marker_compatible={}, has_non_list_content={}, last_item={}, block.end_line={}",
                         line_num,
@@ -324,9 +331,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                         block.end_line = last_item;
                     }
 
-                    list_blocks.push(block.clone());
-
-                    *block = ListBlock {
+                    let new_block = ListBlock {
                         start_line: line_num,
                         end_line: line_num,
                         is_ordered: list_item.is_ordered,
@@ -344,6 +349,8 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                             list_item.marker.len()
                         },
                     };
+                    let old_block = std::mem::replace(block, new_block);
+                    list_blocks.push(old_block);
 
                     // Initialize tracked state for new block
                     reset_tracking_state(
@@ -386,7 +393,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             };
         } else if let Some(ref mut block) = current_block {
             // Not a list item - check if it continues the current block
-            if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+            if debug_list {
                 eprintln!(
                     "[DEBUG] Line {}: non-list-item, is_blank={}, block exists",
                     line_num, line_info.is_blank
@@ -409,7 +416,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
             if prev_line_ends_with_backslash || line_info.indent >= min_continuation_indent {
                 // Indented line or backslash continuation continues the list
-                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                if debug_list {
                     eprintln!(
                         "[DEBUG] Line {}: indented continuation (indent={}, min={})",
                         line_num, line_info.indent, min_continuation_indent
@@ -418,7 +425,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 block.end_line = line_num;
             } else if line_info.is_blank {
                 // Blank line - check if it's internal to the list or ending it
-                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                if debug_list {
                     eprintln!("[DEBUG] Line {line_num}: entering blank line handling");
                 }
                 let mut check_idx = line_idx + 1;
@@ -465,7 +472,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     } else {
                         min_continuation_indent
                     };
-                    if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                    if debug_list {
                         eprintln!(
                             "[DEBUG] Blank line {} checking next line {}: effective_indent={}, adjusted_min={}, next_is_list={}, in_code_block={}",
                             line_num,
@@ -585,7 +592,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     }
                 }
 
-                if std::env::var("RUMDL_DEBUG_LIST").is_ok() {
+                if debug_list {
                     eprintln!("[DEBUG] Blank line {line_num} final: found_continuation={found_continuation}");
                 }
                 if found_continuation {
@@ -593,8 +600,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     block.end_line = line_num;
                 } else {
                     // Blank line ends the list - don't include it
-                    list_blocks.push(block.clone());
-                    current_block = None;
+                    finalize_current_block = true;
                 }
             } else {
                 // Check for lazy continuation
@@ -631,10 +637,14 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     block.end_line = line_num;
                 } else {
                     // Non-indented, non-blank line that's not a lazy continuation - end the block
-                    list_blocks.push(block.clone());
-                    current_block = None;
+                    finalize_current_block = true;
                 }
             }
+        }
+
+        // Finalize the current block outside the borrow scope to avoid cloning
+        if finalize_current_block && let Some(block) = current_block.take() {
+            list_blocks.push(block);
         }
     }
 
