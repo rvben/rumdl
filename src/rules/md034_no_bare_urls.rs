@@ -1,32 +1,47 @@
 /// Rule MD034: No unformatted URLs
 ///
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
+use std::sync::LazyLock;
+
+use fancy_regex::Regex as FancyRegex;
+use regex::Regex;
+
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_url_range};
 use crate::utils::regex_cache::{
-    EMAIL_PATTERN, URL_IPV6_STR, URL_QUICK_CHECK_STR, URL_STANDARD_STR, URL_WWW_STR, XMPP_URI_STR,
-    get_cached_fancy_regex, get_cached_regex,
+    EMAIL_PATTERN, URL_IPV6_REGEX, URL_QUICK_CHECK_REGEX, URL_STANDARD_REGEX, URL_WWW_REGEX, XMPP_URI_REGEX,
 };
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 
-// MD034-specific patterns for markdown constructs
-// Core URL patterns (URL_QUICK_CHECK_STR, URL_STANDARD_STR, etc.) are imported from regex_cache
-const CUSTOM_PROTOCOL_PATTERN_STR: &str = r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#;
-const MARKDOWN_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-const MARKDOWN_EMPTY_LINK_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#;
-const MARKDOWN_EMPTY_REF_PATTERN_STR: &str = r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\[\]"#;
-// Pattern for links in angle brackets - excludes HTTP(S), FTP(S), XMPP URIs, and emails
-const ANGLE_LINK_PATTERN_STR: &str =
-    r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|xmpp:[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#;
-const BADGE_LINK_LINE_STR: &str = r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#;
-const MARKDOWN_IMAGE_PATTERN_STR: &str = r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#;
-// Reference definition pattern - matches [label]: URL with optional title
-const REFERENCE_DEF_RE_STR: &str = r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)";
-const MULTILINE_LINK_CONTINUATION_STR: &str = r#"^[^\[]*\]\(.*\)"#;
-// Pattern to match shortcut/collapsed reference links: [text] or [text][]
-const SHORTCUT_REF_PATTERN_STR: &str = r#"\[([^\[\]]+)\](?!\s*[\[(])"#;
+// MD034-specific pre-compiled regex patterns for markdown constructs
+static CUSTOM_PROTOCOL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:grpc|ws|wss|ssh|git|svn|file|data|javascript|vscode|chrome|about|slack|discord|matrix|irc|redis|mongodb|postgresql|mysql|kafka|nats|amqp|mqtt|custom|app|api|service)://"#).unwrap()
+});
+static MARKDOWN_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap()
+});
+static MARKDOWN_EMPTY_LINK_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\(\)"#).unwrap());
+static MARKDOWN_EMPTY_REF_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\[(?:[^\[\]]|\[[^\]]*\])*\]\[\]"#).unwrap());
+static ANGLE_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"<((?:https?|ftps?)://(?:\[[0-9a-fA-F:]+(?:%[a-zA-Z0-9]+)?\]|[^>]+)|xmpp:[^>]+|[^@\s]+@[^@\s]+\.[^@\s>]+)>"#,
+    )
+    .unwrap()
+});
+static BADGE_LINK_LINE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap());
+static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap());
+static REFERENCE_DEF_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)").unwrap());
+static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
+// Uses FancyRegex for negative lookahead support
+static SHORTCUT_REF_FANCY_REGEX: LazyLock<FancyRegex> =
+    LazyLock::new(|| FancyRegex::new(r#"\[([^\[\]]+)\](?!\s*[\[(])"#).unwrap());
 
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
@@ -100,9 +115,7 @@ impl MD034NoBareUrls {
 
     /// Check if line is inside a reference definition
     fn is_reference_definition(&self, line: &str) -> bool {
-        get_cached_regex(REFERENCE_DEF_RE_STR)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false)
+        REFERENCE_DEF_REGEX.is_match(line)
     }
 
     fn check_line(
@@ -128,16 +141,12 @@ impl MD034NoBareUrls {
 
         // Skip lines that are continuations of multiline markdown links
         // Pattern: text](url) without a leading [
-        if let Ok(re) = get_cached_regex(MULTILINE_LINK_CONTINUATION_STR)
-            && re.is_match(line)
-        {
+        if MULTILINE_LINK_CONTINUATION_REGEX.is_match(line) {
             return warnings;
         }
 
         // Quick check - does this line potentially have a URL or email?
-        let has_quick_check = get_cached_regex(URL_QUICK_CHECK_STR)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false);
+        let has_quick_check = URL_QUICK_CHECK_REGEX.is_match(line);
         let has_www = line.contains("www.");
         let has_at = line.contains('@');
 
@@ -147,60 +156,44 @@ impl MD034NoBareUrls {
 
         // Clear and reuse buffers instead of allocating new ones
         buffers.markdown_link_ranges.clear();
-        if let Ok(re) = get_cached_regex(MARKDOWN_LINK_PATTERN_STR) {
-            for cap in re.captures_iter(line) {
-                if let Some(mat) = cap.get(0) {
-                    buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-                }
+        for cap in MARKDOWN_LINK_REGEX.captures_iter(line) {
+            if let Some(mat) = cap.get(0) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
         }
 
         // Also include empty link patterns like [text]() and [text][]
-        if let Ok(re) = get_cached_regex(MARKDOWN_EMPTY_LINK_PATTERN_STR) {
-            for mat in re.find_iter(line) {
-                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-            }
+        for mat in MARKDOWN_EMPTY_LINK_REGEX.find_iter(line) {
+            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
         }
 
-        if let Ok(re) = get_cached_regex(MARKDOWN_EMPTY_REF_PATTERN_STR) {
-            for mat in re.find_iter(line) {
-                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-            }
+        for mat in MARKDOWN_EMPTY_REF_REGEX.find_iter(line) {
+            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
         }
 
         // Also exclude shortcut reference links like [URL] - even if no definition exists,
         // the brackets indicate user intent to use markdown formatting
-        // Uses fancy_regex for negative lookahead support
-        if let Ok(re) = get_cached_fancy_regex(SHORTCUT_REF_PATTERN_STR) {
-            for mat in re.find_iter(line).flatten() {
-                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-            }
+        // Uses FancyRegex for negative lookahead support
+        for mat in SHORTCUT_REF_FANCY_REGEX.find_iter(line).flatten() {
+            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
         }
 
-        if let Ok(re) = get_cached_regex(ANGLE_LINK_PATTERN_STR) {
-            for cap in re.captures_iter(line) {
-                if let Some(mat) = cap.get(0) {
-                    buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-                }
+        for cap in ANGLE_LINK_REGEX.captures_iter(line) {
+            if let Some(mat) = cap.get(0) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
         }
 
         // Find all markdown images for exclusion
         buffers.image_ranges.clear();
-        if let Ok(re) = get_cached_regex(MARKDOWN_IMAGE_PATTERN_STR) {
-            for cap in re.captures_iter(line) {
-                if let Some(mat) = cap.get(0) {
-                    buffers.image_ranges.push((mat.start(), mat.end()));
-                }
+        for cap in MARKDOWN_IMAGE_REGEX.captures_iter(line) {
+            if let Some(mat) = cap.get(0) {
+                buffers.image_ranges.push((mat.start(), mat.end()));
             }
         }
 
         // Check if this line contains only a badge link (common pattern)
-        let is_badge_line = get_cached_regex(BADGE_LINK_LINE_STR)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false);
-
-        if is_badge_line {
+        if BADGE_LINK_LINE_REGEX.is_match(line) {
             return warnings;
         }
 
@@ -208,98 +201,87 @@ impl MD034NoBareUrls {
         buffers.urls_found.clear();
 
         // First, find IPv6 URLs (they need special handling)
-        if let Ok(re) = get_cached_regex(URL_IPV6_STR) {
-            for mat in re.find_iter(line) {
-                let url_str = mat.as_str();
-                buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
-            }
+        for mat in URL_IPV6_REGEX.find_iter(line) {
+            let url_str = mat.as_str();
+            buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
         }
 
         // Then find regular URLs
-        if let Ok(re) = get_cached_regex(URL_STANDARD_STR) {
-            for mat in re.find_iter(line) {
-                let url_str = mat.as_str();
+        for mat in URL_STANDARD_REGEX.find_iter(line) {
+            let url_str = mat.as_str();
 
-                // Skip if it's an IPv6 URL (already handled)
-                if url_str.contains("://[") {
-                    continue;
-                }
+            // Skip if it's an IPv6 URL (already handled)
+            if url_str.contains("://[") {
+                continue;
+            }
 
-                // Skip malformed IPv6-like URLs
-                // Check for IPv6-like patterns that are malformed
-                if let Some(host_start) = url_str.find("://") {
-                    let after_protocol = &url_str[host_start + 3..];
-                    // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
-                    if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
-                        // Check if the next character after our match is ]
-                        if let Some(char_after) = line.chars().nth(mat.end())
-                            && char_after == ']'
-                        {
-                            // This is likely a malformed IPv6 URL like "https://::1]:8080"
-                            continue;
-                        }
+            // Skip malformed IPv6-like URLs
+            // Check for IPv6-like patterns that are malformed
+            if let Some(host_start) = url_str.find("://") {
+                let after_protocol = &url_str[host_start + 3..];
+                // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
+                if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
+                    // Check if the next character after our match is ]
+                    if let Some(char_after) = line.chars().nth(mat.end())
+                        && char_after == ']'
+                    {
+                        // This is likely a malformed IPv6 URL like "https://::1]:8080"
+                        continue;
                     }
                 }
-
-                buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
             }
+
+            buffers.urls_found.push((mat.start(), mat.end(), url_str.to_string()));
         }
 
         // Find www URLs without protocol (e.g., www.example.com)
-        if let Ok(re) = get_cached_regex(URL_WWW_STR) {
-            for mat in re.find_iter(line) {
-                let url_str = mat.as_str();
-                let start_pos = mat.start();
-                let end_pos = mat.end();
+        for mat in URL_WWW_REGEX.find_iter(line) {
+            let url_str = mat.as_str();
+            let start_pos = mat.start();
+            let end_pos = mat.end();
 
-                // Skip if preceded by / or @ (likely part of a full URL)
-                if start_pos > 0 {
-                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                    if prev_char == Some(b'/') || prev_char == Some(b'@') {
-                        continue;
-                    }
+            // Skip if preceded by / or @ (likely part of a full URL)
+            if start_pos > 0 {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                if prev_char == Some(b'/') || prev_char == Some(b'@') {
+                    continue;
                 }
-
-                // Skip if inside angle brackets (autolink syntax like <www.example.com>)
-                if start_pos > 0 && end_pos < line.len() {
-                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                    let next_char = line.as_bytes().get(end_pos).copied();
-                    if prev_char == Some(b'<') && next_char == Some(b'>') {
-                        continue;
-                    }
-                }
-
-                buffers.urls_found.push((start_pos, end_pos, url_str.to_string()));
             }
+
+            // Skip if inside angle brackets (autolink syntax like <www.example.com>)
+            if start_pos > 0 && end_pos < line.len() {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                let next_char = line.as_bytes().get(end_pos).copied();
+                if prev_char == Some(b'<') && next_char == Some(b'>') {
+                    continue;
+                }
+            }
+
+            buffers.urls_found.push((start_pos, end_pos, url_str.to_string()));
         }
 
         // Find XMPP URIs (GFM extended autolinks: xmpp:user@domain/resource)
-        if let Ok(re) = get_cached_regex(XMPP_URI_STR) {
-            for mat in re.find_iter(line) {
-                let uri_str = mat.as_str();
-                let start_pos = mat.start();
-                let end_pos = mat.end();
+        for mat in XMPP_URI_REGEX.find_iter(line) {
+            let uri_str = mat.as_str();
+            let start_pos = mat.start();
+            let end_pos = mat.end();
 
-                // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
-                if start_pos > 0 && end_pos < line.len() {
-                    let prev_char = line.as_bytes().get(start_pos - 1).copied();
-                    let next_char = line.as_bytes().get(end_pos).copied();
-                    if prev_char == Some(b'<') && next_char == Some(b'>') {
-                        continue;
-                    }
+            // Skip if inside angle brackets (already properly formatted: <xmpp:user@domain>)
+            if start_pos > 0 && end_pos < line.len() {
+                let prev_char = line.as_bytes().get(start_pos - 1).copied();
+                let next_char = line.as_bytes().get(end_pos).copied();
+                if prev_char == Some(b'<') && next_char == Some(b'>') {
+                    continue;
                 }
-
-                buffers.urls_found.push((start_pos, end_pos, uri_str.to_string()));
             }
+
+            buffers.urls_found.push((start_pos, end_pos, uri_str.to_string()));
         }
 
         // Process found URLs
         for &(start, _end, ref url_str) in buffers.urls_found.iter() {
             // Skip custom protocols
-            if get_cached_regex(CUSTOM_PROTOCOL_PATTERN_STR)
-                .map(|re| re.is_match(url_str))
-                .unwrap_or(false)
-            {
+            if CUSTOM_PROTOCOL_REGEX.is_match(url_str) {
                 continue;
             }
 
