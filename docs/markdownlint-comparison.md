@@ -326,9 +326,21 @@ rumdl additionally supports:
    - run: rumdl check .
    ```
 
-### Known Migration Issues
+### Known Behavioral Differences
 
-None currently known. If you encounter compatibility issues, please [file an issue](https://github.com/rvben/rumdl/issues).
+These are intentional deviations where rumdl produces different results than markdownlint. They are design decisions, not bugs.
+
+**MD004 (unordered-list-style):** In `consistent` mode, rumdl uses prevalence-based detection (most common marker wins, ties prefer dash). markdownlint uses the first marker as the standard.
+
+**MD005/MD007 (list-indent / ul-indent):** rumdl uses parent-based dynamic indentation, properly handling ordered lists with variable marker widths (e.g., `1.` vs `10.`). markdownlint may treat children at different indentation levels as inconsistent.
+
+**MD012 (no-multiple-blanks):** rumdl uses the `filtered_lines()` architecture to skip frontmatter, code blocks, and flavor-specific constructs. This may produce slightly different counts near block boundaries.
+
+**MD013 (line-length):** rumdl exempts entire lines that are completely unbreakable (URLs with no spaces, long code spans). It also supports `line_length = 0` to mean unlimited. markdownlint exempts more selectively.
+
+**MD029 (ordered-list-prefix):** rumdl uses CommonMark AST start values. A list starting at `11` expects items 11, 12, 13. rumdl only auto-fixes when `start_value == 1` to preserve explicit numbering intent.
+
+If you encounter other compatibility issues, please [file an issue](https://github.com/rvben/rumdl/issues).
 
 ## Feature Comparison Table
 
