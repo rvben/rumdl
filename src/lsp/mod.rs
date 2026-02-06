@@ -6,7 +6,10 @@
 //! Following Ruff's approach, this is built directly into the main rumdl binary
 //! and can be started with `rumdl server`.
 
+mod completion;
+mod configuration;
 pub mod index_worker;
+mod linting;
 pub mod server;
 pub mod types;
 
