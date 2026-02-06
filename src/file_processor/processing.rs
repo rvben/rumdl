@@ -272,7 +272,7 @@ pub fn process_file_with_formatter(
         // Write fixed content back to file
         if warnings_fixed > 0 {
             // Denormalize back to original line ending before writing
-            let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending);
+            let content_to_write = rumdl_lib::utils::normalize_line_ending(&content, original_line_ending).into_owned();
 
             if let Err(err) = std::fs::write(file_path, &content_to_write)
                 && !silent
@@ -506,7 +506,7 @@ pub fn process_file_with_index(
     let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
 
     // Normalize to LF for all internal processing
-    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
+    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
 
     // Validate inline config comments and warn about unknown rules
     if !silent {

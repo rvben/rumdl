@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
     Lf,
@@ -6,16 +8,31 @@ pub enum LineEnding {
 }
 
 pub fn detect_line_ending_enum(content: &str) -> LineEnding {
-    let has_crlf = content.contains("\r\n");
-    // Check if there are LF characters that are NOT part of CRLF
-    let content_without_crlf = content.replace("\r\n", "");
-    let has_standalone_lf = content_without_crlf.contains('\n');
+    let bytes = content.as_bytes();
+    let mut has_crlf = false;
+    let mut has_standalone_lf = false;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\r' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+            has_crlf = true;
+            i += 2;
+        } else if bytes[i] == b'\n' {
+            has_standalone_lf = true;
+            i += 1;
+        } else {
+            i += 1;
+        }
+        // Early exit once both types are found
+        if has_crlf && has_standalone_lf {
+            return LineEnding::Mixed;
+        }
+    }
 
     match (has_crlf, has_standalone_lf) {
-        (true, true) => LineEnding::Mixed, // Has both CRLF and standalone LF
-        (true, false) => LineEnding::Crlf, // Only CRLF
-        (false, true) => LineEnding::Lf,   // Only LF
-        (false, false) => LineEnding::Lf,  // No line endings, default to LF
+        (true, true) => LineEnding::Mixed,
+        (true, false) => LineEnding::Crlf,
+        (false, _) => LineEnding::Lf,
     }
 }
 
@@ -27,15 +44,21 @@ pub fn detect_line_ending(content: &str) -> &'static str {
     if crlf_count > lf_count { "\r\n" } else { "\n" }
 }
 
-pub fn normalize_line_ending(content: &str, target: LineEnding) -> String {
+pub fn normalize_line_ending<'a>(content: &'a str, target: LineEnding) -> Cow<'a, str> {
     match target {
-        LineEnding::Lf => content.replace("\r\n", "\n"),
+        LineEnding::Lf => {
+            if !content.contains('\r') {
+                Cow::Borrowed(content)
+            } else {
+                Cow::Owned(content.replace("\r\n", "\n"))
+            }
+        }
         LineEnding::Crlf => {
             // First normalize everything to LF, then convert to CRLF
             let normalized = content.replace("\r\n", "\n");
-            normalized.replace('\n', "\r\n")
+            Cow::Owned(normalized.replace('\n', "\r\n"))
         }
-        LineEnding::Mixed => content.to_string(), // Don't change mixed endings
+        LineEnding::Mixed => Cow::Borrowed(content),
     }
 }
 
@@ -59,7 +82,7 @@ pub fn ensure_consistent_line_endings(original: &str, modified: &str) -> String 
     let modified_ending = detect_line_ending_enum(modified);
 
     if target_ending != modified_ending {
-        normalize_line_ending(modified, target_ending)
+        normalize_line_ending(modified, target_ending).into_owned()
     } else {
         modified.to_string()
     }

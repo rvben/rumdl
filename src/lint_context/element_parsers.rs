@@ -306,17 +306,18 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
         }
 
         // Skip if already in angle brackets or markdown links
-        let preceding_char = if match_start > 0 {
-            content.chars().nth(match_start - 1)
+        // All delimiter characters checked here are ASCII, so byte indexing is safe
+        let preceding_byte = if match_start > 0 {
+            Some(content.as_bytes()[match_start - 1])
         } else {
             None
         };
-        let following_char = content.chars().nth(match_end);
+        let following_byte = content.as_bytes().get(match_end).copied();
 
-        if preceding_char == Some('<') || preceding_char == Some('(') || preceding_char == Some('[') {
+        if preceding_byte == Some(b'<') || preceding_byte == Some(b'(') || preceding_byte == Some(b'[') {
             continue;
         }
-        if following_char == Some('>') || following_char == Some(')') || following_char == Some(']') {
+        if following_byte == Some(b'>') || following_byte == Some(b')') || following_byte == Some(b']') {
             continue;
         }
 
@@ -368,17 +369,18 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
         }
 
         // Skip if already in angle brackets or markdown links
-        let preceding_char = if match_start > 0 {
-            content.chars().nth(match_start - 1)
+        // All delimiter characters checked here are ASCII, so byte indexing is safe
+        let preceding_byte = if match_start > 0 {
+            Some(content.as_bytes()[match_start - 1])
         } else {
             None
         };
-        let following_char = content.chars().nth(match_end);
+        let following_byte = content.as_bytes().get(match_end).copied();
 
-        if preceding_char == Some('<') || preceding_char == Some('(') || preceding_char == Some('[') {
+        if preceding_byte == Some(b'<') || preceding_byte == Some(b'(') || preceding_byte == Some(b'[') {
             continue;
         }
-        if following_char == Some('>') || following_char == Some(')') || following_char == Some(']') {
+        if following_byte == Some(b'>') || following_byte == Some(b')') || following_byte == Some(b']') {
             continue;
         }
 

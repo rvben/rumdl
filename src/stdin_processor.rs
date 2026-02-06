@@ -62,7 +62,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     let original_line_ending = rumdl_lib::utils::detect_line_ending_enum(&content);
 
     // Normalize to LF for all internal processing
-    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf);
+    content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
 
     // Validate inline config comments and warn about unknown rules
     if !silent {
@@ -138,7 +138,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             );
 
             // Denormalize back to original line ending before output (I/O boundary)
-            let output_content = rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending);
+            let output_content =
+                rumdl_lib::utils::normalize_line_ending(&fixed_content, original_line_ending).into_owned();
 
             // Output the fixed content to stdout
             print!("{output_content}");
