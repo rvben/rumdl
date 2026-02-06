@@ -181,6 +181,11 @@ impl TableUtils {
             pos += line.len() + 1; // +1 for newline
         }
 
+        // Stack of active list content indents for continuation table tracking.
+        // Supports nested lists: when a child list is seen, we push; when we
+        // dedent past a level, we pop back to the enclosing list.
+        let mut list_indent_stack: Vec<usize> = Vec::new();
+
         while i < lines.len() {
             // Skip lines in code blocks, code spans, or HTML comments
             let line_start = line_positions[i];
@@ -201,30 +206,83 @@ impl TableUtils {
             // Strip blockquote prefix for table detection
             let line_content = Self::strip_blockquote_prefix(lines[i]);
 
-            // Check if this is a list item that contains a table row
+            // Update active list tracking
             let (list_prefix, list_content, content_indent) = Self::extract_list_prefix(line_content);
-            let (is_list_table, effective_content) =
+            if !list_prefix.is_empty() {
+                // Line has a list marker. Pop any deeper/equal levels, then push this one.
+                while list_indent_stack.last().is_some_and(|&top| top >= content_indent) {
+                    list_indent_stack.pop();
+                }
+                list_indent_stack.push(content_indent);
+            } else if !line_content.trim().is_empty() {
+                // Non-blank line without a marker: pop any levels we've dedented past
+                let leading = line_content.len() - line_content.trim_start().len();
+                while list_indent_stack.last().is_some_and(|&top| leading < top) {
+                    list_indent_stack.pop();
+                }
+            }
+            // Blank lines keep the stack unchanged (blank lines don't end list items)
+
+            // Check if this is a list item that contains a table row on the same line,
+            // or a continuation table indented under an active list item
+            let (is_same_line_list_table, effective_content) =
                 if !list_prefix.is_empty() && Self::is_potential_table_row_content(list_content) {
                     (true, list_content)
                 } else {
                     (false, line_content)
                 };
 
+            // Detect continuation list tables: no marker on this line, but indented
+            // under an active list item (e.g., "- Text\n  | h1 | h2 |")
+            let continuation_indent = if !is_same_line_list_table && list_prefix.is_empty() {
+                let leading = line_content.len() - line_content.trim_start().len();
+                // Find the deepest list level this line is indented under
+                list_indent_stack
+                    .iter()
+                    .rev()
+                    .find(|&&indent| leading >= indent)
+                    .copied()
+            } else {
+                None
+            };
+
+            let is_continuation_list_table = continuation_indent.is_some()
+                && {
+                    let indent = continuation_indent.unwrap();
+                    let leading = line_content.len() - line_content.trim_start().len();
+                    // Per CommonMark, 4+ spaces beyond content indent is a code block
+                    leading < indent + 4
+                }
+                && Self::is_potential_table_row(effective_content);
+
+            let is_any_list_table = is_same_line_list_table || is_continuation_list_table;
+
+            // For continuation list tables, use the matched list indent
+            let effective_content_indent = if is_same_line_list_table {
+                content_indent
+            } else if is_continuation_list_table {
+                continuation_indent.unwrap()
+            } else {
+                0
+            };
+
             // Look for potential table start
-            if is_list_table || Self::is_potential_table_row(effective_content) {
-                // For list tables, we need to check indented continuation lines
+            if is_any_list_table || Self::is_potential_table_row(effective_content) {
+                // For list tables (same-line or continuation), check indented continuation lines
                 // For regular tables, check the next line directly
                 let (next_line_content, delimiter_has_valid_indent) = if i + 1 < lines.len() {
                     let next_raw = Self::strip_blockquote_prefix(lines[i + 1]);
-                    if is_list_table {
-                        // For list tables, verify the delimiter line has proper indentation
-                        // before accepting it as part of the list table
+                    if is_any_list_table {
+                        // Verify the delimiter line has proper indentation
                         let leading_spaces = next_raw.len() - next_raw.trim_start().len();
-                        if leading_spaces >= content_indent {
+                        if leading_spaces >= effective_content_indent {
                             // Has proper indentation, strip it and check as delimiter
-                            (Self::strip_list_continuation_indent(next_raw, content_indent), true)
+                            (
+                                Self::strip_list_continuation_indent(next_raw, effective_content_indent),
+                                true,
+                            )
                         } else {
-                            // Not enough indentation - this is a top-level table, not a list table
+                            // Not enough indentation - not a list table
                             (next_raw, false)
                         }
                     } else {
@@ -235,7 +293,7 @@ impl TableUtils {
                 };
 
                 // For list tables, only accept if delimiter has valid indentation
-                let effective_is_list_table = is_list_table && delimiter_has_valid_indent;
+                let effective_is_list_table = is_any_list_table && delimiter_has_valid_indent;
 
                 if i + 1 < lines.len() && Self::is_delimiter_row(next_line_content) {
                     // Found a table! Find its end
@@ -254,7 +312,7 @@ impl TableUtils {
 
                         // For list tables, strip expected indentation
                         let line_content = if effective_is_list_table {
-                            Self::strip_list_continuation_indent(raw_content, content_indent)
+                            Self::strip_list_continuation_indent(raw_content, effective_content_indent)
                         } else {
                             raw_content
                         };
@@ -267,7 +325,7 @@ impl TableUtils {
                         // For list tables, the continuation line must have proper indentation
                         if effective_is_list_table {
                             let leading_spaces = raw_content.len() - raw_content.trim_start().len();
-                            if leading_spaces < content_indent {
+                            if leading_spaces < effective_content_indent {
                                 // Not enough indentation - end of table
                                 break;
                             }
@@ -284,10 +342,19 @@ impl TableUtils {
                     }
 
                     let list_context = if effective_is_list_table {
-                        Some(ListTableContext {
-                            list_prefix: list_prefix.to_string(),
-                            content_indent,
-                        })
+                        if is_same_line_list_table {
+                            // Same-line: prefix is the actual list marker (e.g., "- ")
+                            Some(ListTableContext {
+                                list_prefix: list_prefix.to_string(),
+                                content_indent: effective_content_indent,
+                            })
+                        } else {
+                            // Continuation: prefix is the indentation spaces
+                            Some(ListTableContext {
+                                list_prefix: " ".repeat(effective_content_indent),
+                                content_indent: effective_content_indent,
+                            })
+                        }
                     } else {
                         None
                     };
@@ -772,8 +839,10 @@ impl TableUtils {
         // Then handle list prefix if present
         if let Some(ref list_ctx) = table_block.list_context {
             if line_index == 0 {
-                // Header line: strip list prefix
-                Self::extract_list_prefix(after_blockquote).1
+                // Header line: strip list prefix (handles both markers and indentation)
+                after_blockquote
+                    .strip_prefix(&list_ctx.list_prefix)
+                    .unwrap_or_else(|| Self::extract_list_prefix(after_blockquote).1)
             } else {
                 // Continuation lines: strip indentation
                 Self::strip_list_continuation_indent(after_blockquote, list_ctx.content_indent)

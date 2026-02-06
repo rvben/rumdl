@@ -469,3 +469,69 @@ This line has | some | pipes | but | isn't | a | table.
     let result = rule.check(&fixed_ctx).unwrap();
     assert_eq!(result.len(), 0, "Fixed content should have no warnings");
 }
+
+// --- Continuation table tests (tables on lines after the list marker) ---
+
+#[test]
+fn test_md055_continuation_table_preserves_indent() {
+    // MD055 with "leading_and_trailing" style should fix pipe style
+    // while preserving list indentation
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+    // Table without leading pipes, indented under a list item
+    let content = "- Item\n  h1 | h2\n  ---|---\n  d1 | d2";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "- Item", "List text unchanged");
+    // All table lines must keep 2-space indent
+    for (idx, line) in lines.iter().enumerate().skip(1) {
+        assert!(
+            line.starts_with("  "),
+            "Line {idx} must preserve 2-space indent, got: {line:?}",
+        );
+    }
+    // Should now have leading and trailing pipes
+    assert!(
+        lines[1].trim().starts_with('|') && lines[1].trim().ends_with('|'),
+        "Header should have leading/trailing pipes after fix, got: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_md055_continuation_table_idempotent() {
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+    let content = "- Item\n  | h1 | h2 |\n  |---|---|\n  | d1 | d2 |";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx).unwrap();
+
+    let ctx2 = LintContext::new(&fixed1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(fixed1, fixed2, "MD055 fix must be idempotent for continuation tables");
+}
+
+#[test]
+fn test_md055_nested_list_continuation_table_at_parent_level() {
+    let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+
+    let content = "- Parent\n  - Child\n\n  | h1 | h2 |\n  |---|---|\n  | d1 | d2 |";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    // Table at parent indent (2 spaces) must be preserved
+    assert!(
+        lines[3].starts_with("  "),
+        "Table header at parent level must keep indent, got: {:?}",
+        lines[3]
+    );
+    assert!(
+        lines[4].starts_with("  "),
+        "Table delimiter at parent level must keep indent, got: {:?}",
+        lines[4]
+    );
+}

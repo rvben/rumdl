@@ -667,8 +667,10 @@ impl MD060TableFormat {
                 let after_blockquote = Self::extract_blockquote_prefix(line).1;
                 if list_context.is_some() {
                     if i == 0 {
-                        // Header line: strip list prefix
-                        crate::utils::table_utils::TableUtils::extract_list_prefix(after_blockquote).1
+                        // Header line: strip list prefix (handles both markers and indentation)
+                        after_blockquote.strip_prefix(list_prefix).unwrap_or_else(|| {
+                            crate::utils::table_utils::TableUtils::extract_list_prefix(after_blockquote).1
+                        })
                     } else {
                         // Continuation lines: strip expected indentation
                         after_blockquote

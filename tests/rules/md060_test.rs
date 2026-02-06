@@ -2601,3 +2601,278 @@ fn test_md060_loose_last_column_with_cjk() {
     // CJK row might be different length than English row due to display width differences
     assert_eq!(lines.len(), 4, "Should have 4 lines");
 }
+
+// --- Continuation table tests (tables on lines after the list marker) ---
+
+#[test]
+fn test_md060_unordered_list_continuation_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "- Test\n  | c1 | c2 |\n  |-|-|\n  | foo | bar |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The table must remain indented under the list item
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "- Test", "List item text unchanged");
+    assert!(
+        lines[1].starts_with("  "),
+        "Header line must preserve 2-space indentation, got: {:?}",
+        lines[1]
+    );
+    assert!(
+        lines[2].starts_with("  "),
+        "Delimiter line must preserve 2-space indentation, got: {:?}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with("  "),
+        "Data line must preserve 2-space indentation, got: {:?}",
+        lines[3]
+    );
+
+    // Verify table content is still valid after fixing
+    assert!(lines[1].contains("c1"));
+    assert!(lines[1].contains("c2"));
+    assert!(lines[3].contains("foo"));
+    assert!(lines[3].contains("bar"));
+}
+
+#[test]
+fn test_md060_ordered_list_continuation_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "1. Text\n   | h1 | h2 |\n   |---|---|\n   | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "1. Text");
+    assert!(
+        lines[1].starts_with("   "),
+        "Header must have 3-space indent for ordered list, got: {:?}",
+        lines[1]
+    );
+    assert!(
+        lines[2].starts_with("   "),
+        "Delimiter must have 3-space indent, got: {:?}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with("   "),
+        "Data row must have 3-space indent, got: {:?}",
+        lines[3]
+    );
+}
+
+#[test]
+fn test_md060_nested_list_continuation_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "- Outer\n  - Inner\n    | h1 | h2 |\n    |---|---|\n    | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "- Outer");
+    assert_eq!(lines[1], "  - Inner");
+    assert!(
+        lines[2].starts_with("    "),
+        "Nested table header must have 4-space indent, got: {:?}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with("    "),
+        "Nested table delimiter must have 4-space indent, got: {:?}",
+        lines[3]
+    );
+    assert!(
+        lines[4].starts_with("    "),
+        "Nested table data must have 4-space indent, got: {:?}",
+        lines[4]
+    );
+}
+
+#[test]
+fn test_md060_non_list_indented_table_no_list_context() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Indented table that is NOT under a list item should not get list context
+    let content = "Some text\n| h1 | h2 |\n|---|---|\n| d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "Some text");
+    // Table should not be indented — no list context
+    assert!(
+        !lines[1].starts_with(' '),
+        "Non-list table should not get indentation, got: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_md060_same_line_list_table_no_regression() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Existing same-line list table should still work
+    let content = "- | h1 | h2 |\n  |---|---|\n  | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    // Header line should start with "- "
+    assert!(
+        lines[0].starts_with("- "),
+        "Same-line list table header must keep marker, got: {:?}",
+        lines[0]
+    );
+    // Continuation lines should keep indentation
+    assert!(
+        lines[1].starts_with("  "),
+        "Same-line list table delimiter must keep indent, got: {:?}",
+        lines[1]
+    );
+    assert!(
+        lines[2].starts_with("  "),
+        "Same-line list table data must keep indent, got: {:?}",
+        lines[2]
+    );
+}
+
+#[test]
+fn test_md060_continuation_table_idempotency() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "- Test\n  | c1 | c2 |\n  |-|-|\n  | foo | bar |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx).unwrap();
+
+    // Apply fix a second time — should produce identical output
+    let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(
+        fixed1, fixed2,
+        "Fix must be idempotent:\n  first:  {fixed1:?}\n  second: {fixed2:?}",
+    );
+}
+
+#[test]
+fn test_md060_blank_line_between_text_and_continuation_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // A blank line between list text and table — the table is still inside the list item
+    // per CommonMark (lazy continuation)
+    let content = "- Text\n\n  | h1 | h2 |\n  |---|---|\n  | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    // Table lines should preserve indentation
+    assert!(
+        lines[2].starts_with("  "),
+        "Table after blank line should keep indent, got: {:?}",
+        lines[2]
+    );
+    assert!(
+        lines[3].starts_with("  "),
+        "Delimiter after blank line should keep indent, got: {:?}",
+        lines[3]
+    );
+    assert!(
+        lines[4].starts_with("  "),
+        "Data after blank line should keep indent, got: {:?}",
+        lines[4]
+    );
+}
+
+#[test]
+fn test_md060_nested_list_table_at_parent_level() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table belongs to the parent list item (indent=2), not the child (indent=4)
+    let content = "- Parent\n  - Child\n\n  | h1 | h2 |\n  |---|---|\n  | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "- Parent");
+    assert_eq!(lines[1], "  - Child");
+    // Table at parent indent level (2 spaces) must be preserved
+    assert!(
+        lines[3].starts_with("  "),
+        "Table at parent level must keep 2-space indent, got: {:?}",
+        lines[3]
+    );
+    assert!(
+        lines[4].starts_with("  "),
+        "Delimiter at parent level must keep 2-space indent, got: {:?}",
+        lines[4]
+    );
+    assert!(
+        lines[5].starts_with("  "),
+        "Data at parent level must keep 2-space indent, got: {:?}",
+        lines[5]
+    );
+}
+
+#[test]
+fn test_md060_deeply_indented_not_code_block() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // 3 extra spaces beyond content indent (2) = 5 total. NOT a code block (need 4+ extra = 6+)
+    let content = "- Item\n     | h1 | h2 |\n     |---|---|\n     | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    // Should still be treated as a list table, normalized to content indent (2 spaces)
+    assert!(
+        lines[1].starts_with("  "),
+        "Table should be normalized to content indent, got: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_md060_code_block_boundary_not_treated_as_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // 4 extra spaces beyond content indent (2) = 6 total → this is a code block, not a table
+    let content = "- Item\n      | h1 | h2 |\n      |---|---|\n      | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The "table" is actually a code block — should NOT be reformatted as a list table
+    // (It should remain as-is or be treated as a plain table without list context)
+    let lines: Vec<&str> = fixed.lines().collect();
+    // Should NOT have exactly 2-space indent (that would mean we incorrectly treated it as list table)
+    // It should either remain at 6 spaces (code block, untouched) or be at 0 (plain table)
+    let header_indent = lines[1].len() - lines[1].trim_start().len();
+    assert_ne!(
+        header_indent, 2,
+        "Code-block-depth content should not get list table treatment, got indent: {header_indent}",
+    );
+}
+
+#[test]
+fn test_md060_mixed_ordered_unordered_nested_continuation() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Ordered parent (indent=3) with unordered child (indent=5)
+    // Table at parent level (indent=3)
+    let content = "1. Ordered\n   - Unordered\n\n   | h1 | h2 |\n   |---|---|\n   | d1 | d2 |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines[0], "1. Ordered");
+    // Table at ordered list level must preserve 3-space indent
+    assert!(
+        lines[3].starts_with("   "),
+        "Table at ordered list level must keep 3-space indent, got: {:?}",
+        lines[3]
+    );
+}

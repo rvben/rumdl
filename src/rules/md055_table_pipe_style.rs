@@ -181,15 +181,18 @@ impl MD055TablePipeStyle {
         // Handle list context if present
         if let Some(ref list_ctx) = table_block.list_context {
             if table_line_index == 0 {
-                // Header line: extract list prefix
-                let (list_prefix, content, _) = TableUtils::extract_list_prefix(after_bq);
-                let fixed_content = self.fix_table_content(content.trim(), target_style);
+                // Header line: strip list prefix (handles both markers and indentation)
+                let stripped = after_bq
+                    .strip_prefix(&list_ctx.list_prefix)
+                    .unwrap_or_else(|| TableUtils::extract_list_prefix(after_bq).1);
+                let fixed_content = self.fix_table_content(stripped.trim(), target_style);
 
                 // Restore prefixes: blockquote + list prefix + fixed content
-                if bq_prefix.is_empty() && list_prefix.is_empty() {
+                let lp = &list_ctx.list_prefix;
+                if bq_prefix.is_empty() && lp.is_empty() {
                     fixed_content
                 } else {
-                    format!("{bq_prefix}{list_prefix}{fixed_content}")
+                    format!("{bq_prefix}{lp}{fixed_content}")
                 }
             } else {
                 // Continuation lines: strip indentation, then restore it
