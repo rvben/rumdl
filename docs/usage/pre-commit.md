@@ -65,25 +65,17 @@ hooks:
     exclude: ^docs/drafts/
 ```
 
-### Force Exclude
+### No Exclude
 
-By default, pre-commit passes files explicitly, which bypasses exclude patterns in your config. To enforce excludes:
+Exclude patterns from your config are always respected by default (as of v0.0.156).
 
-=== "In config file"
+To disable all configured exclusions, use `--no-exclude` flag.
 
-    ```toml title=".rumdl.toml"
-    [global]
-    exclude = ["generated/*.md", "vendor/**"]
-    force_exclude = true
-    ```
-
-=== "In pre-commit"
-
-    ```yaml
-    hooks:
-      - id: rumdl
-        args: [--force-exclude]
-    ```
+```yaml
+hooks:
+  - id: rumdl
+    args: [--no-exclude].  # Disable exclude patterns defined in config
+```
 
 ## Stages
 

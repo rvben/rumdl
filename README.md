@@ -297,8 +297,8 @@ rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 # Don't respect gitignore files (note: --respect-gitignore defaults to true)
 rumdl check --respect-gitignore=false .
 
-# Force exclude patterns even for explicitly specified files (useful for pre-commit)
-rumdl check excluded.md --force-exclude  # Will respect exclude patterns in config
+# Ignore exclude patterns from config
+rumdl check excluded.md --no-exclude  # Will ignore exclude patterns in config
 ```
 
 ### Stdin/Stdout Formatting
@@ -361,30 +361,18 @@ When you run `pre-commit install` or `pre-commit run`, pre-commit will automatic
 
 ### Excluding Files in Pre-commit
 
-By default, when pre-commit passes files explicitly to rumdl, the exclude patterns in your `.rumdl.toml` configuration file are ignored. This is intentional behavior - if you explicitly specify a
-file, it gets checked.
+By default, when pre-commit explicitly passes files to rumdl, the exclude patterns defined in your `.rumdl.toml` configuration file are respected.
 
-However, for pre-commit workflows where you want to exclude certain files even when they're passed explicitly, you have two options:
+However, for pre-commit workflows where you want to include all files, even when they're excluded in the config, you can use the `--no-exclude` flag in your pre-commit config, e.g.:
 
-1. **Use `force_exclude` in your configuration file:**
-
-   ```toml
-   # .rumdl.toml
-   [global]
-   exclude = ["generated/*.md", "vendor/**"]
-   force_exclude = true  # Enforce excludes even for explicitly provided files
-   ```
-
-2. **Use the `--force-exclude` flag in your pre-commit config:**
-
-   ```yaml
-   repos:
-     - repo: https://github.com/rvben/rumdl-pre-commit
-       rev: v0.1.15
-       hooks:
-         - id: rumdl
-           args: [--force-exclude]  # Respect exclude patterns from config
-   ```
+ ```yaml
+ repos:
+   - repo: https://github.com/rvben/rumdl-pre-commit
+     rev: v0.1.15
+     hooks:
+       - id: rumdl
+         args: [--no-exclude]  # Ignore exclude patterns defined in config
+ ```
 
 ## CI/CD Integration
 
@@ -517,7 +505,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
-- `--force-exclude`: Enforce exclude patterns even for explicitly specified files (useful for pre-commit hooks)
+- `--no-exclude`: Ignore exclude patterns from config
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information
 - `--statistics`: Show rule violation statistics summary
