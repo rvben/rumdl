@@ -312,7 +312,6 @@ pub fn process_file_with_formatter(
         // Use per-file flavor for re-lint (same as initial lint)
         let flavor = config.get_flavor_for_file(Path::new(file_path));
         let fixed_ctx = LintContext::new(&content, flavor, None);
-        let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(&content);
         let mut remaining_warnings = Vec::new();
 
         for rule in &filtered_rules {
@@ -326,7 +325,7 @@ pub fn process_file_with_formatter(
                     } else {
                         rule_name
                     };
-                    !inline_config.is_rule_disabled(base_rule_name, warning.line)
+                    !fixed_ctx.inline_config().is_rule_disabled(base_rule_name, warning.line)
                 });
                 remaining_warnings.extend(filtered_warnings);
             }

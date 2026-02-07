@@ -129,11 +129,8 @@ impl Rule for MD013LineLength {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-
-        // Parse inline configuration FIRST so we can use effective config for should_skip
-        let inline_config = crate::inline_config::InlineConfig::from_content(content);
-        let config_override = inline_config.get_rule_config("MD013");
+        // Use pre-parsed inline config from LintContext
+        let config_override = ctx.inline_config().get_rule_config("MD013");
 
         // Apply configuration override if present
         let effective_config = if let Some(json_config) = config_override {
@@ -215,12 +212,7 @@ impl Rule for MD013LineLength {
             return Ok(warnings);
         }
 
-        // Use ctx.lines if available for better performance
-        let lines: Vec<&str> = if !ctx.lines.is_empty() {
-            ctx.lines.iter().map(|l| l.content(ctx.content)).collect()
-        } else {
-            content.lines().collect()
-        };
+        let lines = ctx.raw_lines();
 
         // Create a quick lookup set for heading lines
         // We need this for both the heading skip check AND the paragraphs check
@@ -312,7 +304,7 @@ impl Rule for MD013LineLength {
                 }
 
                 // Skip lines that are only a URL, image ref, or link ref
-                if self.should_ignore_line(line, &lines, line_idx, ctx) {
+                if self.should_ignore_line(line, lines, line_idx, ctx) {
                     continue;
                 }
             }
@@ -367,7 +359,7 @@ impl Rule for MD013LineLength {
 
         // If reflow is enabled, generate paragraph-based fixes
         if effective_config.reflow {
-            let paragraph_warnings = self.generate_paragraph_fixes(ctx, &effective_config, &lines);
+            let paragraph_warnings = self.generate_paragraph_fixes(ctx, &effective_config, lines);
             // Merge paragraph warnings with line warnings, removing duplicates
             for pw in paragraph_warnings {
                 // Remove any line warnings that overlap with this paragraph

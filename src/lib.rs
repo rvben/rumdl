@@ -255,8 +255,9 @@ pub fn lint_and_index(
         return (Ok(warnings), file_index);
     }
 
-    // Parse inline configuration comments once
-    let inline_config = crate::inline_config::InlineConfig::from_content(content);
+    // Parse LintContext once (includes inline config parsing)
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
+    let inline_config = lint_ctx.inline_config();
 
     // Export inline config data to FileIndex for cross-file rule filtering
     let (file_disabled, persistent_transitions, line_disabled) = inline_config.export_for_file_index();
@@ -277,9 +278,6 @@ pub fn lint_and_index(
     let _total_rules = rules.len();
     let _applicable_count = applicable_rules.len();
 
-    // Parse LintContext once with the provided flavor
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
-
     #[cfg(not(target_arch = "wasm32"))]
     let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();
     #[cfg(target_arch = "wasm32")]
@@ -289,7 +287,7 @@ pub fn lint_and_index(
     // then recreate only the affected rules. Works for ALL rules without per-rule changes.
     let inline_overrides = inline_config.get_all_rule_configs();
     let merged_config = if !inline_overrides.is_empty() {
-        config.map(|c| c.merge_with_inline_config(&inline_config))
+        config.map(|c| c.merge_with_inline_config(inline_config))
     } else {
         None
     };
