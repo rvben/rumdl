@@ -703,15 +703,18 @@ impl MD032BlanksAroundLists {
                         let next_excluded = ctx.line_info(line_idx + 2).is_some_and(|info| info.in_front_matter);
 
                         if !next_is_blank && !next_excluded && !next_line.trim().is_empty() {
-                            // Check if next line is part of this potential list (continuation or another item)
-                            let next_is_list_content = ORDERED_LIST_NON_ONE_RE.is_match(next_line)
-                                || next_line.trim_start().starts_with("- ")
-                                || next_line.trim_start().starts_with("* ")
-                                || next_line.trim_start().starts_with("+ ")
+                            // Check if next line is a continuation of this ordered list
+                            // Only other ordered items or indented continuations count;
+                            // unordered list markers are a different list requiring separation
+                            let next_trimmed = next_line.trim_start();
+                            let next_is_ordered_content = ORDERED_LIST_NON_ONE_RE.is_match(next_line)
                                 || next_line.starts_with("1. ")
-                                || (next_line.len() > next_line.trim_start().len()); // indented continuation
+                                || (next_line.len() > next_trimmed.len()
+                                    && !next_trimmed.starts_with("- ")
+                                    && !next_trimmed.starts_with("* ")
+                                    && !next_trimmed.starts_with("+ ")); // indented continuation (not a nested unordered list)
 
-                            if !next_is_list_content {
+                            if !next_is_ordered_content {
                                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
                                 let bq_prefix = ctx.blockquote_prefix_for_blank_line(line_idx);
                                 warnings.push(LintWarning {
