@@ -10,3 +10,6 @@ cc 9d4336790c7c4c174061b6aecbeb4883b8d2568e4b05d69a05030bce6506c0b6 # shrinks to
 cc 50790333581cdfe1bd8dadb337faef05adde980638ee7beaeef52624b3010f5d # shrinks to content = "**Σ**0`\n** Σ**\n# "
 cc 52756b9df937bbfe602720c8e1f78abbae00978c01a7de873958144123b42348 # shrinks to content = "***\n---\n# "
 cc 9c3d60039fbd5883d21104d3e002e19e8ce1d45e8bde4b80be00051859201ca9 # shrinks to content = "**\n2. \n- \n- "
+cc 28562fa831e56d3f4d44c768f59eec9aaf8d60077bb791102e5a16ca2a7c1e25 # shrinks to content = "**\n1. \\\n``\n```\n𑤉\n```\n``\n- !"
+cc cced29478b47cf57d82ecc2937a0a796eca5645d41284aad37edd0a8427f8291 # shrinks to content = "- \n> *\n> !\n- "
+cc a502bbd95bfacb1734f6102972ba1be9547235ffb60f010f572587baf0866571 # shrinks to content = "> 0\u{2000} "
