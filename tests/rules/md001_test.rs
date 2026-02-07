@@ -25,11 +25,14 @@ pub fn test_md001_invalid() {
 #[test]
 pub fn test_md001_multiple_violations() {
     let rule = MD001HeadingIncrement::default();
+    // H1 → H3 → H4: check() tracks the fixed level for idempotent fixes.
+    // H3 is flagged (expected H2), H4 is flagged (expected H3 after fixed H2).
     let content = "# Heading 1\n### Heading 3\n#### Heading 4\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 2);
     assert_eq!(result[0].line, 2);
+    assert_eq!(result[1].line, 3);
 }
 
 #[test]

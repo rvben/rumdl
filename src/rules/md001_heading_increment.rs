@@ -202,7 +202,17 @@ impl Rule for MD001HeadingIncrement {
                 });
             }
 
-            prev_level = Some(level);
+            // Track the effective level after fixing: if this heading was fixed,
+            // subsequent headings should be compared against the fixed level.
+            // This matches fix() behavior and ensures check()+apply_all_fixes
+            // produces idempotent results in a single pass.
+            if let Some(prev) = prev_level
+                && level > prev + 1
+            {
+                prev_level = Some(prev + 1);
+            } else {
+                prev_level = Some(level);
+            }
         }
 
         Ok(warnings)
@@ -350,12 +360,14 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
 
-        // Test with invalid headings
+        // Test with invalid headings: H1 → H3 → H4
+        // H3 skips level 2, and H4 is > fixed(H3=H2) + 1, so both are flagged
         let content = "# Heading 1\n### Heading 3\n#### Heading 4";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 2);
+        assert_eq!(result[1].line, 3);
     }
 
     #[test]
@@ -481,6 +493,83 @@ mod tests {
             fix.replacement.contains("{ #custom-id .special }"),
             "check() fix should preserve attribute list, got: {}",
             fix.replacement
+        );
+    }
+
+    #[test]
+    fn test_check_single_skip_with_repeated_level() {
+        let rule = MD001HeadingIncrement::default();
+
+        // H1 followed by two H3s: only the first H3 is flagged.
+        // After fixing H3a to H2 (prev+1), H3b at level 3 = 2+1 is valid.
+        let content = "# H1\n### H3a\n### H3b";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "Only first H3 should be flagged: got {warnings:?}");
+        assert!(warnings[0].message.contains("Expected heading level 2"));
+
+        // Verify check()+apply_all_fixes produces idempotent output
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+        assert!(
+            warnings_after.is_empty(),
+            "After fix, no warnings should remain: {fixed:?}, warnings: {warnings_after:?}"
+        );
+    }
+
+    #[test]
+    fn test_check_cascading_skip_produces_idempotent_fix() {
+        let rule = MD001HeadingIncrement::default();
+
+        // H1 → H4 → H5: both are flagged.
+        // H4: prev=1, expected=2. Fixed level tracked as 2.
+        // H5: prev=2, expected=3.
+        // Both fixes applied in one pass produce clean output.
+        let content = "# Title\n#### Deep\n##### Deeper";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Both deep headings should be flagged for idempotent fix"
+        );
+        assert!(warnings[0].message.contains("Expected heading level 2"));
+        assert!(warnings[1].message.contains("Expected heading level 3"));
+
+        // Verify single-pass idempotent fix
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_after = rule.check(&ctx_fixed).unwrap();
+        assert!(
+            warnings_after.is_empty(),
+            "Fixed content should have no warnings: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_check_level_decrease_resets_tracking() {
+        let rule = MD001HeadingIncrement::default();
+
+        // H1 → H3 (flagged) → H1 (decrease, always allowed) → H3 (flagged again)
+        let content = "# Title\n### Sub\n# Another\n### Sub2";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Both H3 headings should be flagged (each follows an H1)"
+        );
+
+        // Verify single-pass idempotent fix
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&ctx_fixed).unwrap().is_empty(),
+            "Fixed content should pass: {fixed:?}"
         );
     }
 }

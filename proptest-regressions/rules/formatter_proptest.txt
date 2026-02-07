@@ -14,3 +14,5 @@ cc 28562fa831e56d3f4d44c768f59eec9aaf8d60077bb791102e5a16ca2a7c1e25 # shrinks to
 cc cced29478b47cf57d82ecc2937a0a796eca5645d41284aad37edd0a8427f8291 # shrinks to content = "- \n> *\n> !\n- "
 cc a502bbd95bfacb1734f6102972ba1be9547235ffb60f010f572587baf0866571 # shrinks to content = "> 0\u{2000} "
 cc 315c4abb3ee953f78eb2e514678e4a9e84f33bf1645af9413180afda26e88feb # shrinks to content = "[](\u{2000}\"<)"
+cc 0db63a656dee91f43156b6b7be042f08f7060527a5bf1bd5f69936f0f4fa2806 # shrinks to content = "# \n### \n### "
+cc 18a3f3c3349bc74f4b91f4637fafa8b2458280b544c9d3e75610208f1466b643 # shrinks to content = "- $\n| ` |  |\n| --- | --- |\n**0**\n| ` |  |\n| --- | --- |"
