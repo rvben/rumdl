@@ -259,8 +259,9 @@ pub fn lint_and_index(
     let inline_config = crate::inline_config::InlineConfig::from_content(content);
 
     // Export inline config data to FileIndex for cross-file rule filtering
-    let (file_disabled, line_disabled) = inline_config.export_for_file_index();
+    let (file_disabled, persistent_transitions, line_disabled) = inline_config.export_for_file_index();
     file_index.file_disabled_rules = file_disabled;
+    file_index.persistent_transitions = persistent_transitions;
     file_index.line_disabled_rules = line_disabled;
 
     // Analyze content characteristics for rule filtering

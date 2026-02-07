@@ -38,13 +38,32 @@ fn has_inline_config_markers(content: &str) -> bool {
     content.contains("markdownlint") || content.contains("rumdl") || content.contains("prettier-ignore")
 }
 
+/// Type alias for the export_for_file_index return type:
+/// (file_disabled_rules, persistent_transitions, line_disabled_rules)
+pub type FileIndexExport = (
+    HashSet<String>,
+    Vec<(usize, HashSet<String>, HashSet<String>)>,
+    HashMap<usize, HashSet<String>>,
+);
+
+/// A state transition recording which rules are disabled/enabled starting at a given line.
+/// Transitions are stored in ascending line order. The state at any line is determined by
+/// the most recent transition at or before that line.
+#[derive(Debug, Clone)]
+struct StateTransition {
+    /// The 1-indexed line number where this state takes effect
+    line: usize,
+    /// The set of disabled rules at this point ("*" means all rules disabled)
+    disabled: HashSet<String>,
+    /// The set of explicitly enabled rules (only meaningful when disabled contains "*")
+    enabled: HashSet<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct InlineConfig {
-    /// Rules that are disabled at each line (1-indexed line -> set of disabled rules)
-    disabled_at_line: HashMap<usize, HashSet<String>>,
-    /// Rules that are explicitly enabled when all rules are disabled (1-indexed line -> set of enabled rules)
-    /// Only used when "*" is in disabled_at_line
-    enabled_at_line: HashMap<usize, HashSet<String>>,
+    /// State transitions for persistent disable/enable directives, sorted by line number.
+    /// Only stores entries where the state actually changes, not for every line.
+    transitions: Vec<StateTransition>,
     /// Rules disabled for specific lines via disable-line (1-indexed)
     line_disabled_rules: HashMap<usize, HashSet<String>>,
     /// Rules disabled for the entire file
@@ -65,12 +84,30 @@ impl Default for InlineConfig {
 impl InlineConfig {
     pub fn new() -> Self {
         Self {
-            disabled_at_line: HashMap::new(),
-            enabled_at_line: HashMap::new(),
+            transitions: Vec::new(),
             line_disabled_rules: HashMap::new(),
             file_disabled_rules: HashSet::new(),
             file_enabled_rules: HashSet::new(),
             file_rule_config: HashMap::new(),
+        }
+    }
+
+    /// Find the state transition that applies to the given line number.
+    /// Uses binary search to find the last transition at or before the given line.
+    fn find_transition(&self, line_number: usize) -> Option<&StateTransition> {
+        if self.transitions.is_empty() {
+            return None;
+        }
+        // Binary search for the rightmost transition with line <= line_number
+        match self.transitions.binary_search_by_key(&line_number, |t| t.line) {
+            Ok(idx) => Some(&self.transitions[idx]),
+            Err(idx) => {
+                if idx > 0 {
+                    Some(&self.transitions[idx - 1])
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -106,17 +143,35 @@ impl InlineConfig {
         }
 
         // Track current state of disabled rules
-        let mut currently_disabled = HashSet::new();
-        let mut currently_enabled = HashSet::new(); // For when all rules are disabled
+        let mut currently_disabled: HashSet<String> = HashSet::new();
+        let mut currently_enabled: HashSet<String> = HashSet::new();
         let mut capture_stack: Vec<(HashSet<String>, HashSet<String>)> = Vec::new();
+
+        // Track the previously recorded transition state to detect changes
+        let mut prev_disabled: HashSet<String> = HashSet::new();
+        let mut prev_enabled: HashSet<String> = HashSet::new();
+
+        // Record initial state (line 1: nothing disabled)
+        config.transitions.push(StateTransition {
+            line: 1,
+            disabled: HashSet::new(),
+            enabled: HashSet::new(),
+        });
 
         for (idx, line) in lines.iter().enumerate() {
             let line_num = idx + 1; // 1-indexed
 
-            // Store the current state for this line BEFORE processing comments
-            // This way, comments on a line don't affect that same line
-            config.disabled_at_line.insert(line_num, currently_disabled.clone());
-            config.enabled_at_line.insert(line_num, currently_enabled.clone());
+            // Record a transition only if state changed since last recorded transition.
+            // State for this line is the state BEFORE processing comments on this line.
+            if currently_disabled != prev_disabled || currently_enabled != prev_enabled {
+                config.transitions.push(StateTransition {
+                    line: line_num,
+                    disabled: currently_disabled.clone(),
+                    enabled: currently_enabled.clone(),
+                });
+                prev_disabled.clone_from(&currently_disabled);
+                prev_enabled.clone_from(&currently_enabled);
+            }
 
             // Skip processing if this line is inside a code block
             let line_start = line_positions[idx];
@@ -334,6 +389,15 @@ impl InlineConfig {
             }
         }
 
+        // Record final transition if state changed after the last line was processed
+        if currently_disabled != prev_disabled || currently_enabled != prev_enabled {
+            config.transitions.push(StateTransition {
+                line: lines.len() + 1,
+                disabled: currently_disabled,
+                enabled: currently_enabled,
+            });
+        }
+
         config
     }
 
@@ -354,16 +418,12 @@ impl InlineConfig {
             return true;
         }
 
-        // Check persistent disables at this line
-        if let Some(disabled_set) = self.disabled_at_line.get(&line_number) {
-            if disabled_set.contains("*") {
-                // All rules are disabled, check if this rule is explicitly enabled
-                if let Some(enabled_set) = self.enabled_at_line.get(&line_number) {
-                    return !enabled_set.contains(rule_name);
-                }
-                return true; // All disabled and not explicitly enabled
+        // Check persistent disables via state transitions (binary search)
+        if let Some(transition) = self.find_transition(line_number) {
+            if transition.disabled.contains("*") {
+                return !transition.enabled.contains(rule_name);
             } else {
-                return disabled_set.contains(rule_name);
+                return transition.disabled.contains(rule_name);
             }
         }
 
@@ -374,15 +434,12 @@ impl InlineConfig {
     pub fn get_disabled_rules(&self, line_number: usize) -> HashSet<String> {
         let mut disabled = HashSet::new();
 
-        // Add persistent disables
-        if let Some(disabled_set) = self.disabled_at_line.get(&line_number) {
-            if disabled_set.contains("*") {
-                // All rules are disabled except those explicitly enabled
+        // Add persistent disables via state transitions (binary search)
+        if let Some(transition) = self.find_transition(line_number) {
+            if transition.disabled.contains("*") {
                 disabled.insert("*".to_string());
-                // We could subtract enabled rules here, but that would require knowing all rules
-                // For now, we'll just return "*" to indicate all rules are disabled
             } else {
-                for rule in disabled_set {
+                for rule in &transition.disabled {
                     disabled.insert(rule.clone());
                 }
             }
@@ -408,24 +465,21 @@ impl InlineConfig {
         &self.file_rule_config
     }
 
-    /// Export the disabled rules data for storage in FileIndex
+    /// Export the disabled rules data for storage in FileIndex.
     ///
-    /// Returns (file_disabled_rules, line_disabled_rules) for use in cross-file checks.
-    /// Merges both persistent disables and line-specific disables into a single map.
-    pub fn export_for_file_index(&self) -> (HashSet<String>, HashMap<usize, HashSet<String>>) {
+    /// Returns (file_disabled_rules, persistent_transitions, line_disabled_rules).
+    pub fn export_for_file_index(&self) -> FileIndexExport {
         let file_disabled = self.file_disabled_rules.clone();
 
-        // Merge disabled_at_line and line_disabled_rules into a single map
-        let mut line_disabled: HashMap<usize, HashSet<String>> = HashMap::new();
+        let persistent_transitions: Vec<(usize, HashSet<String>, HashSet<String>)> = self
+            .transitions
+            .iter()
+            .map(|t| (t.line, t.disabled.clone(), t.enabled.clone()))
+            .collect();
 
-        for (line, rules) in &self.disabled_at_line {
-            line_disabled.entry(*line).or_default().extend(rules.clone());
-        }
-        for (line, rules) in &self.line_disabled_rules {
-            line_disabled.entry(*line).or_default().extend(rules.clone());
-        }
+        let line_disabled = self.line_disabled_rules.clone();
 
-        (file_disabled, line_disabled)
+        (file_disabled, persistent_transitions, line_disabled)
     }
 }
 
