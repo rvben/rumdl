@@ -36,6 +36,17 @@ impl MD009TrailingSpaces {
         line.as_bytes().iter().rev().take_while(|&&b| b == b' ').count()
     }
 
+    /// Count all trailing whitespace characters (ASCII and Unicode).
+    /// This includes U+2000..U+200A (various Unicode spaces), ASCII space, tab, etc.
+    fn count_trailing_whitespace(line: &str) -> usize {
+        line.chars().rev().take_while(|c| c.is_whitespace()).count()
+    }
+
+    /// Check if a line has any trailing whitespace (ASCII or Unicode)
+    fn has_trailing_whitespace(line: &str) -> bool {
+        line.chars().next_back().is_some_and(|c| c.is_whitespace())
+    }
+
     fn trimmed_len_ascii_whitespace(line: &str) -> usize {
         line.as_bytes()
             .iter()
@@ -95,14 +106,22 @@ impl Rule for MD009TrailingSpaces {
             }
 
             let line_is_ascii = line.is_ascii();
-            let trailing_spaces = if line_is_ascii {
+            // Count ASCII trailing spaces for br_spaces comparison
+            let trailing_ascii_spaces = if line_is_ascii {
                 Self::count_trailing_spaces_ascii(line)
             } else {
                 Self::count_trailing_spaces(line)
             };
+            // For non-ASCII lines, also count all trailing whitespace (including Unicode)
+            // to ensure the fix range covers everything that trim_end() removes
+            let trailing_all_whitespace = if line_is_ascii {
+                trailing_ascii_spaces
+            } else {
+                Self::count_trailing_whitespace(line)
+            };
 
-            // Skip if no trailing spaces
-            if trailing_spaces == 0 {
+            // Skip if no trailing whitespace
+            if trailing_all_whitespace == 0 {
                 continue;
             }
 
@@ -113,14 +132,14 @@ impl Rule for MD009TrailingSpaces {
                 line.trim_end().len()
             };
             if trimmed_len == 0 {
-                if trailing_spaces > 0 {
+                if trailing_all_whitespace > 0 {
                     // Check if this is an empty list item line and config allows it
                     let prev_line = if line_num > 0 { Some(lines[line_num - 1]) } else { None };
                     if self.config.list_item_empty_lines && Self::is_empty_list_item_line(line, prev_line) {
                         continue;
                     }
 
-                    // Calculate precise character range for all trailing spaces on empty line
+                    // Calculate precise character range for all trailing whitespace on empty line
                     let (start_line, start_col, end_line, end_col) = if line_is_ascii {
                         Self::calculate_trailing_range_ascii(line_num + 1, line.len(), 0)
                     } else {
@@ -130,7 +149,7 @@ impl Rule for MD009TrailingSpaces {
                     let fix_range = if line_is_ascii {
                         line_start..line_start + line.len()
                     } else {
-                        _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len())
+                        _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.chars().count())
                     };
 
                     warnings.push(LintWarning {
@@ -160,16 +179,19 @@ impl Rule for MD009TrailingSpaces {
                 }
             }
 
-            // Check if it's a valid line break
-            // Special handling: if the content ends with a newline, the last line from .lines()
-            // is not really the "last line" in terms of trailing spaces rules
+            // Check if it's a valid line break (only ASCII spaces count for br_spaces)
             let is_truly_last_line = line_num == lines.len() - 1 && !content.ends_with('\n');
-            if !self.config.strict && !is_truly_last_line && trailing_spaces == self.config.br_spaces.get() {
+            let has_only_ascii_trailing = trailing_ascii_spaces == trailing_all_whitespace;
+            if !self.config.strict
+                && !is_truly_last_line
+                && has_only_ascii_trailing
+                && trailing_ascii_spaces == self.config.br_spaces.get()
+            {
                 continue;
             }
 
             // Check if this is an empty blockquote line ("> " or ">> " etc)
-            // These are allowed by MD028 to have a single trailing space
+            // These are allowed by MD028 to have a single trailing ASCII space
             let trimmed = if line_is_ascii {
                 &line[..trimmed_len]
             } else {
@@ -177,12 +199,13 @@ impl Rule for MD009TrailingSpaces {
             };
             let is_empty_blockquote_with_space = trimmed.chars().all(|c| c == '>' || c == ' ' || c == '\t')
                 && trimmed.contains('>')
-                && trailing_spaces == 1;
+                && has_only_ascii_trailing
+                && trailing_ascii_spaces == 1;
 
             if is_empty_blockquote_with_space {
-                continue; // Allow single trailing space for empty blockquote lines
+                continue; // Allow single trailing ASCII space for empty blockquote lines
             }
-            // Calculate precise character range for all trailing spaces
+            // Calculate precise character range for all trailing whitespace
             let (start_line, start_col, end_line, end_col) = if line_is_ascii {
                 Self::calculate_trailing_range_ascii(line_num + 1, line.len(), trimmed.len())
             } else {
@@ -191,13 +214,13 @@ impl Rule for MD009TrailingSpaces {
             let line_start = *ctx.line_offsets.get(line_num).unwrap_or(&0);
             let fix_range = if line_is_ascii {
                 let start = line_start + trimmed.len();
-                let end = start + trailing_spaces;
+                let end = start + trailing_all_whitespace;
                 start..end
             } else {
                 _line_index.line_col_to_byte_range_with_length(
                     line_num + 1,
                     trimmed.chars().count() + 1,
-                    trailing_spaces,
+                    trailing_all_whitespace,
                 )
             };
 
@@ -207,17 +230,18 @@ impl Rule for MD009TrailingSpaces {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: if trailing_spaces == 1 {
+                message: if trailing_all_whitespace == 1 {
                     "Trailing space found".to_string()
                 } else {
-                    format!("{trailing_spaces} trailing spaces found")
+                    format!("{trailing_all_whitespace} trailing spaces found")
                 },
                 severity: Severity::Warning,
                 fix: Some(Fix {
                     range: fix_range,
                     replacement: if !self.config.strict
                         && !is_truly_last_line
-                        && trailing_spaces == self.config.br_spaces.get()
+                        && has_only_ascii_trailing
+                        && trailing_ascii_spaces == self.config.br_spaces.get()
                     {
                         " ".repeat(self.config.br_spaces.get())
                     } else {
@@ -235,8 +259,9 @@ impl Rule for MD009TrailingSpaces {
 
         // For simple cases (strict mode), use fast regex approach
         if self.config.strict {
-            // In strict mode, remove ALL trailing spaces everywhere
-            return Ok(get_cached_regex(r"(?m) +$")
+            // In strict mode, remove ALL trailing whitespace everywhere
+            // Use \p{White_Space} to match Unicode whitespace characters too
+            return Ok(get_cached_regex(r"(?m)[\p{White_Space}&&[^\n\r]]+$")
                 .unwrap()
                 .replace_all(content, "")
                 .to_string());
@@ -248,15 +273,31 @@ impl Rule for MD009TrailingSpaces {
         let mut result = String::with_capacity(content.len()); // Pre-allocate capacity
 
         for (i, line) in lines.iter().enumerate() {
-            // Fast path: if no trailing spaces, just add the line
-            if !line.ends_with(' ') {
+            let line_is_ascii = line.is_ascii();
+            // Fast path: check if line has any trailing spaces (ASCII) or
+            // trailing whitespace (Unicode) that we need to handle
+            let needs_processing = if line_is_ascii {
+                line.ends_with(' ')
+            } else {
+                Self::has_trailing_whitespace(line)
+            };
+            if !needs_processing {
                 result.push_str(line);
                 result.push('\n');
                 continue;
             }
 
             let trimmed = line.trim_end();
-            let trailing_spaces = Self::count_trailing_spaces(line);
+            // Count ASCII trailing spaces for br_spaces comparison
+            let trailing_ascii_spaces = Self::count_trailing_spaces(line);
+            // Count all trailing whitespace to detect Unicode whitespace presence
+            let trailing_all_whitespace = if line_is_ascii {
+                trailing_ascii_spaces
+            } else {
+                Self::count_trailing_whitespace(line)
+            };
+            // Only consider pure ASCII trailing spaces for br_spaces preservation
+            let has_only_ascii_trailing = trailing_ascii_spaces == trailing_all_whitespace;
 
             // Handle empty lines - fast regex replacement
             if trimmed.is_empty() {
@@ -303,10 +344,12 @@ impl Rule for MD009TrailingSpaces {
             };
 
             // In non-strict mode, preserve line breaks ONLY if they have exactly br_spaces
-            // BUT: Never preserve trailing spaces in headings or empty blockquotes as they serve no purpose
+            // of pure ASCII trailing spaces (no Unicode whitespace mixed in).
+            // Never preserve trailing spaces in headings or empty blockquotes.
             if !self.config.strict
                 && !is_truly_last_line
-                && trailing_spaces == self.config.br_spaces.get()
+                && has_only_ascii_trailing
+                && trailing_ascii_spaces == self.config.br_spaces.get()
                 && !is_heading
                 && !is_empty_blockquote
             {
@@ -334,8 +377,11 @@ impl Rule for MD009TrailingSpaces {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if content is empty or has no spaces at all
-        ctx.content.is_empty() || !ctx.content.contains(' ')
+        // Skip if content is empty.
+        // We cannot skip based on ASCII-space-only check because Unicode whitespace
+        // characters (e.g., U+2000 EN QUAD) also count as trailing whitespace.
+        // The per-line is_ascii fast path in check()/fix() handles performance.
+        ctx.content.is_empty()
     }
 
     fn category(&self) -> RuleCategory {
@@ -719,5 +765,89 @@ mod tests {
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "Line with two spaces  \nNext line");
+    }
+
+    #[test]
+    fn test_unicode_whitespace_idempotent_fix() {
+        // Regression: U+2000 (EN QUAD) mixed with ASCII space caused non-idempotent fixes.
+        // The fix must strip ALL trailing whitespace (Unicode and ASCII) in one pass.
+        let rule = MD009TrailingSpaces::default(); // br_spaces=2
+
+        // Case from proptest: blockquote with U+2000 and ASCII space
+        let content = "> 0\u{2000} ";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should detect trailing Unicode+ASCII whitespace");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "> 0", "Should strip all trailing whitespace in one pass");
+
+        // Verify idempotency: fixing again should produce same result
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed, fixed2, "Fix must be idempotent");
+    }
+
+    #[test]
+    fn test_unicode_whitespace_variants() {
+        let rule = MD009TrailingSpaces::default();
+
+        // U+2000 EN QUAD
+        let content = "text\u{2000}\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "text\n");
+
+        // U+2001 EM QUAD
+        let content = "text\u{2001}\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "text\n");
+
+        // U+3000 IDEOGRAPHIC SPACE
+        let content = "text\u{3000}\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "text\n");
+
+        // Mixed: Unicode space + ASCII spaces
+        // The trailing 2 ASCII spaces match br_spaces, so they are preserved.
+        // The U+2000 between content and the spaces is removed.
+        let content = "text\u{2000}  \n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Unicode+ASCII mix should be flagged");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "text\n",
+            "All trailing whitespace should be stripped when mix includes Unicode"
+        );
+        // Verify idempotency
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed, fixed2, "Fix must be idempotent");
+
+        // Pure ASCII 2 spaces should still be preserved as br_spaces
+        let content = "text  \nnext\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0, "Pure ASCII br_spaces should still be preserved");
+    }
+
+    #[test]
+    fn test_unicode_whitespace_strict_mode() {
+        let rule = MD009TrailingSpaces::new(2, true);
+
+        // Strict mode should remove all Unicode whitespace too
+        let content = "text\u{2000}\nmore\u{3000}\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "text\nmore\n");
     }
 }

@@ -13,3 +13,4 @@ cc 9c3d60039fbd5883d21104d3e002e19e8ce1d45e8bde4b80be00051859201ca9 # shrinks to
 cc 28562fa831e56d3f4d44c768f59eec9aaf8d60077bb791102e5a16ca2a7c1e25 # shrinks to content = "**\n1. \\\n``\n```\n𑤉\n```\n``\n- !"
 cc cced29478b47cf57d82ecc2937a0a796eca5645d41284aad37edd0a8427f8291 # shrinks to content = "- \n> *\n> !\n- "
 cc a502bbd95bfacb1734f6102972ba1be9547235ffb60f010f572587baf0866571 # shrinks to content = "> 0\u{2000} "
+cc 315c4abb3ee953f78eb2e514678e4a9e84f33bf1645af9413180afda26e88feb # shrinks to content = "[](\u{2000}\"<)"
