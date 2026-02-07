@@ -2,7 +2,6 @@
 
 use colored::*;
 use core::error::Error;
-use memmap2::Mmap;
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
@@ -11,9 +10,6 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 
 use crate::CheckArgs;
-
-/// Threshold for using memory-mapped I/O (1MB)
-pub const MMAP_THRESHOLD: u64 = 1024 * 1024;
 
 /// Apply CLI argument overrides to a sourced config.
 /// This centralizes the logic for CLI args overriding config values,
@@ -34,23 +30,9 @@ pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &Che
     }
 }
 
-/// Efficiently read file content using memory mapping for large files
+/// Read file content as a UTF-8 string.
 pub fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
-    // Get file metadata first
-    let metadata = fs::metadata(path)?;
-    let file_size = metadata.len();
-
-    if file_size > MMAP_THRESHOLD {
-        // Use memory mapping for large files
-        let file = fs::File::open(path)?;
-        let mmap = unsafe { Mmap::map(&file)? };
-
-        // Convert to string - this is still a copy but more efficient for large files
-        String::from_utf8(mmap.to_vec()).map_err(|e| format!("Invalid UTF-8 in file {}: {}", path.display(), e).into())
-    } else {
-        // Use regular reading for small files
-        fs::read_to_string(path).map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
-    }
+    fs::read_to_string(path).map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())
 }
 
 /// Load configuration with standard CLI error handling.
