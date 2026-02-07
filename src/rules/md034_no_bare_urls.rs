@@ -221,10 +221,8 @@ impl MD034NoBareUrls {
                 let after_protocol = &url_str[host_start + 3..];
                 // If it looks like IPv6 (has :: or multiple :) but no brackets, skip if followed by ]
                 if after_protocol.contains("::") || after_protocol.chars().filter(|&c| c == ':').count() > 1 {
-                    // Check if the next character after our match is ]
-                    if let Some(char_after) = line.chars().nth(mat.end())
-                        && char_after == ']'
-                    {
+                    // Check if the next byte after our match is ] (ASCII, so byte check is safe)
+                    if line.as_bytes().get(mat.end()) == Some(&b']') {
                         // This is likely a malformed IPv6 URL like "https://::1]:8080"
                         continue;
                     }

@@ -335,12 +335,12 @@ impl MD044ProperNames {
     fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
         use pulldown_cmark::LinkType;
 
-        // Check inline and reference links - only skip if position is in URL portion, not text portion
-        for link in &ctx.links {
-            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
-                // Calculate where the link text starts based on link type
-                // WikiLinks [[text]] start with '[[' so text is at byte_offset + 2
-                // Regular links [text] start with '[' so text is at byte_offset + 1
+        // Binary search links (sorted by byte_offset) to find candidate containing byte_pos
+        let link_idx = ctx.links.partition_point(|link| link.byte_offset <= byte_pos);
+        if link_idx > 0 {
+            let link = &ctx.links[link_idx - 1];
+            if byte_pos < link.byte_end {
+                // WikiLinks [[text]] start with '[[', regular links [text] start with '['
                 let text_start = if matches!(link.link_type, LinkType::WikiLink { .. }) {
                     link.byte_offset + 2
                 } else {
@@ -348,34 +348,34 @@ impl MD044ProperNames {
                 };
                 let text_end = text_start + link.text.len();
 
-                // If position is within the text portion, don't skip (return false)
+                // If position is within the text portion, don't skip
                 if byte_pos >= text_start && byte_pos < text_end {
                     return false;
                 }
-
                 // Position is in the URL/reference portion, skip it
                 return true;
             }
         }
 
-        // Check images - only skip URL portion, not alt text
-        for image in &ctx.images {
-            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
+        // Binary search images (sorted by byte_offset) to find candidate containing byte_pos
+        let image_idx = ctx.images.partition_point(|img| img.byte_offset <= byte_pos);
+        if image_idx > 0 {
+            let image = &ctx.images[image_idx - 1];
+            if byte_pos < image.byte_end {
                 // Image starts with '![' so alt text starts at byte_offset + 2
                 let alt_start = image.byte_offset + 2;
                 let alt_end = alt_start + image.alt_text.len();
 
-                // If position is within the alt text portion, don't skip (return false)
+                // If position is within the alt text portion, don't skip
                 if byte_pos >= alt_start && byte_pos < alt_end {
                     return false;
                 }
-
                 // Position is in the URL/reference portion, skip it
                 return true;
             }
         }
 
-        // Use pre-computed reference definitions from LintContext
+        // Check pre-computed reference definitions
         ctx.is_in_reference_def(byte_pos)
     }
 
