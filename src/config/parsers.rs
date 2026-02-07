@@ -1,4 +1,3 @@
-use crate::rules;
 use crate::types::LineLength;
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -7,9 +6,8 @@ use std::str::FromStr;
 use toml_edit::DocumentMut;
 
 use super::flavor::{MarkdownFlavor, normalize_key, warn_comma_without_brace_in_pattern};
-use super::registry::RuleRegistry;
 use super::source_tracking::{ConfigSource, SourcedConfigFragment, SourcedValue};
-use super::types::{Config, ConfigError};
+use super::types::ConfigError;
 use super::validation::to_relative_display_path;
 
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
@@ -21,9 +19,8 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
     let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
 
-    // Create rule registry for alias resolution
-    let all_rules = rules::all_rules(&Config::default());
-    let registry = RuleRegistry::from_rules(&all_rules);
+    // Use the lazily-initialized default registry for alias resolution and schema validation
+    let registry = super::registry::default_registry();
 
     // 1. Handle [tool.rumdl] and [tool.rumdl.global] sections
     if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
@@ -461,9 +458,8 @@ pub(super) fn parse_rumdl_toml(
     // source parameter provided by caller
     let file = Some(path.to_string());
 
-    // Define known rules before the loop
-    let all_rules = rules::all_rules(&Config::default());
-    let registry = RuleRegistry::from_rules(&all_rules);
+    // Use the lazily-initialized default registry for alias resolution and schema validation
+    let registry = super::registry::default_registry();
 
     // Handle [global] section
     if let Some(global_item) = doc.get("global")

@@ -1,6 +1,28 @@
+use std::sync::LazyLock;
+
 use crate::rule::Rule;
 
 use super::flavor::normalize_key;
+
+/// Lazily-initialized default `RuleRegistry` built from rules with default config.
+///
+/// Rule config schemas (valid keys, types, aliases) are intrinsic to each rule type
+/// and do not change based on runtime configuration. This static registry avoids
+/// repeatedly constructing 67+ rule instances just to extract their schemas.
+static DEFAULT_REGISTRY: LazyLock<RuleRegistry> = LazyLock::new(|| {
+    let default_config = super::types::Config::default();
+    let rules = crate::rules::all_rules(&default_config);
+    RuleRegistry::from_rules(&rules)
+});
+
+/// Returns a reference to the lazily-initialized default `RuleRegistry`.
+///
+/// Use this instead of `all_rules(&Config::default())` + `RuleRegistry::from_rules()`
+/// when you only need rule metadata (names, config schemas, aliases) rather than
+/// configured rule instances for linting.
+pub fn default_registry() -> &'static RuleRegistry {
+    &DEFAULT_REGISTRY
+}
 
 /// Registry of all known rules and their config schemas
 pub struct RuleRegistry {

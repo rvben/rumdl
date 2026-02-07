@@ -167,11 +167,8 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool) {
                     formatter::format_provenance(provenance)
                 );
             } else {
-                let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
-                if let Some(rule) = all_rules.iter().find(|r| r.name() == section_part)
-                    && let Some((_, toml::Value::Table(table))) = rule.default_config_section()
-                    && let Some(v) = table.get(&normalized_field)
-                {
+                let registry = rumdl_config::default_registry();
+                if let Some(v) = registry.expected_value_for(&normalized_rule_name, &normalized_field) {
                     let value_str = formatter::format_toml_value(v);
                     println!("{normalized_rule_name}.{normalized_field} = {value_str} [from default]");
                     return;
@@ -220,8 +217,8 @@ fn handle_config_display(
     no_config: bool,
     isolated: bool,
 ) {
+    let registry = rumdl_config::default_registry();
     let all_rules_reg = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
-    let registry_reg = rumdl_config::RuleRegistry::from_rules(&all_rules_reg);
     let sourced_reg = if defaults {
         // For defaults, create a SourcedConfig that includes all rule defaults
         let mut default_sourced = rumdl_config::SourcedConfig::default();
@@ -244,7 +241,7 @@ fn handle_config_display(
     } else {
         load_config_with_cli_error_handling(config_path, no_config || isolated)
     };
-    let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, &registry_reg);
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, registry);
     if !validation_warnings.is_empty() {
         for warn in &validation_warnings {
             eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);

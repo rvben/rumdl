@@ -61,9 +61,8 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
 
     // 3. Validate configuration
-    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
-    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
-    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+    let registry = rumdl_config::default_registry();
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);
     if !validation_warnings.is_empty() && !args.silent {
         for warn in &validation_warnings {
             eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);

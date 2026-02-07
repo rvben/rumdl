@@ -692,9 +692,8 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     crate::apply_cli_overrides(&mut sourced, args);
 
     // Validate configuration
-    let all_rules = rumdl_lib::rules::all_rules(&rumdl_config::Config::default());
-    let registry = rumdl_config::RuleRegistry::from_rules(&all_rules);
-    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+    let registry = rumdl_config::default_registry();
+    let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);
     if !validation_warnings.is_empty() && !args.silent {
         for warn in &validation_warnings {
             eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);
@@ -794,7 +793,7 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                             crate::apply_cli_overrides(&mut sourced, args);
 
                             // Re-validate configuration
-                            let validation_warnings = rumdl_config::validate_config_sourced(&sourced, &registry);
+                            let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);
                             if !validation_warnings.is_empty() && !args.silent {
                                 for warn in &validation_warnings {
                                     eprintln!("\x1b[33m[config warning]\x1b[0m {}", warn.message);

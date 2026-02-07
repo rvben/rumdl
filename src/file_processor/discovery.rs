@@ -64,28 +64,20 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         // Handle extend flags (additive with config)
         let mut current_rules = all_rules;
 
-        // Start with config enable if present (config set already resolved to canonical IDs)
+        // If config enable is set AND extend-enable is provided, merge both sets
+        // before filtering, so we only need the single all_rules Vec
         if !config_enable_set.is_empty() {
-            current_rules.retain(|rule| config_enable_set.contains(rule.name()));
-        }
-
-        // Add CLI extend-enable rules
-        if let Some(extend_enabled_cli) = &cli_extend_enable_set {
-            // If we started with all rules (no config enable), keep all rules
-            // If we started with config enable, we need to re-filter with extended set
-            if !config_enable_set.is_empty() {
+            if let Some(extend_enabled_cli) = &cli_extend_enable_set {
                 // Merge config enable set with CLI extend-enable (both already canonical IDs)
                 let extended_enable_set: HashSet<&str> = config_enable_set
                     .iter()
                     .map(|s| s.as_str())
                     .chain(extend_enabled_cli.iter().map(|s| s.as_str()))
                     .collect();
-
-                // Re-filter with extended set
-                current_rules = rumdl_lib::rules::all_rules(config)
-                    .into_iter()
-                    .filter(|rule| extended_enable_set.contains(rule.name()))
-                    .collect();
+                current_rules.retain(|rule| extended_enable_set.contains(rule.name()));
+            } else {
+                // Only config enable, no extend-enable
+                current_rules.retain(|rule| config_enable_set.contains(rule.name()));
             }
         }
 
