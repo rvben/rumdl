@@ -80,10 +80,10 @@ impl MD062LinkDestinationWhitespace {
         let dest_content_start = paren_start + 1; // After '('
         let rest = &raw_link[dest_content_start..];
 
-        // Find the closing paren, handling nested parens and titles
+        // Find the closing paren, handling nested parens and angle brackets
         let mut depth = 1;
         let mut in_angle_brackets = false;
-        let mut dest_content_end = rest.len();
+        let mut dest_content_end = None;
 
         for (i, c) in rest.char_indices() {
             match c {
@@ -93,13 +93,18 @@ impl MD062LinkDestinationWhitespace {
                 ')' if !in_angle_brackets => {
                     depth -= 1;
                     if depth == 0 {
-                        dest_content_end = i;
+                        dest_content_end = Some(i);
                         break;
                     }
                 }
                 _ => {}
             }
         }
+
+        // If we couldn't find the matching closing paren, the link structure
+        // is too complex to parse (e.g., unmatched angle brackets masking the
+        // closing paren). Bail out rather than producing a broken fix.
+        let dest_content_end = dest_content_end?;
 
         let dest_content = &rest[..dest_content_end];
 
@@ -665,6 +670,41 @@ mod tests {
             warnings[0].fix.as_ref().unwrap().replacement,
             "[link](./path/to/file.md)"
         );
+    }
+
+    #[test]
+    fn test_unmatched_angle_bracket_in_destination() {
+        // When `<` inside the destination masks the closing `)`, the rule
+        // should not produce a warning or fix, since it cannot reliably
+        // determine the destination boundaries.
+        let rule = MD062LinkDestinationWhitespace::new();
+        let content = "[](  \"<)";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Should not warn when closing paren is masked by angle bracket"
+        );
+
+        // Verify idempotency: fix should not modify unparseable links
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_unicode_whitespace_in_destination() {
+        // Unicode whitespace (EN QUAD U+2000) in link destination
+        let rule = MD062LinkDestinationWhitespace::new();
+        let content = "[](\u{2000}\"<)";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Should not warn when angle bracket masks closing paren"
+        );
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix must be idempotent for unparseable links");
     }
 
     #[test]
