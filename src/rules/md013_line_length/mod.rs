@@ -7,9 +7,7 @@ use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
-use crate::utils::regex_cache::{
-    IMAGE_REF_PATTERN, INLINE_LINK_REGEX as MARKDOWN_LINK_PATTERN, LINK_REF_PATTERN, URL_IN_TEXT, URL_PATTERN,
-};
+use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::split_into_sentences;
 use toml;
@@ -241,13 +239,13 @@ impl Rule for MD013LineLength {
             let line_number = line_idx + 1;
             let line = lines[line_idx];
 
-            // Calculate effective length excluding unbreakable URLs
+            // Calculate actual line length
             let effective_length = self.calculate_effective_length(line);
 
             // Use single line length limit for all content
             let line_limit = effective_config.line_length.get();
 
-            // Skip short lines immediately (double-check after effective length calculation)
+            // Skip short lines immediately
             if effective_length <= line_limit {
                 continue;
             }
@@ -466,6 +464,7 @@ impl MD013LineLength {
                 || lines[i].trim().is_empty()
                 || is_horizontal_rule(lines[i].trim())
                 || is_template_directive_only(lines[i])
+                || (lines[i].trim().starts_with('[') && lines[i].contains("]:"))
             {
                 i += 1;
                 continue;
@@ -1210,7 +1209,6 @@ impl MD013LineLength {
                     }
                     ReflowMode::Default => {
                         // In default mode, only reflow if any individual line exceeds limit
-                        // Check the original lines, not the combined content
                         (list_start..i)
                             .any(|line_idx| self.calculate_effective_length(lines[line_idx]) > config.line_length.get())
                     }
@@ -1790,54 +1788,10 @@ impl MD013LineLength {
         }
     }
 
-    /// Calculate effective line length excluding unbreakable URLs
+    /// Calculate effective line length
+    ///
+    /// Returns the actual display length of the line using the configured length mode.
     fn calculate_effective_length(&self, line: &str) -> usize {
-        if self.config.strict {
-            // In strict mode, count everything
-            return self.calculate_string_length(line);
-        }
-
-        // Quick byte-level check: if line doesn't contain "http" or "[", it can't have URLs or markdown links
-        let bytes = line.as_bytes();
-        if !bytes.contains(&b'h') && !bytes.contains(&b'[') {
-            return self.calculate_string_length(line);
-        }
-
-        // More precise check for URLs and links
-        if !line.contains("http") && !line.contains('[') {
-            return self.calculate_string_length(line);
-        }
-
-        let mut effective_line = line.to_string();
-
-        // First handle markdown links to avoid double-counting URLs
-        // Pattern: [text](very-long-url) -> [text](url)
-        if line.contains('[') && line.contains("](") {
-            for cap in MARKDOWN_LINK_PATTERN.captures_iter(&effective_line.clone()) {
-                if let (Some(full_match), Some(text), Some(url)) = (cap.get(0), cap.get(1), cap.get(2))
-                    && url.as_str().len() > 15
-                {
-                    let replacement = format!("[{}](url)", text.as_str());
-                    effective_line = effective_line.replacen(full_match.as_str(), &replacement, 1);
-                }
-            }
-        }
-
-        // Then replace bare URLs with a placeholder of reasonable length
-        // This allows lines with long URLs to pass if the rest of the content is reasonable
-        if effective_line.contains("http") {
-            for url_match in URL_IN_TEXT.find_iter(&effective_line.clone()) {
-                let url = url_match.as_str();
-                // Skip if this URL is already part of a markdown link we handled
-                if !effective_line.contains(&format!("({url})")) {
-                    // Replace URL with placeholder that represents a "reasonable" URL length
-                    // Using 15 chars as a reasonable URL placeholder (e.g., "https://ex.com")
-                    let placeholder = "x".repeat(15.min(url.len()));
-                    effective_line = effective_line.replacen(url, &placeholder, 1);
-                }
-            }
-        }
-
-        self.calculate_string_length(&effective_line)
+        self.calculate_string_length(line)
     }
 }

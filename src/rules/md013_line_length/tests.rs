@@ -390,40 +390,37 @@ fn test_rule_metadata() {
 fn test_url_embedded_in_text() {
     let rule = MD013LineLength::new(50, false, false, false, false);
 
-    // This line would be 85 chars, but only ~45 without the URL
+    // 79 chars, limit 50 — flagged (actual length used, no URL stripping)
     let content = "Check the docs at https://example.com/very/long/url/that/exceeds/limit for info";
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should not flag because effective length (with URL placeholder) is under 50
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
 fn test_multiple_urls_in_line() {
     let rule = MD013LineLength::new(50, false, false, false, false);
 
-    // Line with multiple URLs
+    // 77 chars, limit 50 — flagged (actual length used, no URL stripping)
     let content = "See https://first-url.com/long and https://second-url.com/also/very/long here";
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
     let result = rule.check(&ctx).unwrap();
 
-    // Should not flag because effective length is reasonable
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
 fn test_markdown_link_with_long_url() {
     let rule = MD013LineLength::new(50, false, false, false, false);
 
-    // Markdown link with very long URL
+    // 95 chars, limit 50 — flagged (actual length used, no URL stripping)
     let content = "Check the [documentation](https://example.com/very/long/path/to/documentation/page) for details";
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should not flag because effective length counts link as short
-    assert_eq!(result.len(), 0);
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -461,8 +458,50 @@ fn test_documentation_example_from_md051() {
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should not flag because the URL is in a markdown link
-    assert_eq!(result.len(), 0);
+    // Line is 119 chars with limit 80 — flagged (actual length used, no URL stripping)
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_warning_reports_actual_length() {
+    // Verify that the warning message reports the actual line length, not a reduced URL-stripped length
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "This line has a URL https://example.com/long/url and trailing text here";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1);
+    // Should report actual length (71), not a URL-stripped length
+    assert!(
+        result[0].message.contains("71"),
+        "Expected actual length 71 in message: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_issue_384_reflow_with_urls() {
+    // Reproduces the exact scenario from issue #384: list items with markdown links
+    // that exceed the line limit should be reflowed
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(120),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "- Use [`pre-commit`](https://pre-commit.com) (with [`prek`](https://prek.j178.dev)) to format and lint code. to format and lint code.";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have a warning (133 chars > 120 limit)
+    assert!(!result.is_empty(), "Should flag: 133 chars > 120");
+
+    // The fix should reflow the line to fit within the limit
+    let fixed = rule.fix(&ctx).unwrap();
+    for line in fixed.lines() {
+        let len = line.chars().count();
+        assert!(len <= 120, "Line still too long after reflow: {line} ({len} chars)");
+    }
 }
 
 #[test]
