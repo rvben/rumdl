@@ -12,6 +12,7 @@ mod tests;
 
 use crate::config::MarkdownFlavor;
 use crate::inline_config::InlineConfig;
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -102,6 +103,12 @@ impl<'a> LintContext<'a> {
             offsets
         });
 
+        // Compute content_lines once for all functions that need it
+        let content_lines: Vec<&str> = content.lines().collect();
+
+        // Detect front matter boundaries once for all functions that need it
+        let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
+
         // Detect code blocks and code spans once and cache them
         let (code_blocks, code_span_ranges) = profile_section!(
             "Code blocks",
@@ -154,7 +161,15 @@ impl<'a> LintContext<'a> {
         let (mut lines, emphasis_spans) = profile_section!(
             "Basic line info",
             profile,
-            line_computation::compute_basic_line_info(content, &line_offsets, &code_blocks, flavor, &skip_ranges,)
+            line_computation::compute_basic_line_info(
+                content,
+                &content_lines,
+                &line_offsets,
+                &code_blocks,
+                flavor,
+                &skip_ranges,
+                front_matter_end,
+            )
         );
 
         // Detect HTML blocks BEFORE heading detection
@@ -182,7 +197,7 @@ impl<'a> LintContext<'a> {
         profile_section!(
             "MkDocs constructs",
             profile,
-            flavor_detection::detect_mkdocs_line_info(content, &mut lines, flavor)
+            flavor_detection::detect_mkdocs_line_info(&content_lines, &mut lines, flavor)
         );
 
         // Detect Obsidian comments (%%...%%) in Obsidian flavor
@@ -204,11 +219,12 @@ impl<'a> LintContext<'a> {
             "Headings & blockquotes",
             profile,
             heading_detection::detect_headings_and_blockquotes(
-                content,
+                &content_lines,
                 &mut lines,
                 flavor,
                 &html_comment_ranges,
-                &link_byte_ranges
+                &link_byte_ranges,
+                front_matter_end,
             )
         );
 
@@ -279,11 +295,11 @@ impl<'a> LintContext<'a> {
             )
         );
 
-        // Pre-compute LineIndex once for all rules (eliminates 46x content cloning)
+        // Reuse the already-computed line_offsets instead of recomputing in LineIndex::new()
         let line_index = profile_section!(
             "Line index",
             profile,
-            crate::utils::range_utils::LineIndex::new(content)
+            crate::utils::range_utils::LineIndex::with_line_starts(content, line_offsets.clone())
         );
 
         // Pre-compute Jinja template ranges once for all rules (eliminates O(n*m) in MD011)

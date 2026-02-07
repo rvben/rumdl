@@ -1,5 +1,4 @@
 use crate::config::MarkdownFlavor;
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use std::sync::LazyLock;
 
 use super::types::*;
@@ -51,22 +50,18 @@ pub(super) fn parse_blockquote_detailed(line: &str) -> Option<BlockquoteComponen
 
 /// Detect headings and blockquotes (called after HTML block detection)
 pub(super) fn detect_headings_and_blockquotes(
-    content: &str,
+    content_lines: &[&str],
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
     link_byte_ranges: &[(usize, usize)],
+    front_matter_end: usize,
 ) {
     // Regex for heading detection
     static ATX_HEADING_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"^(\s*)(#{1,6})(\s*)(.*)$").unwrap());
     static SETEXT_UNDERLINE_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"^(\s*)(=+|-+)\s*$").unwrap());
-
-    let content_lines: Vec<&str> = content.lines().collect();
-
-    // Detect front matter boundaries to skip those lines
-    let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
     // Detect headings (including Setext which needs look-ahead) and blockquotes
     for i in 0..lines.len() {

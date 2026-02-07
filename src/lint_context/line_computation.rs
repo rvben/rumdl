@@ -1,5 +1,4 @@
 use crate::config::MarkdownFlavor;
-use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::element_cache::ElementCache;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -11,22 +10,20 @@ use super::{ListItemMap, SkipByteRanges};
 /// Also returns emphasis spans detected during the pulldown-cmark parse
 pub(super) fn compute_basic_line_info(
     content: &str,
+    content_lines: &[&str],
     line_offsets: &[usize],
     code_blocks: &[(usize, usize)],
     flavor: MarkdownFlavor,
     skip_ranges: &SkipByteRanges<'_>,
+    front_matter_end: usize,
 ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
-    let content_lines: Vec<&str> = content.lines().collect();
     let mut lines = Vec::with_capacity(content_lines.len());
 
     // Pre-compute which lines are in code blocks
     let code_block_map = compute_code_block_line_map(content, line_offsets, code_blocks);
 
     // Pre-compute which lines are in math blocks ($$ ... $$)
-    let math_block_map = compute_math_block_line_map(content, &code_block_map);
-
-    // Detect front matter boundaries FIRST, before any other parsing
-    let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
+    let math_block_map = compute_math_block_line_map(content_lines, &code_block_map);
 
     // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
     let (list_item_map, emphasis_spans) =
@@ -164,8 +161,7 @@ pub(super) fn compute_code_block_line_map(
 
 /// Pre-compute which lines are inside math blocks ($$ ... $$) - O(n) single pass
 /// Returns a Vec<bool> where index i indicates if line i is in a math block
-pub(super) fn compute_math_block_line_map(content: &str, code_block_map: &[bool]) -> Vec<bool> {
-    let content_lines: Vec<&str> = content.lines().collect();
+pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
 

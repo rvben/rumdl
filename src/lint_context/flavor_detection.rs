@@ -190,7 +190,7 @@ pub(super) fn detect_jsx_and_mdx_comments(
 
 /// Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
 /// and populate the corresponding fields in LineInfo
-pub(super) fn detect_mkdocs_line_info(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineInfo], flavor: MarkdownFlavor) {
     if flavor != MarkdownFlavor::MkDocs {
         return;
     }
@@ -198,8 +198,6 @@ pub(super) fn detect_mkdocs_line_info(content: &str, lines: &mut [LineInfo], fla
     use crate::utils::mkdocs_admonitions;
     use crate::utils::mkdocs_definition_lists;
     use crate::utils::mkdocs_tabs;
-
-    let content_lines: Vec<&str> = content.lines().collect();
 
     // Track admonition context
     let mut in_admonition = false;
