@@ -83,6 +83,43 @@ impl<'a> LineIndex<'a> {
         index
     }
 
+    /// Create a `LineIndex` from pre-computed line starts and code block byte ranges.
+    ///
+    /// Instead of re-scanning content to find code blocks, this converts
+    /// the already-detected byte ranges into line-level information.
+    pub fn with_line_starts_and_code_blocks(
+        content: &'a str,
+        line_starts: Vec<usize>,
+        code_block_byte_ranges: &[(usize, usize)],
+    ) -> Self {
+        let mut code_block_lines = HashSet::new();
+
+        for &(block_start, block_end) in code_block_byte_ranges {
+            let start_line = match line_starts.binary_search(&block_start) {
+                Ok(idx) => idx,
+                Err(idx) => idx.saturating_sub(1),
+            };
+            let end_line = if block_end == 0 {
+                0
+            } else {
+                match line_starts.binary_search(&block_end) {
+                    // block_end exactly at a line start means the block ended on the previous line
+                    Ok(idx) => idx.saturating_sub(1),
+                    Err(idx) => idx.saturating_sub(1),
+                }
+            };
+            for line_idx in start_line..=end_line {
+                code_block_lines.insert(line_idx);
+            }
+        }
+
+        Self {
+            line_starts,
+            content,
+            code_block_lines: Some(code_block_lines),
+        }
+    }
+
     /// Get the content of a line by 0-based index using pre-computed byte offsets.
     /// Returns the line content without the trailing newline character.
     fn get_line(&self, line_idx: usize) -> Option<&'a str> {

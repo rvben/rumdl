@@ -54,6 +54,7 @@ pub(super) type ByteRanges = Vec<(usize, usize)>;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
+    content_lines: Vec<&'a str>,              // Pre-split lines from content (avoids repeated allocations)
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>,             // Pre-computed line information
@@ -295,11 +296,15 @@ impl<'a> LintContext<'a> {
             )
         );
 
-        // Reuse the already-computed line_offsets instead of recomputing in LineIndex::new()
+        // Reuse already-computed line_offsets and code_blocks instead of re-detecting
         let line_index = profile_section!(
             "Line index",
             profile,
-            crate::utils::range_utils::LineIndex::with_line_starts(content, line_offsets.clone())
+            crate::utils::range_utils::LineIndex::with_line_starts_and_code_blocks(
+                content,
+                line_offsets.clone(),
+                &code_blocks,
+            )
         );
 
         // Pre-compute Jinja template ranges once for all rules (eliminates O(n*m) in MD011)
@@ -332,6 +337,7 @@ impl<'a> LintContext<'a> {
 
         Self {
             content,
+            content_lines,
             line_offsets,
             code_blocks,
             lines,
@@ -363,6 +369,18 @@ impl<'a> LintContext<'a> {
             inline_config,
             obsidian_comment_ranges,
         }
+    }
+
+    /// Get parsed inline configuration state.
+    pub fn inline_config(&self) -> &InlineConfig {
+        &self.inline_config
+    }
+
+    /// Get pre-split content lines, avoiding repeated `content.lines().collect()` allocations.
+    ///
+    /// Lines are 0-indexed (line 0 corresponds to line number 1 in the document).
+    pub fn raw_lines(&self) -> &[&'a str] {
+        &self.content_lines
     }
 
     /// Check if a rule is disabled at a specific line number (1-indexed)
