@@ -66,8 +66,7 @@ impl Rule for MD030ListMarkerSpace {
             return Ok(warnings);
         }
 
-        // Collect lines once
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Track which lines we've already processed (to avoid duplicates)
         let mut processed_lines = std::collections::HashSet::new();
@@ -110,7 +109,7 @@ impl Rule for MD030ListMarkerSpace {
                     let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
                     // Determine if this is a multi-line list item
-                    let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, &lines);
+                    let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
                     let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
                     if actual_spaces != expected_spaces {
@@ -169,12 +168,12 @@ impl Rule for MD030ListMarkerSpace {
             }
 
             // Skip indented code blocks
-            if self.is_indented_code_block(line, line_idx, &lines) {
+            if self.is_indented_code_block(line, line_idx, lines) {
                 continue;
             }
 
             // Try to detect list-like patterns using regex-based detection
-            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, &lines) {
+            if let Some(warning) = self.check_unrecognized_list_marker(ctx, line, line_num, lines) {
                 warnings.push(warning);
             }
         }
@@ -232,7 +231,7 @@ impl Rule for MD030ListMarkerSpace {
             return Ok(content.to_string());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut result_lines = Vec::with_capacity(lines.len());
 
         for (line_idx, line) in lines.iter().enumerate() {
@@ -247,7 +246,7 @@ impl Rule for MD030ListMarkerSpace {
             }
 
             // Skip if this is an indented code block (4+ spaces with blank line before)
-            if self.is_indented_code_block(line, line_idx, &lines) {
+            if self.is_indented_code_block(line, line_idx, lines) {
                 result_lines.push(line.to_string());
                 continue;
             }
@@ -256,7 +255,7 @@ impl Rule for MD030ListMarkerSpace {
             // This ensures we fix spacing on ALL lines that look like list items,
             // even if the parser doesn't recognize them due to strict nesting rules.
             // User intention matters: if it looks like a list item, fix it.
-            let is_multi_line = self.is_multi_line_list_item(ctx, line_num, &lines);
+            let is_multi_line = self.is_multi_line_list_item(ctx, line_num, lines);
             if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
                 result_lines.push(fixed_line);
             } else {

@@ -113,7 +113,7 @@ impl MD050StrongStyle {
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let content = ctx.content;
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Count how many times each marker appears (prevalence-based approach)
         let mut asterisk_count = 0;
@@ -334,7 +334,7 @@ impl Rule for MD050StrongStyle {
         };
 
         // Store matches with their positions
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         let matches: Vec<(usize, usize)> = strong_regex
             .find_iter(content)

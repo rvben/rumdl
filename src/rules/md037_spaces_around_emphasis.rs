@@ -114,7 +114,7 @@ impl Rule for MD037NoSpaceInEmphasis {
 
         // Filter out warnings for emphasis markers that are inside links, HTML comments, math, or MkDocs markup
         let mut filtered_warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;

@@ -309,13 +309,12 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
         // Early return handled by should_skip()
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Get the configured style explicitly and validate it
         let configured_style = match self.config.style.as_str() {
@@ -336,7 +335,7 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             // Count all rows to determine most prevalent style (prevalence-based approach)
             let table_style = if configured_style == "consistent" {
-                self.determine_table_style(table_block, &lines)
+                self.determine_table_style(table_block, lines)
             } else {
                 None
             };
@@ -420,8 +419,7 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use the configured style but validate it first
         let configured_style = match self.config.style.as_str() {
@@ -445,7 +443,7 @@ impl Rule for MD055TablePipeStyle {
             // First pass: determine the table's style for "consistent" mode
             // Count all rows to determine most prevalent style (prevalence-based approach)
             let table_style = if configured_style == "consistent" {
-                self.determine_table_style(table_block, &lines)
+                self.determine_table_style(table_block, lines)
             } else {
                 None
             };
@@ -472,7 +470,7 @@ impl Rule for MD055TablePipeStyle {
 
         let mut fixed = result_lines.join("\n");
         // Preserve trailing newline if original content had one
-        if content.ends_with('\n') && !fixed.ends_with('\n') {
+        if ctx.content.ends_with('\n') && !fixed.ends_with('\n') {
             fixed.push('\n');
         }
         Ok(fixed)

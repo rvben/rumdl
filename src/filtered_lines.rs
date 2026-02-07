@@ -302,7 +302,6 @@ pub struct FilteredLinesIter<'a> {
     ctx: &'a LintContext<'a>,
     config: LineFilterConfig,
     current_index: usize,
-    content_lines: Vec<&'a str>,
 }
 
 impl<'a> FilteredLinesIter<'a> {
@@ -312,7 +311,6 @@ impl<'a> FilteredLinesIter<'a> {
             ctx,
             config,
             current_index: 0,
-            content_lines: ctx.content.lines().collect(),
         }
     }
 }
@@ -322,6 +320,7 @@ impl<'a> Iterator for FilteredLinesIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let lines = &self.ctx.lines;
+        let raw_lines = self.ctx.raw_lines();
 
         while self.current_index < lines.len() {
             let idx = self.current_index;
@@ -332,8 +331,8 @@ impl<'a> Iterator for FilteredLinesIter<'a> {
                 continue;
             }
 
-            // Get the actual line content from the document
-            let line_content = self.content_lines.get(idx).copied().unwrap_or("");
+            // Get the actual line content from pre-split lines
+            let line_content = raw_lines.get(idx).copied().unwrap_or("");
 
             // Return the filtered line with 1-indexed line number
             return Some(FilteredLine {

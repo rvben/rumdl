@@ -117,7 +117,7 @@ impl Rule for MD058BlanksAroundTables {
             return Ok(Vec::new());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use pre-computed table blocks from context
         let table_blocks = &ctx.table_blocks;
@@ -125,7 +125,7 @@ impl Rule for MD058BlanksAroundTables {
         for table_block in table_blocks {
             // Check for sufficient blank lines before table
             if table_block.start_line > 0 {
-                let blank_lines_before = self.count_blank_lines_before(&lines, table_block.start_line);
+                let blank_lines_before = self.count_blank_lines_before(lines, table_block.start_line);
                 if blank_lines_before < self.config.minimum_before {
                     let needed = self.config.minimum_before - blank_lines_before;
                     let message = if self.config.minimum_before == 1 {
@@ -164,7 +164,7 @@ impl Rule for MD058BlanksAroundTables {
 
                 // Skip check if next line is a block attribute
                 if !next_line_is_attribute {
-                    let blank_lines_after = self.count_blank_lines_after(&lines, table_block.end_line);
+                    let blank_lines_after = self.count_blank_lines_after(lines, table_block.end_line);
                     if blank_lines_after < self.config.minimum_after {
                         let needed = self.config.minimum_after - blank_lines_after;
                         let message = if self.config.minimum_after == 1 {
@@ -209,7 +209,7 @@ impl Rule for MD058BlanksAroundTables {
             return Ok(content.to_string());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut result = Vec::new();
         let mut i = 0;
 

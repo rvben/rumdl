@@ -151,20 +151,19 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Pre-compute which lines are part of HTML comments
-        let html_comment_lines = Self::find_html_comment_lines(&lines);
+        let html_comment_lines = Self::find_html_comment_lines(lines);
 
         // Pre-compute which lines are inside fenced code blocks (``` or ~~~)
         // We only skip fenced code blocks - code has its own formatting rules
         // (e.g., Makefiles require tabs, Go uses tabs by convention)
         // We still flag tab-indented content because it might be accidental
-        let fenced_code_block_lines = Self::find_fenced_code_block_lines(&lines);
+        let fenced_code_block_lines = Self::find_fenced_code_block_lines(lines);
 
         for (line_num, &line) in lines.iter().enumerate() {
             // Skip if in HTML comment
@@ -247,15 +246,15 @@ impl Rule for MD010NoHardTabs {
         let content = ctx.content;
 
         let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Pre-compute which lines are part of HTML comments
-        let html_comment_lines = Self::find_html_comment_lines(&lines);
+        let html_comment_lines = Self::find_html_comment_lines(lines);
 
         // Pre-compute which lines are inside fenced code blocks
         // Only skip fenced code blocks - code has its own formatting rules
         // (e.g., Makefiles require tabs, Go uses tabs by convention)
-        let fenced_code_block_lines = Self::find_fenced_code_block_lines(&lines);
+        let fenced_code_block_lines = Self::find_fenced_code_block_lines(lines);
 
         for (i, line) in lines.iter().enumerate() {
             if html_comment_lines[i] {

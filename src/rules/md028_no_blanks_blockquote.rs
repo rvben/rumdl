@@ -355,7 +355,7 @@ impl Rule for MD028NoBlanksBlockquote {
         let mut warnings = Vec::new();
 
         // Get all lines
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Pre-scan to find blank lines and blockquote lines for faster processing
         let mut blank_line_indices = Vec::new();
@@ -384,7 +384,7 @@ impl Rule for MD028NoBlanksBlockquote {
             let line_num = line_idx + 1;
 
             // Check if this is a problematic blank line inside a blockquote
-            if let Some((level, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx, ctx.flavor) {
+            if let Some((level, fix_content)) = Self::is_problematic_blank_line(lines, line_idx, ctx.flavor) {
                 let line = lines[line_idx];
                 let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line);
 
@@ -411,11 +411,11 @@ impl Rule for MD028NoBlanksBlockquote {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut result = Vec::with_capacity(ctx.lines.len());
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
 
         for (line_idx, line) in lines.iter().enumerate() {
             // Check if this blank line needs fixing
-            if let Some((_, fix_content)) = Self::is_problematic_blank_line(&lines, line_idx, ctx.flavor) {
+            if let Some((_, fix_content)) = Self::is_problematic_blank_line(lines, line_idx, ctx.flavor) {
                 result.push(fix_content);
             } else {
                 result.push(line.to_string());

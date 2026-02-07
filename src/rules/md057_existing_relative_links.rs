@@ -422,8 +422,8 @@ impl Rule for MD057ExistingRelativeLinks {
             // Create element cache once for all links
             let element_cache = ElementCache::new(content);
 
-            // Pre-collect lines to avoid repeated line iteration
-            let lines: Vec<&str> = content.lines().collect();
+            // Pre-collected lines from context
+            let lines = ctx.raw_lines();
 
             // Track which lines we've already processed to avoid duplicates
             // (ctx.links may have multiple entries for the same line, especially with malformed markdown)

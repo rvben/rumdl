@@ -190,7 +190,7 @@ impl Rule for MD025SingleTitle {
         let mut _found_title_in_front_matter = false;
         if !self.config.front_matter_title.is_empty() {
             // Detect front matter manually
-            let content_lines: Vec<&str> = ctx.content.lines().collect();
+            let content_lines = ctx.raw_lines();
             if content_lines.first().map(|l| l.trim()) == Some("---") {
                 // Look for the end of front matter
                 for (idx, line) in content_lines.iter().enumerate().skip(1) {

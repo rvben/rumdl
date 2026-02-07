@@ -298,7 +298,7 @@ impl Rule for MD026NoTrailingPunctuation {
             Err(_) => return Ok(content.to_string()),
         };
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         // Use pre-computed heading information from LintContext

@@ -849,8 +849,7 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let line_index = &ctx.line_index;
 
         // Early return for empty content
@@ -864,7 +863,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        let mut warnings = self.perform_checks(ctx, &lines, &list_blocks, line_index)?;
+        let mut warnings = self.perform_checks(ctx, lines, &list_blocks, line_index)?;
 
         // When lazy continuation is not allowed, detect and warn about lazy continuation
         // lines WITHIN list blocks (text that continues a list item but with less
@@ -959,7 +958,7 @@ impl Rule for MD032BlanksAroundLists {
 impl MD032BlanksAroundLists {
     /// Helper method for fixing implementation
     fn fix_with_structure_impl(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
         let num_lines = lines.len();
         if num_lines == 0 {
             return Ok(String::new());

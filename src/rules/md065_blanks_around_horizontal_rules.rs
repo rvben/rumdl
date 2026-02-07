@@ -106,7 +106,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
             return Ok(Vec::new());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
             // Use pre-computed is_horizontal_rule from LineInfo
@@ -116,12 +116,12 @@ impl Rule for MD065BlanksAroundHorizontalRules {
             }
 
             // Skip if this is actually a setext heading marker
-            if Self::is_setext_heading_marker(&lines, i) {
+            if Self::is_setext_heading_marker(lines, i) {
                 continue;
             }
 
             // Check for blank line before HR (unless at start of document)
-            if i > 0 && Self::count_blank_lines_before(&lines, i) == 0 {
+            if i > 0 && Self::count_blank_lines_before(lines, i) == 0 {
                 let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -139,7 +139,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
             }
 
             // Check for blank line after HR (unless at end of document)
-            if i < lines.len() - 1 && Self::count_blank_lines_after(&lines, i) == 0 {
+            if i < lines.len() - 1 && Self::count_blank_lines_after(lines, i) == 0 {
                 let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -168,7 +168,7 @@ impl Rule for MD065BlanksAroundHorizontalRules {
             return Ok(content.to_string());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut result = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {

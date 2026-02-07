@@ -351,7 +351,6 @@ impl MD052ReferenceLinkImages {
 
     fn find_undefined_references(
         &self,
-        content: &str,
         references: &HashSet<String>,
         ctx: &crate::lint_context::LintContext,
         mkdocs_mode: bool,
@@ -592,7 +591,7 @@ impl MD052ReferenceLinkImages {
         }
 
         // Need to use regex for shortcut references
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         in_example_section = false; // Reset for line-by-line processing
 
         for (line_num, line) in lines.iter().enumerate() {
@@ -925,10 +924,10 @@ impl Rule for MD052ReferenceLinkImages {
         let references = self.extract_references(content, mkdocs_mode);
 
         // Use optimized detection method with cached link/image data
+        let lines = ctx.raw_lines();
         for (line_num, col, match_len, reference) in
-            self.find_undefined_references(content, &references, ctx, mkdocs_mode)
+            self.find_undefined_references(&references, ctx, mkdocs_mode)
         {
-            let lines: Vec<&str> = content.lines().collect();
             let line_content = lines.get(line_num).unwrap_or(&"");
 
             // Calculate precise character range for the entire undefined reference

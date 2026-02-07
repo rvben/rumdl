@@ -267,7 +267,7 @@ impl MD041FirstLineHeading {
     /// Analyze document to determine if it can be fixed and gather metadata.
     /// Returns None if not fixable, Some(analysis) if fixable.
     fn analyze_for_fix(&self, ctx: &crate::lint_context::LintContext) -> Option<FixAnalysis> {
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
         if lines.is_empty() {
             return None;
         }
@@ -461,7 +461,7 @@ impl Rule for MD041FirstLineHeading {
             return Ok(ctx.content.to_string());
         };
 
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
         let heading_idx = analysis.heading_idx;
         let front_matter_end_idx = analysis.front_matter_end_idx;
         let is_setext = analysis.is_setext;

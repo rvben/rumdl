@@ -131,7 +131,7 @@ impl Rule for MD054LinkImageStyle {
         }
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         for (line_num, line) in lines.iter().enumerate() {
             // Skip code blocks and reference definitions early

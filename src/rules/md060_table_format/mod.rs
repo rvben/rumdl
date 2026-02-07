@@ -859,15 +859,14 @@ impl Rule for MD060TableFormat {
             return Ok(Vec::new());
         }
 
-        let content = ctx.content;
         let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
 
         for table_block in table_blocks {
-            let format_result = self.fix_table_block(&lines, table_block, ctx.flavor);
+            let format_result = self.fix_table_block(lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))
@@ -942,13 +941,13 @@ impl Rule for MD060TableFormat {
         }
 
         let content = ctx.content;
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
 
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for table_block in table_blocks {
-            let format_result = self.fix_table_block(&lines, table_block, ctx.flavor);
+            let format_result = self.fix_table_block(lines, table_block, ctx.flavor);
 
             let table_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
                 .chain(std::iter::once(table_block.delimiter_line))

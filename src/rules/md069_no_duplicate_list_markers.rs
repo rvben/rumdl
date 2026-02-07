@@ -132,7 +132,7 @@ impl Rule for MD069NoDuplicateListMarkers {
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut result = String::with_capacity(ctx.content.len());
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
 
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1; // 1-indexed for inline config

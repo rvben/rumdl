@@ -145,9 +145,8 @@ impl Rule for MD070NestedCodeFence {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         let mut i = 0;
         while i < lines.len() {
@@ -243,7 +242,7 @@ impl Rule for MD070NestedCodeFence {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let mut result = String::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         let mut i = 0;
         while i < lines.len() {

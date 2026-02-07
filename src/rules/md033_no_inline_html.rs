@@ -888,7 +888,7 @@ impl Rule for MD033NoInlineHtml {
         }
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Track nomarkdown and comment blocks (Kramdown extension)
         let mut in_nomarkdown = false;

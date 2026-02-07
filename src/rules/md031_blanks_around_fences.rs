@@ -227,12 +227,12 @@ impl Rule for MD031BlanksAroundFences {
         let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
         let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
-        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
+        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, lines);
 
         // Helper to check if a line is a Quarto div marker (opening or closing)
         let is_quarto_div_marker =
@@ -254,10 +254,10 @@ impl Rule for MD031BlanksAroundFences {
             // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
             let prev_line_is_quarto_marker = *opening_line > 0 && is_quarto_div_marker(lines[*opening_line - 1]);
             if *opening_line > 0
-                && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
+                && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && !prev_line_is_quarto_marker
-                && self.should_require_blank_line(*opening_line, &lines)
+                && self.should_require_blank_line(*opening_line, lines)
             {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*opening_line + 1, lines[*opening_line]);
@@ -285,10 +285,10 @@ impl Rule for MD031BlanksAroundFences {
             let next_line_is_quarto_marker =
                 *closing_line + 1 < lines.len() && is_quarto_div_marker(lines[*closing_line + 1]);
             if *closing_line + 1 < lines.len()
-                && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
+                && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
                 && !next_line_is_quarto_marker
-                && self.should_require_blank_line(*closing_line, &lines)
+                && self.should_require_blank_line(*closing_line, lines)
             {
                 let (start_line, start_col, end_line, end_col) =
                     calculate_line_range(*closing_line + 1, lines[*closing_line]);
@@ -340,9 +340,9 @@ impl Rule for MD031BlanksAroundFences {
                 if mkdocs_admonitions::is_admonition_start(line) {
                     // Check for blank line before admonition
                     if i > 0
-                        && !Self::is_effectively_empty_line(i - 1, &lines, ctx)
+                        && !Self::is_effectively_empty_line(i - 1, lines, ctx)
                         && !Self::is_right_after_frontmatter(i, ctx)
-                        && self.should_require_blank_line(i, &lines)
+                        && self.should_require_blank_line(i, lines)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
@@ -379,8 +379,8 @@ impl Rule for MD031BlanksAroundFences {
                     // We need a blank line between the admonition content and the current line
                     // Check if the previous line (i-1) is a blank line separator
                     if i > 0
-                        && !Self::is_effectively_empty_line(i - 1, &lines, ctx)
-                        && self.should_require_blank_line(i - 1, &lines)
+                        && !Self::is_effectively_empty_line(i - 1, lines, ctx)
+                        && self.should_require_blank_line(i - 1, lines)
                     {
                         let (start_line, start_col, end_line, end_col) = calculate_line_range(i + 1, lines[i]);
 
@@ -416,7 +416,7 @@ impl Rule for MD031BlanksAroundFences {
         // Check if original content ended with newline
         let had_trailing_newline = content.ends_with('\n');
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         // Helper to check if a line is a Quarto div marker (opening or closing)
@@ -424,7 +424,7 @@ impl Rule for MD031BlanksAroundFences {
             |line: &str| -> bool { is_quarto && (quarto_divs::is_div_open(line) || quarto_divs::is_div_close(line)) };
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
-        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, &lines);
+        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, lines);
 
         // Collect lines that need blank lines before/after
         let mut needs_blank_before: std::collections::HashSet<usize> = std::collections::HashSet::new();
@@ -436,10 +436,10 @@ impl Rule for MD031BlanksAroundFences {
             // Use is_effectively_empty_line to handle blockquote blank lines
             let prev_line_is_quarto_marker = *opening_line > 0 && is_quarto_div_marker(lines[*opening_line - 1]);
             if *opening_line > 0
-                && !Self::is_effectively_empty_line(*opening_line - 1, &lines, ctx)
+                && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
                 && !Self::is_right_after_frontmatter(*opening_line, ctx)
                 && !prev_line_is_quarto_marker
-                && self.should_require_blank_line(*opening_line, &lines)
+                && self.should_require_blank_line(*opening_line, lines)
             {
                 needs_blank_before.insert(*opening_line);
             }
@@ -450,10 +450,10 @@ impl Rule for MD031BlanksAroundFences {
             let next_line_is_quarto_marker =
                 *closing_line + 1 < lines.len() && is_quarto_div_marker(lines[*closing_line + 1]);
             if *closing_line + 1 < lines.len()
-                && !Self::is_effectively_empty_line(*closing_line + 1, &lines, ctx)
+                && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
                 && !is_kramdown_block_attribute(lines[*closing_line + 1])
                 && !next_line_is_quarto_marker
-                && self.should_require_blank_line(*closing_line, &lines)
+                && self.should_require_blank_line(*closing_line, lines)
             {
                 needs_blank_after.insert(*closing_line);
             }

@@ -131,7 +131,7 @@ impl Rule for MD049EmphasisStyle {
         }
 
         // Filter out emphasis markers that are inside links or MkDocs markup
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
         emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
             // Skip emphasis inside Obsidian comments
             if ctx.is_in_obsidian_comment(*abs_pos) {

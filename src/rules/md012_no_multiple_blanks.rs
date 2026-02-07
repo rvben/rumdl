@@ -101,7 +101,7 @@ impl Rule for MD012NoMultipleBlanks {
 
         // Quick check for consecutive newlines or potential whitespace-only lines before processing
         // Look for multiple consecutive lines that could be blank (empty or whitespace-only)
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let has_potential_blanks = lines
             .windows(2)
             .any(|pair| pair[0].trim().is_empty() && pair[1].trim().is_empty());
@@ -155,7 +155,7 @@ impl Rule for MD012NoMultipleBlanks {
                     warnings.extend(self.generate_excess_warnings(
                         blank_start,
                         blank_count,
-                        &lines,
+                        lines,
                         &lines_to_check,
                         line_index,
                     ));
@@ -179,7 +179,7 @@ impl Rule for MD012NoMultipleBlanks {
                     warnings.extend(self.generate_excess_warnings(
                         blank_start,
                         blank_count,
-                        &lines,
+                        lines,
                         &lines_to_check,
                         line_index,
                     ));

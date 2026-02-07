@@ -207,7 +207,7 @@ impl Rule for MD056TableColumnCount {
             return Ok(Vec::new());
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use pre-computed table blocks from context
         let table_blocks = &ctx.table_blocks;
@@ -284,7 +284,7 @@ impl Rule for MD056TableColumnCount {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let flavor = ctx.flavor;
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
 
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();

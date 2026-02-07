@@ -39,7 +39,7 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             return Ok(warnings);
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // fm_end_line is 1-indexed, so the line after frontmatter is at index fm_end_line
         if let Some(next_line) = lines.get(fm_end_line)
@@ -81,7 +81,7 @@ impl Rule for MD071BlankLineAfterFrontmatter {
         // Check if original content ended with newline
         let had_trailing_newline = content.ends_with('\n');
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut result = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {

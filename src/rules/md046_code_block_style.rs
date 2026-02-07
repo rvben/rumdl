@@ -486,7 +486,7 @@ impl MD046CodeBlockStyle {
         ctx: &crate::lint_context::LintContext,
     ) -> Result<Vec<LintWarning>, LintError> {
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use pulldown-cmark to detect fenced code blocks - this handles list-indented fences correctly
         let options = Options::all();
@@ -848,7 +848,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // Check for code block style consistency
-        let lines: Vec<&str> = ctx.content.lines().collect();
+        let lines = ctx.raw_lines();
         let mut warnings = Vec::new();
 
         // Check if we're in MkDocs mode
@@ -864,12 +864,12 @@ impl Rule for MD046CodeBlockStyle {
 
         // Pre-compute tab and admonition contexts for MkDocs filtering
         let in_tab_context = if is_mkdocs {
-            self.precompute_mkdocs_tab_context(&lines)
+            self.precompute_mkdocs_tab_context(lines)
         } else {
             vec![false; lines.len()]
         };
         let in_admonition_context = if is_mkdocs {
-            self.precompute_mkdocs_admonition_context(&lines)
+            self.precompute_mkdocs_admonition_context(lines)
         } else {
             vec![false; lines.len()]
         };
@@ -1014,7 +1014,7 @@ impl Rule for MD046CodeBlockStyle {
             }
         }
 
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Determine target style
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
@@ -1024,14 +1024,14 @@ impl Rule for MD046CodeBlockStyle {
         };
 
         // Pre-compute list, tab, and admonition contexts for efficiency
-        let in_list_context = self.precompute_block_continuation_context(&lines);
+        let in_list_context = self.precompute_block_continuation_context(lines);
         let in_tab_context = if is_mkdocs {
-            self.precompute_mkdocs_tab_context(&lines)
+            self.precompute_mkdocs_tab_context(lines)
         } else {
             vec![false; lines.len()]
         };
         let in_admonition_context = if is_mkdocs {
-            self.precompute_mkdocs_admonition_context(&lines)
+            self.precompute_mkdocs_admonition_context(lines)
         } else {
             vec![false; lines.len()]
         };
@@ -1040,7 +1040,7 @@ impl Rule for MD046CodeBlockStyle {
         // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
         // - unsafe_fence_lines: contain fence markers but aren't complete (skip fixing to avoid broken output)
         let (misplaced_fence_lines, unsafe_fence_lines) = self.categorize_indented_blocks(
-            &lines,
+            lines,
             is_mkdocs,
             &in_list_context,
             &in_tab_context,
@@ -1099,7 +1099,7 @@ impl Rule for MD046CodeBlockStyle {
                     result.push('\n');
                 }
             } else if self.is_indented_code_block_with_context(
-                &lines,
+                lines,
                 i,
                 is_mkdocs,
                 &in_list_context,
@@ -1111,7 +1111,7 @@ impl Rule for MD046CodeBlockStyle {
                 // Check if we need to start a new fenced block
                 let prev_line_is_indented = i > 0
                     && self.is_indented_code_block_with_context(
-                        &lines,
+                        lines,
                         i - 1,
                         is_mkdocs,
                         &in_list_context,
@@ -1148,7 +1148,7 @@ impl Rule for MD046CodeBlockStyle {
                     // Check if this is the end of the indented block
                     let next_line_is_indented = i < lines.len() - 1
                         && self.is_indented_code_block_with_context(
-                            &lines,
+                            lines,
                             i + 1,
                             is_mkdocs,
                             &in_list_context,

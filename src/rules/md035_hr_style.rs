@@ -103,15 +103,14 @@ impl Rule for MD035HRStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let _line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use the configured style or find the most prevalent HR style
         let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
-            Self::most_prevalent_hr_style(&lines, ctx).unwrap_or_else(|| "---".to_string())
+            Self::most_prevalent_hr_style(lines, ctx).unwrap_or_else(|| "---".to_string())
         } else {
             self.config.style.clone()
         };
@@ -125,7 +124,7 @@ impl Rule for MD035HRStyle {
             }
 
             // Skip if this is a potential Setext heading underline
-            if Self::is_potential_setext_heading(&lines, i) {
+            if Self::is_potential_setext_heading(lines, i) {
                 continue;
             }
 
@@ -167,11 +166,11 @@ impl Rule for MD035HRStyle {
         let _line_index = &ctx.line_index;
 
         let mut result = Vec::new();
-        let lines: Vec<&str> = content.lines().collect();
+        let lines = ctx.raw_lines();
 
         // Use the configured style or find the most prevalent HR style
         let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
-            Self::most_prevalent_hr_style(&lines, ctx).unwrap_or_else(|| "---".to_string())
+            Self::most_prevalent_hr_style(lines, ctx).unwrap_or_else(|| "---".to_string())
         } else {
             self.config.style.clone()
         };
@@ -186,7 +185,7 @@ impl Rule for MD035HRStyle {
             }
 
             // Skip if this is a potential Setext heading underline
-            if Self::is_potential_setext_heading(&lines, i) {
+            if Self::is_potential_setext_heading(lines, i) {
                 result.push(line.to_string());
                 continue;
             }
