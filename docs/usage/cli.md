@@ -31,7 +31,7 @@ rumdl check --fix .              # Lint and auto-fix issues
 | `--watch`              | Watch for changes and re-lint                        |
 | `--verbose`            | Show detailed output                                 |
 | `--quiet`              | Suppress output except errors                        |
-| `--force-exclude`      | Enforce exclude patterns for explicit files          |
+| `--no-exclude`         | Disable exclude patterns defined in config           |
 
 ### `fmt [PATHS...]`
 
