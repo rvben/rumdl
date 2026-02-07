@@ -97,3 +97,65 @@ pub fn test_md001_html_comments_dont_affect_heading_sequence() {
         "Should have no violations when HTML comment headings don't interfere, but got: {result:?}"
     );
 }
+
+/// Setext H1 followed by a deep ATX heading: the ATX heading is fixed to H2.
+#[test]
+pub fn test_md001_setext_h1_followed_by_deep_atx() {
+    let rule = MD001HeadingIncrement::default();
+    let content = "Title\n=====\n\n#### Fourth Level\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "H4 after Setext H1 should be flagged");
+    assert!(warnings[0].message.contains("Expected heading level 2"));
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("## Fourth Level"),
+        "H4 should become H2 (ATX), got: {fixed}"
+    );
+
+    // Verify fix is idempotent
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert_eq!(fixed, fixed2, "fix() must be idempotent");
+}
+
+/// Parametric test: for every warning, check()'s fix replacement matches fix()'s output line.
+#[test]
+pub fn test_md001_check_fix_consistency() {
+    let rule = MD001HeadingIncrement::default();
+
+    let inputs = [
+        "# H1\n### H3\n",
+        "# H1\n#### H4\n##### H5\n",
+        "## H2\n##### H5\n",
+        "# A\n### B\n# C\n#### D\n",
+        "Title\n=====\n\n#### Deep\n",
+        "---\ntitle: T\n---\n\n#### Deep\n",
+        "# H1\n  ### Indented H3\n",
+    ];
+
+    for input in &inputs {
+        let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+        let fixed_lines: Vec<&str> = fixed.lines().collect();
+
+        for w in &warnings {
+            if let Some(ref fix) = w.fix {
+                let idx = w.line - 1;
+                assert!(
+                    idx < fixed_lines.len(),
+                    "Line {} out of range for input: {input:?}",
+                    w.line
+                );
+                assert_eq!(
+                    fix.replacement, fixed_lines[idx],
+                    "check()/fix() diverge at line {} for input: {input:?}",
+                    w.line
+                );
+            }
+        }
+    }
+}
