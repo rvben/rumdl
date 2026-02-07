@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-02-07
+
+### Added
+
+- **MD057: `relative-to-docs` option** - New config option for validating absolute
+  link paths relative to a documentation root directory
+
+### Performance
+
+- **2.5x faster on real-world repositories** - Comprehensive performance audit and
+  optimization across the core pipeline, rule implementations, and infrastructure.
+  Validated against ripgrep, ruff, and rust repositories (1,832 files, 276K lines)
+  with zero regressions.
+
+  Key optimizations:
+  - Switch release profile from size optimization (`opt-level = "z"`) to speed (`opt-level = 3`)
+  - Zero-allocation line ending normalization for LF-only files (common case)
+  - Replace `chars().nth()` O(n) calls with O(1) byte indexing for ASCII checks
+  - Promote MD034 regex patterns to `LazyLock` statics (eliminated ~160K mutex cycles per 10K-line file)
+  - Reduce `LineInfo` memory 79% by boxing rare struct variants (3.4MB → 720KB for 10K-line files)
+  - Eliminate redundant `Vec<char>` allocation in horizontal rule detection
+  - Cache debug environment variable lookups in list parser
+  - Move `ListBlock` by value instead of cloning
+  - Fix MD044 O(n×m) boundary checks and full-document regex scans
+  - Fix MD052 repeated full-document HTML comment scans
+  - Replace per-line `HashMap` cloning in `InlineConfig` with state-transition storage
+  - Deduplicate `content.lines().collect()` across 48 call sites in 27 rules
+  - Compute content lines once in `LintContext`, share via `ctx.raw_lines()`
+  - Unify code block detection into a single pass shared with `LineIndex`
+  - Eliminate redundant `InlineConfig` parsing (parse once in `LintContext`)
+  - Deduplicate line offset and front matter computation during context construction
+  - Add O(1) line access via pre-computed line starts in `LineIndex`
+  - Lazy-initialize rule registry with `LazyLock` (eliminated 5+ redundant `all_rules()` calls)
+  - Remove unused mmap code path from file reading
+
+### Changed
+
+- **`explain` command completeness** - Now uses the full rule registry instead of
+  a manually maintained list, ensuring all rules (including MD069-MD074) are included
+
 ## [0.1.14] - 2026-02-06
 
 ### Added

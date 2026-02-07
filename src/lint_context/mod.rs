@@ -54,7 +54,7 @@ pub(super) type ByteRanges = Vec<(usize, usize)>;
 
 pub struct LintContext<'a> {
     pub content: &'a str,
-    content_lines: Vec<&'a str>,              // Pre-split lines from content (avoids repeated allocations)
+    content_lines: Vec<&'a str>, // Pre-split lines from content (avoids repeated allocations)
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub lines: Vec<LineInfo>,             // Pre-computed line information

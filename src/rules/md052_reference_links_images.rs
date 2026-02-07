@@ -925,9 +925,7 @@ impl Rule for MD052ReferenceLinkImages {
 
         // Use optimized detection method with cached link/image data
         let lines = ctx.raw_lines();
-        for (line_num, col, match_len, reference) in
-            self.find_undefined_references(&references, ctx, mkdocs_mode)
-        {
+        for (line_num, col, match_len, reference) in self.find_undefined_references(&references, ctx, mkdocs_mode) {
             let line_content = lines.get(line_num).unwrap_or(&"");
 
             // Calculate precise character range for the entire undefined reference
