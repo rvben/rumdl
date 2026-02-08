@@ -17,10 +17,9 @@ fi
 echo
 echo "Linting markdown with rumdl"
 echo "Working directory: $(pwd)"
-echo "Lint path: ${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
-
-# Path: use input or default to workspace root
-lint_path="${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
+# Paths: split space-separated input into array, default to workspace root
+read -ra lint_paths <<< "${GHA_RUMDL_PATH:-$GITHUB_WORKSPACE}"
+echo "Lint path(s): ${lint_paths[*]}"
 
 # Build rumdl command arguments
 rumdl_args=()
@@ -68,7 +67,7 @@ fi
 
 # Run rumdl and capture output
 set +e
-results=$(rumdl check "$lint_path" "${rumdl_args[@]}" 2>&1)
+results=$(rumdl check "${lint_paths[@]}" "${rumdl_args[@]}" 2>&1)
 exit_code=$?
 set -e
 

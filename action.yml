@@ -12,7 +12,7 @@ inputs:
     required: false
     default: ""
   path:
-    description: "Path to lint (default: workspace root)"
+    description: "File(s) or directories to lint, space-separated (default: workspace root)"
     required: false
     default: ""
   config:
