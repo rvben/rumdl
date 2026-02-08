@@ -74,7 +74,7 @@ vim.lsp.enable("rumdl")
 
 ### Helix
 
-Add to `~/.config/helix/languages.toml`:
+Add to `languages.toml`:
 
 ```toml
 [language-server.rumdl]
@@ -84,7 +84,13 @@ args = ["server"]
 [[language]]
 name = "markdown"
 language-servers = ["rumdl"]
+formatter = { command = "rumdl", args = ["check", "--fix", "--stdin"] }
 ```
+
+> **Note:** The `[[language]]` block replaces the Helix defaults. Add any other
+> language servers you use (e.g., `marksman`) to the `language-servers` list.
+> rumdl was merged into Helix's built-in config after the 25.07.1 release,
+> so manual configuration will not be needed once the next Helix version ships.
 
 ### VS Code
 
