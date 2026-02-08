@@ -465,6 +465,7 @@ impl MD013LineLength {
                 || is_horizontal_rule(lines[i].trim())
                 || is_template_directive_only(lines[i])
                 || (lines[i].trim().starts_with('[') && lines[i].contains("]:"))
+                || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
             {
                 i += 1;
                 continue;
@@ -647,6 +648,7 @@ impl MD013LineLength {
                     NestedListItem(String, usize), // full line content and original indent
                     SemanticLine(String),          // Lines starting with NOTE:, WARNING:, etc that should stay separate
                     SnippetLine(String),           // MkDocs Snippets delimiters (-8<-) that must stay on their own line
+                    DivMarker(String),             // Quarto/Pandoc div markers (::: opening or closing)
                     Empty,
                 }
 
@@ -742,9 +744,14 @@ impl MD013LineLength {
                             // See: https://github.com/rvben/rumdl/issues/76
                             let content = trim_preserving_hard_break(&line_info.content(ctx.content)[indent..]);
 
+                            // Check if this is a div marker (::: opening or closing)
+                            // These must be preserved on their own line, not merged into paragraphs
+                            if line_info.is_div_marker {
+                                list_item_lines.push(LineType::DivMarker(content));
+                            }
                             // Check if this is a fence marker (opening or closing)
                             // These should be treated as code block lines, not paragraph content
-                            if is_fence_marker(&content) {
+                            else if is_fence_marker(&content) {
                                 list_item_lines.push(LineType::CodeBlock(content, indent));
                             }
                             // Check if this is a semantic line (NOTE:, WARNING:, etc.)
@@ -788,6 +795,7 @@ impl MD013LineLength {
                     NestedList(Vec<(String, usize)>), // (content, indent) pairs for nested list items
                     SemanticLine(String), // Semantic markers like NOTE:, WARNING: that stay on their own line
                     SnippetLine(String),  // MkDocs Snippets delimiter that stays on its own line without extra spacing
+                    DivMarker(String),    // Quarto/Pandoc div marker (::: opening or closing) preserved on its own line
                     Html {
                         lines: Vec<String>,        // HTML content preserved exactly as-is
                         has_preceding_blank: bool, // Whether there was a blank line before this block
@@ -1117,6 +1125,35 @@ impl MD013LineLength {
                             blocks.push(Block::SnippetLine(content.clone()));
                             had_preceding_blank = false;
                         }
+                        LineType::DivMarker(content) => {
+                            // Div markers (::: opening or closing) are standalone structural delimiters
+                            // Flush any current block and add as separate block
+                            if in_code {
+                                blocks.push(Block::Code {
+                                    lines: current_code_block.clone(),
+                                    has_preceding_blank: code_block_has_preceding_blank,
+                                });
+                                current_code_block.clear();
+                                in_code = false;
+                            } else if in_nested_list {
+                                blocks.push(Block::NestedList(current_nested_list.clone()));
+                                current_nested_list.clear();
+                                in_nested_list = false;
+                            } else if in_html_block {
+                                blocks.push(Block::Html {
+                                    lines: current_html_block.clone(),
+                                    has_preceding_blank: html_block_has_preceding_blank,
+                                });
+                                current_html_block.clear();
+                                html_tag_stack.clear();
+                                in_html_block = false;
+                            } else if !current_paragraph.is_empty() {
+                                blocks.push(Block::Paragraph(current_paragraph.clone()));
+                                current_paragraph.clear();
+                            }
+                            blocks.push(Block::DivMarker(content.clone()));
+                            had_preceding_blank = false;
+                        }
                     }
                 }
 
@@ -1164,10 +1201,15 @@ impl MD013LineLength {
                     let has_code_blocks = blocks.iter().any(|b| matches!(b, Block::Code { .. }));
                     let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine(_)));
                     let has_snippet_lines = blocks.iter().any(|b| matches!(b, Block::SnippetLine(_)));
+                    let has_div_markers = blocks.iter().any(|b| matches!(b, Block::DivMarker(_)));
                     let has_paragraphs = blocks.iter().any(|b| matches!(b, Block::Paragraph(_)));
 
-                    // If we have nested lists, code blocks, semantic lines, or snippet lines but no paragraphs, don't normalize
-                    if (has_nested_lists || has_code_blocks || has_semantic_lines || has_snippet_lines)
+                    // If we have structural blocks but no paragraphs, don't normalize
+                    if (has_nested_lists
+                        || has_code_blocks
+                        || has_semantic_lines
+                        || has_snippet_lines
+                        || has_div_markers)
                         && !has_paragraphs
                     {
                         return false;
@@ -1315,8 +1357,8 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
-                                        _ => true,                      // For all other blocks, add blank line
+                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
+                                        _ => true, // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1375,8 +1417,8 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
-                                        _ => true,                      // For all other blocks, add blank line
+                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
+                                        _ => true, // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1407,8 +1449,8 @@ impl MD013LineLength {
                                         Block::Code {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
-                                        _ => true,                      // For all other blocks, add blank line
+                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
+                                        _ => true, // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1427,6 +1469,15 @@ impl MD013LineLength {
                                     result.push(format!("{expected_indent}{content}"));
                                 }
                                 // No blank lines added before or after snippet delimiters
+                            }
+                            Block::DivMarker(content) => {
+                                // Preserve div markers (::: opening or closing) as-is on their own line
+                                if is_first_block {
+                                    result.push(format!("{marker}{content}"));
+                                    is_first_block = false;
+                                } else {
+                                    result.push(format!("{expected_indent}{content}"));
+                                }
                             }
                             Block::Html {
                                 lines: html_lines,
@@ -1459,8 +1510,8 @@ impl MD013LineLength {
                                         Block::Html {
                                             has_preceding_blank, ..
                                         } => *has_preceding_blank,
-                                        Block::SnippetLine(_) => false, // No blank line before snippet delimiters
-                                        _ => true,                      // For all other blocks, add blank line
+                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
+                                        _ => true, // For all other blocks, add blank line
                                     };
                                     if should_add_blank {
                                         result.push(String::new());
@@ -1572,6 +1623,7 @@ impl MD013LineLength {
                     || is_template_directive_only(next_line)
                     || is_standalone_attr_list(next_line)
                     || is_snippet_block_delimiter(next_line)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                 {
                     break;
                 }

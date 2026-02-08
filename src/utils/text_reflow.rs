@@ -1446,6 +1446,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             continue;
         }
 
+        // Preserve Quarto/Pandoc div markers (:::) as-is
+        if trimmed.starts_with(":::") {
+            result.push(line.to_string());
+            i += 1;
+            continue;
+        }
+
         // Preserve fenced code blocks
         if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
             result.push(line.to_string());
@@ -1576,6 +1583,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                         && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
                     || is_numbered_list_item(next_trimmed)
                     || is_definition_list_item(next_trimmed)
+                    || next_trimmed.starts_with(":::")
                 {
                     break;
                 }
@@ -1680,6 +1688,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 && !(next_trimmed.starts_with('+')
                     && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
                 && !is_numbered_list_item(next_trimmed)
+                && !next_trimmed.starts_with(":::")
             {
                 is_single_line_paragraph = false;
             }
@@ -1752,6 +1761,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                         && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
                     || is_numbered_list_item(next_trimmed)
                     || is_definition_list_item(next_trimmed)
+                    || next_trimmed.starts_with(":::")
                 {
                     break;
                 }

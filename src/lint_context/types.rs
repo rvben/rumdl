@@ -46,6 +46,9 @@ pub struct LineInfo {
     pub in_math_block: bool,
     /// Whether this line is inside a Quarto div block (::: ... :::)
     pub in_quarto_div: bool,
+    /// Whether this line is a Quarto/Pandoc div marker (opening ::: {.class} or closing :::)
+    /// Analogous to `is_horizontal_rule` — marks structural delimiters that are not paragraph text
+    pub is_div_marker: bool,
     /// Whether this line contains or is inside a JSX expression (MDX only)
     pub in_jsx_expression: bool,
     /// Whether this line is inside an MDX comment {/* ... */} (MDX only)
