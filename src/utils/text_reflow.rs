@@ -297,6 +297,44 @@ fn is_numbered_list_item(line: &str) -> bool {
     false
 }
 
+/// Check if a trimmed line is an unordered list item (-, *, + followed by space)
+fn is_unordered_list_marker(s: &str) -> bool {
+    matches!(s.as_bytes().first(), Some(b'-' | b'*' | b'+'))
+        && !is_horizontal_rule(s)
+        && (s.len() == 1 || s.as_bytes().get(1) == Some(&b' '))
+}
+
+/// Shared structural checks for block boundary detection.
+/// Checks elements that only depend on the trimmed line content.
+fn is_block_boundary_core(trimmed: &str) -> bool {
+    trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+        || trimmed.starts_with('>')
+        || (trimmed.starts_with('[') && trimmed.contains("]:"))
+        || is_horizontal_rule(trimmed)
+        || is_unordered_list_marker(trimmed)
+        || is_numbered_list_item(trimmed)
+        || is_definition_list_item(trimmed)
+        || trimmed.starts_with(":::")
+}
+
+/// Check if a trimmed line starts a new structural block element.
+/// Used for paragraph boundary detection in `reflow_markdown()`.
+fn is_block_boundary(trimmed: &str) -> bool {
+    is_block_boundary_core(trimmed) || trimmed.starts_with('|')
+}
+
+/// Check if a line starts a new structural block for paragraph boundary detection
+/// in `reflow_paragraph_at_line()`. Extends the core checks with indented code blocks
+/// (≥4 spaces) and table row detection via `is_potential_table_row`.
+fn is_paragraph_boundary(trimmed: &str, line: &str) -> bool {
+    is_block_boundary_core(trimmed)
+        || ElementCache::calculate_indentation_width_default(line) >= 4
+        || crate::utils::table_utils::TableUtils::is_potential_table_row(line)
+}
+
 /// Check if a line ends with a hard break (either two spaces or backslash)
 ///
 /// CommonMark supports two formats for hard line breaks:
@@ -1511,16 +1549,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // Preserve lists (but not horizontal rules)
-        // A valid unordered list marker must be followed by a space (or be alone on line)
-        // This prevents emphasis markers like "*text*" from being parsed as list items
-        let is_unordered_list = |s: &str, marker: char| -> bool {
-            s.starts_with(marker) && !is_horizontal_rule(s) && (s.len() == 1 || s.chars().nth(1) == Some(' '))
-        };
-        if is_unordered_list(trimmed, '-')
-            || is_unordered_list(trimmed, '*')
-            || is_unordered_list(trimmed, '+')
-            || is_numbered_list_item(trimmed)
-        {
+        if is_unordered_list_marker(trimmed) || is_numbered_list_item(trimmed) {
             // Find the list marker and preserve indentation
             let indent = line.len() - line.trim_start().len();
             let indent_str = " ".repeat(indent);
@@ -1567,24 +1596,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 let next_trimmed = next_line.trim();
 
                 // Stop if we hit an empty line or another list item or special block
-                if next_trimmed.is_empty()
-                    || next_trimmed.starts_with('#')
-                    || next_trimmed.starts_with("```")
-                    || next_trimmed.starts_with("~~~")
-                    || next_trimmed.starts_with('>')
-                    || next_trimmed.starts_with('|')
-                    || (next_trimmed.starts_with('[') && next_line.contains("]:"))
-                    || is_horizontal_rule(next_trimmed)
-                    || (next_trimmed.starts_with('-')
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || (next_trimmed.starts_with('*')
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || (next_trimmed.starts_with('+')
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || is_numbered_list_item(next_trimmed)
-                    || is_definition_list_item(next_trimmed)
-                    || next_trimmed.starts_with(":::")
-                {
+                if is_block_boundary(next_trimmed) {
                     break;
                 }
 
@@ -1668,28 +1680,9 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         // Check if this is a single line that doesn't need processing
         let mut is_single_line_paragraph = true;
         if i + 1 < lines.len() {
-            let next_line = lines[i + 1];
-            let next_trimmed = next_line.trim();
-            // Check if next line starts a new block
-            if !next_trimmed.is_empty()
-                && !next_trimmed.starts_with('#')
-                && !next_trimmed.starts_with("```")
-                && !next_trimmed.starts_with("~~~")
-                && !next_trimmed.starts_with('>')
-                && !next_trimmed.starts_with('|')
-                && !(next_trimmed.starts_with('[') && next_line.contains("]:"))
-                && !is_horizontal_rule(next_trimmed)
-                && !(next_trimmed.starts_with('-')
-                    && !is_horizontal_rule(next_trimmed)
-                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                && !(next_trimmed.starts_with('*')
-                    && !is_horizontal_rule(next_trimmed)
-                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                && !(next_trimmed.starts_with('+')
-                    && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                && !is_numbered_list_item(next_trimmed)
-                && !next_trimmed.starts_with(":::")
-            {
+            let next_trimmed = lines[i + 1].trim();
+            // Check if next line continues this paragraph
+            if !is_block_boundary(next_trimmed) {
                 is_single_line_paragraph = false;
             }
         }
@@ -1743,26 +1736,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 let next_trimmed = next_line.trim();
 
                 // Stop at empty lines or special blocks
-                if next_trimmed.is_empty()
-                    || next_trimmed.starts_with('#')
-                    || next_trimmed.starts_with("```")
-                    || next_trimmed.starts_with("~~~")
-                    || next_trimmed.starts_with('>')
-                    || next_trimmed.starts_with('|')
-                    || (next_trimmed.starts_with('[') && next_line.contains("]:"))
-                    || is_horizontal_rule(next_trimmed)
-                    || (next_trimmed.starts_with('-')
-                        && !is_horizontal_rule(next_trimmed)
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || (next_trimmed.starts_with('*')
-                        && !is_horizontal_rule(next_trimmed)
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || (next_trimmed.starts_with('+')
-                        && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-                    || is_numbered_list_item(next_trimmed)
-                    || is_definition_list_item(next_trimmed)
-                    || next_trimmed.starts_with(":::")
-                {
+                if is_block_boundary(next_trimmed) {
                     break;
                 }
 
@@ -1889,21 +1863,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
     let trimmed = target_line.trim();
 
     // Don't reflow special blocks
-    if trimmed.is_empty()
-        || trimmed.starts_with('#')
-        || trimmed.starts_with("```")
-        || trimmed.starts_with("~~~")
-        || ElementCache::calculate_indentation_width_default(target_line) >= 4
-        || trimmed.starts_with('>')
-        || crate::utils::table_utils::TableUtils::is_potential_table_row(target_line) // Tables
-        || (trimmed.starts_with('[') && target_line.contains("]:")) // Reference definitions
-        || is_horizontal_rule(trimmed)
-        || ((trimmed.starts_with('-') || trimmed.starts_with('*') || trimmed.starts_with('+'))
-            && !is_horizontal_rule(trimmed)
-            && (trimmed.len() == 1 || trimmed.chars().nth(1) == Some(' ')))
-        || is_numbered_list_item(trimmed)
-        || is_definition_list_item(trimmed)
-    {
+    if is_paragraph_boundary(trimmed, target_line) {
         return None;
     }
 
@@ -1915,21 +1875,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         let prev_trimmed = prev_line.trim();
 
         // Stop at blank line or special blocks
-        if prev_trimmed.is_empty()
-            || prev_trimmed.starts_with('#')
-            || prev_trimmed.starts_with("```")
-            || prev_trimmed.starts_with("~~~")
-            || ElementCache::calculate_indentation_width_default(prev_line) >= 4
-            || prev_trimmed.starts_with('>')
-            || crate::utils::table_utils::TableUtils::is_potential_table_row(prev_line)
-            || (prev_trimmed.starts_with('[') && prev_line.contains("]:"))
-            || is_horizontal_rule(prev_trimmed)
-            || ((prev_trimmed.starts_with('-') || prev_trimmed.starts_with('*') || prev_trimmed.starts_with('+'))
-                && !is_horizontal_rule(prev_trimmed)
-                && (prev_trimmed.len() == 1 || prev_trimmed.chars().nth(1) == Some(' ')))
-            || is_numbered_list_item(prev_trimmed)
-            || is_definition_list_item(prev_trimmed)
-        {
+        if is_paragraph_boundary(prev_trimmed, prev_line) {
             break;
         }
 
@@ -1944,21 +1890,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         let next_trimmed = next_line.trim();
 
         // Stop at blank line or special blocks
-        if next_trimmed.is_empty()
-            || next_trimmed.starts_with('#')
-            || next_trimmed.starts_with("```")
-            || next_trimmed.starts_with("~~~")
-            || ElementCache::calculate_indentation_width_default(next_line) >= 4
-            || next_trimmed.starts_with('>')
-            || crate::utils::table_utils::TableUtils::is_potential_table_row(next_line)
-            || (next_trimmed.starts_with('[') && next_line.contains("]:"))
-            || is_horizontal_rule(next_trimmed)
-            || ((next_trimmed.starts_with('-') || next_trimmed.starts_with('*') || next_trimmed.starts_with('+'))
-                && !is_horizontal_rule(next_trimmed)
-                && (next_trimmed.len() == 1 || next_trimmed.chars().nth(1) == Some(' ')))
-            || is_numbered_list_item(next_trimmed)
-            || is_definition_list_item(next_trimmed)
-        {
+        if is_paragraph_boundary(next_trimmed, next_line) {
             break;
         }
 
@@ -2063,5 +1995,108 @@ mod tests {
         assert!(!text_ends_with_abbreviation("paradigms?", &abbreviations)); // question mark
         assert!(!text_ends_with_abbreviation("word", &abbreviations)); // no punctuation
         assert!(!text_ends_with_abbreviation("", &abbreviations)); // empty string
+    }
+
+    #[test]
+    fn test_is_unordered_list_marker() {
+        // Valid unordered list markers
+        assert!(is_unordered_list_marker("- item"));
+        assert!(is_unordered_list_marker("* item"));
+        assert!(is_unordered_list_marker("+ item"));
+        assert!(is_unordered_list_marker("-")); // lone marker
+        assert!(is_unordered_list_marker("*"));
+        assert!(is_unordered_list_marker("+"));
+
+        // Not list markers
+        assert!(!is_unordered_list_marker("---")); // horizontal rule
+        assert!(!is_unordered_list_marker("***")); // horizontal rule
+        assert!(!is_unordered_list_marker("- - -")); // horizontal rule
+        assert!(!is_unordered_list_marker("* * *")); // horizontal rule
+        assert!(!is_unordered_list_marker("*emphasis*")); // emphasis, not list
+        assert!(!is_unordered_list_marker("-word")); // no space after marker
+        assert!(!is_unordered_list_marker("")); // empty
+        assert!(!is_unordered_list_marker("text")); // plain text
+        assert!(!is_unordered_list_marker("# heading")); // heading
+    }
+
+    #[test]
+    fn test_is_block_boundary() {
+        // Block boundaries
+        assert!(is_block_boundary("")); // empty line
+        assert!(is_block_boundary("# Heading")); // ATX heading
+        assert!(is_block_boundary("## Level 2")); // ATX heading
+        assert!(is_block_boundary("```rust")); // code fence
+        assert!(is_block_boundary("~~~")); // tilde code fence
+        assert!(is_block_boundary("> quote")); // blockquote
+        assert!(is_block_boundary("| cell |")); // table
+        assert!(is_block_boundary("[link]: http://example.com")); // reference def
+        assert!(is_block_boundary("---")); // horizontal rule
+        assert!(is_block_boundary("***")); // horizontal rule
+        assert!(is_block_boundary("- item")); // unordered list
+        assert!(is_block_boundary("* item")); // unordered list
+        assert!(is_block_boundary("+ item")); // unordered list
+        assert!(is_block_boundary("1. item")); // ordered list
+        assert!(is_block_boundary("10. item")); // ordered list
+        assert!(is_block_boundary(": definition")); // definition list
+        assert!(is_block_boundary(":::")); // div marker
+        assert!(is_block_boundary("::::: {.callout-note}")); // div marker with attrs
+
+        // NOT block boundaries (paragraph continuation)
+        assert!(!is_block_boundary("regular text"));
+        assert!(!is_block_boundary("*emphasis*")); // emphasis, not list
+        assert!(!is_block_boundary("[link](url)")); // inline link, not reference def
+        assert!(!is_block_boundary("some words here"));
+    }
+
+    #[test]
+    fn test_definition_list_boundary_in_single_line_paragraph() {
+        // Verifies that a definition list item after a single-line paragraph
+        // is treated as a block boundary, not merged into the paragraph
+        let options = ReflowOptions {
+            line_length: 80,
+            ..Default::default()
+        };
+        let input = "Term\n: Definition of the term";
+        let result = reflow_markdown(input, &options);
+        // The definition list marker should remain on its own line
+        assert!(
+            result.contains(": Definition"),
+            "Definition list item should not be merged into previous line. Got: {result:?}"
+        );
+        let lines: Vec<&str> = result.lines().collect();
+        assert_eq!(lines.len(), 2, "Should remain two separate lines. Got: {lines:?}");
+        assert_eq!(lines[0], "Term");
+        assert_eq!(lines[1], ": Definition of the term");
+    }
+
+    #[test]
+    fn test_is_paragraph_boundary() {
+        // Core block boundary checks are inherited
+        assert!(is_paragraph_boundary("# Heading", "# Heading"));
+        assert!(is_paragraph_boundary("- item", "- item"));
+        assert!(is_paragraph_boundary(":::", ":::"));
+        assert!(is_paragraph_boundary(": definition", ": definition"));
+
+        // Indented code blocks (≥4 spaces or tab)
+        assert!(is_paragraph_boundary("code", "    code"));
+        assert!(is_paragraph_boundary("code", "\tcode"));
+
+        // Table rows via is_potential_table_row
+        assert!(is_paragraph_boundary("| a | b |", "| a | b |"));
+        assert!(is_paragraph_boundary("a | b", "a | b")); // pipe-delimited without leading pipe
+
+        // Not paragraph boundaries
+        assert!(!is_paragraph_boundary("regular text", "regular text"));
+        assert!(!is_paragraph_boundary("text", "  text")); // 2-space indent is not code
+    }
+
+    #[test]
+    fn test_div_marker_boundary_in_reflow_paragraph_at_line() {
+        // Verifies that div markers (:::) are treated as paragraph boundaries
+        // in reflow_paragraph_at_line, preventing reflow across div boundaries
+        let content = "Some paragraph text here.\n\n::: {.callout-note}\nThis is a callout.\n:::\n";
+        // Line 3 is the div marker — should not be reflowed
+        let result = reflow_paragraph_at_line(content, 3, 80);
+        assert!(result.is_none(), "Div marker line should not be reflowed");
     }
 }
