@@ -297,8 +297,8 @@ rumdl check --include "docs/**/*.md" --exclude "docs/temp,docs/drafts" .
 # Don't respect gitignore files (note: --respect-gitignore defaults to true)
 rumdl check --respect-gitignore=false .
 
-# Ignore exclude patterns from config
-rumdl check excluded.md --no-exclude  # Will ignore exclude patterns in config
+# Disable all exclude patterns from config
+rumdl check excluded.md --no-exclude
 ```
 
 ### Stdin/Stdout Formatting
@@ -365,14 +365,14 @@ By default, when pre-commit explicitly passes files to rumdl, the exclude patter
 
 However, for pre-commit workflows where you want to include all files, even when they're excluded in the config, you can use the `--no-exclude` flag in your pre-commit config, e.g.:
 
- ```yaml
- repos:
-   - repo: https://github.com/rvben/rumdl-pre-commit
-     rev: v0.1.15
-     hooks:
-       - id: rumdl
-         args: [--no-exclude]  # Ignore exclude patterns defined in config
- ```
+```yaml
+repos:
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: v0.1.15
+    hooks:
+      - id: rumdl
+        args: [--no-exclude]  # Disable all exclude patterns
+```
 
 ## CI/CD Integration
 
@@ -505,7 +505,7 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)
 - `--include <patterns>`: Include only specific files or directories (comma-separated glob patterns)
 - `--respect-gitignore`: Respect .gitignore files when scanning directories (does not apply to explicitly provided paths)
-- `--no-exclude`: Ignore exclude patterns from config
+- `--no-exclude`: Disable all exclude patterns from config
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information
 - `--statistics`: Show rule violation statistics summary

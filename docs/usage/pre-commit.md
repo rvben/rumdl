@@ -74,7 +74,7 @@ To disable all configured exclusions, use `--no-exclude` flag.
 ```yaml
 hooks:
   - id: rumdl
-    args: [--no-exclude].  # Disable exclude patterns defined in config
+    args: [--no-exclude]  # Disable exclude patterns defined in config
 ```
 
 ## Stages
