@@ -397,6 +397,12 @@ pub struct GlobalConfig {
     /// Can also be disabled via --no-cache CLI flag
     #[serde(default = "default_true")]
     pub cache: bool,
+
+    /// Whether the enable list was explicitly set (even if empty).
+    /// Used to distinguish "no enable list configured" from "enable list is empty"
+    /// (e.g., markdownlint `default: false` with no rules enabled).
+    #[serde(skip)]
+    pub enable_is_explicit: bool,
 }
 
 fn default_respect_gitignore() -> bool {
@@ -425,6 +431,7 @@ impl Default for GlobalConfig {
             force_exclude: false,
             cache_dir: None,
             cache: true,
+            enable_is_explicit: false,
         }
     }
 }

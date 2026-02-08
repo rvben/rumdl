@@ -66,7 +66,7 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
 
         // If config enable is set AND extend-enable is provided, merge both sets
         // before filtering, so we only need the single all_rules Vec
-        if !config_enable_set.is_empty() {
+        if !config_enable_set.is_empty() || config.global.enable_is_explicit {
             if let Some(extend_enabled_cli) = &cli_extend_enable_set {
                 // Merge config enable set with CLI extend-enable (both already canonical IDs)
                 let extended_enable_set: HashSet<&str> = config_enable_set
@@ -104,7 +104,8 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
 
         // Step 2a: Apply config `enable` (if specified).
         // Config set already resolved to canonical IDs.
-        if !config_enable_set.is_empty() {
+        // Also applies when enable was explicitly set to empty (e.g., markdownlint `default: false` with no rules).
+        if !config_enable_set.is_empty() || config.global.enable_is_explicit {
             current_rules.retain(|rule| config_enable_set.contains(rule.name()));
         }
 

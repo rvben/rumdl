@@ -121,10 +121,36 @@ impl MarkdownlintConfig {
     pub fn map_to_sourced_rumdl_config(&self, file_path: Option<&str>) -> SourcedConfig {
         let mut sourced_config = SourcedConfig::default();
         let file = file_path.map(|s| s.to_string());
+
+        // Extract the `default` key
+        let default_enabled = self.0.get("default").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        let mut disabled_rules = Vec::new();
+        let mut enabled_rules = Vec::new();
+
         for (key, value) in &self.0 {
+            // Skip the `default` key — it's not a rule
+            if key == "default" {
+                continue;
+            }
+
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
+
+                // Handle boolean values according to `default` semantics
+                if value.is_bool() {
+                    let is_enabled = value.as_bool().unwrap_or(false);
+                    if default_enabled {
+                        if !is_enabled {
+                            disabled_rules.push(norm_rule_key.clone());
+                        }
+                    } else if is_enabled {
+                        enabled_rules.push(norm_rule_key.clone());
+                    }
+                    continue;
+                }
+
                 let toml_value: Option<toml::Value> = serde_yml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
                 let rule_config = sourced_config.rules.entry(norm_rule_key.clone()).or_default();
@@ -209,6 +235,10 @@ impl MarkdownlintConfig {
                             );
                         }
                     }
+                    // When default: false, rules with object configs are explicitly enabled
+                    if !default_enabled {
+                        enabled_rules.push(norm_rule_key.clone());
+                    }
                 } else {
                     log::error!(
                         "Could not convert value for rule key {key:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config."
@@ -217,6 +247,15 @@ impl MarkdownlintConfig {
                 }
             }
         }
+
+        // Apply enable/disable lists
+        if !disabled_rules.is_empty() {
+            sourced_config.global.disable = SourcedValue::new(disabled_rules, ConfigSource::ProjectConfig);
+        }
+        if !enabled_rules.is_empty() || !default_enabled {
+            sourced_config.global.enable = SourcedValue::new(enabled_rules, ConfigSource::ProjectConfig);
+        }
+
         if let Some(_f) = file {
             sourced_config.loaded_files.push(_f);
         }
@@ -231,22 +270,39 @@ impl MarkdownlintConfig {
         let mut fragment = crate::config::SourcedConfigFragment::default();
         let file = file_path.map(|s| s.to_string());
 
+        // Extract the `default` key: controls whether rules are enabled by default.
+        // When true (or absent), all rules are enabled unless explicitly disabled.
+        // When false, only rules explicitly set to true or configured with an object are enabled.
+        let default_enabled = self.0.get("default").and_then(|v| v.as_bool()).unwrap_or(true);
+
         // Accumulate disabled and enabled rules
         let mut disabled_rules = Vec::new();
         let mut enabled_rules = Vec::new();
 
         for (key, value) in &self.0 {
+            // Skip the `default` key — it's not a rule
+            if key == "default" {
+                continue;
+            }
+
             let mapped = markdownlint_to_rumdl_rule_key(key);
             if let Some(rumdl_key) = mapped {
                 let norm_rule_key = rumdl_key.to_ascii_uppercase();
                 // Special handling for boolean values (true/false)
                 if value.is_bool() {
-                    if !value.as_bool().unwrap_or(false) {
-                        // Accumulate disabled rules
-                        disabled_rules.push(norm_rule_key.clone());
+                    let enabled = value.as_bool().unwrap_or(false);
+                    if default_enabled {
+                        // default: true — all rules on by default
+                        // true → no-op (already enabled), false → disable
+                        if !enabled {
+                            disabled_rules.push(norm_rule_key.clone());
+                        }
                     } else {
-                        // Accumulate enabled rules
-                        enabled_rules.push(norm_rule_key.clone());
+                        // default: false — all rules off by default
+                        // true → enable, false → no-op (already disabled)
+                        if enabled {
+                            enabled_rules.push(norm_rule_key.clone());
+                        }
                     }
                     continue;
                 }
@@ -325,6 +381,11 @@ impl MarkdownlintConfig {
                             );
                         }
                     }
+
+                    // When default: false, rules with object configs are explicitly enabled
+                    if !default_enabled {
+                        enabled_rules.push(norm_rule_key.clone());
+                    }
                 }
             }
         }
@@ -339,8 +400,11 @@ impl MarkdownlintConfig {
             );
         }
 
-        // Set all enabled rules at once
-        if !enabled_rules.is_empty() {
+        // Set all enabled rules at once.
+        // When default: false, always push the enable override (even if empty)
+        // so the source changes from Default to ProjectConfig, signaling that
+        // the enable list is authoritative.
+        if !enabled_rules.is_empty() || !default_enabled {
             fragment.global.enable.push_override(
                 enabled_rules,
                 crate::config::ConfigSource::ProjectConfig,
@@ -578,8 +642,12 @@ ul-style:
         // Check disabled rule
         assert!(fragment.global.disable.value.contains(&"MD025".to_string()));
 
-        // Check enabled rule
-        assert!(fragment.global.enable.value.contains(&"MD026".to_string()));
+        // When default is absent (= true), boolean true is no-op — no enable list
+        assert!(
+            !fragment.global.enable.value.contains(&"MD026".to_string()),
+            "Boolean true should be no-op when default is absent (treated as true)"
+        );
+        assert!(fragment.global.enable.value.is_empty());
 
         // Check rule configuration
         assert!(fragment.rules.contains_key("MD003"));
@@ -770,5 +838,214 @@ ul-style:
                 "Alias {alias} should map to {expected}"
             );
         }
+    }
+
+    #[test]
+    fn test_default_true_with_boolean_rules() {
+        // default: true + MD001: true + MD013: { line_length: 120 }
+        // Expected: no enable list (all rules already on), no disable list, MD013 config preserved
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert(
+            "MD013".to_string(),
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
+                map.insert(
+                    serde_yml::Value::String("line_length".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(120)),
+                );
+                map
+            }),
+        );
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        // No enable list: boolean true is no-op when default is true
+        assert!(
+            fragment.global.enable.value.is_empty(),
+            "Enable list should be empty when default: true"
+        );
+        // No disable list
+        assert!(fragment.global.disable.value.is_empty(), "Disable list should be empty");
+        // MD013 config preserved
+        assert!(fragment.rules.contains_key("MD013"));
+        assert_eq!(
+            fragment.rules["MD013"].values["line-length"].value,
+            toml::Value::Integer(120)
+        );
+    }
+
+    #[test]
+    fn test_default_false_with_boolean_and_config_rules() {
+        // default: false + MD001: true + MD013: { line_length: 120 }
+        // Expected: enable list contains both MD001 and MD013
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(false));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert(
+            "MD013".to_string(),
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
+                map.insert(
+                    serde_yml::Value::String("line_length".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(120)),
+                );
+                map
+            }),
+        );
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        let mut enabled_sorted = fragment.global.enable.value.clone();
+        enabled_sorted.sort();
+        assert_eq!(
+            enabled_sorted,
+            vec!["MD001", "MD013"],
+            "Both boolean-true and config-object rules should be in enable list"
+        );
+        assert!(fragment.global.disable.value.is_empty(), "No rules should be disabled");
+        // MD013 config preserved
+        assert!(fragment.rules.contains_key("MD013"));
+        assert_eq!(
+            fragment.rules["MD013"].values["line-length"].value,
+            toml::Value::Integer(120)
+        );
+    }
+
+    #[test]
+    fn test_default_absent_with_boolean_rules() {
+        // No `default` key + MD001: true → same as default: true (no enable list)
+        let mut config_map = HashMap::new();
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD009".to_string(), serde_yml::Value::Bool(false));
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        // No enable list: true is no-op when default is absent (treated as true)
+        assert!(
+            fragment.global.enable.value.is_empty(),
+            "Enable list should be empty when default is absent"
+        );
+        // MD009 should be disabled
+        assert_eq!(fragment.global.disable.value, vec!["MD009"]);
+    }
+
+    #[test]
+    fn test_default_false_only_booleans() {
+        // default: false + MD001: true + MD009: false
+        // Expected: enable list = [MD001], no disable list (false is no-op when default: false)
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(false));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD009".to_string(), serde_yml::Value::Bool(false));
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        assert_eq!(fragment.global.enable.value, vec!["MD001"]);
+        assert!(
+            fragment.global.disable.value.is_empty(),
+            "Disable list should be empty when default: false (false is no-op)"
+        );
+    }
+
+    #[test]
+    fn test_default_true_with_boolean_rules_legacy() {
+        // Test the legacy map_to_sourced_rumdl_config path
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert("MD009".to_string(), serde_yml::Value::Bool(false));
+        config_map.insert(
+            "MD013".to_string(),
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
+                map.insert(
+                    serde_yml::Value::String("line_length".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(120)),
+                );
+                map
+            }),
+        );
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let sourced = mdl_config.map_to_sourced_rumdl_config(Some("test.yaml"));
+
+        // No enable list: boolean true is no-op when default is true
+        assert!(sourced.global.enable.value.is_empty());
+        // MD009 should be disabled
+        assert_eq!(sourced.global.disable.value, vec!["MD009"]);
+        // MD013 config preserved
+        assert!(sourced.rules.contains_key("MD013"));
+        assert_eq!(
+            sourced.rules["MD013"].values["line-length"].value,
+            toml::Value::Integer(120)
+        );
+    }
+
+    #[test]
+    fn test_default_false_with_config_rules_legacy() {
+        // Test the legacy path with default: false
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(false));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(true));
+        config_map.insert(
+            "MD013".to_string(),
+            serde_yml::Value::Mapping({
+                let mut map = serde_yml::Mapping::new();
+                map.insert(
+                    serde_yml::Value::String("line_length".to_string()),
+                    serde_yml::Value::Number(serde_yml::Number::from(120)),
+                );
+                map
+            }),
+        );
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let sourced = mdl_config.map_to_sourced_rumdl_config(Some("test.yaml"));
+
+        let mut enabled_sorted = sourced.global.enable.value.clone();
+        enabled_sorted.sort();
+        assert_eq!(enabled_sorted, vec!["MD001", "MD013"]);
+        assert!(sourced.global.disable.value.is_empty());
+    }
+
+    #[test]
+    fn test_default_false_no_rules_disables_everything() {
+        // default: false with no other rules should result in an empty-but-explicit enable list
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(false));
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        // Enable list is empty but was explicitly set (source should be ProjectConfig, not Default)
+        assert!(fragment.global.enable.value.is_empty());
+        assert_eq!(
+            fragment.global.enable.source,
+            crate::config::ConfigSource::ProjectConfig,
+            "Enable source should be ProjectConfig when default: false"
+        );
+    }
+
+    #[test]
+    fn test_default_false_only_false_rules_disables_everything() {
+        // default: false + MD001: false → no rules enabled, enable list is explicit
+        let mut config_map = HashMap::new();
+        config_map.insert("default".to_string(), serde_yml::Value::Bool(false));
+        config_map.insert("MD001".to_string(), serde_yml::Value::Bool(false));
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(Some("test.yaml"));
+
+        assert!(fragment.global.enable.value.is_empty());
+        assert_eq!(
+            fragment.global.enable.source,
+            crate::config::ConfigSource::ProjectConfig,
+        );
     }
 }

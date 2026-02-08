@@ -790,6 +790,9 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             }
             rules.insert(normalized_rule_name, RuleConfig { severity, values });
         }
+        // Enable is "explicit" if it was set by something other than the Default source
+        let enable_is_explicit = sourced.global.enable.source != ConfigSource::Default;
+
         #[allow(deprecated)]
         let global = GlobalConfig {
             enable: sourced.global.enable.value,
@@ -805,6 +808,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             force_exclude: sourced.global.force_exclude.value,
             cache_dir: sourced.global.cache_dir.as_ref().map(|v| v.value.clone()),
             cache: sourced.global.cache.value,
+            enable_is_explicit,
         };
         Config {
             global,

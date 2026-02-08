@@ -1,6 +1,8 @@
-use rumdl_lib::config::{ConfigSource, normalize_key};
+use rumdl_lib::config::{Config, ConfigSource, SourcedConfig, normalize_key};
 use rumdl_lib::markdownlint_config::MarkdownlintConfig;
 use std::collections::HashMap;
+use std::fs;
+use tempfile::tempdir;
 
 #[test]
 fn test_markdownlint_config_mapping() {
@@ -248,5 +250,141 @@ MD060: false
     assert_eq!(
         fragment.rules["MD024"].values["siblings-only"].value.as_bool(),
         Some(true)
+    );
+}
+
+#[test]
+fn test_default_true_boolean_rules_dont_create_allowlist() {
+    // Issue #389: When default: true + MD001: true + MD013: { line_length: 120 },
+    // MD013 should still be active (no exclusive enable list created).
+    let temp = tempdir().unwrap();
+    let config_path = temp.path().join(".markdownlint.yaml");
+    fs::write(
+        &config_path,
+        r#"default: true
+MD001: true
+MD013:
+  line_length: 120
+"#,
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // No enable list should be set — boolean true is no-op when default: true
+    assert!(
+        config.global.enable.is_empty(),
+        "Enable list should be empty when default: true"
+    );
+    // No disable list
+    assert!(config.global.disable.is_empty(), "No rules should be disabled");
+    // MD013 config should be preserved
+    assert!(config.rules.contains_key("MD013"), "MD013 should be configured");
+    let md013 = &config.rules["MD013"];
+    assert_eq!(
+        md013.values.get("line-length").and_then(|v| v.as_integer()),
+        Some(120),
+        "MD013 line-length should be 120"
+    );
+}
+
+#[test]
+fn test_default_false_enables_configured_rules() {
+    // When default: false, only explicitly enabled/configured rules should be active
+    let temp = tempdir().unwrap();
+    let config_path = temp.path().join(".markdownlint.yaml");
+    fs::write(
+        &config_path,
+        r#"default: false
+MD001: true
+MD013:
+  line_length: 120
+"#,
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Both MD001 (boolean true) and MD013 (object config) should be in the enable list
+    let mut enabled = config.global.enable.clone();
+    enabled.sort();
+    assert_eq!(
+        enabled,
+        vec!["MD001", "MD013"],
+        "Both boolean-true and config-object rules should be enabled"
+    );
+    // No rules disabled
+    assert!(
+        config.global.disable.is_empty(),
+        "No rules should be disabled when default: false"
+    );
+    // MD013 config should be preserved
+    assert!(config.rules.contains_key("MD013"), "MD013 should be configured");
+    let md013 = &config.rules["MD013"];
+    assert_eq!(
+        md013.values.get("line-length").and_then(|v| v.as_integer()),
+        Some(120),
+        "MD013 line-length should be 120"
+    );
+}
+
+#[test]
+fn test_default_absent_same_as_default_true() {
+    // When `default` key is absent, it should behave the same as default: true
+    let temp = tempdir().unwrap();
+    let config_path = temp.path().join(".markdownlint.yaml");
+    fs::write(
+        &config_path,
+        r#"MD001: true
+MD009: false
+MD013:
+  line_length: 80
+"#,
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // No enable list: boolean true is no-op
+    assert!(
+        config.global.enable.is_empty(),
+        "Enable list should be empty when default absent"
+    );
+    // enable_is_explicit should be false when default is absent
+    assert!(
+        !config.global.enable_is_explicit,
+        "Enable should not be explicit when default absent"
+    );
+    // MD009 should be disabled
+    assert!(
+        config.global.disable.contains(&"MD009".to_string()),
+        "MD009 should be disabled"
+    );
+    // MD013 config should be preserved
+    assert!(config.rules.contains_key("MD013"));
+}
+
+#[test]
+fn test_default_false_no_rules_disables_all() {
+    // default: false with no other rules → enable list is empty but explicit,
+    // which means no rules should run
+    let temp = tempdir().unwrap();
+    let config_path = temp.path().join(".markdownlint.yaml");
+    fs::write(&config_path, "default: false\n").unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(config.global.enable.is_empty(), "Enable list should be empty");
+    assert!(
+        config.global.enable_is_explicit,
+        "Enable should be explicit when default: false"
     );
 }
