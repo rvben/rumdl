@@ -41,8 +41,8 @@ fn normalize_path(path: &Path) -> PathBuf {
 ///
 /// See [docs/md051.md](../../docs/md051.md) for full documentation, configuration, and examples.
 ///
-/// This rule validates that link anchors (the part after #) exist in the current document.
-/// Only applies to internal document links (like #heading), not to external URLs or cross-file links.
+/// This rule validates that link anchors (the part after #) point to existing headings.
+/// Supports both same-document anchors and cross-file fragment links when linting a workspace.
 #[derive(Clone)]
 pub struct MD051LinkFragments {
     /// Anchor style to use for validation
