@@ -727,11 +727,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PRECOMMIT_DISPATCH_TOKEN }}
         run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             https://api.github.com/repos/rvben/rumdl-pre-commit/dispatches \
-            -d '{"event_type": "pypi_release"}'
+            -d "{\"event_type\": \"pypi_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify rumdl-vscode
         if: ${{ success() && inputs.dry_run != true }}
