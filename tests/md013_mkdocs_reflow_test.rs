@@ -425,3 +425,136 @@ This is a very long line that exceeds the default line length limit and should t
     assert!(fixed.contains("!!! note"), "Admonition marker should be preserved");
     assert!(fixed.contains("- List item"), "List items should be preserved");
 }
+
+// ───── Bug #2: Compact admonition marker lines must not be reflowed ─────
+
+#[test]
+fn test_compact_admonition_marker_not_reflowed() {
+    // Compact admonition: `!!! note` followed immediately by indented content (no blank line)
+    // The marker line must NEVER be reflowed — only the indented content lines.
+    let content = r#"!!! note
+    This is a very long compact admonition content line that exceeds the default eighty character line length limit and should be wrapped.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Marker line must be exactly `!!! note` — never merged with content
+    let first_line = fixed.lines().next().unwrap();
+    assert_eq!(
+        first_line, "!!! note",
+        "Compact admonition marker must remain on its own line, got: {first_line:?}"
+    );
+
+    // Content must NOT appear on the marker line
+    assert!(
+        !first_line.contains("This is"),
+        "Content must not be merged onto the admonition marker line"
+    );
+
+    // All content lines should be indented with 4 spaces
+    for line in fixed.lines().skip(1) {
+        if !line.is_empty() {
+            assert!(
+                line.starts_with("    "),
+                "Content line should have 4-space indent: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_compact_admonition_with_title_not_reflowed() {
+    // Compact admonition with title: `!!! warning "Caution"` followed by indented content
+    let content = r#"!!! warning "Caution"
+    This is a long warning message inside a compact admonition with a custom title that exceeds the eighty character line length limit.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let first_line = fixed.lines().next().unwrap();
+    assert_eq!(
+        first_line,
+        "!!! warning \"Caution\"",
+        "Admonition marker with title must remain intact: {first_line:?}"
+    );
+}
+
+#[test]
+fn test_compact_collapsible_admonition_not_reflowed() {
+    // Collapsible admonition `???` format
+    let content = r#"??? info "Details"
+    This collapsible admonition has content that is very long and exceeds the line length limit and should be wrapped while preserving indentation.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let first_line = fixed.lines().next().unwrap();
+    assert_eq!(
+        first_line,
+        "??? info \"Details\"",
+        "Collapsible marker must remain intact: {first_line:?}"
+    );
+}
+
+#[test]
+fn test_tab_marker_not_reflowed() {
+    // Tab marker `=== "Tab"` followed by indented content
+    let content = r#"=== "Configuration"
+    This is a very long configuration description inside a tab that exceeds the default eighty character line length limit and should be wrapped.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let first_line = fixed.lines().next().unwrap();
+    assert_eq!(
+        first_line,
+        "=== \"Configuration\"",
+        "Tab marker must remain intact: {first_line:?}"
+    );
+}
+
+#[test]
+fn test_compact_admonition_multi_paragraph_preserved() {
+    // Multi-paragraph compact admonition: content spans multiple paragraphs
+    // Each paragraph should be reflowed independently, maintaining structure
+    let content = r#"!!! note
+    First paragraph of the admonition that is long enough to need reflowing when the line length limit is set to eighty characters.
+
+    Second paragraph of the admonition that is also long enough to trigger the reflow when the line length limit is eighty.
+"#;
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Marker line intact
+    assert_eq!(fixed.lines().next().unwrap(), "!!! note");
+
+    // Blank line separating paragraphs should be preserved
+    let lines: Vec<&str> = fixed.lines().collect();
+    let has_blank_between_paragraphs = lines.windows(3).any(|w| {
+        w[0].starts_with("    ") && w[1].is_empty() && w[2].starts_with("    ")
+    });
+    assert!(
+        has_blank_between_paragraphs,
+        "Blank line between admonition paragraphs should be preserved. Got:\n{fixed}"
+    );
+}

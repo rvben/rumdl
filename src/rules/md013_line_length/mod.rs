@@ -3,8 +3,10 @@
 /// See [docs/md013.md](../../docs/md013.md) for full documentation, configuration, and examples.
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
+use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
@@ -484,6 +486,15 @@ impl MD013LineLength {
 
             // Handle MkDocs container content (admonitions and tabs) with indent-preserving reflow
             if ctx.line_info(line_num).is_some_and(|info| info.in_mkdocs_container()) {
+                // Skip admonition/tab marker lines — only reflow their indented content
+                let current_line = lines[i];
+                if mkdocs_admonitions::is_admonition_start(current_line)
+                    || mkdocs_tabs::is_tab_marker(current_line)
+                {
+                    i += 1;
+                    continue;
+                }
+
                 let container_start = i;
 
                 // Detect the actual indent level from the first content line
