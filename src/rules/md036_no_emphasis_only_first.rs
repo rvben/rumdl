@@ -213,9 +213,21 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         let mut warnings = Vec::new();
 
-        for (i, line) in content.lines().enumerate() {
+        let lines: Vec<&str> = content.lines().collect();
+        let line_count = lines.len();
+
+        for (i, line) in lines.iter().enumerate() {
             // Skip obvious non-matches quickly
             if line.trim().is_empty() || (!line.contains('*') && !line.contains('_')) {
+                continue;
+            }
+
+            // Emphasis-as-heading requires the line to be a standalone paragraph:
+            // - preceded by a blank line (or start of document)
+            // - followed by a blank line (or end of document)
+            let prev_blank = i == 0 || lines[i - 1].trim().is_empty();
+            let next_blank = i + 1 >= line_count || lines[i + 1].trim().is_empty();
+            if !prev_blank || !next_blank {
                 continue;
             }
 

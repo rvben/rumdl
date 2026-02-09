@@ -14,7 +14,8 @@ fn test_valid_emphasis() {
 #[test]
 fn test_emphasis_only() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-    let content = "*Emphasized*\n_Also emphasized_";
+    // Each emphasis must be a standalone paragraph (surrounded by blank lines)
+    let content = "*Emphasized*\n\n_Also emphasized_";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -24,9 +25,30 @@ fn test_emphasis_only() {
 }
 
 #[test]
+fn test_emphasis_not_standalone_paragraph() {
+    let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+    // Emphasis followed immediately by text is part of a paragraph, not heading-like
+    let content = "**Bold label**\nText continues here.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Should not flag emphasis that's part of a paragraph");
+}
+
+#[test]
+fn test_emphasis_preceded_by_text() {
+    let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+    // Emphasis preceded by text without blank line is part of a paragraph
+    let content = "Some intro text\n**Bold label**";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 0, "Should not flag emphasis preceded by text without blank line");
+}
+
+#[test]
 fn test_strong_only() {
     let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
-    let content = "**Strong**\n__Also strong__";
+    // Each strong must be a standalone paragraph (surrounded by blank lines)
+    let content = "**Strong**\n\n__Also strong__";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2);
@@ -244,10 +266,8 @@ fn test_markdownlint_parity_comprehensive() {
 #[test]
 fn test_custom_punctuation_config() {
     // Test with custom punctuation configuration
-    let content = r#"**Heading!**
-**Another@**
-**Custom#**
-**Default:**"#;
+    // Each line must be a standalone paragraph to be flagged
+    let content = "**Heading!**\n\n**Another@**\n\n**Custom#**\n\n**Default:**";
 
     // With custom punctuation that includes ! @ # but not :
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -262,9 +282,8 @@ fn test_custom_punctuation_config() {
 #[test]
 fn test_empty_punctuation_config() {
     // Test with empty punctuation (flag everything)
-    let content = r#"**Heading:**
-**Another.**
-**Plain**"#;
+    // Each line must be a standalone paragraph to be flagged
+    let content = "**Heading:**\n\n**Another.**\n\n**Plain**";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let rule = MD036NoEmphasisAsHeading::new("".to_string());
