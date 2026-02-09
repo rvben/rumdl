@@ -661,9 +661,37 @@ impl MD033NoInlineHtml {
             return None;
         }
 
-        // Escape special markdown characters in link text
-        // Brackets need escaping to avoid breaking the link syntax
-        let escaped_text = inner_content.replace('[', r"\[").replace(']', r"\]");
+        // If inner content is exactly a markdown image (from a prior <img> fix),
+        // use it directly without bracket escaping to produce valid [![alt](src)](href).
+        // Must verify the entire content is a single image — not mixed content like
+        // "![](url) extra [text]" where trailing brackets still need escaping.
+        let trimmed_inner = inner_content.trim();
+        let is_markdown_image = trimmed_inner.starts_with("![")
+            && trimmed_inner.contains("](")
+            && trimmed_inner.ends_with(')')
+            && {
+                // Verify the closing ](url) accounts for the rest of the content
+                // by finding the image's ]( and checking nothing follows the final )
+                if let Some(bracket_close) = trimmed_inner.rfind("](") {
+                    let after_paren = &trimmed_inner[bracket_close + 2..];
+                    // The rest should be just "url)" — find the matching close paren
+                    after_paren.ends_with(')')
+                        && after_paren
+                            .chars()
+                            .filter(|&c| c == ')')
+                            .count()
+                            >= after_paren.chars().filter(|&c| c == '(').count()
+                } else {
+                    false
+                }
+            };
+        let escaped_text = if is_markdown_image {
+            trimmed_inner.to_string()
+        } else {
+            // Escape special markdown characters in link text
+            // Brackets need escaping to avoid breaking the link syntax
+            inner_content.replace('[', r"\[").replace(']', r"\]")
+        };
 
         // Escape parentheses in URL
         let escaped_url = href.replace('(', "%28").replace(')', "%29");
@@ -2417,5 +2445,135 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
                 "Pattern {pattern} should not be flagged. Got: {result:?}"
             );
         }
+    }
+
+    // ───── Bug #3: Bracket escaping in image-inside-link conversion ─────
+    //
+    // When <a> wraps already-converted markdown image text, the bracket escaping
+    // must be skipped to produce valid [![alt](url)](href) instead of !\[\](url)
+
+    #[test]
+    fn test_md033_fix_a_wrapping_markdown_image_no_escaped_brackets() {
+        // When <a> wraps a markdown image (from a prior fix iteration),
+        // the result should be [![](url)](href) — no escaped brackets
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = r#"<a href="https://example.com">![](https://example.com/image.png)</a>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed,
+            "[![](https://example.com/image.png)](https://example.com)",
+        );
+        assert!(!fixed.contains(r"\["), "Must not escape brackets: {fixed}");
+        assert!(!fixed.contains(r"\]"), "Must not escape brackets: {fixed}");
+    }
+
+    #[test]
+    fn test_md033_fix_a_wrapping_markdown_image_with_alt() {
+        // <a> wrapping ![alt](url) preserves alt text in linked image
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = r#"<a href="https://github.com/repo">![Contributors](https://contrib.rocks/image?repo=org/repo)</a>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed,
+            "[![Contributors](https://contrib.rocks/image?repo=org/repo)](https://github.com/repo)"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_img_without_alt_produces_empty_alt() {
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = r#"<img src="photo.jpg" />"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "![](photo.jpg)");
+    }
+
+    #[test]
+    fn test_md033_fix_a_with_plain_text_still_escapes_brackets() {
+        // Plain text brackets inside <a> SHOULD be escaped
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = r#"<a href="https://example.com">text with [brackets]</a>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains(r"\[brackets\]"),
+            "Plain text brackets should be escaped: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_a_with_image_plus_extra_text_escapes_brackets() {
+        // Mixed content: image followed by bracketed text — brackets must be escaped
+        // The image detection must NOT match partial content
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = r#"<a href="/link">![](img.png) see [docs]</a>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // "see [docs]" brackets should be escaped since inner content is mixed
+        assert!(
+            fixed.contains(r"\[docs\]"),
+            "Brackets in mixed image+text content should be escaped: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_img_in_a_end_to_end() {
+        // End-to-end: verify that iterative fixing of <a><img></a>
+        // produces the correct final result through the fix coordinator
+        use crate::config::Config;
+        use crate::fix_coordinator::FixCoordinator;
+
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let rules: Vec<Box<dyn crate::rule::Rule>> = vec![Box::new(rule)];
+
+        let mut content =
+            r#"<a href="https://github.com/org/repo"><img src="https://contrib.rocks/image?repo=org/repo" /></a>"#
+                .to_string();
+        let config = Config::default();
+        let coordinator = FixCoordinator::new();
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10, None)
+            .unwrap();
+
+        assert_eq!(
+            content,
+            "[![](https://contrib.rocks/image?repo=org/repo)](https://github.com/org/repo)",
+            "End-to-end: <a><img></a> should become valid linked image"
+        );
+        assert!(result.converged);
+        assert!(!content.contains(r"\["), "No escaped brackets: {content}");
+    }
+
+    #[test]
+    fn test_md033_fix_img_in_a_with_alt_end_to_end() {
+        use crate::config::Config;
+        use crate::fix_coordinator::FixCoordinator;
+
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let rules: Vec<Box<dyn crate::rule::Rule>> = vec![Box::new(rule)];
+
+        let mut content =
+            r#"<a href="https://github.com/org/repo"><img src="https://contrib.rocks/image" alt="Contributors" /></a>"#
+                .to_string();
+        let config = Config::default();
+        let coordinator = FixCoordinator::new();
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 10, None)
+            .unwrap();
+
+        assert_eq!(
+            content,
+            "[![Contributors](https://contrib.rocks/image)](https://github.com/org/repo)",
+        );
+        assert!(result.converged);
     }
 }
