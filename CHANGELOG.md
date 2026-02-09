@@ -7,9 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-02-09
+
+### Added
+
+- **MD013**: `semantic-line-breaks` reflow mode (preview) — breaks lines at semantic
+  boundaries using a cascading strategy: sentence boundaries first, then clause
+  punctuation (`,` `;` `:` `—`), then English break-words (`and`, `or`, `but`,
+  `which`, `that`, `because`, etc.), then word wrap as fallback
+  ([#388](https://github.com/rvben/rumdl/issues/388))
+
 ### Fixed
 
-- **docs**: Update to reflect `--no-exclude` replacing deprecated (since v0.0.156) `--force-exclude`
+- **MD013**: Use actual line length instead of URL-stripped length for line-length
+  checks — lines were incorrectly passing when long URLs inflated the real length
+- **MD013**: Preserve Quarto/Pandoc div markers (`::: {.class}`) during text reflow
+  instead of reflowing them into surrounding paragraphs
+- **MD001**: Track fixed heading level in `check()` for idempotent fixes — repeated
+  `--fix` runs no longer produce different output for multi-level heading violations
+- **MD032**: Idempotent fix for ordered non-1 list followed by unordered list
+- **MD032**: Use `fix()` method in proptest and allow convergence within 3 passes
+- **MD062**: Bail out when unmatched angle bracket masks closing paren, preventing
+  false positive warnings on valid link syntax
+- **MD009**: Strip all trailing Unicode whitespace in a single pass instead of
+  handling each whitespace character separately
+- **GitHub Action**: Support multiple space-separated file paths in `path` input
+- **docs**: Fix YAML typo, indentation, and `--no-exclude` descriptions
+  (thanks @JonathanWillitts in [#385](https://github.com/rvben/rumdl/pull/385))
+- **config**: Handle markdownlint `default` key and boolean rule semantics in
+  `.markdownlint.json` compatibility
+  ([#389](https://github.com/rvben/rumdl/issues/389))
+
+### Changed
+
+- **reflow**: Extract block boundary helpers to deduplicate paragraph detection logic
+- **MD001**: Extract `compute_heading_fix()` to unify check() and fix() code paths
+- **docs**: Add Helix editor formatter configuration and note about built-in support
+- **docs**: Add link and nav validation guide, fix MD051 cross-file documentation
 
 ## [0.1.15] - 2026-02-07
 
