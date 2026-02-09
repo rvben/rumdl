@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MD013**: Fix panic on multi-byte characters (smart quotes, em dashes) in
+  semantic line break sentence boundary detection
+- **MD013**: Preserve element adjacency during reflow — text directly adjacent
+  to shortcodes, code spans, or links (e.g., `v{{< shortcode >}}`) is no longer
+  split across lines
 - **MD013**: Use actual line length instead of URL-stripped length for line-length
   checks — lines were incorrectly passing when long URLs inflated the real length
 - **MD013**: Preserve Quarto/Pandoc div markers (`::: {.class}`) during text reflow
