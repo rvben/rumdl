@@ -280,7 +280,6 @@ fn test_md045_unicode_alt_text() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect all images with missing/empty alt text");
-
 }
 
 #[test]

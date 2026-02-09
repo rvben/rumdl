@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] - 2026-02-09
+
+### Fixed
+
+- **Config**: `enable = []` is now correctly treated as "disable all rules" instead
+  of being silently ignored
+- **MD013**: Preserve MkDocs admonition markers (`!!!`, `???`, `???+`) during text
+  reflow instead of stripping them from continuation lines
+- **MD033**: Escape regex special characters in `allowed-elements` config values —
+  square brackets and other metacharacters were being interpreted as regex patterns
+- **MD036**: Only flag emphasis as heading-like when it forms a standalone paragraph
+  (surrounded by blank lines), matching markdownlint behavior
+
+### Changed
+
+- **MD045**: Made diagnostic-only — auto-fix removed because meaningful alt text
+  requires human judgment. Automated placeholders derived from filenames (e.g.,
+  "User Profile image") are harmful for accessibility. The rule now reports missing
+  alt text without offering to fix it.
+- **CI**: Pass version in pre-commit dispatch payload
+
 ## [0.1.16] - 2026-02-09
 
 ### Added

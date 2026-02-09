@@ -41,7 +41,11 @@ fn test_emphasis_preceded_by_text() {
     let content = "Some intro text\n**Bold label**";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 0, "Should not flag emphasis preceded by text without blank line");
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not flag emphasis preceded by text without blank line"
+    );
 }
 
 #[test]

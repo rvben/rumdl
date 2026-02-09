@@ -488,9 +488,7 @@ impl MD013LineLength {
             if ctx.line_info(line_num).is_some_and(|info| info.in_mkdocs_container()) {
                 // Skip admonition/tab marker lines — only reflow their indented content
                 let current_line = lines[i];
-                if mkdocs_admonitions::is_admonition_start(current_line)
-                    || mkdocs_tabs::is_tab_marker(current_line)
-                {
+                if mkdocs_admonitions::is_admonition_start(current_line) || mkdocs_tabs::is_tab_marker(current_line) {
                     i += 1;
                     continue;
                 }

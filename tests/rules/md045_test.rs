@@ -114,5 +114,3 @@ fn test_descriptive_filenames_not_used_for_alt() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "MD045 should not modify content (diagnostic-only)");
 }
-
-

@@ -481,8 +481,7 @@ fn test_compact_admonition_with_title_not_reflowed() {
 
     let first_line = fixed.lines().next().unwrap();
     assert_eq!(
-        first_line,
-        "!!! warning \"Caution\"",
+        first_line, "!!! warning \"Caution\"",
         "Admonition marker with title must remain intact: {first_line:?}"
     );
 }
@@ -502,8 +501,7 @@ fn test_compact_collapsible_admonition_not_reflowed() {
 
     let first_line = fixed.lines().next().unwrap();
     assert_eq!(
-        first_line,
-        "??? info \"Details\"",
+        first_line, "??? info \"Details\"",
         "Collapsible marker must remain intact: {first_line:?}"
     );
 }
@@ -523,8 +521,7 @@ fn test_tab_marker_not_reflowed() {
 
     let first_line = fixed.lines().next().unwrap();
     assert_eq!(
-        first_line,
-        "=== \"Configuration\"",
+        first_line, "=== \"Configuration\"",
         "Tab marker must remain intact: {first_line:?}"
     );
 }
@@ -550,9 +547,9 @@ fn test_compact_admonition_multi_paragraph_preserved() {
 
     // Blank line separating paragraphs should be preserved
     let lines: Vec<&str> = fixed.lines().collect();
-    let has_blank_between_paragraphs = lines.windows(3).any(|w| {
-        w[0].starts_with("    ") && w[1].is_empty() && w[2].starts_with("    ")
-    });
+    let has_blank_between_paragraphs = lines
+        .windows(3)
+        .any(|w| w[0].starts_with("    ") && w[1].is_empty() && w[2].starts_with("    "));
     assert!(
         has_blank_between_paragraphs,
         "Blank line between admonition paragraphs should be preserved. Got:\n{fixed}"

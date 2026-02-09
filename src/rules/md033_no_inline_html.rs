@@ -666,20 +666,15 @@ impl MD033NoInlineHtml {
         // Must verify the entire content is a single image — not mixed content like
         // "![](url) extra [text]" where trailing brackets still need escaping.
         let trimmed_inner = inner_content.trim();
-        let is_markdown_image = trimmed_inner.starts_with("![")
-            && trimmed_inner.contains("](")
-            && trimmed_inner.ends_with(')')
-            && {
+        let is_markdown_image =
+            trimmed_inner.starts_with("![") && trimmed_inner.contains("](") && trimmed_inner.ends_with(')') && {
                 // Verify the closing ](url) accounts for the rest of the content
                 // by finding the image's ]( and checking nothing follows the final )
                 if let Some(bracket_close) = trimmed_inner.rfind("](") {
                     let after_paren = &trimmed_inner[bracket_close + 2..];
                     // The rest should be just "url)" — find the matching close paren
                     after_paren.ends_with(')')
-                        && after_paren
-                            .chars()
-                            .filter(|&c| c == ')')
-                            .count()
+                        && after_paren.chars().filter(|&c| c == ')').count()
                             >= after_paren.chars().filter(|&c| c == '(').count()
                 } else {
                     false
@@ -2461,10 +2456,7 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        assert_eq!(
-            fixed,
-            "[![](https://example.com/image.png)](https://example.com)",
-        );
+        assert_eq!(fixed, "[![](https://example.com/image.png)](https://example.com)",);
         assert!(!fixed.contains(r"\["), "Must not escape brackets: {fixed}");
         assert!(!fixed.contains(r"\]"), "Must not escape brackets: {fixed}");
     }
@@ -2473,7 +2465,8 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
     fn test_md033_fix_a_wrapping_markdown_image_with_alt() {
         // <a> wrapping ![alt](url) preserves alt text in linked image
         let rule = MD033NoInlineHtml::with_fix(true);
-        let content = r#"<a href="https://github.com/repo">![Contributors](https://contrib.rocks/image?repo=org/repo)</a>"#;
+        let content =
+            r#"<a href="https://github.com/repo">![Contributors](https://contrib.rocks/image?repo=org/repo)</a>"#;
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
@@ -2544,8 +2537,7 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
             .unwrap();
 
         assert_eq!(
-            content,
-            "[![](https://contrib.rocks/image?repo=org/repo)](https://github.com/org/repo)",
+            content, "[![](https://contrib.rocks/image?repo=org/repo)](https://github.com/org/repo)",
             "End-to-end: <a><img></a> should become valid linked image"
         );
         assert!(result.converged);
