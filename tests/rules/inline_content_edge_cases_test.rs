@@ -281,10 +281,6 @@ fn test_md045_unicode_alt_text() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 8, "Should detect all images with missing/empty alt text");
 
-    // Verify fixes add placeholder
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("![Image image](image.png)"));
-    assert!(fixed.contains("![Photo image](图片/photo.jpg)"));
 }
 
 #[test]

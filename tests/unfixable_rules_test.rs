@@ -4,6 +4,7 @@ use rumdl_lib::config::Config;
 use rumdl_lib::rule::{FixCapability, Rule};
 use rumdl_lib::rules::MD018NoMissingSpaceAtx;
 use rumdl_lib::rules::MD033NoInlineHtml;
+use rumdl_lib::rules::MD045NoAltText;
 use rumdl_lib::rules::MD054LinkImageStyle;
 
 #[test]
@@ -14,6 +15,10 @@ fn test_inherently_unfixable_rules_declare_capability() {
 
     // MD033 is inherently unfixable
     let rule = MD033NoInlineHtml::new();
+    assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
+
+    // MD045 is diagnostic-only (alt text requires human judgment)
+    let rule = MD045NoAltText::new();
     assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
 }
 
