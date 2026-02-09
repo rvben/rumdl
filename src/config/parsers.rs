@@ -33,14 +33,19 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
                 && let Ok(values) = Vec::<String>::deserialize(enable.clone())
             {
                 // Resolve rule name aliases (e.g., "ul-style" -> "MD004")
-                let normalized_values = values
+                let normalized_values: Vec<String> = values
                     .into_iter()
                     .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
                     .collect();
-                fragment
-                    .global
-                    .enable
-                    .push_override(normalized_values, source, file.clone(), None);
+                // Only push if non-empty: an empty enable list in rumdl config means
+                // "no filter" (all rules enabled), not "disable all rules".
+                // The empty-but-explicit case is only valid for markdownlint's `default: false`.
+                if !normalized_values.is_empty() {
+                    fragment
+                        .global
+                        .enable
+                        .push_override(normalized_values, source, file.clone(), None);
+                }
             }
 
             if let Some(disable) = table.get("disable")
@@ -488,10 +493,16 @@ pub(super) fn parse_rumdl_toml(
                         };
 
                         match norm_key.as_str() {
-                            "enable" => fragment
-                                .global
-                                .enable
-                                .push_override(final_values, source, file.clone(), None),
+                            "enable" => {
+                                // Only push if non-empty: an empty enable list in rumdl config
+                                // means "no filter", not "disable all rules".
+                                if !final_values.is_empty() {
+                                    fragment
+                                        .global
+                                        .enable
+                                        .push_override(final_values, source, file.clone(), None);
+                                }
+                            }
                             "disable" => {
                                 fragment
                                     .global
