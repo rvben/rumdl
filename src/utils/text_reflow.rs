@@ -179,9 +179,9 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
 
     // Look back to check for common abbreviations (only applies to periods)
     if pos > 0 && c == '.' {
-        // Check if the text up to and including this period ends with an abbreviation
-        // Note: text[..=pos] includes the character at pos (the period)
-        if text_ends_with_abbreviation(&text[..=pos], abbreviations) {
+        // Convert char index to byte offset for string slicing
+        let byte_offset: usize = chars[..=pos].iter().map(|ch| ch.len_utf8()).sum();
+        if text_ends_with_abbreviation(&text[..byte_offset], abbreviations) {
             return false;
         }
 
@@ -1214,7 +1214,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
     let mut lines = Vec::new();
     let mut current_line = String::new();
 
-    for element in elements.iter() {
+    for (idx, element) in elements.iter().enumerate() {
         let element_str = format!("{element}");
 
         // For text elements, split into sentences
@@ -1293,8 +1293,19 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
             handle_emphasis_sentence_split(content, "~~", &abbreviations, &mut current_line, &mut lines);
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
-            // Add space before element if needed (unless it's after an opening paren/bracket)
-            if !current_line.is_empty()
+            // Check if this element is adjacent to the preceding text (no space between)
+            let is_adjacent = if idx > 0 {
+                match &elements[idx - 1] {
+                    Element::Text(t) => !t.is_empty() && !t.ends_with(char::is_whitespace),
+                    _ => true,
+                }
+            } else {
+                false
+            };
+
+            // Add space before element if needed, but not for adjacent elements
+            if !is_adjacent
+                && !current_line.is_empty()
                 && !current_line.ends_with(' ')
                 && !current_line.ends_with('(')
                 && !current_line.ends_with('[')
@@ -1462,7 +1473,7 @@ fn is_inside_element(pos: usize, spans: &[(usize, usize)]) -> bool {
 
 /// Minimum fraction of line_length that the first part of a split must occupy.
 /// Prevents awkwardly short first lines like "A," or "Note:" on their own.
-const MIN_SPLIT_RATIO: f64 = 0.2;
+const MIN_SPLIT_RATIO: f64 = 0.3;
 
 /// Split a line at the latest clause punctuation that keeps the first part
 /// within `line_length`. Returns None if no valid split point exists or if
@@ -1612,7 +1623,37 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
             result.extend(cascade_split_line(&line, options.line_length, &options.abbreviations));
         }
     }
-    result
+
+    // Step 3: Merge very short trailing lines back into the previous line.
+    // Word wrap can produce lines like "was" or "see" on their own, which reads poorly.
+    let min_line_len = ((options.line_length as f64) * MIN_SPLIT_RATIO) as usize;
+    let mut merged: Vec<String> = Vec::with_capacity(result.len());
+    for line in result {
+        if !merged.is_empty() && line.chars().count() < min_line_len && !line.trim().is_empty() {
+            // Don't merge across sentence boundaries — sentence splits are intentional
+            let prev_ends_at_sentence = {
+                let trimmed = merged.last().unwrap().trim_end();
+                trimmed
+                    .chars()
+                    .rev()
+                    .find(|c| !matches!(c, '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']'))
+                    .is_some_and(|c| matches!(c, '.' | '!' | '?'))
+            };
+
+            if !prev_ends_at_sentence {
+                let prev = merged.last_mut().unwrap();
+                let combined = format!("{prev} {line}");
+                // Only merge if the combined line doesn't wildly exceed the limit
+                // (allow up to 10% overflow to avoid orphan words)
+                if combined.chars().count() <= options.line_length + options.line_length / 10 {
+                    *prev = combined;
+                    continue;
+                }
+            }
+        }
+        merged.push(line);
+    }
+    merged
 }
 
 /// Reflow elements into lines that fit within the line length
@@ -1621,9 +1662,24 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let mut current_line = String::new();
     let mut current_length = 0;
 
-    for element in elements {
+    for (idx, element) in elements.iter().enumerate() {
         let element_str = format!("{element}");
         let element_len = element.len();
+
+        // Determine adjacency from the original elements, not from current_line.
+        // Elements are adjacent when there's no whitespace between them in the source:
+        // - Text("v") → HugoShortcode("{{<...>}}") = adjacent (text has no trailing space)
+        // - Text(" and ") → InlineLink("[a](url)") = NOT adjacent (text has trailing space)
+        // - HugoShortcode("{{<...>}}") → Text(",") = adjacent (text has no leading space)
+        let is_adjacent_to_prev = if idx > 0 {
+            match (&elements[idx - 1], element) {
+                (Element::Text(t), _) => !t.is_empty() && !t.ends_with(char::is_whitespace),
+                (_, Element::Text(t)) => !t.is_empty() && !t.starts_with(char::is_whitespace),
+                _ => true,
+            }
+        } else {
+            false
+        };
 
         // For text elements that might need breaking
         if let Element::Text(text) = element {
@@ -1639,7 +1695,32 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     .chars()
                     .all(|c| matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}'));
 
-                if current_length > 0 && current_length + 1 + word_len > options.line_length && !is_trailing_punct {
+                // First word of text adjacent to preceding non-text element
+                // must stay attached (e.g., shortcode followed by punctuation or text)
+                let is_first_adjacent = i == 0 && is_adjacent_to_prev;
+
+                if is_first_adjacent {
+                    // Attach directly without space, preventing line break
+                    if current_length + word_len > options.line_length && current_length > 0 {
+                        // Would exceed — break before the adjacent group
+                        if let Some(last_space) = current_line.rfind(' ') {
+                            let before = current_line[..last_space].trim_end().to_string();
+                            let after = current_line[last_space + 1..].to_string();
+                            lines.push(before);
+                            current_line = format!("{after}{word}");
+                            current_length = current_line.chars().count();
+                        } else {
+                            current_line.push_str(word);
+                            current_length += word_len;
+                        }
+                    } else {
+                        current_line.push_str(word);
+                        current_length += word_len;
+                    }
+                } else if current_length > 0
+                    && current_length + 1 + word_len > options.line_length
+                    && !is_trailing_punct
+                {
                     // Start a new line (but never for trailing punctuation)
                     lines.push(current_line.trim().to_string());
                     current_line = word.to_string();
@@ -1659,14 +1740,33 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
         } else {
             // For non-text elements (code, links, references), treat as atomic units
             // These should never be broken across lines
-            if current_length > 0 && current_length + 1 + element_len > options.line_length {
-                // Start a new line
+
+            if is_adjacent_to_prev {
+                // Adjacent to preceding text — attach directly without space
+                if current_length + element_len > options.line_length {
+                    // Would exceed limit — break before the adjacent word group
+                    if let Some(last_space) = current_line.rfind(' ') {
+                        let before = current_line[..last_space].trim_end().to_string();
+                        let after = current_line[last_space + 1..].to_string();
+                        lines.push(before);
+                        current_line = format!("{after}{element_str}");
+                        current_length = current_line.chars().count();
+                    } else {
+                        // No space to break at — accept the long line
+                        current_line.push_str(&element_str);
+                        current_length += element_len;
+                    }
+                } else {
+                    current_line.push_str(&element_str);
+                    current_length += element_len;
+                }
+            } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
+                // Not adjacent, would exceed — start new line
                 lines.push(current_line.trim().to_string());
                 current_line = element_str;
                 current_length = element_len;
             } else {
-                // Add element to current line
-                // Don't add space if the current line ends with an opening bracket/paren
+                // Not adjacent, fits — add with space
                 let ends_with_opener =
                     current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
                 if current_length > 0 && !ends_with_opener {

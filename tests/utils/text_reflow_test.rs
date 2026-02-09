@@ -3882,3 +3882,97 @@ fn test_semantic_nested_elements_bold_in_link() {
         "Nested bold+link should not be split: {result:?}"
     );
 }
+
+#[test]
+fn test_semantic_shortcode_adjacent_to_text() {
+    // Hugo shortcode directly adjacent to text (no space between) must stay together
+    // Real-world pattern: v{{< skew currentVersion >}},
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "If you are running a version of Kubernetes other than v{{< skew currentVersion >}}, check the documentation for that version.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // "v" must stay attached to the shortcode
+    assert!(
+        joined.contains("v{{< skew currentVersion >}}"),
+        "v must not be separated from adjacent shortcode: {result:?}"
+    );
+    // The comma must stay attached to the shortcode too
+    assert!(
+        joined.contains("v{{< skew currentVersion >}},"),
+        "comma must stay attached to shortcode: {result:?}"
+    );
+    // Must not contain "v" alone on a line
+    for line in &result {
+        assert!(
+            line.trim() != "v",
+            "\"v\" should not appear alone on a line: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_semantic_shortcode_with_surrounding_text() {
+    // Shortcode preceded by space — should allow break before shortcode
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input =
+        "Kubernetes {{< skew currentVersion >}} requires that you use a runtime that conforms with the specification.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // Shortcode should remain intact
+    assert!(
+        joined.contains("{{< skew currentVersion >}}"),
+        "Shortcode should not be split: {result:?}"
+    );
+}
+
+#[test]
+fn test_word_wrap_adjacent_element_no_break() {
+    // Even in default word-wrap mode, adjacent elements should not be separated
+    let options = ReflowOptions {
+        line_length: 60,
+        break_on_sentences: false,
+        ..Default::default()
+    };
+
+    let input = "If you are running a version other than v{{< skew currentVersion >}}, check docs.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // "v" must stay attached to the shortcode
+    assert!(
+        joined.contains("v{{< skew currentVersion >}}"),
+        "v must not be separated from adjacent shortcode in word-wrap mode: {result:?}"
+    );
+}
+
+#[test]
+fn test_word_wrap_code_adjacent_to_text() {
+    // Code span directly adjacent to text: word`code` should not be broken
+    let options = ReflowOptions {
+        line_length: 40,
+        break_on_sentences: false,
+        ..Default::default()
+    };
+
+    let input = "The configuration uses myconfig`value` for all operations in the system.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+
+    // "myconfig" must stay attached to `value`
+    assert!(
+        joined.contains("myconfig`value`"),
+        "Text must stay attached to adjacent code span: {result:?}"
+    );
+}
