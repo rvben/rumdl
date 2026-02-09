@@ -12,6 +12,7 @@ fn test_list_item_trailing_whitespace_removal() {
         break_on_sentences: true, // MD013 uses true by default
         preserve_breaks: false,
         sentence_per_line: false,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 
@@ -174,6 +175,7 @@ fn test_sentence_per_line_reflow() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 
@@ -196,6 +198,7 @@ fn test_sentence_per_line_with_backticks() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -213,6 +216,7 @@ fn test_sentence_per_line_with_backticks_in_parens() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -230,6 +234,7 @@ fn test_sentence_per_line_with_questions_exclamations() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -497,6 +502,7 @@ fn test_ie_abbreviation_split_debug() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 
@@ -516,6 +522,7 @@ fn test_ie_abbreviation_paragraph() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 
@@ -533,6 +540,7 @@ fn test_definition_list_preservation() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -552,6 +560,7 @@ fn test_definition_list_multiline() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -569,6 +578,7 @@ fn test_definition_list_multiple() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -587,6 +597,7 @@ fn test_definition_list_with_paragraphs() {
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 
@@ -632,6 +643,7 @@ fn test_abbreviation_false_positives_word_boundary() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -664,6 +676,7 @@ fn test_abbreviation_period_vs_other_punctuation() {
     let options = ReflowOptions {
         line_length: 80,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -730,6 +743,7 @@ fn test_issue_150_exact_reproduction() {
     let options = ReflowOptions {
         line_length: 0, // unlimited
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -892,6 +906,7 @@ fn test_abbreviations_in_sentence_per_line_integration() {
     let options = ReflowOptions {
         line_length: 0, // unlimited
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -927,6 +942,7 @@ fn test_issue_150_all_reported_variations() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -958,6 +974,7 @@ fn test_performance_no_hang_on_false_positives() {
     let options = ReflowOptions {
         line_length: 0,
         sentence_per_line: true,
+        semantic_line_breaks: false,
         abbreviations: None,
         ..Default::default()
     };
@@ -3371,4 +3388,497 @@ fn test_whitespace_only_text_not_accumulated() {
             "Emphasis should not have leading space: {line:?}"
         );
     }
+}
+
+// ============================================================
+// Semantic Line Breaks Tests
+// ============================================================
+
+#[test]
+fn test_semantic_basic_sentence_splitting() {
+    // Two sentences should be split onto separate lines
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "First sentence here. Second sentence there.";
+    let result = reflow_line(input, &options);
+    assert_eq!(result, vec!["First sentence here.", "Second sentence there."]);
+}
+
+#[test]
+fn test_semantic_short_lines_no_cascade() {
+    // When each sentence fits within line_length, only sentence splits occur
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Short one. Short two. Short three.";
+    let result = reflow_line(input, &options);
+    assert_eq!(result, vec!["Short one.", "Short two.", "Short three."]);
+}
+
+#[test]
+fn test_semantic_clause_punctuation_cascade() {
+    // A single long sentence with commas should split at clause punctuation.
+    // The comma at position 24 fits within the 50-char limit.
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The quick brown fox dog, and the lazy cow jumped over the shining moon tonight.";
+    let result = reflow_line(input, &options);
+    // Should split at the comma since the full sentence exceeds 50 chars
+    assert!(result.len() >= 2, "Should split long sentence: {result:?}");
+    assert!(
+        result[0].ends_with(','),
+        "First part should end at clause punctuation: {:?}",
+        result[0]
+    );
+}
+
+#[test]
+fn test_semantic_break_word_cascade() {
+    // A long sentence without clause punctuation but with break-words
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The implementation handles errors and provides meaningful feedback to users.";
+    let result = reflow_line(input, &options);
+    // Should split at "and" since it's a break-word
+    assert!(result.len() >= 2, "Should split at break-word: {result:?}");
+    let joined = result.join(" ");
+    // Verify no content is lost
+    assert!(
+        joined.contains("errors") && joined.contains("provides"),
+        "Content should be preserved: {result:?}"
+    );
+}
+
+#[test]
+fn test_semantic_full_cascade_all_levels() {
+    // Test that all four cascade levels work together
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "First sentence is short. The second sentence is quite long with a comma, \
+                 and it also has break-words which make it even longer than the limit allows.";
+    let result = reflow_line(input, &options);
+
+    // First sentence should be on its own line
+    assert_eq!(result[0], "First sentence is short.");
+    // The rest should be split further via cascade
+    assert!(
+        result.len() >= 3,
+        "Long second sentence should be split further: {result:?}"
+    );
+}
+
+#[test]
+fn test_semantic_markdown_link_preservation() {
+    // Links should not be broken across lines
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See the [documentation link](https://example.com/very/long/path) for details.";
+    let result = reflow_line(input, &options);
+
+    // The link should remain intact on one line
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("[documentation link](https://example.com/very/long/path)"),
+        "Link should not be broken: {result:?}"
+    );
+}
+
+#[test]
+fn test_semantic_code_span_preservation() {
+    // Code spans should not be broken
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Use the `very_long_function_name_here()` method, and then call `another_function()` after.";
+    let result = reflow_line(input, &options);
+
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("`very_long_function_name_here()`"),
+        "Code span should not be broken: {result:?}"
+    );
+    assert!(
+        joined.contains("`another_function()`"),
+        "Second code span should not be broken: {result:?}"
+    );
+}
+
+#[test]
+fn test_semantic_em_dash_splitting() {
+    // Em dashes should be valid clause punctuation split points
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The feature\u{2014}which was requested by many users\u{2014}is now available.";
+    let result = reflow_line(input, &options);
+    // Should split at em dash
+    assert!(result.len() >= 2, "Should split at em dash: {result:?}");
+}
+
+#[test]
+fn test_semantic_line_length_zero_sentence_only() {
+    // line_length = 0 means sentence-only splitting, no cascading
+    let options = ReflowOptions {
+        line_length: 0,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "First sentence with a very long clause, and another clause, and even more text that goes on and on. Second sentence.";
+    let result = reflow_line(input, &options);
+    // Should only split at sentence boundaries
+    assert_eq!(result.len(), 2, "Should only have sentence splits: {result:?}");
+    assert!(result[0].ends_with('.'), "First line should end at sentence boundary");
+    assert_eq!(result[1], "Second sentence.");
+}
+
+#[test]
+fn test_semantic_abbreviations_respected() {
+    // Abbreviations like "Dr." should not cause sentence splits
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Dr. Smith went to the store. He bought milk.";
+    let result = reflow_line(input, &options);
+    assert_eq!(result, vec!["Dr. Smith went to the store.", "He bought milk."]);
+}
+
+#[test]
+fn test_semantic_idempotency() {
+    // Reflowing already-reflowed text should produce the same output
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood.";
+
+    let first_pass = reflow_line(input, &options);
+    let first_result = first_pass.join(" ");
+
+    let second_pass = reflow_line(&first_result, &options);
+
+    assert_eq!(
+        first_pass, second_pass,
+        "Second reflow pass should produce same result.\nFirst: {first_pass:?}\nSecond: {second_pass:?}"
+    );
+}
+
+#[test]
+fn test_semantic_single_sentence_no_split() {
+    // A single short sentence should not be split
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Just a single short sentence.";
+    let result = reflow_line(input, &options);
+    assert_eq!(result, vec!["Just a single short sentence."]);
+}
+
+#[test]
+fn test_semantic_semicolon_split() {
+    // Semicolons should be valid split points
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The first clause is here; the second clause follows after the semicolon.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split at semicolon: {result:?}");
+    assert!(
+        result[0].ends_with(';'),
+        "First part should end at semicolon: {:?}",
+        result[0]
+    );
+}
+
+#[test]
+fn test_semantic_word_wrap_fallback() {
+    // When no clause punct or break-words fit, should fall back to word wrap
+    let options = ReflowOptions {
+        line_length: 30,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Supercalifragilisticexpialidocious documentation reference manual.";
+    let result = reflow_line(input, &options);
+    // The word itself exceeds the limit, so word wrap should handle it
+    assert!(result.len() >= 2, "Should use word wrap fallback: {result:?}");
+}
+
+#[test]
+fn test_semantic_multiple_sentences_with_cascade() {
+    // Multiple sentences where some need cascade splitting
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Short sentence. A longer sentence that contains a comma, \
+                 and additional clauses that push it beyond the limit. Another short one.";
+    let result = reflow_line(input, &options);
+
+    // First and last sentences should be on their own lines
+    assert_eq!(result[0], "Short sentence.");
+    assert_eq!(result.last().unwrap().trim(), "Another short one.");
+    // Middle sentence should be split further
+    assert!(result.len() >= 4, "Middle sentence should be cascade-split: {result:?}");
+}
+
+#[test]
+fn test_semantic_break_word_which() {
+    // "which" is a break-word
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The new feature which was requested by many users improves the overall experience.";
+    let result = reflow_line(input, &options);
+    // Should try to split at "which"
+    assert!(result.len() >= 2, "Should split at break-word: {result:?}");
+}
+
+#[test]
+fn test_semantic_break_word_because() {
+    // "because" is a break-word
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "This approach is preferred because it provides better performance and maintainability.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split at 'because': {result:?}");
+}
+
+#[test]
+fn test_semantic_break_word_not_inside_words() {
+    // Break-words like "or", "and", "for" must not match inside larger words
+    // "author" contains "or", "format" contains "or", "information" contains "for"
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The author organized the information for the editor.";
+    let result = reflow_line(input, &options);
+    // Line is under 80 chars — should not be split
+    assert_eq!(result.len(), 1, "Short line should not be split: {result:?}");
+    assert_eq!(result[0], input);
+}
+
+#[test]
+fn test_semantic_break_word_boundary_check() {
+    // Ensure break-words only match at word boundaries (space before and after)
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    // "normalized" contains "or", "format" contains "for" — these must NOT trigger
+    let input = "The normalized format works because the authors organized all information for distribution purposes.";
+    let result = reflow_line(input, &options);
+    // Should split at "because" or "for" (the standalone words), not inside "normalized"/"format"/"authors"
+    assert!(result.len() >= 2, "Should split: {result:?}");
+    // Verify none of the lines break mid-word
+    for line in &result {
+        assert!(
+            !line.ends_with("auth") && !line.ends_with("f") && !line.ends_with("inf"),
+            "Should not break inside words: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_semantic_em_dash_no_spaces() {
+    // Em dash without surrounding spaces should still be a valid split point
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The implementation\u{2014}which was carefully designed\u{2014}handles all the edge cases properly.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split at em dash: {result:?}");
+}
+
+#[test]
+fn test_semantic_break_word_inside_link() {
+    // Break-words inside link text should not trigger a split
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See the [documentation for beginners](https://example.com) and the [guide for experts](https://example.com/experts) today.";
+    let result = reflow_line(input, &options);
+    // The links should not be broken apart
+    for line in &result {
+        // If a line contains "[documentation", it must also contain the closing ")"
+        if line.contains("[documentation") {
+            assert!(line.contains("example.com)"), "Link should not be split: {result:?}");
+        }
+        if line.contains("[guide") {
+            assert!(line.contains("experts)"), "Link should not be split: {result:?}");
+        }
+    }
+}
+
+#[test]
+fn test_semantic_multiple_break_words_prefers_latest() {
+    // When multiple break-words are valid, prefer the latest (rightmost) one
+    let options = ReflowOptions {
+        line_length: 70,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The system handles errors and warnings and notifications and alerts when processing large batches.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split: {result:?}");
+    // The first line should be as long as possible (latest break-word within limit)
+    assert!(
+        result[0].chars().count() > 30,
+        "Should prefer latest break-word for longer first line: {result:?}"
+    );
+}
+
+#[test]
+fn test_semantic_break_word_at_start_of_text() {
+    // A break-word at the very start of text should not create an empty first line
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "and then the rest of the very long sentence continues beyond the line length limit here.";
+    let result = reflow_line(input, &options);
+    // First line should not be empty
+    assert!(!result[0].is_empty(), "First line should not be empty: {result:?}");
+}
+
+#[test]
+fn test_semantic_short_clause_punct_skipped() {
+    // Early clause punctuation that would create an unreasonably short first line
+    // should be skipped in favor of break-words or word wrap
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    // "A," is only 2 chars — less than 20% of 80 (= 16). Should skip comma, use break-words.
+    let input = "A, this is a very long sentence that goes on and on with many words but no more commas in the rest.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split: {result:?}");
+    // First line should NOT be just "A,"
+    assert!(
+        result[0].chars().count() >= 16,
+        "First line should not be unreasonably short (min 20% of line_length): got '{}' ({} chars)",
+        result[0],
+        result[0].chars().count()
+    );
+}
+
+#[test]
+fn test_semantic_short_colon_skipped() {
+    // "Note:" is only 5 chars — less than 20% of 80. Should skip to break-words.
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Note: the configuration system provides multiple options for customizing behavior and the settings persist across sessions.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split: {result:?}");
+    assert!(
+        result[0].chars().count() >= 16,
+        "First line should not be unreasonably short: got '{}' ({} chars)",
+        result[0],
+        result[0].chars().count()
+    );
+}
+
+#[test]
+fn test_semantic_valid_clause_punct_still_works() {
+    // Clause punctuation that creates a reasonable first line should still work
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The author organized the information for the editor, and the format worked well because it was properly normalized for distribution.";
+    let result = reflow_line(input, &options);
+    assert!(result.len() >= 2, "Should split: {result:?}");
+    // The comma after "editor" is at ~50 chars, well above the 16-char minimum
+    assert!(result[0].ends_with(','), "Should split at comma: {result:?}");
+}
+
+#[test]
+fn test_semantic_nested_elements_bold_in_link() {
+    // Nested markdown elements should be preserved
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Check the **[important guide](https://example.com/guide)** for more details and information.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    // The bold+link should remain intact
+    assert!(
+        joined.contains("**[important guide](https://example.com/guide)**"),
+        "Nested bold+link should not be split: {result:?}"
+    );
 }

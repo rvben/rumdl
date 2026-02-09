@@ -29,6 +29,8 @@ pub struct ReflowOptions {
     pub preserve_breaks: bool,
     /// Whether to enforce one sentence per line
     pub sentence_per_line: bool,
+    /// Whether to use semantic line breaks (cascading split strategy)
+    pub semantic_line_breaks: bool,
     /// Custom abbreviations for sentence detection
     /// Periods are optional - both "Dr" and "Dr." work the same
     /// Custom abbreviations are always added to the built-in defaults
@@ -42,6 +44,7 @@ impl Default for ReflowOptions {
             break_on_sentences: true,
             preserve_breaks: false,
             sentence_per_line: false,
+            semantic_line_breaks: false,
             abbreviations: None,
         }
     }
@@ -386,6 +389,12 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     if options.sentence_per_line {
         let elements = parse_markdown_elements(line);
         return reflow_elements_sentence_per_line(&elements, &options.abbreviations);
+    }
+
+    // For semantic line breaks mode, use cascading split strategy
+    if options.semantic_line_breaks {
+        let elements = parse_markdown_elements(line);
+        return reflow_elements_semantic(&elements, options);
     }
 
     // Quick check: if line is already short enough or no wrapping requested, return as-is
@@ -1388,6 +1397,224 @@ fn handle_emphasis_sentence_split(
     }
 }
 
+/// English break-words used for semantic line break splitting.
+/// These are conjunctions and relative pronouns where a line break
+/// reads naturally.
+const BREAK_WORDS: &[&str] = &[
+    "and",
+    "or",
+    "but",
+    "nor",
+    "yet",
+    "so",
+    "for",
+    "which",
+    "that",
+    "because",
+    "when",
+    "if",
+    "while",
+    "where",
+    "although",
+    "though",
+    "unless",
+    "since",
+    "after",
+    "before",
+    "until",
+    "as",
+    "once",
+    "whether",
+    "however",
+    "therefore",
+    "moreover",
+    "furthermore",
+    "nevertheless",
+    "whereas",
+];
+
+/// Check if a character is clause punctuation for semantic line breaks
+fn is_clause_punctuation(c: char) -> bool {
+    matches!(c, ',' | ';' | ':' | '\u{2014}') // comma, semicolon, colon, em dash
+}
+
+/// Compute element spans for a flat text representation of elements.
+/// Returns Vec of (start, end) byte offsets for non-Text elements,
+/// so we can check that a split position doesn't fall inside them.
+fn compute_element_spans(elements: &[Element]) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut offset = 0;
+    for element in elements {
+        let rendered = format!("{element}");
+        let len = rendered.len();
+        if !matches!(element, Element::Text(_)) {
+            spans.push((offset, offset + len));
+        }
+        offset += len;
+    }
+    spans
+}
+
+/// Check if a byte position falls inside any non-Text element span
+fn is_inside_element(pos: usize, spans: &[(usize, usize)]) -> bool {
+    spans.iter().any(|(start, end)| pos > *start && pos < *end)
+}
+
+/// Minimum fraction of line_length that the first part of a split must occupy.
+/// Prevents awkwardly short first lines like "A," or "Note:" on their own.
+const MIN_SPLIT_RATIO: f64 = 0.2;
+
+/// Split a line at the latest clause punctuation that keeps the first part
+/// within `line_length`. Returns None if no valid split point exists or if
+/// the split would create an unreasonably short first line.
+fn split_at_clause_punctuation(
+    text: &str,
+    line_length: usize,
+    element_spans: &[(usize, usize)],
+) -> Option<(String, String)> {
+    let chars: Vec<char> = text.chars().collect();
+    let search_end = chars.len().min(line_length);
+    let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
+
+    let mut best_pos = None;
+    for i in (0..search_end).rev() {
+        if is_clause_punctuation(chars[i]) {
+            // Convert char position to byte position for element span check
+            let byte_pos: usize = chars[..=i].iter().map(|c| c.len_utf8()).sum();
+            if !is_inside_element(byte_pos, element_spans) {
+                best_pos = Some(i);
+                break;
+            }
+        }
+    }
+
+    let pos = best_pos?;
+
+    // Reject splits that create very short first lines
+    if pos + 1 < min_first_len {
+        return None;
+    }
+
+    // Split after the punctuation character
+    let first: String = chars[..=pos].iter().collect();
+    let rest: String = chars[pos + 1..].iter().collect();
+    let rest = rest.trim_start().to_string();
+
+    if rest.is_empty() {
+        return None;
+    }
+
+    Some((first, rest))
+}
+
+/// Split a line before the latest break-word that keeps the first part
+/// within `line_length`. Returns None if no valid split point exists or if
+/// the split would create an unreasonably short first line.
+fn split_at_break_word(text: &str, line_length: usize, element_spans: &[(usize, usize)]) -> Option<(String, String)> {
+    let lower = text.to_lowercase();
+    let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
+    let mut best_split: Option<(usize, usize)> = None; // (byte_start, word_len_bytes)
+
+    for &word in BREAK_WORDS {
+        let mut search_start = 0;
+        while let Some(pos) = lower[search_start..].find(word) {
+            let abs_pos = search_start + pos;
+
+            // Verify it's a word boundary: preceded by space, followed by space
+            let preceded_by_space = abs_pos == 0 || text.as_bytes().get(abs_pos - 1) == Some(&b' ');
+            let followed_by_space = text.as_bytes().get(abs_pos + word.len()) == Some(&b' ');
+
+            if preceded_by_space && followed_by_space {
+                // The break goes BEFORE the word, so first part ends at abs_pos - 1
+                let first_part_len = text[..abs_pos].trim_end().chars().count();
+
+                if first_part_len >= min_first_len
+                    && first_part_len <= line_length
+                    && !is_inside_element(abs_pos, element_spans)
+                {
+                    // Prefer the latest valid split point
+                    if best_split.is_none_or(|(prev_pos, _)| abs_pos > prev_pos) {
+                        best_split = Some((abs_pos, word.len()));
+                    }
+                }
+            }
+
+            search_start = abs_pos + word.len();
+        }
+    }
+
+    let (byte_start, _word_len) = best_split?;
+
+    let first = text[..byte_start].trim_end().to_string();
+    let rest = text[byte_start..].to_string();
+
+    if first.is_empty() || rest.trim().is_empty() {
+        return None;
+    }
+
+    Some((first, rest))
+}
+
+/// Recursively cascade-split a line that exceeds line_length.
+/// Tries clause punctuation first, then break-words, then word wrap.
+fn cascade_split_line(text: &str, line_length: usize, abbreviations: &Option<Vec<String>>) -> Vec<String> {
+    if line_length == 0 || text.chars().count() <= line_length {
+        return vec![text.to_string()];
+    }
+
+    let elements = parse_markdown_elements(text);
+    let element_spans = compute_element_spans(&elements);
+
+    // Try clause punctuation split
+    if let Some((first, rest)) = split_at_clause_punctuation(text, line_length, &element_spans) {
+        let mut result = vec![first];
+        result.extend(cascade_split_line(&rest, line_length, abbreviations));
+        return result;
+    }
+
+    // Try break-word split
+    if let Some((first, rest)) = split_at_break_word(text, line_length, &element_spans) {
+        let mut result = vec![first];
+        result.extend(cascade_split_line(&rest, line_length, abbreviations));
+        return result;
+    }
+
+    // Fallback: word wrap using existing reflow_elements
+    let options = ReflowOptions {
+        line_length,
+        break_on_sentences: false,
+        preserve_breaks: false,
+        sentence_per_line: false,
+        semantic_line_breaks: false,
+        abbreviations: abbreviations.clone(),
+    };
+    reflow_elements(&elements, &options)
+}
+
+/// Reflow elements using semantic line breaks strategy:
+/// 1. Split at sentence boundaries (always)
+/// 2. For lines exceeding line_length, cascade through clause punct → break-words → word wrap
+fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
+    // Step 1: Split into sentences using existing sentence-per-line logic
+    let sentence_lines = reflow_elements_sentence_per_line(elements, &options.abbreviations);
+
+    // Step 2: For each sentence line, apply cascading splits if it exceeds line_length
+    // When line_length is 0 (unlimited), skip cascading — sentence splits only
+    if options.line_length == 0 {
+        return sentence_lines;
+    }
+
+    let mut result = Vec::new();
+    for line in sentence_lines {
+        if line.chars().count() <= options.line_length {
+            result.push(line);
+        } else {
+            result.extend(cascade_split_line(&line, options.line_length, &options.abbreviations));
+        }
+    }
+    result
+}
+
 /// Reflow elements into lines that fit within the line length
 fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let mut lines = Vec::new();
@@ -1929,6 +2156,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         break_on_sentences: true,
         preserve_breaks: false,
         sentence_per_line: false,
+        semantic_line_breaks: false,
         abbreviations: None,
     };
 

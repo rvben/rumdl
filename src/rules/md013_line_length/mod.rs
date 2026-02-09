@@ -100,9 +100,11 @@ impl MD013LineLength {
             return true;
         }
 
-        // For sentence-per-line or normalize mode, never skip based on line length
+        // For sentence-per-line, semantic-line-breaks, or normalize mode, never skip based on line length
         if config.reflow
-            && (config.reflow_mode == ReflowMode::SentencePerLine || config.reflow_mode == ReflowMode::Normalize)
+            && (config.reflow_mode == ReflowMode::SentencePerLine
+                || config.reflow_mode == ReflowMode::SemanticLineBreaks
+                || config.reflow_mode == ReflowMode::Normalize)
         {
             return false;
         }
@@ -157,6 +159,7 @@ impl Rule for MD013LineLength {
                         "default" => ReflowMode::Default,
                         "normalize" => ReflowMode::Normalize,
                         "sentence-per-line" => ReflowMode::SentencePerLine,
+                        "semantic-line-breaks" => ReflowMode::SemanticLineBreaks,
                         _ => ReflowMode::default(),
                     };
                 }
@@ -173,7 +176,8 @@ impl Rule for MD013LineLength {
         if self.should_skip_with_config(ctx, &effective_config)
             && !(effective_config.reflow
                 && (effective_config.reflow_mode == ReflowMode::Normalize
-                    || effective_config.reflow_mode == ReflowMode::SentencePerLine))
+                    || effective_config.reflow_mode == ReflowMode::SentencePerLine
+                    || effective_config.reflow_mode == ReflowMode::SemanticLineBreaks))
         {
             return Ok(Vec::new());
         }
@@ -205,7 +209,8 @@ impl Rule for MD013LineLength {
         if candidate_lines.is_empty()
             && !(effective_config.reflow
                 && (effective_config.reflow_mode == ReflowMode::Normalize
-                    || effective_config.reflow_mode == ReflowMode::SentencePerLine))
+                    || effective_config.reflow_mode == ReflowMode::SentencePerLine
+                    || effective_config.reflow_mode == ReflowMode::SemanticLineBreaks))
         {
             return Ok(warnings);
         }
@@ -331,6 +336,12 @@ impl Rule for MD013LineLength {
                     continue;
                 }
                 // Multiple sentences will be handled by paragraph-based reflow
+                continue;
+            }
+
+            // In semantic-line-breaks mode, skip per-line checks —
+            // all reflow is handled at the paragraph level with cascading splits
+            if effective_config.reflow_mode == ReflowMode::SemanticLineBreaks {
                 continue;
             }
 
@@ -540,6 +551,14 @@ impl MD013LineLength {
                         let sentences = split_into_sentences(&paragraph_text);
                         sentences.len() > 1 || container_lines.len() > 1
                     }
+                    ReflowMode::SemanticLineBreaks => {
+                        let sentences = split_into_sentences(&paragraph_text);
+                        sentences.len() > 1
+                            || container_lines.len() > 1
+                            || container_lines
+                                .iter()
+                                .any(|line| self.calculate_effective_length(line) > config.line_length.get())
+                    }
                     ReflowMode::Default => container_lines
                         .iter()
                         .any(|line| self.calculate_effective_length(line) > config.line_length.get()),
@@ -570,6 +589,7 @@ impl MD013LineLength {
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
@@ -1249,6 +1269,13 @@ impl MD013LineLength {
                         let sentences = split_into_sentences(&combined_content);
                         sentences.len() > 1
                     }
+                    ReflowMode::SemanticLineBreaks => {
+                        let sentences = split_into_sentences(&combined_content);
+                        sentences.len() > 1
+                            || (list_start..i).any(|line_idx| {
+                                self.calculate_effective_length(lines[line_idx]) > config.line_length.get()
+                            })
+                    }
                     ReflowMode::Default => {
                         // In default mode, only reflow if any individual line exceeds limit
                         (list_start..i)
@@ -1278,6 +1305,7 @@ impl MD013LineLength {
                         break_on_sentences: true,
                         preserve_breaks: false,
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                        semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                         abbreviations: config.abbreviations_for_reflow(),
                     };
 
@@ -1550,6 +1578,10 @@ impl MD013LineLength {
                                     )
                                 }
                             }
+                            ReflowMode::SemanticLineBreaks => {
+                                let num_sentences = split_into_sentences(&combined_content).len();
+                                format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
+                            }
                             ReflowMode::Normalize => {
                                 let combined_length = self.calculate_effective_length(&full_line);
                                 if combined_length > config.line_length.get() {
@@ -1693,6 +1725,15 @@ impl MD013LineLength {
                         false
                     }
                 }
+                ReflowMode::SemanticLineBreaks => {
+                    let sentences = split_into_sentences(&paragraph_text);
+                    // Reflow if multiple sentences, multiple lines, or any line exceeds limit
+                    sentences.len() > 1
+                        || paragraph_lines.len() > 1
+                        || paragraph_lines
+                            .iter()
+                            .any(|line| self.calculate_effective_length(line) > config.line_length.get())
+                }
                 ReflowMode::Default => {
                     // In default mode, only reflow if lines exceed limit
                     paragraph_lines
@@ -1742,6 +1783,7 @@ impl MD013LineLength {
                     break_on_sentences: true,
                     preserve_breaks: false,
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
@@ -1777,7 +1819,7 @@ impl MD013LineLength {
                     // In sentence-per-line mode, report the entire paragraph
                     let (warning_line, warning_end_line) = match config.reflow_mode {
                         ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
-                        ReflowMode::SentencePerLine => {
+                        ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks => {
                             // Highlight the entire paragraph that needs reformatting
                             (paragraph_start + 1, paragraph_start + paragraph_lines.len())
                         }
@@ -1811,6 +1853,12 @@ impl MD013LineLength {
                                     // Multiple lines - could be split sentences or mixed
                                     format!("Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)")
                                 }
+                            },
+                            ReflowMode::SemanticLineBreaks => {
+                                let num_sentences = split_into_sentences(&paragraph_text).len();
+                                format!(
+                                    "Paragraph should use semantic line breaks ({num_sentences} sentences)"
+                                )
                             },
                             ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
                         },

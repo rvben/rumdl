@@ -14,6 +14,13 @@ pub enum ReflowMode {
     /// One sentence per line - break at sentence boundaries
     #[serde(alias = "sentence_per_line")]
     SentencePerLine,
+    /// Semantic line breaks - cascading strategy:
+    /// 1. Sentence boundaries (always)
+    /// 2. Clause punctuation (when line > line-length)
+    /// 3. English break-words (when line still > line-length)
+    /// 4. Word wrap (fallback)
+    #[serde(alias = "semantic_line_breaks")]
+    SemanticLineBreaks,
 }
 
 /// Length calculation mode for MD013
@@ -168,6 +175,12 @@ mod tests {
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.reflow_mode, ReflowMode::Normalize);
+
+        let toml_str = r#"
+            reflow-mode = "semantic-line-breaks"
+        "#;
+        let config: MD013Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.reflow_mode, ReflowMode::SemanticLineBreaks);
     }
 
     #[test]
@@ -179,6 +192,12 @@ mod tests {
         "#;
         let config: MD013Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+
+        let toml_str = r#"
+            reflow-mode = "semantic_line_breaks"
+        "#;
+        let config: MD013Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.reflow_mode, ReflowMode::SemanticLineBreaks);
     }
 
     #[test]
@@ -226,6 +245,15 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         assert!(toml_str.contains("sentence-per-line"));
         assert!(!toml_str.contains("sentence_per_line"));
+
+        // Test serialization of SemanticLineBreaks
+        let config = MD013Config {
+            reflow_mode: ReflowMode::SemanticLineBreaks,
+            ..config
+        };
+        let toml_str = toml::to_string(&config).unwrap();
+        assert!(toml_str.contains("semantic-line-breaks"));
+        assert!(!toml_str.contains("semantic_line_breaks"));
     }
 
     #[test]

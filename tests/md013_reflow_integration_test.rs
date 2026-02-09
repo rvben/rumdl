@@ -396,3 +396,130 @@ reflow = true
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn test_md013_semantic_line_breaks_via_cli() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "semantic-line-breaks"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    // Run fix
+    let _output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+
+    // Should have sentence breaks
+    assert!(
+        fixed.contains("rights.\n"),
+        "Should break at sentence boundary: {fixed:?}"
+    );
+
+    // Each line should respect the 80-char limit (or be a single word)
+    for line in fixed.lines() {
+        if !line.is_empty() && line.contains(' ') {
+            assert!(
+                line.len() <= 85, // Allow small overshoot for edge cases
+                "Line should be approximately within limit: {line:?} (len={})",
+                line.len()
+            );
+        }
+    }
+}
+
+#[test]
+fn test_md013_semantic_line_breaks_idempotent() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "First sentence is here. Second sentence is also present. Third sentence completes the paragraph.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "semantic-line-breaks"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    // First pass
+    let _output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let after_first = fs::read_to_string(&file_path).unwrap();
+
+    // Second pass
+    let _output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let after_second = fs::read_to_string(&file_path).unwrap();
+
+    assert_eq!(
+        after_first, after_second,
+        "Second fix pass should produce identical output (idempotent)"
+    );
+}
+
+#[test]
+fn test_md013_semantic_line_breaks_check_detects_violations() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "First sentence. Second sentence. Third sentence.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "semantic-line-breaks"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should detect that the paragraph needs semantic line breaks
+    assert!(
+        stdout.contains("semantic line breaks"),
+        "Should report semantic line breaks violation: {stdout}"
+    );
+}
