@@ -1,12 +1,9 @@
-# Pre-commit hooks for rumdl
+# Pre-commit hooks for rumdl (using prek - https://prek.j178.dev)
 # Install with:
-#   pre-commit install                          # Install commit hooks
-#   pre-commit install --hook-type commit-msg   # Install commit-msg hooks
-#   pre-commit install --hook-type pre-push     # Install push hooks
+#   prek install                          # Installs all hook stages
 # Run manually:
-#   pre-commit run --all-files                         # Run commit hooks
-#   pre-commit run --hook-stage push --all-files       # Run push hooks
-#   pre-commit run --hook-stage commit-msg --commit-msg-filename .git/COMMIT_EDITMSG
+#   prek run --all-files                         # Run commit hooks
+#   prek run --hook-stage pre-push --all-files   # Run push hooks
 
 fail_fast: true
 
@@ -72,9 +69,8 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
-  # General file quality checks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+  # General file quality checks (prek built-in Rust implementations)
+  - repo: builtin
     hooks:
       - id: trailing-whitespace
         exclude: \.md$|tests/inline_config_test\.rs$|tests/output_format_integration_tests\.rs$|tests/lsp_editor_integration_tests\.rs$|tests/utils_markdown_edge_cases\.rs$

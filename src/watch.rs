@@ -346,6 +346,9 @@ pub fn perform_check_run(
     // For cross-file analysis, we collect FileIndex data during linting (no second pass needed)
     let mut file_indices: HashMap<PathBuf, rumdl_lib::workspace_index::FileIndex> = HashMap::new();
 
+    // Track files that already have issues from Phase 1 to avoid double-counting in Phase 2
+    let mut files_already_with_issues: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
     let (
         mut has_issues,
         mut has_warnings,
@@ -412,9 +415,12 @@ pub fn perform_check_run(
                 files_fixed += 1;
             }
 
+            let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
+
             if file_has_issues {
                 has_issues = true;
                 files_with_issues += 1;
+                files_already_with_issues.insert(canonical.clone());
             }
 
             if warnings
@@ -434,8 +440,6 @@ pub fn perform_check_run(
 
             // Store FileIndex for cross-file analysis (no second pass needed!)
             if needs_cross_file {
-                // Canonicalize path for consistent cache key matching
-                let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
                 file_indices.insert(canonical, file_index);
             }
         }
@@ -505,6 +509,8 @@ pub fn perform_check_run(
             if file_has_issues {
                 has_issues = true;
                 files_with_issues += 1;
+                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                files_already_with_issues.insert(canonical);
             }
 
             if warnings
@@ -591,7 +597,9 @@ pub fn perform_check_run(
                 && !cross_file_warnings.is_empty()
             {
                 has_issues = true;
-                files_with_issues += 1;
+                if !files_already_with_issues.contains(file_path) {
+                    files_with_issues += 1;
+                }
                 total_issues += cross_file_warnings.len();
 
                 // Check for warning-or-higher severity
