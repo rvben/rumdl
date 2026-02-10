@@ -2576,3 +2576,141 @@ fn test_mixed_content_with_templates() {
     let content2 = "Start {{#something}} end";
     assert!(!is_template_directive_only(content2));
 }
+
+#[test]
+fn test_reflow_preserves_mkdocstrings_autodoc_block() {
+    // Issue #396: mkdocstrings autodoc blocks with indented YAML options must not be reflowed
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "::: path.to.module\n    options:\n      group_by_category: false\n      members:\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let reflow_fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(
+        reflow_fixes.is_empty(),
+        "mkdocstrings autodoc blocks should not be reflowed, got {reflow_fixes:?}"
+    );
+}
+
+#[test]
+fn test_reflow_preserves_mkdocstrings_with_identifier() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "::: my_module.MyClass\n    handler: python\n    options:\n      show_source: true\n      heading_level: 3\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let reflow_fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(
+        reflow_fixes.is_empty(),
+        "mkdocstrings autodoc blocks should not produce reflow fixes, got {reflow_fixes:?}"
+    );
+}
+
+#[test]
+fn test_reflow_preserves_mkdocstrings_surrounded_by_paragraphs() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "This is a long paragraph that exceeds the forty character line length limit.\n\n::: my_module.MyClass\n    handler: python\n    options:\n      show_source: true\n\nAnother long paragraph that also exceeds the forty character line length limit.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    for warning in &result {
+        if let Some(ref fix) = warning.fix {
+            let fixed = &fix.replacement;
+            assert!(
+                !fixed.contains("handler:") && !fixed.contains("show_source:"),
+                "mkdocstrings YAML options should not appear in reflow fixes: {fixed}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_reflow_mkdocstrings_not_detected_in_standard_flavor() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // In standard flavor, this content is not treated as mkdocstrings
+    let content = "::: my_module.MyClass\n    handler: python\n    options:\n      show_source: true\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let _result = rule.check(&ctx).unwrap();
+    // Just verify it doesn't panic — behavior differs per flavor
+}
+
+#[test]
+fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
+    // Blank lines within an autodoc block should not break preservation
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "::: path.to.module\n    handler: python\n\n    options:\n      show_source: true\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let reflow_fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(
+        reflow_fixes.is_empty(),
+        "mkdocstrings blocks with blank lines should not be reflowed, got {reflow_fixes:?}"
+    );
+}

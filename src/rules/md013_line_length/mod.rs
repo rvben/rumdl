@@ -491,6 +491,7 @@ impl MD013LineLength {
                     || info.in_esm_block
                     || info.in_jsx_expression
                     || info.in_mdx_comment
+                    || info.in_mkdocstrings
             });
 
             if should_skip_due_to_line_info
