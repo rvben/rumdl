@@ -220,3 +220,94 @@ fn test_filter_rules_preserves_rule_order() {
 
     assert_eq!(all_names, filtered_names);
 }
+
+#[test]
+fn test_filter_rules_enable_all_keyword() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let global_config = GlobalConfig {
+        enable: vec!["ALL".to_string()],
+        ..Default::default()
+    };
+
+    let filtered = filter_rules(&all, &global_config);
+
+    // enable: ["ALL"] should enable all rules
+    assert_eq!(filtered.len(), total);
+}
+
+#[test]
+fn test_filter_rules_enable_all_with_disable() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let global_config = GlobalConfig {
+        enable: vec!["ALL".to_string()],
+        disable: vec!["MD013".to_string()],
+        ..Default::default()
+    };
+
+    let filtered = filter_rules(&all, &global_config);
+
+    // enable: ["ALL"] + disable: ["MD013"] → all rules minus MD013
+    assert_eq!(filtered.len(), total - 1);
+
+    let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!rule_names.contains("MD013"));
+    assert!(rule_names.contains("MD001"));
+}
+
+#[test]
+fn test_filter_rules_enable_all_case_insensitive() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    // Test lowercase "all"
+    let global_config = GlobalConfig {
+        enable: vec!["all".to_string()],
+        ..Default::default()
+    };
+    let filtered = filter_rules(&all, &global_config);
+    assert_eq!(filtered.len(), total);
+
+    // Test mixed case "All"
+    let global_config = GlobalConfig {
+        enable: vec!["All".to_string()],
+        ..Default::default()
+    };
+    let filtered = filter_rules(&all, &global_config);
+    assert_eq!(filtered.len(), total);
+}
+
+#[test]
+fn test_filter_rules_enable_all_overrides_disable_all() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    // enable: ["ALL"] + disable: ["all"] → all rules enabled
+    let global_config = GlobalConfig {
+        enable: vec!["ALL".to_string()],
+        disable: vec!["all".to_string()],
+        ..Default::default()
+    };
+
+    let filtered = filter_rules(&all, &global_config);
+    assert_eq!(filtered.len(), total);
+}
+
+#[test]
+fn test_filter_rules_empty_enable_returns_all() {
+    // With the default GlobalConfig (enable not explicitly set),
+    // all rules should be returned
+    let config = Config::default();
+    let all = all_rules(&config);
+    let global_config = GlobalConfig::default();
+
+    let filtered = filter_rules(&all, &global_config);
+    assert_eq!(filtered.len(), all.len());
+}

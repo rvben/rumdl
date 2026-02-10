@@ -7,16 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-02-10
+
 ### Added
 
+- **Config**: `enable = ["ALL"]` keyword to explicitly enable all rules
+  (equivalent to omitting `enable`), with `disable` still applied on top
 - **MD013**: In non-strict mode, suppress line-length warnings when the excess
   comes entirely from inline link/image URLs — if replacing `[text](url)` with
   `[text]` would bring the line within the limit, the warning is not raised
+  ([#393](https://github.com/rvben/rumdl/issues/393))
+- **MD057**: `compact-paths` config option to warn about unnecessary path
+  traversal in wiki links (e.g., `../sibling` when `sibling` suffices)
+  ([#391](https://github.com/rvben/rumdl/issues/391))
+
+### Changed
+
+- **Config**: `enable = []` now means "no rules enabled" (was incorrectly
+  treated as "use defaults"). Omitting `enable` still enables all rules.
+  Use `enable = ["ALL"]` to explicitly enable all rules.
 
 ### Fixed
 
 - **MD013**: Skip mkdocstrings autodoc blocks (`::: module.Class` with indented
-  YAML options) during paragraph reflow (#396)
+  YAML options) during paragraph reflow
+  ([#396](https://github.com/rvben/rumdl/issues/396))
+- **MD013**: Implement trailing-word replacement for non-strict mode — reflow
+  now correctly handles lines where the last word pushes past the limit
+- **MD044**: Skip proper name checking when link text is itself a URL (starts
+  with `http://`, `https://`, or `www.`), matching markdownlint behavior
+  ([#395](https://github.com/rvben/rumdl/issues/395))
 
 ## [0.1.17] - 2026-02-09
 

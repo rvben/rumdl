@@ -509,8 +509,8 @@
     "aliases": [],
     "summary": "Relative links should point to existing files",
     "category": "link",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md057/"
   },
   {

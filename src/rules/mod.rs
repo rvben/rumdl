@@ -260,6 +260,11 @@ pub fn create_rule_by_name(name: &str, config: &crate::config::Config) -> Option
 use crate::config::GlobalConfig;
 use std::collections::HashSet;
 
+/// Check whether the enable list contains the "all" keyword (case-insensitive).
+fn enable_contains_all(enable: &[String]) -> bool {
+    enable.iter().any(|s| s.eq_ignore_ascii_case("all"))
+}
+
 pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Vec<Box<dyn Rule>> {
     let mut enabled_rules: Vec<Box<dyn Rule>> = Vec::new();
     let disabled_rules: HashSet<String> = global_config.disable.iter().cloned().collect();
@@ -268,15 +273,17 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
     if disabled_rules.contains("all") {
         // If 'enable' is also provided, only those rules are enabled, overriding "disable all"
         if !global_config.enable.is_empty() {
-            let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
-            for rule in rules {
-                if enabled_set.contains(rule.name()) {
-                    // Clone the rule (rules need to implement Clone or we need another approach)
-                    // For now, assuming rules are copyable/default constructible easily is complex.
-                    // Let's recreate the rule instance instead. This is brittle.
-                    // A better approach would involve rule registration and instantiation by name.
-                    // --> Reverting to filtering the input slice by cloning Box<dyn Rule>.
+            if enable_contains_all(&global_config.enable) {
+                // enable: ["ALL"] + disable: ["all"] cancel out → all rules enabled
+                for rule in rules {
                     enabled_rules.push(dyn_clone::clone_box(&**rule));
+                }
+            } else {
+                let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+                for rule in rules {
+                    if enabled_set.contains(rule.name()) {
+                        enabled_rules.push(dyn_clone::clone_box(&**rule));
+                    }
                 }
             }
         }
@@ -286,10 +293,19 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
 
     // If 'enable' is specified, only use those rules
     if !global_config.enable.is_empty() {
-        let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
-        for rule in rules {
-            if enabled_set.contains(rule.name()) && !disabled_rules.contains(rule.name()) {
-                enabled_rules.push(dyn_clone::clone_box(&**rule));
+        if enable_contains_all(&global_config.enable) {
+            // enable: ["ALL"] means all rules, then apply disable on top
+            for rule in rules {
+                if !disabled_rules.contains(rule.name()) {
+                    enabled_rules.push(dyn_clone::clone_box(&**rule));
+                }
+            }
+        } else {
+            let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+            for rule in rules {
+                if enabled_set.contains(rule.name()) && !disabled_rules.contains(rule.name()) {
+                    enabled_rules.push(dyn_clone::clone_box(&**rule));
+                }
             }
         }
     } else {

@@ -46,6 +46,9 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
     let config_enable_set: HashSet<String> = config.global.enable.iter().map(|s| resolve_rule_name(s)).collect();
     let config_disable_set: HashSet<String> = config.global.disable.iter().map(|s| resolve_rule_name(s)).collect();
 
+    // Check if enable contains the "ALL" keyword (case-insensitive)
+    let config_enable_all = config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
+
     if let Some(enabled_cli) = &cli_enable_set {
         // CLI --enable completely overrides config (ruff --select behavior)
         // CLI names are already resolved to canonical IDs
@@ -67,7 +70,9 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         // If config enable is set AND extend-enable is provided, merge both sets
         // before filtering, so we only need the single all_rules Vec
         if !config_enable_set.is_empty() || config.global.enable_is_explicit {
-            if let Some(extend_enabled_cli) = &cli_extend_enable_set {
+            if config_enable_all {
+                // enable: ["ALL"] means keep all rules, no filtering needed
+            } else if let Some(extend_enabled_cli) = &cli_extend_enable_set {
                 // Merge config enable set with CLI extend-enable (both already canonical IDs)
                 let extended_enable_set: HashSet<&str> = config_enable_set
                     .iter()
@@ -105,7 +110,8 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         // Step 2a: Apply config `enable` (if specified).
         // Config set already resolved to canonical IDs.
         // Also applies when enable was explicitly set to empty (e.g., markdownlint `default: false` with no rules).
-        if !config_enable_set.is_empty() || config.global.enable_is_explicit {
+        // enable: ["ALL"] → keep all rules, skip retain
+        if (!config_enable_set.is_empty() || config.global.enable_is_explicit) && !config_enable_all {
             current_rules.retain(|rule| config_enable_set.contains(rule.name()));
         }
 

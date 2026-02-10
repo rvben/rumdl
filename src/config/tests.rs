@@ -2042,13 +2042,12 @@ fn test_relative_path_empty_string() {
     assert_eq!(result, "");
 }
 
-// ───── Bug #1: `enable = []` should not disable all rules ─────
+// ───── `enable = []` semantics ─────
 
 #[test]
-fn test_empty_enable_list_does_not_disable_all_rules_rumdl_toml() {
+fn test_empty_enable_list_is_explicit_rumdl_toml() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join(".rumdl.toml");
-    // Air framework's config pattern: enable = [] with disable = [...]
     let config_content = r#"
 [global]
 enable = []
@@ -2058,27 +2057,25 @@ disable = ["MD013"]
 
     let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
 
-    // enable should remain at Default source (not overridden by empty list)
-    assert_eq!(
+    // enable = [] should be treated as explicitly set (not Default)
+    assert_ne!(
         sourced.global.enable.source,
         ConfigSource::Default,
-        "Empty enable = [] should not change source from Default"
+        "Empty enable = [] should change source from Default (it was explicitly set)"
     );
 
     let config: Config = sourced.into_validated_unchecked().into();
 
-    // enable should be empty (all rules enabled)
-    assert!(
-        config.global.enable.is_empty(),
-        "Empty enable list should result in no enable filter"
-    );
+    // enable should be empty and explicit → disables all rules
+    assert!(config.global.enable.is_empty());
+    assert!(config.global.enable_is_explicit);
 
-    // disable should still work
+    // disable should still be parsed
     assert_eq!(config.global.disable, vec!["MD013".to_string()]);
 }
 
 #[test]
-fn test_empty_enable_list_does_not_disable_all_rules_pyproject() {
+fn test_empty_enable_list_is_explicit_pyproject() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join("pyproject.toml");
     let config_content = r#"
@@ -2090,12 +2087,48 @@ disable = ["MD033"]
 
     let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
 
-    // enable should remain at Default source
-    assert_eq!(
+    // enable = [] should be treated as explicitly set
+    assert_ne!(
         sourced.global.enable.source,
         ConfigSource::Default,
-        "Empty enable = [] in pyproject.toml should not change source from Default"
+        "Empty enable = [] in pyproject.toml should change source from Default"
     );
+}
+
+#[test]
+fn test_enable_all_keyword_rumdl_toml() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[global]
+enable = ["ALL"]
+disable = ["MD013"]
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // enable should contain "ALL"
+    assert!(config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all")));
+    // disable should still be parsed
+    assert_eq!(config.global.disable, vec!["MD013".to_string()]);
+}
+
+#[test]
+fn test_enable_all_keyword_pyproject() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join("pyproject.toml");
+    let config_content = r#"
+[tool.rumdl]
+enable = ["ALL"]
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all")));
 }
 
 #[test]

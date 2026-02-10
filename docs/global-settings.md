@@ -97,7 +97,7 @@ flavor = "standard"
 ### `enable`
 
 **Type**: `string[]`
-**Default**: `[]` (all rules enabled)
+**Default**: not set (all rules enabled; `disable` applies normally)
 **CLI Equivalent**: `--enable`
 
 Enables only the specified rules. When this option is set, all other rules are disabled except those explicitly listed.
@@ -110,8 +110,10 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 **Usage Notes**:
 
 - Rule IDs are case-insensitive but conventionally uppercase (e.g., "MD001")
-- If `enable` is non-empty, it takes precedence over `disable`
-- If `enable` is empty (or omitted), all rules are enabled by default and `disable` is applied normally
+- `enable = []` (empty list) disables **all** rules — nothing will be linted
+- Omitting `enable` entirely uses the default: all rules enabled, `disable` applied normally
+- `enable = ["ALL"]` explicitly enables every rule, equivalent to the default; `disable` still applies on top
+- If `enable` lists specific rules, only those rules run (subject to `disable`)
 - Useful for gradually adopting rumdl or focusing on specific rule categories
 
 **Example CLI usage**:
