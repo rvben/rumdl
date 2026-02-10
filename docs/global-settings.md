@@ -110,8 +110,8 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 **Usage Notes**:
 
 - Rule IDs are case-insensitive but conventionally uppercase (e.g., "MD001")
-- If both `enable` and `disable` are specified, `enable` takes precedence
-- An empty array means all rules are enabled (default behavior)
+- If `enable` is non-empty, it takes precedence over `disable`
+- If `enable` is empty (or omitted), all rules are enabled by default and `disable` is applied normally
 - Useful for gradually adopting rumdl or focusing on specific rule categories
 
 **Example CLI usage**:

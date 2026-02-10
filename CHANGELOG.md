@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Config**: `enable = []` is now correctly treated as "disable all rules" instead
-  of being silently ignored
+- **Config**: `enable = []` is now correctly treated as "use defaults" (all rules
+  enabled) instead of acting as an empty allowlist that disabled all rules
 - **MD013**: Preserve MkDocs admonition markers (`!!!`, `???`, `???+`) during text
   reflow instead of stripping them from continuation lines
 - **MD033**: Escape regex special characters in `allowed-elements` config values —
