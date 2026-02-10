@@ -1335,6 +1335,7 @@ fn test_relative_to_docs_resolves_valid_link() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1355,6 +1356,7 @@ fn test_relative_to_docs_flags_missing_link() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
         .with_path(temp_dir.path().join("docs"));
@@ -1386,6 +1388,7 @@ fn test_relative_to_docs_extensionless_link() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1407,6 +1410,7 @@ fn test_relative_to_docs_fallback_without_mkdocs_yml() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1436,6 +1440,7 @@ fn test_relative_to_docs_custom_docs_dir() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1459,6 +1464,7 @@ fn test_relative_to_docs_with_fragment() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1484,6 +1490,7 @@ fn test_relative_to_docs_image() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1504,6 +1511,7 @@ fn test_relative_to_docs_image_missing() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
         .with_path(temp_dir.path().join("docs"));
@@ -1525,6 +1533,7 @@ fn test_relative_to_docs_reference_definition() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1550,6 +1559,7 @@ fn test_relative_to_docs_directory_index() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1575,6 +1585,7 @@ fn test_relative_to_docs_directory_without_index() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1606,6 +1617,7 @@ fn test_relative_to_docs_directory_without_trailing_slash() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1630,6 +1642,7 @@ fn test_relative_to_docs_nested_subdirectory() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1652,6 +1665,7 @@ fn test_relative_to_docs_url_encoded_path() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1675,6 +1689,7 @@ fn test_relative_to_docs_root_link() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1696,6 +1711,7 @@ fn test_relative_to_docs_root_link_missing_index() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
         .with_path(temp_dir.path().join("docs"));
@@ -1720,6 +1736,7 @@ fn test_existing_ignore_and_warn_unchanged() {
     // Test ignore (default)
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::Ignore,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1729,6 +1746,7 @@ fn test_existing_ignore_and_warn_unchanged() {
     // Test warn
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::Warn,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -1774,6 +1792,7 @@ fn test_relative_to_docs_html_fallback() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1795,6 +1814,7 @@ fn test_relative_to_docs_html_fallback_missing() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
         .with_path(temp_dir.path().join("docs"));
@@ -1817,6 +1837,7 @@ fn test_relative_to_docs_query_parameter() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1844,6 +1865,7 @@ fn test_relative_to_docs_mixed_links() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
@@ -1868,6 +1890,7 @@ fn test_relative_to_docs_reference_definition_missing() {
 
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToDocs,
+        ..Default::default()
     };
     let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config)
         .with_path(temp_dir.path().join("docs"));
@@ -1880,4 +1903,654 @@ fn test_relative_to_docs_reference_definition_missing() {
         "Missing ref def absolute link should warn, got: {result:?}"
     );
     assert!(result[0].message.contains("does not exist"));
+}
+
+// =============================================================================
+// compact-paths tests (Issue #391)
+// =============================================================================
+
+fn make_compact_paths_config() -> MD057Config {
+    MD057Config {
+        compact_paths: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_compact_paths_disabled_by_default() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create sub_dir/file.md
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    // From sub_dir/, ../sub_dir/file.md is unnecessarily long
+    let content = "[link](../sub_dir/file.md)\n";
+
+    // Default config — compact_paths is false
+    let rule = MD057ExistingRelativeLinks::new().with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Should have no compact-paths warnings (feature disabled)
+    assert!(
+        result.iter().all(|w| !w.message.contains("simplified")),
+        "Default config should not produce compact-paths warnings, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_same_directory() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create sub_dir/file.md
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    // From sub_dir/, link goes up then back into sub_dir
+    let content = "[link](../sub_dir/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_dot_prefix() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    fs::write(base_path.join("file.md"), "# File").unwrap();
+
+    // ./file.md can be simplified to file.md
+    let content = "[link](./file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning for ./file.md, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_deep_traversal() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create a/sub/file.md
+    let deep_dir = base_path.join("a").join("sub");
+    fs::create_dir_all(&deep_dir).unwrap();
+    fs::write(deep_dir.join("file.md"), "# File").unwrap();
+
+    // From a/sub/, ../../a/sub/file.md → file.md
+    let content = "[link](../../a/sub/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&deep_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning for deep traversal, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_already_optimal() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create sibling/file.md
+    let sub_dir = base_path.join("sub_dir");
+    let sibling_dir = base_path.join("sibling");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::create_dir_all(&sibling_dir).unwrap();
+    fs::write(sibling_dir.join("file.md"), "# File").unwrap();
+
+    // From sub_dir/, ../sibling/file.md is already optimal
+    let content = "[link](../sibling/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert!(
+        compact_warnings.is_empty(),
+        "Already optimal path should produce no compact-paths warnings, got: {compact_warnings:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_with_fragment() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File\n## Section").unwrap();
+
+    // Fragment should be preserved in suggestion
+    let content = "[link](../sub_dir/file.md#section)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md#section'"),
+        "Should preserve fragment in suggestion, got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_with_query() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    // Query parameter should be preserved in suggestion
+    let content = "[link](../sub_dir/file.md?v=1)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md?v=1'"),
+        "Should preserve query in suggestion, got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_with_query_and_fragment() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File\n## Section").unwrap();
+
+    // Both query and fragment should be preserved
+    let content = "[link](../sub_dir/file.md?v=1#section)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md?v=1#section'"),
+        "Should preserve both query and fragment in suggestion, got: {}",
+        compact_warnings[0].message
+    );
+
+    // Verify fix also preserves both
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[link](file.md?v=1#section)\n",
+        "Fix should preserve query and fragment"
+    );
+}
+
+#[test]
+fn test_compact_paths_images() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("image.png"), "PNG data").unwrap();
+
+    let content = "![img](../sub_dir/image.png)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning for image, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'image.png'"),
+        "Should suggest 'image.png', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_reference_defs() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    let content = "[ref]: ../sub_dir/file.md\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning for ref def, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_nonexistent_file() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    // Do NOT create file.md — it doesn't exist
+
+    // Should still warn about unnecessary traversal even if target is missing
+    let content = "[link](../sub_dir/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    let broken_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("does not exist")).collect();
+
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Should still warn about path traversal, got: {compact_warnings:?}"
+    );
+    assert_eq!(
+        broken_warnings.len(),
+        1,
+        "Should also warn about broken link, got: {broken_warnings:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_external_urls_skipped() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[link](https://example.com/../path)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "External URLs should not be checked for compact-paths, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_fragment_only_skipped() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[link](#section)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Fragment-only links should not be checked, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_plain_relative_no_warning() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    fs::write(base_path.join("file.md"), "# File").unwrap();
+
+    // file.md has no traversal — should not warn
+    let content = "[link](file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Plain relative paths should not produce compact-paths warnings, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_necessary_parent_traversal() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // Create structure: sub/child/ and file.md at root
+    let sub_child = base_path.join("sub").join("child");
+    fs::create_dir_all(&sub_child).unwrap();
+    fs::write(base_path.join("file.md"), "# File").unwrap();
+
+    // From sub/child/, ../../file.md is already the shortest path to root/file.md
+    let content = "[link](../../file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_child);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert!(
+        compact_warnings.is_empty(),
+        "Necessary parent traversal should not produce compact-paths warnings, got: {compact_warnings:?}"
+    );
+}
+
+#[test]
+fn test_compact_paths_mixed_traversal() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    // ./sub/../file.md normalizes to file.md
+    fs::write(base_path.join("file.md"), "# File").unwrap();
+    fs::create_dir_all(base_path.join("sub")).unwrap();
+
+    let content = "[link](./sub/../file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Mixed traversal should produce compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_fix_produces_correct_output() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    let content = "[link](../sub_dir/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(fixed, "[link](file.md)\n", "Fix should replace path with compact form");
+}
+
+#[test]
+fn test_compact_paths_fix_preserves_fragment() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File\n## Section").unwrap();
+
+    let content = "[link](../sub_dir/file.md#section)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(fixed, "[link](file.md#section)\n", "Fix should preserve fragment");
+}
+
+#[test]
+fn test_compact_paths_config_deserialization() {
+    // Default: compact-paths should be false
+    let config: MD057Config = toml::from_str("").unwrap();
+    assert!(!config.compact_paths, "compact_paths should default to false");
+
+    // Kebab-case
+    let config: MD057Config = toml::from_str("compact-paths = true").unwrap();
+    assert!(config.compact_paths, "kebab-case should work");
+
+    // Snake_case alias
+    let config: MD057Config = toml::from_str("compact_paths = true").unwrap();
+    assert!(config.compact_paths, "snake_case alias should work");
+}
+
+#[test]
+fn test_compact_paths_warning_positions() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    // "Some text [link](../sub_dir/file.md) more" — URL starts at column 18
+    let content = "Some text [link](../sub_dir/file.md) more\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(compact_warnings.len(), 1);
+    assert_eq!(compact_warnings[0].line, 1, "Should be on line 1");
+    // URL "../sub_dir/file.md" starts at byte 17 (0-indexed), column 18 (1-indexed)
+    assert!(
+        compact_warnings[0].column > 1,
+        "Column should reflect URL position, not start of line, got: {}",
+        compact_warnings[0].column
+    );
+}
+
+#[test]
+fn test_compact_paths_multiple_links_fix() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("a.md"), "# A").unwrap();
+    fs::write(sub_dir.join("b.md"), "# B").unwrap();
+    fs::write(sub_dir.join("c.md"), "# C").unwrap();
+
+    let content = "\
+[first](../sub_dir/a.md)
+[second](../sub_dir/b.md)
+[third](../sub_dir/c.md)
+";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        3,
+        "All three links should have compact-paths warnings"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[first](a.md)\n[second](b.md)\n[third](c.md)\n",
+        "All three links should be compacted without corruption"
+    );
+}
+
+#[test]
+fn test_compact_paths_unicode_before_link() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    // Multi-byte characters before the link test byte-offset calculation
+    let content = "日本語テキスト [link](../sub_dir/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(compact_warnings.len(), 1);
+
+    // Fix should work correctly despite multi-byte characters preceding the link
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "日本語テキスト [link](file.md)\n",
+        "Fix should handle multi-byte characters correctly"
+    );
+}
+
+#[test]
+fn test_compact_paths_dot_prefix_image() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    fs::write(base_path.join("img.png"), "PNG").unwrap();
+
+    let content = "![alt](./img.png)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Image with ./ prefix should warn, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'img.png'"),
+        "Should suggest 'img.png', got: {}",
+        compact_warnings[0].message
+    );
+}
+
+#[test]
+fn test_compact_paths_dot_prefix_reference_def() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    fs::write(base_path.join("file.md"), "# File").unwrap();
+
+    let content = "[ref]: ./file.md\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Reference def with ./ prefix should warn, got: {compact_warnings:?}"
+    );
+    assert!(
+        compact_warnings[0].message.contains("'file.md'"),
+        "Should suggest 'file.md', got: {}",
+        compact_warnings[0].message
+    );
 }

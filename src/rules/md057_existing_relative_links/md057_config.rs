@@ -26,6 +26,12 @@ pub struct MD057Config {
     /// - "relative_to_docs": Resolve relative to MkDocs docs_dir and validate
     #[serde(alias = "absolute_links")]
     pub absolute_links: AbsoluteLinksOption,
+
+    /// Warn when relative links contain unnecessary path traversal.
+    /// When enabled, `../sub_dir/file.md` from within `sub_dir/` warns
+    /// and suggests the shorter equivalent `file.md`.
+    #[serde(alias = "compact_paths")]
+    pub compact_paths: bool,
 }
 
 impl RuleConfig for MD057Config {

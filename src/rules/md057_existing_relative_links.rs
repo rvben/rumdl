@@ -3,7 +3,9 @@
 //!
 //! See [docs/md057.md](../../docs/md057.md) for full documentation, configuration, and examples.
 
-use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{
+    CrossFileScope, Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
+};
 use crate::utils::element_cache::ElementCache;
 use crate::workspace_index::{FileIndex, extract_cross_file_links};
 use regex::Regex;
@@ -282,6 +284,30 @@ impl MD057ExistingRelativeLinks {
         base_path.join(link)
     }
 
+    /// Check if a relative link can be compacted and return the simplified form.
+    ///
+    /// Returns `None` if compact-paths is disabled, the link has no traversal,
+    /// or the link is already the shortest form.
+    /// Returns `Some(suggestion)` with the full compacted URL (including fragment/query suffix).
+    fn compact_path_suggestion(&self, url: &str, base_path: &Path) -> Option<String> {
+        if !self.config.compact_paths {
+            return None;
+        }
+
+        // Split URL into path and suffix (fragment/query)
+        let path_end = url
+            .find('?')
+            .unwrap_or(url.len())
+            .min(url.find('#').unwrap_or(url.len()));
+        let path_part = &url[..path_end];
+        let suffix = &url[path_end..];
+
+        // URL-decode the path portion for filesystem resolution
+        let decoded_path = Self::url_decode(path_part);
+
+        compute_compact_path(base_path, &decoded_path).map(|compact| format!("{compact}{suffix}"))
+    }
+
     /// Validate an absolute link by resolving it relative to MkDocs docs_dir.
     ///
     /// Returns `Some(warning_message)` if the link is broken, `None` if valid.
@@ -484,7 +510,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                 .and_then(|caps| caps.get(1).map(|g| (caps, g)))
                         });
 
-                    if let Some((_caps, url_group)) = caps_and_url {
+                    if let Some((caps, url_group)) = caps_and_url {
                         let url = url_group.as_str().trim();
 
                         // Skip empty URLs
@@ -540,6 +566,36 @@ impl Rule for MD057ExistingRelativeLinks {
                                 AbsoluteLinksOption::Ignore => {}
                             }
                             continue;
+                        }
+
+                        // Check for unnecessary path traversal (compact-paths)
+                        // Reconstruct full URL including fragment (regex group 2)
+                        // since url_group (group 1) contains only the path part
+                        let full_url_for_compact = if let Some(frag) = caps.get(2) {
+                            format!("{url}{}", frag.as_str())
+                        } else {
+                            url.to_string()
+                        };
+                        if let Some(suggestion) = self.compact_path_suggestion(&full_url_for_compact, &base_path) {
+                            let url_start = url_group.start();
+                            let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
+                            let fix_byte_start = line_start_byte + url_start;
+                            let fix_byte_end = line_start_byte + url_end;
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: link.line,
+                                column: url_start + 1,
+                                end_line: link.line,
+                                end_column: url_end + 1,
+                                message: format!(
+                                    "Relative link '{full_url_for_compact}' can be simplified to '{suggestion}'"
+                                ),
+                                severity: Severity::Warning,
+                                fix: Some(Fix {
+                                    range: fix_byte_start..fix_byte_end,
+                                    replacement: suggestion,
+                                }),
+                            });
                         }
 
                         // Strip query parameters and fragments before checking file existence
@@ -649,6 +705,26 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Check for unnecessary path traversal (compact-paths)
+            if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
+                let img_line_start_byte = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
+                let fix_byte_start = img_line_start_byte + image.start_col;
+                let fix_byte_end = fix_byte_start + url.len();
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: image.line,
+                    column: image.start_col + 1,
+                    end_line: image.line,
+                    end_column: image.start_col + 1 + url.len(),
+                    message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: fix_byte_start..fix_byte_end,
+                        replacement: suggestion,
+                    }),
+                });
+            }
+
             // Strip query parameters and fragments before checking file existence
             let file_path = Self::strip_query_and_fragment(url);
 
@@ -752,6 +828,30 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Check for unnecessary path traversal (compact-paths)
+            if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
+                let ref_line_idx = ref_def.line - 1;
+                let col = content.lines().nth(ref_line_idx).map_or(1, |line_content| {
+                    line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                });
+                let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
+                let fix_byte_start = ref_line_start_byte + col - 1;
+                let fix_byte_end = fix_byte_start + url.len();
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: ref_def.line,
+                    column: col,
+                    end_line: ref_def.line,
+                    end_column: col + url.len(),
+                    message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: fix_byte_start..fix_byte_end,
+                        replacement: suggestion,
+                    }),
+                });
+            }
+
             // Strip query parameters and fragments before checking file existence
             let file_path = Self::strip_query_and_fragment(url);
 
@@ -808,8 +908,33 @@ impl Rule for MD057ExistingRelativeLinks {
         Ok(warnings)
     }
 
+    fn fix_capability(&self) -> FixCapability {
+        if self.config.compact_paths {
+            FixCapability::ConditionallyFixable
+        } else {
+            FixCapability::Unfixable
+        }
+    }
+
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        Ok(ctx.content.to_string())
+        if !self.config.compact_paths {
+            return Ok(ctx.content.to_string());
+        }
+
+        let warnings = self.check(ctx)?;
+        let mut content = ctx.content.to_string();
+
+        // Collect fixable warnings (compact-paths) sorted by byte offset descending
+        let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
+        fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+
+        for fix in fixes {
+            if fix.range.end <= content.len() {
+                content.replace_range(fix.range.clone(), &fix.replacement);
+            }
+        }
+
+        Ok(content)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -921,6 +1046,75 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         Ok(warnings)
+    }
+}
+
+/// Compute the shortest relative path from `from_dir` to `to_path`.
+///
+/// Both paths must be normalized (no `.` or `..` components).
+/// Returns a relative `PathBuf` that navigates from `from_dir` to `to_path`.
+fn shortest_relative_path(from_dir: &Path, to_path: &Path) -> PathBuf {
+    let from_components: Vec<_> = from_dir.components().collect();
+    let to_components: Vec<_> = to_path.components().collect();
+
+    // Find common prefix length
+    let common_len = from_components
+        .iter()
+        .zip(to_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let mut result = PathBuf::new();
+
+    // Go up for each remaining component in from_dir
+    for _ in common_len..from_components.len() {
+        result.push("..");
+    }
+
+    // Append remaining components from to_path
+    for component in &to_components[common_len..] {
+        result.push(component);
+    }
+
+    result
+}
+
+/// Check if a relative link path can be shortened.
+///
+/// Given the source directory and the raw link path, computes whether there's
+/// a shorter equivalent path. Returns `Some(compact_path)` if the link can
+/// be simplified, `None` if it's already optimal.
+fn compute_compact_path(source_dir: &Path, raw_link_path: &str) -> Option<String> {
+    let link_path = Path::new(raw_link_path);
+
+    // Only check paths that contain traversal (../ or ./)
+    let has_traversal = link_path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::CurDir));
+
+    if !has_traversal {
+        return None;
+    }
+
+    // Resolve: source_dir + raw_link_path, then normalize
+    let combined = source_dir.join(link_path);
+    let normalized_target = normalize_path(&combined);
+
+    // Compute shortest path from source_dir back to the normalized target
+    let normalized_source = normalize_path(source_dir);
+    let shortest = shortest_relative_path(&normalized_source, &normalized_target);
+
+    // Compare against the raw link path — if it differs, the path can be compacted
+    if shortest != link_path {
+        let compact = shortest.to_string_lossy().to_string();
+        // Avoid suggesting empty path
+        if compact.is_empty() {
+            return None;
+        }
+        // Markdown links always use forward slashes regardless of platform
+        Some(compact.replace('\\', "/"))
+    } else {
+        None
     }
 }
 
@@ -2590,6 +2784,7 @@ A footnote[^1] and a [ref link][myref].
 
         let config = MD057Config {
             absolute_links: AbsoluteLinksOption::Warn,
+            ..Default::default()
         };
         let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
 
@@ -2627,6 +2822,7 @@ A footnote[^1] and a [ref link][myref].
 
         let config = MD057Config {
             absolute_links: AbsoluteLinksOption::Warn,
+            ..Default::default()
         };
         let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
 
@@ -2657,6 +2853,7 @@ A footnote[^1] and a [ref link][myref].
 
         let config = MD057Config {
             absolute_links: AbsoluteLinksOption::Warn,
+            ..Default::default()
         };
         let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
 
