@@ -422,12 +422,13 @@ fn test_multiple_urls_in_line() {
 fn test_markdown_link_with_long_url() {
     let rule = MD013LineLength::new(50, false, false, false, false);
 
-    // 95 chars, limit 50 — flagged (actual length used, no URL stripping)
+    // 95 chars, limit 50. Text-only: "Check the [documentation] for details" = 38 chars.
+    // Since URL removal brings line within limit, the warning is suppressed.
     let content = "Check the [documentation](https://example.com/very/long/path/to/documentation/page) for details";
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 1);
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -585,17 +586,16 @@ fn test_bold_link_forgiven() {
 }
 
 #[test]
-fn test_links_with_text_between_flagged_when_prefix_long() {
+fn test_links_with_text_between_suppressed_when_text_short() {
     let rule = MD013LineLength::new(50, false, false, false, false);
     let content =
         "See [Link One](https://example.com/long/path) and also [Link Two](https://example.com/long/path) here";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Last word "here" replaced with "#"
-    // Remaining: "See [Link One](https://example.com/long/path) and also [Link Two](https://example.com/long/path) #"
-    // Still well over 50 → flagged
-    assert_eq!(result.len(), 1);
+    // Text-only: "See [Link One] and also [Link Two] here" = 40 chars, under 50.
+    // URLs account for the excess, so the warning is suppressed.
+    assert_eq!(result.len(), 0);
 }
 
 #[test]
@@ -2713,4 +2713,304 @@ fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
         reflow_fixes.is_empty(),
         "mkdocstrings blocks with blank lines should not be reflowed, got {reflow_fixes:?}"
     );
+}
+
+// ─── Semantic link understanding tests ───
+
+#[test]
+fn test_semantic_link_basic_suppression() {
+    // Line is 70 chars. With limit 40, it exceeds.
+    // But text without URL is: "Click [here] now." = 18 chars, well under 40.
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "Click [here](https://example.com/very/long/path/to/resource/page) now.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should suppress warning when URL removal brings line within limit"
+    );
+}
+
+#[test]
+fn test_semantic_link_text_still_too_long() {
+    // Even removing URLs, the text content itself exceeds the limit
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = "This is very long text that exceeds the limit [link](https://example.com) more text here";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(!result.is_empty(), "Should warn when text alone exceeds limit");
+}
+
+#[test]
+fn test_semantic_link_multiple_links() {
+    // Two inline links on one line. Text-only: "See [foo] and [bar] here." = 26 chars
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "See [foo](https://example.com/foo/path) and [bar](https://example.com/bar/path) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should suppress when multiple links' URLs account for the excess"
+    );
+}
+
+#[test]
+fn test_semantic_link_image_suppression() {
+    // Image: ![photo](long-url) → text-only is "![photo]" (8 chars)
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "See ![photo](https://example.com/images/very/long/path/photo.jpg) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should suppress when image URL accounts for the excess"
+    );
+}
+
+#[test]
+fn test_semantic_link_reference_links_no_savings() {
+    // Reference links have no inline URL to strip — no savings possible.
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = "This is a line with a [reference link][ref] that is quite long and exceeds the limit.\n\n[ref]: https://example.com";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Line 1 has no inline URLs, so semantic link check can't help
+    let line1_warnings: Vec<_> = result.iter().filter(|w| w.line == 1).collect();
+    assert!(!line1_warnings.is_empty(), "Reference links provide no URL savings");
+}
+
+#[test]
+fn test_semantic_link_strict_mode_no_suppression() {
+    // In strict mode, semantic link understanding is disabled
+    let rule = MD013LineLength::new(40, false, false, false, true);
+    let content = "Click [here](https://example.com/very/long/path/to/resource/page) now.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Strict mode should not suppress even when URL accounts for excess"
+    );
+}
+
+#[test]
+fn test_semantic_link_with_title() {
+    // Link with title: [text](url "title") — entire construct is savings
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "Click [here](https://example.com/path \"A helpful title\") now.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should suppress when link with title URL accounts for excess"
+    );
+}
+
+#[test]
+fn test_semantic_link_nested_badge() {
+    // Nested: [![badge](img-url)](link-url) — outer construct contains inner
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content =
+        "Status [![build](https://img.shields.io/badge/build-passing-green)](https://ci.example.com/builds/latest)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should suppress for nested badge constructs");
+}
+
+#[test]
+fn test_semantic_link_no_links_on_line() {
+    // No links at all — should behave exactly as before (warning)
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = "This is a very long line without any links that definitely exceeds thirty chars.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(!result.is_empty(), "Should warn when no links to strip");
+}
+
+#[test]
+fn test_semantic_link_autolinks_no_savings() {
+    // Autolinks <url> can't be shortened — they display the URL itself.
+    // Autolinks are LinkType::Autolink, not Inline — they don't contribute savings.
+    // This test verifies autolinks don't interfere with the semantic link check.
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "Visit <https://example.com/very/long/path/to/resource/page> for details.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let _result = rule.check(&ctx).unwrap();
+}
+
+#[test]
+fn test_semantic_link_mixed_inline_and_reference() {
+    // One inline link and one reference link — only the inline link provides savings
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "See [docs](https://example.com/long/docs/path) and [more][ref] for details and info.\n\n[ref]: https://example.com";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    let line1_warnings: Vec<_> = result.iter().filter(|w| w.line == 1).collect();
+    assert!(
+        line1_warnings.is_empty(),
+        "Inline link savings should bring line within limit"
+    );
+}
+
+#[test]
+fn test_semantic_link_bold_text_in_link() {
+    // Bold formatting inside link text: [**bold**](url)
+    // link.text is raw source "**bold**", so text_only_len correctly includes the ** markers
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "Click [**important docs**](https://example.com/very/long/path/docs) now.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // text-only: "Click [**important docs**] now." = 31 chars, under 40
+    assert!(result.is_empty(), "Should handle markdown formatting inside link text");
+}
+
+#[test]
+fn test_semantic_link_code_span_in_link() {
+    // Code span inside link text: [`code`](url)
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = "See [`Config`](https://example.com/long/api/Config) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // text-only: "See [`Config`] here." = 20 chars, under 30
+    assert!(result.is_empty(), "Should handle code spans inside link text");
+}
+
+#[test]
+fn test_semantic_link_url_with_parentheses() {
+    // URL with parentheses (e.g., Wikipedia links)
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "See [article](https://en.wikipedia.org/wiki/Rust_(programming_language)) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // text-only: "See [article] here." = 19 chars, under 40
+    assert!(result.is_empty(), "Should handle URLs with parentheses");
+}
+
+#[test]
+fn test_semantic_link_only_partial_savings() {
+    // Link provides some savings but not enough
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    // 75 chars raw. Link construct is [link](https://x.co) = 21 chars. text-only = [link] = 6 chars.
+    // savings = 15. text_only_length = 75 - 15 = 60, still over 50.
+    let content = "This is quite a long line of text with a short [link](https://x.co) and more text after it.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Should warn when savings aren't enough to bring under limit"
+    );
+}
+
+#[test]
+fn test_semantic_link_boundary_exactly_at_limit() {
+    // Text-only length is exactly equal to the limit — should suppress (<=)
+    // "X [t](https://example.com/path1234)" = 37 chars raw
+    // Text-only: "X [t]" = 5 chars
+    // We need text-only == limit. Let's construct carefully:
+    // limit=20, text-only should be exactly 20
+    let rule = MD013LineLength::new(20, false, false, false, false);
+    // "abcdefghijklm [xy](https://example.com/long)" = text-only is "abcdefghijklm [xy]" = 19 chars
+    // Need exactly 20: "abcdefghijklmnop [x](https://example.com/long/path)" text-only = "abcdefghijklmnop [x]" = 20
+    let content = "abcdefghijklmnop [x](https://example.com/long/path)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Should suppress when text-only length equals limit exactly"
+    );
+}
+
+#[test]
+fn test_semantic_link_boundary_one_over_limit() {
+    // Text-only length is one over the limit — should warn.
+    // Must also fail the trailing-word check to reach the semantic check.
+    // Content: two links close together so trailing-word replacement doesn't help.
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    // text-only = "abcdefghijklmnopqrstuvwxyz0123456789ab [x] [y]" = 47 chars, over 40
+    // trailing-word check: last word is "[y](url2)" → replacement still over 40
+    let content = "abcdefghijklmnopqrstuvwxyz0123456789ab [x](https://a.co/1) [y](https://b.co/2)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(!result.is_empty(), "Should warn when text-only length exceeds limit");
+}
+
+#[test]
+fn test_semantic_link_empty_link_text() {
+    // Empty link text: [](url) is valid — text-only is "[]" (2 chars)
+    let rule = MD013LineLength::new(20, false, false, false, false);
+    let content = "See [](https://example.com/very/long/path/to/resource) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should handle empty link text correctly");
+}
+
+#[test]
+fn test_semantic_link_empty_image_alt() {
+    // Empty alt text: ![](url) is valid — text-only is "![]" (3 chars)
+    let rule = MD013LineLength::new(20, false, false, false, false);
+    let content = "See ![](https://example.com/very/long/path/to/resource) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "Should handle empty image alt text correctly");
+}
+
+#[test]
+fn test_semantic_link_entire_line_is_link() {
+    // The entire line is a single link
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = "[documentation](https://example.com/very/long/path/to/documentation/page/section)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Text-only: "[documentation]" = 15 chars, under 30
+    assert!(
+        result.is_empty(),
+        "Should suppress when entire line is a link with short text"
+    );
+}
+
+#[test]
+fn test_semantic_link_in_blockquote() {
+    // Blockquote with inline link
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "> See the [guide](https://example.com/very/long/path/to/guide) for details.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Text-only: "> See the [guide] for details." = ~31 chars, under 40
+    assert!(result.is_empty(), "Should suppress link URL excess in blockquotes");
+}
+
+#[test]
+fn test_semantic_link_long_text_short_url() {
+    // Long link text but short URL — savings are tiny, won't help
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "See the [very long descriptive link text that explains everything](https://x.co) here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Text-only: "See the [very long descriptive link text that explains everything] here." = 72 chars
+    // Still well over 40
+    assert!(!result.is_empty(), "Should warn when link text itself is long");
+}
+
+#[test]
+fn test_semantic_link_multiple_images() {
+    // Multiple images on one line
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "![a](https://example.com/img/long1.png) ![b](https://example.com/img/long2.png)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Text-only: "![a] ![b]" = 9 chars, well under 40
+    assert!(
+        result.is_empty(),
+        "Should suppress when multiple image URLs account for excess"
+    );
+}
+
+#[test]
+fn test_semantic_link_in_list_item() {
+    // List item with inline link
+    let rule = MD013LineLength::new(40, false, false, false, false);
+    let content = "- Click [here](https://example.com/very/long/path/to/resource/page) now.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    // Text-only: "- Click [here] now." = 19 chars, under 40
+    assert!(result.is_empty(), "Should suppress link URL excess in list items");
 }

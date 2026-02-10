@@ -12,6 +12,7 @@ use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::split_into_sentences;
+use pulldown_cmark::LinkType;
 use toml;
 
 mod helpers;
@@ -270,6 +271,14 @@ impl Rule for MD013LineLength {
             // Skip lines where the check length is within the limit
             if check_length <= line_limit {
                 continue;
+            }
+
+            // Semantic link understanding: suppress when excess comes entirely from inline URLs
+            if !effective_config.strict {
+                let text_only_length = self.calculate_text_only_length(effective_length, line_number, ctx);
+                if text_only_length <= line_limit {
+                    continue;
+                }
             }
 
             // Skip mkdocstrings blocks (already handled by LintContext)
@@ -1926,5 +1935,82 @@ impl MD013LineLength {
     /// Returns the actual display length of the line using the configured length mode.
     fn calculate_effective_length(&self, line: &str) -> usize {
         self.calculate_string_length(line)
+    }
+
+    /// Calculate line length with inline link/image URLs removed.
+    ///
+    /// For each inline link `[text](url)` or image `![alt](url)` on the line,
+    /// computes the "savings" from removing the URL portion (keeping only `[text]`
+    /// or `![alt]`). Returns `effective_length - total_savings`.
+    ///
+    /// Handles nested constructs (e.g., `[![img](url)](url)`) by only counting the
+    /// outermost construct to avoid double-counting.
+    fn calculate_text_only_length(
+        &self,
+        effective_length: usize,
+        line_number: usize,
+        ctx: &crate::lint_context::LintContext,
+    ) -> usize {
+        let line_range = ctx.line_index.line_content_range(line_number);
+        let line_byte_end = line_range.end;
+
+        // Collect inline links/images on this line: (byte_offset, byte_end, text_only_display_len)
+        let mut constructs: Vec<(usize, usize, usize)> = Vec::new();
+
+        for link in &ctx.links {
+            if link.line != line_number || link.is_reference {
+                continue;
+            }
+            if !matches!(link.link_type, LinkType::Inline) {
+                continue;
+            }
+            // Skip cross-line links
+            if link.byte_end > line_byte_end {
+                continue;
+            }
+            // `[text]` in configured length mode
+            let text_only_len = 2 + self.calculate_string_length(&link.text);
+            constructs.push((link.byte_offset, link.byte_end, text_only_len));
+        }
+
+        for image in &ctx.images {
+            if image.line != line_number || image.is_reference {
+                continue;
+            }
+            if !matches!(image.link_type, LinkType::Inline) {
+                continue;
+            }
+            // Skip cross-line images
+            if image.byte_end > line_byte_end {
+                continue;
+            }
+            // `![alt]` in configured length mode
+            let text_only_len = 3 + self.calculate_string_length(&image.alt_text);
+            constructs.push((image.byte_offset, image.byte_end, text_only_len));
+        }
+
+        if constructs.is_empty() {
+            return effective_length;
+        }
+
+        // Sort by byte offset to handle overlapping/nested constructs
+        constructs.sort_by_key(|&(start, _, _)| start);
+
+        let mut total_savings: usize = 0;
+        let mut last_end: usize = 0;
+
+        for (start, end, text_only_len) in &constructs {
+            // Skip constructs nested inside a previously counted one
+            if *start < last_end {
+                continue;
+            }
+            // Full construct length in configured length mode
+            let full_source = &ctx.content[*start..*end];
+            let full_len = self.calculate_string_length(full_source);
+            total_savings += full_len.saturating_sub(*text_only_len);
+            last_end = *end;
+        }
+
+        effective_length.saturating_sub(total_savings)
     }
 }
