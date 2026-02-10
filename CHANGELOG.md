@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MD013**: In non-strict mode, suppress line-length warnings when the excess
+  comes entirely from inline link/image URLs — if replacing `[text](url)` with
+  `[text]` would bring the line within the limit, the warning is not raised
+
+### Fixed
+
+- **MD013**: Skip mkdocstrings autodoc blocks (`::: module.Class` with indented
+  YAML options) during paragraph reflow (#396)
+
 ## [0.1.17] - 2026-02-09
 
 ### Fixed
