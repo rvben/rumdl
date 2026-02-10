@@ -96,7 +96,7 @@ fn test_pyproject_toml_config_loading() {
     let test_file = temp_dir.path().join("test.md");
     fs::write(
         &test_file,
-        "# Test File\n\nThis line is 85 characters long which exceeds the default limit of 80 characters.\n",
+        "# Test File\n\nThis is a very long line that definitely exceeds the default limit of eighty characters by a lot\n",
     )
     .unwrap();
 
@@ -165,8 +165,7 @@ line-length = 100
     .unwrap();
 
     // Create test file with long line
-    let test_file_content =
-        "# Test File\n\nThis line is 85 characters long which exceeds the default limit of 80 characters.\n";
+    let test_file_content = "# Test File\n\nThis is a very long line that definitely exceeds the default limit of eighty characters by a lot\n";
 
     let snake_test_file = snake_case_dir.path().join("test.md");
     fs::write(&snake_test_file, test_file_content).unwrap();

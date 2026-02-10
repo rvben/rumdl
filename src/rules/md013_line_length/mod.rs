@@ -78,10 +78,8 @@ impl MD013LineLength {
             return true;
         }
 
-        // Only skip if the entire line is a link reference (quick check first)
-        if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed) {
-            return true;
-        }
+        // Note: link reference definitions are handled as always-exempt (even in strict mode)
+        // in the main check loop, so they don't need to be checked here.
 
         // Code blocks with long strings (only check if in code block)
         if ctx.line_info(current_line + 1).is_some_and(|info| info.in_code_block)
@@ -246,20 +244,46 @@ impl Rule for MD013LineLength {
             let line_number = line_idx + 1;
             let line = lines[line_idx];
 
-            // Calculate actual line length
+            // Calculate actual line length (used in warning messages)
             let effective_length = self.calculate_effective_length(line);
 
             // Use single line length limit for all content
             let line_limit = effective_config.line_length.get();
 
-            // Skip short lines immediately
-            if effective_length <= line_limit {
+            // In non-strict mode, forgive the trailing non-whitespace run.
+            // If the line only exceeds the limit because of a long token at the end
+            // (URL, link chain, identifier), it passes. This matches markdownlint's
+            // behavior: line.replace(/\S*$/u, "#")
+            let check_length = if effective_config.strict {
+                effective_length
+            } else {
+                match line.rfind(char::is_whitespace) {
+                    Some(pos) => {
+                        let ws_char = line[pos..].chars().next().unwrap();
+                        let prefix_end = pos + ws_char.len_utf8();
+                        self.calculate_string_length(&line[..prefix_end]) + 1
+                    }
+                    None => 1, // No whitespace — entire line is a single token
+                }
+            };
+
+            // Skip lines where the check length is within the limit
+            if check_length <= line_limit {
                 continue;
             }
 
             // Skip mkdocstrings blocks (already handled by LintContext)
             if ctx.lines[line_idx].in_mkdocstrings {
                 continue;
+            }
+
+            // Link reference definitions are always exempt, even in strict mode.
+            // There's no way to shorten them without breaking the URL.
+            {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[') && trimmed.contains("]:") && LINK_REF_PATTERN.is_match(trimmed) {
+                    continue;
+                }
             }
 
             // Skip various block types efficiently
@@ -276,7 +300,6 @@ impl Rule for MD013LineLength {
                     || (!effective_config.code_blocks
                         && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                     || (!effective_config.tables && table_lines_set.contains(&line_number))
-                    || ctx.lines[line_number - 1].blockquote.is_some()
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)

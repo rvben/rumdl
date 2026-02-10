@@ -355,7 +355,7 @@ fn test_admonition_with_code_block_at_start_does_not_hang() {
     x
     ```
 
-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+This is a very long line that definitely exceeds the default limit of eighty characters by a lot here now
 "#;
 
     let config = create_mkdocs_config_with_reflow();

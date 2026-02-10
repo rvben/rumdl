@@ -131,7 +131,10 @@ fn test_table_checked_when_enabled() {
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 2); // Both table lines exceed limit
+    // Header row has spaces and prefix exceeds limit → flagged.
+    // Delimiter row has no spaces (one continuous token) → trailing-word forgiveness applies.
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].line, 1);
 }
 
 #[test]
@@ -170,7 +173,7 @@ fn test_issue_78_tables_with_inline_code() {
 | `var with very long name` | `val exceeding limit` |
 | value 1 | value 2 |
 
-This line exceeds limit"#;
+This line has extra words that exceed the limit even after trailing-word forgiveness"#;
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
@@ -247,13 +250,15 @@ fn test_strict_mode() {
 }
 
 #[test]
-fn test_blockquote_exemption() {
+fn test_blockquote_wrappable_text_is_flagged() {
     let rule = MD013LineLength::new(30, false, false, false, false);
-    let content = "> This is a very long line inside a blockquote that should be ignored.";
+    // Blockquote with wrappable text — the text before the last word exceeds the limit
+    let content = "> This is a very long line inside a blockquote that should be flagged.";
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 0);
+    // Blockquotes with wrappable text should be flagged (matches markdownlint behavior)
+    assert_eq!(result.len(), 1);
 }
 
 #[test]
@@ -285,7 +290,8 @@ fn test_no_fix_without_reflow() {
 
 #[test]
 fn test_character_vs_byte_counting() {
-    let rule = MD013LineLength::new(10, false, false, false, false);
+    // Use strict mode to test pure character counting without trailing-word forgiveness
+    let rule = MD013LineLength::new(10, false, false, false, true);
     // Unicode characters should count as 1 character each
     let content = "你好世界这是测试文字超过限制"; // 14 characters
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -306,7 +312,8 @@ fn test_empty_content() {
 
 #[test]
 fn test_excess_range_calculation() {
-    let rule = MD013LineLength::new(10, false, false, false, false);
+    // Use strict mode to test range calculation without trailing-word forgiveness
+    let rule = MD013LineLength::new(10, false, false, false, true);
     let content = "12345678901234567890"; // 20 chars, limit is 10
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -450,15 +457,28 @@ fn test_strict_mode_counts_urls() {
 }
 
 #[test]
-fn test_documentation_example_from_md051() {
+fn test_trailing_link_forgiven_in_non_strict() {
     let rule = MD013LineLength::new(80, false, false, false, false);
 
-    // This is the actual line from md051.md that was causing issues
+    // 119 chars, but the text before the trailing link token fits within 80 chars.
+    // "For more information, see the [CommonMark " = 42 chars → under 80
     let content = r#"For more information, see the [CommonMark specification](https://spec.commonmark.org/0.30/#link-reference-definitions)."#;
     let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Line is 119 chars with limit 80 — flagged (actual length used, no URL stripping)
+    // Not flagged: the trailing token is what pushes it over the limit
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_trailing_link_flagged_in_strict() {
+    let rule = MD013LineLength::new(80, false, false, false, true); // strict=true
+
+    let content = r#"For more information, see the [CommonMark specification](https://spec.commonmark.org/0.30/#link-reference-definitions)."#;
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // In strict mode, the full line length is checked — flagged
     assert_eq!(result.len(), 1);
 }
 
@@ -476,6 +496,209 @@ fn test_warning_reports_actual_length() {
         "Expected actual length 71 in message: {}",
         result[0].message
     );
+}
+
+// =============================================================================
+// Trailing-word forgiveness tests (issue #393, markdownlint non-strict parity)
+// =============================================================================
+
+#[test]
+fn test_issue_393_list_item_with_link_chain() {
+    // Original issue: list item with chained markdown links has no breakable position
+    let rule = MD013LineLength::new(99, false, false, false, false);
+    let content =
+        "- [@kevinsuttle](https://kevinsuttle.com/)/[macOS-Defaults](https://github.com/kevinSuttle/macOS-Defaults)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // 106 chars, but everything after "- " is a single non-whitespace token.
+    // After trailing-word replacement: "- #" = 3 chars → under 99
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_single_long_token_no_spaces() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "ThisIsASingleVeryLongTokenWithNoSpacesAtAllThatExceedsLimit";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // No whitespace at all → entire line is one token → check_length = 1
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_single_long_token_in_strict_mode() {
+    let rule = MD013LineLength::new(50, false, false, false, true); // strict
+    let content = "ThisIsASingleVeryLongTokenWithNoSpacesAtAllThatExceedsLimit";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // In strict mode, no trailing-word forgiveness
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_list_item_with_single_long_token() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "- ThisIsAVeryLongListItemTokenThatExceedsTheLimitButCannotBeBroken";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // After "- " the rest is a single token → "- #" = 3 chars
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_trailing_url_forgiven() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "short text https://github.com/kevinSuttle/macOS-Defaults/really/long/path";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // "short text " = 11 chars → check_length = 12 → under 50
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_trailing_url_flagged_when_prefix_exceeds_limit() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "This text is already very long before the URL even starts here https://example.com";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // "This text is already very long before the URL even starts here " = 63 chars
+    // check_length = 63 + 1 = 64 → over 50 → flagged
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_bold_link_forgiven() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "**[Bold link text](https://github.com/kevinSuttle/macOS-Defaults/really/long/path)**";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Last whitespace is before "text](...)**"
+    // "**[Bold link " = 13 chars → check_length = 14 → under 50
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_links_with_text_between_flagged_when_prefix_long() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content =
+        "See [Link One](https://example.com/long/path) and also [Link Two](https://example.com/long/path) here";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Last word "here" replaced with "#"
+    // Remaining: "See [Link One](https://example.com/long/path) and also [Link Two](https://example.com/long/path) #"
+    // Still well over 50 → flagged
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_blockquote_ending_with_url_forgiven() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "> See https://github.com/kevinSuttle/macOS-Defaults/really/long/path";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // "> See " = 6 chars → check_length = 7 → under 50
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_blockquote_with_wrappable_text_flagged() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "> This is a very long blockquote line with lots of wrappable text that exceeds the limit easily";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Even after trailing-word replacement, the prefix exceeds 50 → flagged
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_link_ref_definition_exempt_in_strict_mode() {
+    let rule = MD013LineLength::new(50, false, false, false, true); // strict=true
+    let content = "[reference]: https://example.com/very/long/url/that/exceeds/the/configured/limit";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Reference definitions are always exempt, even in strict mode
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_link_ref_definition_exempt_in_non_strict_mode() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "[reference]: https://example.com/very/long/url/that/exceeds/the/configured/limit";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_trailing_word_replacement_preserves_warning_length() {
+    // The warning message should report ACTUAL line length, not the check_length
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    // 87 chars total. After trailing-word replacement:
+    // "This line is already very long before the trailing " = 51 chars → check_length = 52 → over 50
+    let content = "This line is already very long before the trailing https://example.com/long/url/path";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1);
+    // Warning must report the actual 84 chars, not 52
+    assert!(
+        result[0].message.contains("84"),
+        "Expected actual length in message: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_image_ref_without_spaces_forgiven() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "![very-long-image-alt-text-that-exceeds-the-line-limit-by-a-lot][ref]";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // No whitespace → check_length = 1
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn test_markdownlint_documentation_examples() {
+    // From markdownlint docs, assuming limit = 40 ("IF THIS LINE IS THE MAXIMUM LENGTH")
+    let rule = MD013LineLength::new(40, false, false, false, false);
+
+    // "This line is okay because there are-no-spaces-beyond-that-length"
+    // Last whitespace before "are-no-spaces-beyond-that-length"
+    // "This line is okay because there " = 32 chars → check_length = 33 → under 40
+    let content = "This line is okay because there are-no-spaces-beyond-that-length";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.check(&ctx).unwrap().len(),
+        0,
+        "should pass: no spaces beyond limit"
+    );
+
+    // "This line is a violation because there are spaces beyond that length"
+    // Last word "length" → prefix = "This line is a violation because there are spaces beyond that " = 62 chars
+    // check_length = 63 → over 40 → flagged
+    let content = "This line is a violation because there are spaces beyond that length";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 1, "should flag: spaces beyond limit");
+
+    // "This-line-is-okay-because-there-are-no-spaces-anywhere-within"
+    // No whitespace → check_length = 1 → passes
+    let content = "This-line-is-okay-because-there-are-no-spaces-anywhere-within";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 0, "should pass: no spaces anywhere");
 }
 
 #[test]

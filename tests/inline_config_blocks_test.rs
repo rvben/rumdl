@@ -141,10 +141,10 @@ This line has trailing spaces and should now trigger MD009  "#;
 fn test_disable_at_end_of_file() {
     let content = r#"# Test Document
 
-This is a very long line that exceeds 80 characters and should trigger MD013 normally
+This is a very long line that definitely exceeds the default limit of eighty characters by a lot here
 
 <!-- markdownlint-disable MD013 -->
-This is a very long line that exceeds 80 characters and would normally trigger MD013 but is disabled"#;
+This is a very long line that definitely exceeds the default limit of eighty characters but is disabled"#;
 
     let rules = all_rules(&Config::default());
     let warnings = lint(

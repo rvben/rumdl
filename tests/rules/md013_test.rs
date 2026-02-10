@@ -74,7 +74,9 @@ fn test_strict_mode() {
     let content = "https://very-long-url-that-exceeds-length.com\n![Long image ref][ref]\n[ref]: https://long-url.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3); // All lines should be flagged in strict mode
+    // URL and image ref are flagged in strict mode.
+    // Link reference definitions are always exempt, even in strict mode.
+    assert_eq!(result.len(), 2);
 }
 
 #[test]
@@ -260,13 +262,15 @@ fn test_parity_table_rows_checked() {
 }
 
 #[test]
-fn test_parity_blockquotes_skipped() {
+fn test_parity_blockquotes_checked() {
     let rule = MD013LineLength::new(80, true, true, true, false);
+    // Blockquotes with wrappable text are checked (matches markdownlint behavior).
     let content =
-        "> This is a very long blockquote line that should not be flagged by MD013 even if it is over the limit.";
+        "> This is a very long blockquote line that should be flagged by MD013 because it has wrappable text.";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert!(result.is_empty());
+    // The prefix before the last word exceeds 80 chars → flagged
+    assert_eq!(result.len(), 1);
 }
 
 // Additional comprehensive tests
@@ -284,14 +288,21 @@ fn test_lines_exactly_at_limit() {
 #[test]
 fn test_lines_one_char_over_limit() {
     let rule = MD013LineLength::new(50, true, true, true, false);
+    // 51 chars, but "here!!!!" is the trailing word. After replacement:
+    // "This line is exactly fifty characters long " = 43 + "#" = 44 → under 50.
+    // In non-strict mode, trailing-word forgiveness applies.
     let content = "This line is exactly fifty characters long here!!!!";
     assert_eq!(content.chars().count(), 51);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].column, 51);
-    assert_eq!(result[0].end_column, 52);
+    assert_eq!(result.len(), 0, "trailing word forgiven in non-strict mode");
+
+    // In strict mode, it IS flagged
+    let strict_rule = MD013LineLength::new(50, true, true, true, true);
+    let result_strict = strict_rule.check(&ctx).unwrap();
+    assert_eq!(result_strict.len(), 1);
+    assert_eq!(result_strict[0].column, 51);
+    assert_eq!(result_strict[0].end_column, 52);
 }
 
 #[test]
@@ -354,8 +365,10 @@ fn test_tables_configurable() {
     // With tables = true (check tables - include in line length checking)
     let rule_check = MD013LineLength::new(50, true, true, true, false);
     let result_check = rule_check.check(&ctx).unwrap();
-    // Both lines exceed 50 characters
-    assert_eq!(result_check.len(), 2);
+    // Header row: wrappable text exceeds limit → flagged.
+    // Delimiter row: no spaces (single token) → trailing-word forgiveness → not flagged.
+    assert_eq!(result_check.len(), 1);
+    assert_eq!(result_check[0].line, 1);
 
     // With tables = false (skip tables - exclude from line length checking)
     let rule_skip = MD013LineLength::new(50, true, false, true, false);
@@ -404,13 +417,13 @@ fn test_strict_mode_vs_non_strict_mode() {
     // Non-strict mode
     let rule_lenient = MD013LineLength::new(30, true, true, true, false);
     let result_lenient = rule_lenient.check(&ctx).unwrap();
-    assert_eq!(result_lenient.len(), 1); // Only the normal line
+    assert_eq!(result_lenient.len(), 1); // Only the normal line (wrappable text)
     assert_eq!(result_lenient[0].line, 4);
 
-    // Strict mode
+    // Strict mode: URL, image ref flagged. Link ref definition always exempt.
     let rule_strict = MD013LineLength::new(30, true, true, true, true);
     let result_strict = rule_strict.check(&ctx).unwrap();
-    assert_eq!(result_strict.len(), 4); // All lines flagged
+    assert_eq!(result_strict.len(), 3);
 }
 
 // Fix method tests
@@ -618,7 +631,8 @@ fn test_inline_code_with_long_strings() {
 
 #[test]
 fn test_column_positions_for_excess_characters() {
-    let rule = MD013LineLength::new(10, true, true, true, false);
+    // Use strict mode to test column position calculation without trailing-word forgiveness
+    let rule = MD013LineLength::new(10, true, true, true, true);
     let content = "1234567890ABCDEF"; // 16 chars, limit is 10
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
@@ -1141,11 +1155,19 @@ fn test_length_mode_chars_with_cjk() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Should pass with 9 chars (limit 20)");
 
-    // Add more characters to exceed limit
+    // Add more characters to exceed limit (use strict mode — no spaces in CJK text,
+    // so trailing-word forgiveness would skip it in non-strict mode)
+    let config_strict = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Chars,
+        strict: true,
+        ..Default::default()
+    };
+    let rule_strict = MD013LineLength::from_config_struct(config_strict);
     let content_long = "你好世界HelloWorld你好世界Hello"; // 23 chars
     assert_eq!(content_long.chars().count(), 23);
     let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result_long = rule.check(&ctx_long).unwrap();
+    let result_long = rule_strict.check(&ctx_long).unwrap();
     assert_eq!(result_long.len(), 1, "Should fail with 23 chars (limit 20)");
 }
 
@@ -1188,10 +1210,18 @@ fn test_length_mode_visual_with_cjk() {
     assert!(result_edge.is_empty(), "Should pass with exactly 20 visual columns");
 
     // Now exceed: "你好世界HelloWorld你好" = 8+10+4 = 22 visual columns
+    // Use strict mode — no spaces in CJK text, trailing-word forgiveness would skip it
+    let config_strict = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Visual,
+        strict: true,
+        ..Default::default()
+    };
+    let rule_strict = MD013LineLength::from_config_struct(config_strict);
     let content_long = "你好世界HelloWorld你好";
     assert_eq!(content_long.width(), 22);
     let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result_long = rule.check(&ctx_long).unwrap();
+    let result_long = rule_strict.check(&ctx_long).unwrap();
     assert_eq!(result_long.len(), 1, "Should fail with 22 visual columns (limit 20)");
 }
 
@@ -1244,11 +1274,32 @@ fn test_length_mode_visual_with_emoji() {
     let result_edge = rule.check(&ctx_edge).unwrap();
     assert!(result_edge.is_empty(), "Should pass with exactly 20 visual columns");
 
-    // Now exceed: "Hello 👋 World 🌍 🚀!" = 20 + 1 = 21
+    // "Hello 👋 World 🌍 🚀!" = 21 visual cols, but trailing word "🚀!" = 3 cols.
+    // After replacement: prefix "Hello 👋 World 🌍 " = 18 cols → check_length = 19 → under 20.
+    // In non-strict mode, trailing-word forgiveness applies.
     let content_long = "Hello 👋 World 🌍 🚀!";
     let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result_long = rule.check(&ctx_long).unwrap();
-    assert_eq!(result_long.len(), 1, "Should fail with 21 visual columns (limit 20)");
+    assert_eq!(
+        result_long.len(),
+        0,
+        "Should pass: trailing word forgiven in non-strict mode"
+    );
+
+    // In strict mode, it IS flagged
+    let config_strict = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Visual,
+        strict: true,
+        ..Default::default()
+    };
+    let rule_strict = MD013LineLength::from_config_struct(config_strict);
+    let result_strict = rule_strict.check(&ctx_long).unwrap();
+    assert_eq!(
+        result_strict.len(),
+        1,
+        "Should fail with 21 visual columns in strict mode"
+    );
 }
 
 #[test]
@@ -1278,11 +1329,18 @@ fn test_length_mode_bytes() {
     let result_cjk = rule.check(&ctx_cjk).unwrap();
     assert!(result_cjk.is_empty(), "Should pass with 6 bytes");
 
-    // Create a line that exceeds 20 bytes
+    // Create a line that exceeds 20 bytes (use strict — no spaces, trailing-word forgiveness would skip)
+    let config_strict = MD013Config {
+        line_length: LineLength::from_const(20),
+        length_mode: LengthMode::Bytes,
+        strict: true,
+        ..Default::default()
+    };
+    let rule_strict = MD013LineLength::from_config_struct(config_strict);
     let content_long = "Hello你好World你好世界"; // 5 + 6 + 5 + 12 = 28 bytes
     assert_eq!(content_long.len(), 28);
     let ctx_long = LintContext::new(content_long, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result_long = rule.check(&ctx_long).unwrap();
+    let result_long = rule_strict.check(&ctx_long).unwrap();
     assert_eq!(result_long.len(), 1, "Should fail with 28 bytes (limit 20)");
 }
 
@@ -1366,9 +1424,11 @@ fn test_length_mode_japanese_text() {
     assert!(result_chars.is_empty(), "Should pass with 12 chars (limit 15)");
 
     // Visual mode: 24 visual columns (each Japanese char = 2 columns)
+    // Use strict — no spaces in Japanese text, trailing-word forgiveness would skip it
     let config_visual = MD013Config {
         line_length: LineLength::from_const(20),
         length_mode: LengthMode::Visual,
+        strict: true,
         ..Default::default()
     };
     let rule_visual = MD013LineLength::from_config_struct(config_visual);

@@ -156,12 +156,14 @@ fn test_config_priority() {
     // Apply configs using LOCAL helper, getting a NEW vector
     let configured_rules_1 = apply_rule_configs(&initial_rules, &config);
 
-    // Test with a line that's 100 chars (exceeds default but within config)
+    // Test with a line that's 100 chars (exceeds default but within config).
+    // Uses words with spaces so trailing-word replacement doesn't forgive the whole line.
     let line_100_chars = "# Test
 
 "
     .to_owned()
-        + &"A".repeat(98); // 98 A's + 2 chars for "# " = 100 chars
+        + &"ab ".repeat(32)
+        + "abcd"; // 32 * 3 + 4 = 100 chars on line 3, prefix = 97
 
     // Run linting with the NEW configured rules vector
     let warnings = rumdl_lib::lint(
