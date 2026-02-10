@@ -348,9 +348,9 @@ impl MD044ProperNames {
                 };
                 let text_end = text_start + link.text.len();
 
-                // If position is within the text portion, don't skip
+                // If position is within the text portion, skip only if text is a URL
                 if byte_pos >= text_start && byte_pos < text_end {
-                    return false;
+                    return Self::link_text_is_url(&link.text);
                 }
                 // Position is in the URL/reference portion, skip it
                 return true;
@@ -377,6 +377,13 @@ impl MD044ProperNames {
 
         // Check pre-computed reference definitions
         ctx.is_in_reference_def(byte_pos)
+    }
+
+    /// Check if link text is a URL that should not have proper name corrections.
+    /// Matches markdownlint behavior: skip text starting with `http://`, `https://`, or `www.`.
+    fn link_text_is_url(text: &str) -> bool {
+        let lower = text.trim().to_ascii_lowercase();
+        lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("www.")
     }
 
     // Check if a character is a word boundary (handles Unicode)
@@ -1196,5 +1203,114 @@ Regular javascript here.
                 .any(|w| w.line == 1 && w.column == 3 && w.message.contains("'javascript'"))
         );
         assert!(result.iter().any(|w| w.line == 3 && w.message.contains("'javascript'")));
+    }
+
+    #[test]
+    fn test_url_link_text_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        // Link text that is itself a URL should not be flagged
+        let content = r#"[https://github.com/org/repo](https://github.com/org/repo)
+
+[http://github.com/org/repo](http://github.com/org/repo)
+
+[www.github.com/org/repo](https://www.github.com/org/repo)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "URL-like link text should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_url_link_text_with_leading_space_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        // Leading/trailing whitespace in link text should be trimmed before URL check
+        let content = r#"[ https://github.com/org/repo](https://github.com/org/repo)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "URL-like link text with leading space should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_url_link_text_uppercase_scheme_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        let content = r#"[HTTPS://GITHUB.COM/org/repo](https://github.com/org/repo)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "URL-like link text with uppercase scheme should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_non_url_link_text_still_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        // Link text that is NOT a URL should still be flagged
+        let content = r#"[github.com/org/repo](https://github.com/org/repo)
+
+[Visit github](https://github.com/org/repo)
+
+[//github.com/org/repo](//github.com/org/repo)
+
+[ftp://github.com/org/repo](ftp://github.com/org/repo)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 4, "Non-URL link text should be flagged, got: {result:?}");
+        assert!(result.iter().any(|w| w.line == 1)); // github.com (no protocol)
+        assert!(result.iter().any(|w| w.line == 3)); // Visit github
+        assert!(result.iter().any(|w| w.line == 5)); // //github.com (protocol-relative)
+        assert!(result.iter().any(|w| w.line == 7)); // ftp://github.com
+    }
+
+    #[test]
+    fn test_url_link_text_fix_not_applied() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        let content = "[https://github.com/org/repo](https://github.com/org/repo)\n";
+
+        let ctx = create_context(content);
+        let result = rule.fix(&ctx).unwrap();
+
+        assert_eq!(result, content, "Fix should not modify URL-like link text");
+    }
+
+    #[test]
+    fn test_mixed_url_and_regular_link_text() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+
+        // Mix of URL link text (should skip) and regular text (should flag)
+        let content = r#"[https://github.com/org/repo](https://github.com/org/repo)
+
+Visit [github documentation](https://github.com/docs) for details.
+
+[www.github.com/pricing](https://www.github.com/pricing)"#;
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only line 3 should be flagged ("github documentation" is not a URL)
+        assert_eq!(
+            result.len(),
+            1,
+            "Only non-URL link text should be flagged, got: {result:?}"
+        );
+        assert_eq!(result[0].line, 3);
     }
 }
