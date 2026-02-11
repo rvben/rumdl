@@ -62,6 +62,17 @@ impl TableUtils {
             }
         }
 
+        // Skip ATX headings (# through ######)
+        if trimmed.starts_with('#') {
+            let hash_count = trimmed.bytes().take_while(|&b| b == b'#').count();
+            if hash_count <= 6 {
+                let after_hashes = &trimmed[hash_count..];
+                if after_hashes.is_empty() || after_hashes.starts_with(' ') || after_hashes.starts_with('\t') {
+                    return false;
+                }
+            }
+        }
+
         // Skip lines that are clearly code or inline code
         if trimmed.starts_with("`") || trimmed.contains("``") {
             return false;
@@ -1001,6 +1012,48 @@ mod tests {
         assert!(TableUtils::is_potential_table_row("| cell | cell |"));
         assert!(TableUtils::is_potential_table_row("cell | cell"));
         assert!(TableUtils::is_potential_table_row("| Header | Header |"));
+    }
+
+    #[test]
+    fn test_atx_headings_with_pipes_not_table_rows() {
+        // All 6 ATX heading levels with pipes
+        assert!(!TableUtils::is_potential_table_row("# Heading | with pipe"));
+        assert!(!TableUtils::is_potential_table_row("## Heading | with pipe"));
+        assert!(!TableUtils::is_potential_table_row("### Heading | with pipe"));
+        assert!(!TableUtils::is_potential_table_row("#### Heading | with pipe"));
+        assert!(!TableUtils::is_potential_table_row("##### Heading | with pipe"));
+        assert!(!TableUtils::is_potential_table_row("###### Heading | with pipe"));
+
+        // Multiple pipes in headings
+        assert!(!TableUtils::is_potential_table_row("### col1 | col2 | col3"));
+        assert!(!TableUtils::is_potential_table_row("## a|b|c"));
+
+        // Headings with tab after hashes
+        assert!(!TableUtils::is_potential_table_row("#\tHeading | pipe"));
+        assert!(!TableUtils::is_potential_table_row("##\tHeading | pipe"));
+
+        // Heading with only hashes and pipe (empty heading text)
+        assert!(!TableUtils::is_potential_table_row("# |"));
+        assert!(!TableUtils::is_potential_table_row("## |"));
+
+        // Indented headings (spaces before #)
+        assert!(!TableUtils::is_potential_table_row("  ## Heading | pipe"));
+        assert!(!TableUtils::is_potential_table_row("   ### Heading | pipe"));
+
+        // Unicode content in headings (the original proptest failure case)
+        assert!(!TableUtils::is_potential_table_row("#### ®aAA|ᯗ"));
+
+        // 7+ hashes are NOT headings — should follow normal table detection
+        // "####### text|pipe" has no space after 7 hashes if treated as non-heading
+        // but with a space it still has 7+ hashes so not a heading
+        assert!(TableUtils::is_potential_table_row("####### text | pipe"));
+
+        // Hash without space is NOT a heading, so pipe detection applies
+        assert!(TableUtils::is_potential_table_row("#nospc|pipe"));
+
+        // These SHOULD still be detected as potential table rows
+        assert!(TableUtils::is_potential_table_row("| # Header | Value |"));
+        assert!(TableUtils::is_potential_table_row("text | #tag"));
     }
 
     #[test]

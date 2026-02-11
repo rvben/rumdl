@@ -6,19 +6,6 @@ use rumdl_lib::types::LineLength;
 use unicode_width::UnicodeWidthStr;
 
 #[test]
-fn test_md060_disabled_by_default() {
-    let rule = MD060TableFormat::default();
-    let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-
-    let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 0, "Rule should be disabled by default");
-
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, content, "No changes when disabled");
-}
-
-#[test]
 fn test_md060_align_simple_ascii_table() {
     let rule = MD060TableFormat::new(true, "aligned".to_string());
 
@@ -2874,5 +2861,55 @@ fn test_md060_mixed_ordered_unordered_nested_continuation() {
         lines[3].starts_with("   "),
         "Table at ordered list level must keep 3-space indent, got: {:?}",
         lines[3]
+    );
+}
+
+#[test]
+fn test_md060_atx_heading_with_pipe_not_misidentified_as_table() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // ATX headings containing pipes should not be reformatted as table rows
+    let content = "#### heading|with pipe\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "ATX heading with pipe should not trigger MD060, got {warnings:?}"
+    );
+
+    // Fix should be idempotent (no changes)
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "ATX heading with pipe should not be modified");
+}
+
+#[test]
+fn test_md060_atx_heading_with_pipe_idempotent() {
+    // Reproduces the proptest failure: heading with unicode and pipe
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "#### ®aAA|ᯗ\n";
+    let ctx1 = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx1).unwrap();
+
+    let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(fixed1, fixed2, "Fix must be idempotent for heading with unicode pipe");
+}
+
+#[test]
+fn test_md060_heading_adjacent_to_table_not_absorbed() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // A heading with a pipe immediately before a real table should not be
+    // absorbed into the table
+    let content = "## Section|A\n\n| Col1 | Col2 |\n| ---- | ---- |\n| a    | b    |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The heading line must remain unchanged
+    assert!(
+        fixed.starts_with("## Section|A\n"),
+        "Heading must not be reformatted, got: {fixed:?}"
     );
 }

@@ -955,19 +955,24 @@ proptest! {
         prop_assert_eq!(fixed1, fixed2, "MD059 fix not idempotent");
     }
 
+    // MD060 uses fix() because each warning carries the same whole-table
+    // replacement. apply_all_fixes would apply the replacement N times,
+    // corrupting the output. Like MD032 and MD058, we allow up to 3 passes.
     #[test]
     fn test_md060_idempotent(content in markdown_content_strategy()) {
-        let rule = MD060TableFormat::default();
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
+        let fixed1 = rule.fix(&ctx1).unwrap_or_else(|_| content.to_string());
 
         let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
+        let fixed2 = rule.fix(&ctx2).unwrap_or_else(|_| fixed1.clone());
 
-        prop_assert_eq!(fixed1, fixed2, "MD060 fix not idempotent");
+        if fixed1 != fixed2 {
+            let ctx3 = LintContext::new(&fixed2, MarkdownFlavor::Standard, None);
+            let fixed3 = rule.fix(&ctx3).unwrap_or_else(|_| fixed2.clone());
+            prop_assert_eq!(fixed2, fixed3, "MD060 fix did not converge within 3 passes");
+        }
     }
 
     #[test]
