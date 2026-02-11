@@ -1,5 +1,5 @@
 use rumdl_lib::config::{Config, GlobalConfig};
-use rumdl_lib::rules::{all_rules, filter_rules};
+use rumdl_lib::rules::{all_rules, filter_rules, opt_in_rules};
 use std::collections::HashSet;
 
 #[test]
@@ -28,15 +28,24 @@ fn test_filter_rules_with_empty_config() {
     let global_config = GlobalConfig::default();
 
     let filtered = filter_rules(&all, &global_config);
+    let num_opt_in = opt_in_rules().len();
 
-    // With default config, all rules should be enabled
-    assert_eq!(filtered.len(), all.len());
+    // With default config, all non-opt-in rules should be enabled
+    assert_eq!(filtered.len(), all.len() - num_opt_in);
+
+    // Opt-in rules should NOT be in the default set
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    for opt_in_name in opt_in_rules() {
+        assert!(!filtered_names.contains(opt_in_name),
+            "Opt-in rule {opt_in_name} should not be in default filter_rules output");
+    }
 }
 
 #[test]
 fn test_filter_rules_disable_specific_rules() {
     let config = Config::default();
     let all = all_rules(&config);
+    let num_opt_in = opt_in_rules().len();
 
     let global_config = GlobalConfig {
         disable: vec!["MD001".to_string(), "MD004".to_string(), "MD003".to_string()],
@@ -45,8 +54,8 @@ fn test_filter_rules_disable_specific_rules() {
 
     let filtered = filter_rules(&all, &global_config);
 
-    // Should have 3 fewer rules
-    assert_eq!(filtered.len(), all.len() - 3);
+    // Should have non-opt-in rules minus 3 disabled ones
+    assert_eq!(filtered.len(), all.len() - num_opt_in - 3);
 
     // Verify disabled rules are not present
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
@@ -162,8 +171,9 @@ fn test_filter_rules_complex_scenario() {
 
     let filtered = filter_rules(&all, &global_config);
 
-    // Should have all rules minus the 4 disabled ones
-    assert_eq!(filtered.len(), all.len() - 4);
+    // Should have non-opt-in rules minus the 4 disabled ones
+    let num_opt_in = opt_in_rules().len();
+    assert_eq!(filtered.len(), all.len() - num_opt_in - 4);
 
     let rule_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
 
@@ -200,6 +210,7 @@ fn test_all_rules_consistency() {
 fn test_filter_rules_preserves_rule_order() {
     let config = Config::default();
     let all = all_rules(&config);
+    let opt_in_set = opt_in_rules();
 
     // Disable some rules in the middle
     let global_config = GlobalConfig {
@@ -210,10 +221,11 @@ fn test_filter_rules_preserves_rule_order() {
     let filtered = filter_rules(&all, &global_config);
 
     // Check that remaining rules maintain their relative order
+    // (excluding opt-in rules which are filtered out by default)
     let all_names: Vec<String> = all
         .iter()
         .map(|r| r.name().to_string())
-        .filter(|name| !global_config.disable.contains(name))
+        .filter(|name| !global_config.disable.contains(name) && !opt_in_set.contains(name.as_str()))
         .collect();
 
     let filtered_names: Vec<String> = filtered.iter().map(|r| r.name().to_string()).collect();
@@ -301,13 +313,14 @@ fn test_filter_rules_enable_all_overrides_disable_all() {
 }
 
 #[test]
-fn test_filter_rules_empty_enable_returns_all() {
+fn test_filter_rules_empty_enable_returns_non_opt_in() {
     // With the default GlobalConfig (enable not explicitly set),
-    // all rules should be returned
+    // all non-opt-in rules should be returned
     let config = Config::default();
     let all = all_rules(&config);
+    let num_opt_in = opt_in_rules().len();
     let global_config = GlobalConfig::default();
 
     let filtered = filter_rules(&all, &global_config);
-    assert_eq!(filtered.len(), all.len());
+    assert_eq!(filtered.len(), all.len() - num_opt_in);
 }

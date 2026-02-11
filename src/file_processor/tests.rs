@@ -213,7 +213,7 @@ fn test_strip_base_prefix_nonexistent_base() {
 #[test]
 fn test_format_embedded_markdown_blocks_atx_heading() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Example\n\n```markdown\n#Heading without space\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -228,7 +228,7 @@ fn test_format_embedded_markdown_blocks_atx_heading() {
 #[test]
 fn test_format_embedded_markdown_blocks_md_language() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Example\n\n```md\n#Test\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -240,7 +240,7 @@ fn test_format_embedded_markdown_blocks_md_language() {
 #[test]
 fn test_format_embedded_markdown_blocks_case_insensitive() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```MARKDOWN\n#Upper case\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -252,7 +252,7 @@ fn test_format_embedded_markdown_blocks_case_insensitive() {
 #[test]
 fn test_format_embedded_markdown_blocks_tilde_fence() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n~~~markdown\n#Tilde fence\n~~~\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -264,7 +264,7 @@ fn test_format_embedded_markdown_blocks_tilde_fence() {
 #[test]
 fn test_format_embedded_markdown_blocks_multiple_blocks() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```markdown\n#First\n```\n\nText\n\n```md\n#Second\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -277,7 +277,7 @@ fn test_format_embedded_markdown_blocks_multiple_blocks() {
 #[test]
 fn test_format_embedded_markdown_blocks_nested() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Outer block contains inner block (using longer fence)
     let mut content = "# Doc\n\n````markdown\n#Outer\n\n```markdown\n#Inner\n```\n````\n".to_string();
@@ -290,7 +290,7 @@ fn test_format_embedded_markdown_blocks_nested() {
 #[test]
 fn test_format_embedded_markdown_blocks_preserves_indentation() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with relative indentation that should be preserved
     let mut content = "# Doc\n\n```markdown\n#Heading\n\n    code block\n```\n".to_string();
@@ -307,7 +307,7 @@ fn test_format_embedded_markdown_blocks_preserves_indentation() {
 #[test]
 fn test_format_embedded_markdown_blocks_empty_block() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```markdown\n\n```\n".to_string();
     let original = content.clone();
@@ -320,7 +320,7 @@ fn test_format_embedded_markdown_blocks_empty_block() {
 #[test]
 fn test_format_embedded_markdown_blocks_whitespace_only() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```markdown\n   \n\n```\n".to_string();
     let original = content.clone();
@@ -333,7 +333,7 @@ fn test_format_embedded_markdown_blocks_whitespace_only() {
 #[test]
 fn test_format_embedded_markdown_blocks_skips_other_languages() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```rust\n#[derive(Debug)]\nfn main() {}\n```\n".to_string();
     let original = content.clone();
@@ -346,7 +346,7 @@ fn test_format_embedded_markdown_blocks_skips_other_languages() {
 #[test]
 fn test_format_embedded_markdown_blocks_multiple_blank_lines() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // MD012 should fix multiple consecutive blank lines
     let mut content = "# Doc\n\n```markdown\n# Heading\n\n\n\nParagraph\n```\n".to_string();
@@ -368,7 +368,7 @@ fn test_format_embedded_markdown_blocks_multiple_blank_lines() {
 #[test]
 fn test_format_embedded_markdown_blocks_depth_limit() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Create deeply nested blocks (beyond MAX_EMBEDDED_DEPTH)
     let mut content = "# Doc\n\n".to_string();
@@ -447,7 +447,7 @@ fn test_restore_indent_preserves_trailing_newline() {
 fn test_format_embedded_markdown_no_extra_blank_line() {
     // Regression test: MD047 should NOT add extra blank line before closing fence
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content that doesn't end with newline inside the block
     let mut content = "# Doc\n\n```markdown\n> [!INFO]\n> Content\n```\n".to_string();
@@ -471,7 +471,7 @@ fn test_format_embedded_markdown_no_extra_blank_line() {
 fn test_format_embedded_markdown_with_fix() {
     // Test that fixes are applied without corrupting structure
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```markdown\n#Bad heading\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -488,7 +488,7 @@ fn test_format_embedded_markdown_with_fix() {
 fn test_format_embedded_markdown_unicode_content() {
     // Test with multi-byte UTF-8 characters to verify byte offset handling
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Japanese, Chinese, and emoji characters (multi-byte UTF-8)
     let mut content = "# ドキュメント\n\n```markdown\n#見出し\n\n中文内容 🎉\n```\n".to_string();
@@ -521,7 +521,7 @@ fn test_format_embedded_markdown_unicode_content() {
 fn test_format_embedded_markdown_in_list_item() {
     // Test markdown code block indented inside a list item
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "- List item:\n\n  ```markdown\n  #Heading\n  ```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -537,7 +537,7 @@ fn test_format_embedded_markdown_info_string_with_attributes() {
     // Test that info string attributes are handled correctly
     // e.g., ```markdown title="Example"
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     let mut content = "# Doc\n\n```markdown title=\"Example\" highlight={1}\n#Heading\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
@@ -555,7 +555,7 @@ fn test_format_embedded_markdown_info_string_with_attributes() {
 fn test_format_embedded_markdown_depth_verification() {
     // Verify that each level up to MAX_EMBEDDED_DEPTH is actually formatted
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Create content with 2 sequential blocks at different "depths"
     // Note: True nesting requires increasing fence length, which changes parsing.
@@ -574,7 +574,7 @@ fn test_format_embedded_markdown_depth_verification() {
 fn test_format_embedded_markdown_true_nesting() {
     // Test true recursive nesting with tilde fences (avoids fence length issues)
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Use tildes for outer, backticks for inner - this is valid CommonMark
     let mut content = "# Doc\n\n~~~markdown\n#Outer\n\n```markdown\n#Inner\n```\n~~~\n".to_string();
@@ -597,7 +597,7 @@ fn test_format_embedded_markdown_cli_integration() {
     use tempfile::NamedTempFile;
 
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Create a temp file with embedded markdown
     let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -622,7 +622,7 @@ fn test_format_embedded_markdown_md041_behavior() {
     // MD041 requires first heading to be H1, but embedded docs often show examples
     // with H2 headings deliberately
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Embedded content starts with H2, not H1
     let mut content = "# Main Doc\n\n```markdown\n## Example H2\n```\n".to_string();
@@ -643,7 +643,7 @@ fn test_format_embedded_markdown_md041_behavior() {
 #[test]
 fn test_check_embedded_markdown_blocks() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with violations inside embedded markdown
     let content = "# Doc\n```markdown\n##  Bad heading\n```\n";
@@ -669,7 +669,7 @@ fn test_check_embedded_markdown_blocks() {
 #[test]
 fn test_check_embedded_markdown_blocks_skips_file_scoped_rules() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content that would trigger MD041 (no H1 first) and MD047 (no trailing newline)
     let content = "# Doc\n```markdown\n## Not H1\nNo trailing newline```\n";
@@ -691,7 +691,7 @@ fn test_check_embedded_markdown_blocks_skips_file_scoped_rules() {
 #[test]
 fn test_check_embedded_markdown_blocks_empty() {
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // No embedded markdown
     let content = "# Doc\n\nSome text\n";
@@ -706,7 +706,7 @@ fn test_format_embedded_markdown_respects_filtered_rules() {
     // Test that embedded markdown formatting respects per-file-ignores
     // This simulates what happens when per-file-ignores excludes certain rules
     let config = rumdl_config::Config::default();
-    let all_rules = rumdl_lib::rules::all_rules(&config);
+    let all_rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with MD022 violation (missing blank line above heading)
     let original = "# Rule Documentation\n\n```markdown\n# Heading\n## No blank line above\n```\n";
@@ -749,7 +749,7 @@ fn test_format_embedded_markdown_respects_filtered_rules() {
 fn test_format_embedded_markdown_respects_inline_config() {
     // Test that embedded markdown formatting respects inline disable directives
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with MD022 violation inside a markdown block, wrapped in inline disable
     let original = r#"# Doc
@@ -782,7 +782,7 @@ fn test_check_embedded_markdown_respects_inline_config() {
     // Test that embedded markdown checking respects inline disable directives
     // This ensures check and fmt behave consistently
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with MD022 violation inside a markdown block, wrapped in inline disable
     let content = r#"# Doc
@@ -815,7 +815,7 @@ fn test_check_embedded_markdown_respects_inline_config() {
 fn test_check_and_format_consistency() {
     // Verify that check and format behave identically for inline config
     let config = rumdl_config::Config::default();
-    let rules = rumdl_lib::rules::all_rules(&config);
+    let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
     // Content with violations both inside and outside disabled region
     let content = r#"# Doc

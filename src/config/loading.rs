@@ -34,6 +34,22 @@ impl SourcedConfig<ConfigLoaded> {
             fragment.global.disable.overrides.first().and_then(|o| o.line),
         );
 
+        // Extend-enable uses union semantics (additive across config levels)
+        self.global.extend_enable.merge_union(
+            fragment.global.extend_enable.value,
+            fragment.global.extend_enable.source,
+            fragment.global.extend_enable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.extend_enable.overrides.first().and_then(|o| o.line),
+        );
+
+        // Extend-disable uses union semantics (additive across config levels)
+        self.global.extend_disable.merge_union(
+            fragment.global.extend_disable.value,
+            fragment.global.extend_disable.source,
+            fragment.global.extend_disable.overrides.first().and_then(|o| o.file.clone()),
+            fragment.global.extend_disable.overrides.first().and_then(|o| o.line),
+        );
+
         // Conflict resolution: Enable overrides disable
         // Remove any rules from disable that appear in enable
         self.global
@@ -808,8 +824,32 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             force_exclude: sourced.global.force_exclude.value,
             cache_dir: sourced.global.cache_dir.as_ref().map(|v| v.value.clone()),
             cache: sourced.global.cache.value,
+            extend_enable: sourced.global.extend_enable.value,
+            extend_disable: sourced.global.extend_disable.value,
             enable_is_explicit,
         };
+
+        // Backward compatibility bridge: per-rule `enabled = true` → extend_enable
+        // For opt-in rules (MD060, MD063, MD072, MD073), if the per-rule config
+        // has `enabled = true`, add the rule to extend_enable and emit a warning.
+        let opt_in_with_enabled = ["MD060", "MD063", "MD072", "MD073"];
+        let mut global = global;
+        for rule_name in opt_in_with_enabled {
+            if let Some(rule_cfg) = rules.get(rule_name) {
+                if let Some(toml::Value::Boolean(true)) = rule_cfg.values.get("enabled") {
+                    if !global.extend_enable.contains(&rule_name.to_string()) {
+                        log::warn!(
+                            "[DEPRECATED] [{}] enabled = true is deprecated. \
+                             Use `extend-enable = [\"{}\"]` in [global] instead.",
+                            rule_name,
+                            rule_name
+                        );
+                        global.extend_enable.push(rule_name.to_string());
+                    }
+                }
+            }
+        }
+
         Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,

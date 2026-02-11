@@ -851,14 +851,10 @@ impl Rule for MD060TableFormat {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        !self.config.enabled || !ctx.likely_has_tables()
+        !ctx.likely_has_tables()
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        if !self.config.enabled {
-            return Ok(Vec::new());
-        }
-
         let line_index = &ctx.line_index;
         let mut warnings = Vec::new();
 
@@ -936,10 +932,6 @@ impl Rule for MD060TableFormat {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        if !self.config.enabled {
-            return Ok(ctx.content.to_string());
-        }
-
         let content = ctx.content;
         let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
@@ -1033,19 +1025,6 @@ mod tests {
             tables: true, // Default: tables are checked
             ..Default::default()
         }
-    }
-
-    #[test]
-    fn test_md060_disabled_by_default() {
-        let rule = MD060TableFormat::default();
-        let content = "| Name | Age |\n|---|---|\n| Alice | 30 |";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-
-        let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 0);
-
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, content);
     }
 
     #[test]

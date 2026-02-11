@@ -226,10 +226,6 @@ impl Rule for MD072FrontmatterKeySort {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        if !self.config.enabled {
-            return Ok(Vec::new());
-        }
-
         let content = ctx.content;
         let mut warnings = Vec::new();
 
@@ -383,10 +379,6 @@ impl Rule for MD072FrontmatterKeySort {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        if !self.config.enabled {
-            return Ok(ctx.content.to_string());
-        }
-
         let content = ctx.content;
 
         let fm_type = FrontMatterUtils::detect_front_matter_type(content);
@@ -633,17 +625,6 @@ mod tests {
     }
 
     // ==================== Config Tests ====================
-
-    #[test]
-    fn test_disabled_by_default() {
-        let rule = MD072FrontmatterKeySort::new();
-        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-
-        // Disabled by default, should return no warnings
-        assert!(result.is_empty());
-    }
 
     #[test]
     fn test_enabled_via_config() {

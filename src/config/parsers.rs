@@ -57,6 +57,32 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
                     .push_override(normalized_values, source, file.clone(), None);
             }
 
+            if let Some(extend_enable) = table.get("extend-enable").or_else(|| table.get("extend_enable"))
+                && let Ok(values) = Vec::<String>::deserialize(extend_enable.clone())
+            {
+                let normalized_values: Vec<String> = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
+                fragment
+                    .global
+                    .extend_enable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
+            if let Some(extend_disable) = table.get("extend-disable").or_else(|| table.get("extend_disable"))
+                && let Ok(values) = Vec::<String>::deserialize(extend_disable.clone())
+            {
+                let normalized_values: Vec<String> = values
+                    .into_iter()
+                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                    .collect();
+                fragment
+                    .global
+                    .extend_disable
+                    .push_override(normalized_values, source, file.clone(), None);
+            }
+
             if let Some(include) = table.get("include")
                 && let Ok(values) = Vec::<String>::deserialize(include.clone())
             {
@@ -273,6 +299,10 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
                 "cache_dir",
                 "cache-dir",
                 "cache",
+                "extend-enable",
+                "extend_enable",
+                "extend-disable",
+                "extend_disable",
             ]
             .contains(&norm_rule_key.as_str());
 
@@ -431,6 +461,8 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
     // Only return Some(fragment) if any config was found
     let has_any = !fragment.global.enable.value.is_empty()
         || !fragment.global.disable.value.is_empty()
+        || !fragment.global.extend_enable.value.is_empty()
+        || !fragment.global.extend_disable.value.is_empty()
         || !fragment.global.include.value.is_empty()
         || !fragment.global.exclude.value.is_empty()
         || !fragment.global.fixable.value.is_empty()
@@ -468,17 +500,17 @@ pub(super) fn parse_rumdl_toml(
         for (key, value_item) in global_table.iter() {
             let norm_key = normalize_key(key);
             match norm_key.as_str() {
-                "enable" | "disable" | "include" | "exclude" => {
+                "enable" | "disable" | "include" | "exclude" | "extend-enable" | "extend-disable" => {
                     if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                        // Corrected: Iterate directly over the Formatted<Array>
                         let values: Vec<String> = formatted_array
                                 .iter()
-                                .filter_map(|item| item.as_str()) // Extract strings
+                                .filter_map(|item| item.as_str())
                                 .map(|s| s.to_string())
                                 .collect();
 
-                        // Resolve rule name aliases for enable/disable (e.g., "ul-style" -> "MD004")
-                        let final_values = if norm_key == "enable" || norm_key == "disable" {
+                        // Resolve rule name aliases for enable/disable/extend variants
+                        let is_rule_list = matches!(norm_key.as_str(), "enable" | "disable" | "extend-enable" | "extend-disable");
+                        let final_values = if is_rule_list {
                             values
                                 .into_iter()
                                 .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
@@ -512,7 +544,19 @@ pub(super) fn parse_rumdl_toml(
                                     .exclude
                                     .push_override(final_values, source, file.clone(), None)
                             }
-                            _ => unreachable!("Outer match guarantees only enable/disable/include/exclude"),
+                            "extend-enable" => {
+                                fragment
+                                    .global
+                                    .extend_enable
+                                    .push_override(final_values, source, file.clone(), None)
+                            }
+                            "extend-disable" => {
+                                fragment
+                                    .global
+                                    .extend_disable
+                                    .push_override(final_values, source, file.clone(), None)
+                            }
+                            _ => unreachable!("Outer match guarantees only these keys"),
                         }
                     } else {
                         log::warn!(

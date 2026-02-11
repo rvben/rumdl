@@ -27,13 +27,13 @@ fn create_mkdocs_config() -> Config {
 
 fn lint_mkdocs(content: &str) -> Vec<rumdl_lib::rule::LintWarning> {
     let config = create_mkdocs_config();
-    let rules = all_rules(&config);
+    let rules = filter_rules(&all_rules(&config), &config.global);
     lint(content, &rules, false, MarkdownFlavor::MkDocs, None).unwrap()
 }
 
 fn lint_standard(content: &str) -> Vec<rumdl_lib::rule::LintWarning> {
     let config = Config::default();
-    let rules = all_rules(&config);
+    let rules = filter_rules(&all_rules(&config), &config.global);
     lint(content, &rules, false, MarkdownFlavor::Standard, None).unwrap()
 }
 
@@ -3927,7 +3927,7 @@ mod per_extension_regression {
 
         // Step 2: Fix should not modify valid content (round-trip safety)
         let config = create_mkdocs_config();
-        let rules = all_rules(&config);
+        let rules = filter_rules(&all_rules(&config), &config.global);
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         // MD054 intentionally returns Err (doesn't support auto-fix)
         let unfixable_rules: &[&str] = &["MD054"];
@@ -4258,7 +4258,7 @@ $E = mc^2$\n\n\
 [^1]: A footnote.\n";
 
         let config = create_mkdocs_config();
-        let rules = all_rules(&config);
+        let rules = filter_rules(&all_rules(&config), &config.global);
         let warnings = lint(content, &rules, false, MarkdownFlavor::MkDocs, None).unwrap();
 
         // Verify the test document triggers the expected rules

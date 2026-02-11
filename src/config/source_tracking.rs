@@ -160,6 +160,8 @@ pub struct SourcedGlobalConfig {
     pub force_exclude: SourcedValue<bool>,
     pub cache_dir: Option<SourcedValue<String>>,
     pub cache: SourcedValue<bool>,
+    pub extend_enable: SourcedValue<Vec<String>>,
+    pub extend_disable: SourcedValue<Vec<String>>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -178,6 +180,8 @@ impl Default for SourcedGlobalConfig {
             force_exclude: SourcedValue::new(false, ConfigSource::Default),
             cache_dir: None,
             cache: SourcedValue::new(true, ConfigSource::Default),
+            extend_enable: SourcedValue::new(Vec::new(), ConfigSource::Default),
+            extend_disable: SourcedValue::new(Vec::new(), ConfigSource::Default),
         }
     }
 }

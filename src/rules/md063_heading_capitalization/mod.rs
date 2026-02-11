@@ -720,15 +720,10 @@ impl Rule for MD063HeadingCapitalization {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if rule is disabled or no headings
-        !self.config.enabled || !ctx.likely_has_headings() || !ctx.lines.iter().any(|line| line.heading.is_some())
+        !ctx.likely_has_headings() || !ctx.lines.iter().any(|line| line.heading.is_some())
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        if !self.config.enabled {
-            return Ok(Vec::new());
-        }
-
         let content = ctx.content;
 
         if content.is_empty() {
@@ -786,10 +781,6 @@ impl Rule for MD063HeadingCapitalization {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        if !self.config.enabled {
-            return Ok(ctx.content.to_string());
-        }
-
         let content = ctx.content;
 
         if content.is_empty() {
@@ -1055,21 +1046,6 @@ mod tests {
         assert_eq!(result.len(), 1);
         // Custom ID should be preserved
         assert!(result[0].message.contains("{#intro}"));
-    }
-
-    #[test]
-    fn test_md063_disabled_by_default() {
-        let rule = MD063HeadingCapitalization::new();
-        let content = "# hello world\n";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-
-        // Should return no warnings when disabled
-        let warnings = rule.check(&ctx).unwrap();
-        assert_eq!(warnings.len(), 0);
-
-        // Should return content unchanged when disabled
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, content);
     }
 
     // Acronym preservation tests

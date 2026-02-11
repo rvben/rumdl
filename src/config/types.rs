@@ -398,6 +398,14 @@ pub struct GlobalConfig {
     #[serde(default = "default_true")]
     pub cache: bool,
 
+    /// Additional rules to enable on top of the base set (additive)
+    #[serde(default, alias = "extend_enable")]
+    pub extend_enable: Vec<String>,
+
+    /// Additional rules to disable on top of the base set (additive)
+    #[serde(default, alias = "extend_disable")]
+    pub extend_disable: Vec<String>,
+
     /// Whether the enable list was explicitly set (even if empty).
     /// Used to distinguish "no enable list configured" from "enable list is empty"
     /// (e.g., markdownlint `default: false` with no rules enabled).
@@ -431,6 +439,8 @@ impl Default for GlobalConfig {
             force_exclude: false,
             cache_dir: None,
             cache: true,
+            extend_enable: Vec::new(),
+            extend_disable: Vec::new(),
             enable_is_explicit: false,
         }
     }

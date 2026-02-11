@@ -1,9 +1,11 @@
 use rumdl_lib::config::Config; // Ensure Config is imported
 use rumdl_lib::config::RuleRegistry;
+use rumdl_lib::config::SourcedConfig;
 use rumdl_lib::rules::*;
 use serial_test::serial;
+use std::collections::HashSet;
 use std::fs;
-use tempfile::tempdir; // For temporary directory // Add back env import // Ensure SourcedConfig is imported
+use tempfile::tempdir; // For temporary directory
 
 #[test]
 fn test_load_config_file() {
@@ -2630,4 +2632,404 @@ fn test_per_file_ignores_brace_expansion_pyproject() {
             .is_empty(),
         "Comma pattern in pyproject.toml should NOT match README.md"
     );
+}
+
+// =============================================================================
+// Opt-in rules and extend-enable/extend-disable tests
+// =============================================================================
+
+#[test]
+fn test_extend_enable_config_rumdl_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    let config_content = r#"
+[global]
+extend-enable = ["MD060", "MD063"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert_eq!(config.global.extend_enable.len(), 2);
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()));
+    assert!(config.global.extend_enable.contains(&"MD063".to_string()));
+}
+
+#[test]
+fn test_extend_disable_config_rumdl_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    let config_content = r#"
+[global]
+extend-disable = ["MD013", "MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert_eq!(config.global.extend_disable.len(), 2);
+    assert!(config.global.extend_disable.contains(&"MD013".to_string()));
+    assert!(config.global.extend_disable.contains(&"MD033".to_string()));
+}
+
+#[test]
+fn test_extend_enable_config_pyproject_toml() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("pyproject.toml");
+
+    let config_content = r#"
+[tool.rumdl]
+extend-enable = ["MD060"]
+extend-disable = ["MD013"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()));
+    assert!(config.global.extend_disable.contains(&"MD013".to_string()));
+}
+
+#[test]
+fn test_extend_enable_with_aliases() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Use rule aliases instead of MD numbers
+    let config_content = r#"
+[global]
+extend-enable = ["table-format", "heading-capitalization"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    // Aliases should resolve to canonical rule names
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()),
+        "table-format should resolve to MD060, got: {:?}", config.global.extend_enable);
+    assert!(config.global.extend_enable.contains(&"MD063".to_string()),
+        "heading-capitalization should resolve to MD063, got: {:?}", config.global.extend_enable);
+}
+
+#[test]
+fn test_extend_enable_snake_case_key() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Use snake_case key variant
+    let config_content = r#"
+[global]
+extend_enable = ["MD060"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()));
+}
+
+#[test]
+fn test_opt_in_rules_excluded_by_default() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    let opt_in_set = opt_in_rules();
+
+    // Opt-in rules should NOT be in the default set
+    for name in &opt_in_set {
+        assert!(!filtered_names.contains(*name),
+            "Opt-in rule {name} should not be in default filtered rules");
+    }
+
+    // Non-opt-in rules should be present
+    assert!(filtered_names.contains("MD001"));
+    assert!(filtered_names.contains("MD013"));
+    assert!(filtered_names.contains("MD058"));
+}
+
+#[test]
+fn test_enable_all_includes_opt_in() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.enable = vec!["ALL".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    // enable: ["ALL"] should include all rules, including opt-in
+    assert_eq!(filtered.len(), all.len());
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(filtered_names.contains("MD060"));
+    assert!(filtered_names.contains("MD063"));
+    assert!(filtered_names.contains("MD072"));
+}
+
+#[test]
+fn test_extend_enable_adds_opt_in_to_defaults() {
+    let config = Config::default();
+    let all = all_rules(&config);
+    let num_opt_in = opt_in_rules().len();
+
+    let mut global = config.global.clone();
+    global.extend_enable = vec!["MD060".to_string(), "MD063".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    // Should have default rules + 2 opt-in rules
+    assert_eq!(filtered.len(), all.len() - num_opt_in + 2);
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(filtered_names.contains("MD060"));
+    assert!(filtered_names.contains("MD063"));
+    // Other opt-in rules still excluded
+    assert!(!filtered_names.contains("MD072"));
+}
+
+#[test]
+fn test_disable_overrides_extend_enable() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.extend_enable = vec!["MD060".to_string()];
+    global.disable = vec!["MD060".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    // disable should win over extend-enable
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!filtered_names.contains("MD060"));
+}
+
+#[test]
+fn test_extend_disable_removes_from_defaults() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.extend_disable = vec!["MD001".to_string(), "MD013".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!filtered_names.contains("MD001"));
+    assert!(!filtered_names.contains("MD013"));
+}
+
+#[test]
+fn test_enable_empty_means_no_rules() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.enable_is_explicit = true;
+    // enable is empty but explicit → no rules
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), 0);
+}
+
+#[test]
+fn test_enable_empty_plus_extend_enable() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.enable_is_explicit = true;
+    // enable = [] + extend-enable = ["MD001"] → only MD001
+    global.extend_enable = vec!["MD001".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].name(), "MD001");
+}
+
+#[test]
+fn test_enable_specific_plus_extend_enable() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.enable = vec!["MD001".to_string()];
+    global.extend_enable = vec!["MD013".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    assert_eq!(filtered.len(), 2);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(names.contains("MD001"));
+    assert!(names.contains("MD013"));
+}
+
+#[test]
+fn test_enable_all_plus_disable_specific() {
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.enable = vec!["ALL".to_string()];
+    global.disable = vec!["MD060".to_string(), "MD013".to_string()];
+    let filtered = filter_rules(&all, &global);
+
+    assert_eq!(filtered.len(), all.len() - 2);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!names.contains("MD060"));
+    assert!(!names.contains("MD013"));
+}
+
+#[test]
+fn test_backward_compat_enabled_true_bridge() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Legacy config: [MD060] enabled = true
+    let config_content = r#"
+[MD060]
+enabled = true
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    // The bridge should add MD060 to extend_enable
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()),
+        "Backward compat bridge should add MD060 to extend_enable, got: {:?}",
+        config.global.extend_enable);
+}
+
+#[test]
+fn test_backward_compat_enabled_true_with_disable() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Legacy config: [MD060] enabled = true, but also disable = ["MD060"]
+    let config_content = r#"
+[global]
+disable = ["MD060"]
+
+[MD060]
+enabled = true
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    // The bridge adds to extend_enable, but disable should still win
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!names.contains("MD060"),
+        "disable should win over backward-compat bridge");
+}
+
+#[test]
+fn test_backward_compat_enabled_false_is_noop() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // Legacy config: [MD060] enabled = false
+    let config_content = r#"
+[MD060]
+enabled = false
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(
+        Some(config_path.to_str().unwrap()), None, true
+    ).expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    // enabled = false should NOT add to extend_enable
+    assert!(!config.global.extend_enable.contains(&"MD060".to_string()),
+        "enabled=false should not add to extend_enable");
+}
+
+#[test]
+fn test_extend_enable_all_keyword() {
+    // extend-enable = ["ALL"] should enable all rules including opt-in
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let mut global = config.global.clone();
+    global.extend_enable = vec!["ALL".to_string()];
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), total,
+        "extend-enable = [\"ALL\"] should enable all {} rules", total);
+}
+
+#[test]
+fn test_extend_enable_all_with_specific_enable() {
+    // enable = ["MD001"] + extend-enable = ["ALL"] → all rules
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let mut global = config.global.clone();
+    global.enable = vec!["MD001".to_string()];
+    global.extend_enable = vec!["ALL".to_string()];
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), total,
+        "enable + extend-enable=[\"ALL\"] should enable all rules");
+}
+
+#[test]
+fn test_extend_disable_all_keyword() {
+    // extend-disable = ["all"] should disable all rules
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.extend_disable = vec!["all".to_string()];
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), 0,
+        "extend-disable = [\"all\"] should disable all rules");
+}
+
+#[test]
+fn test_extend_disable_all_case_insensitive() {
+    // extend-disable = ["ALL"] (uppercase) should also work
+    let config = Config::default();
+    let all = all_rules(&config);
+
+    let mut global = config.global.clone();
+    global.extend_disable = vec!["ALL".to_string()];
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), 0,
+        "extend-disable = [\"ALL\"] should disable all rules (case-insensitive)");
+}
+
+#[test]
+fn test_extend_enable_all_with_extend_disable_specific() {
+    // extend-enable = ["ALL"] + extend-disable = ["MD013"] → all minus MD013
+    let config = Config::default();
+    let all = all_rules(&config);
+    let total = all.len();
+
+    let mut global = config.global.clone();
+    global.extend_enable = vec!["ALL".to_string()];
+    global.extend_disable = vec!["MD013".to_string()];
+    let filtered = filter_rules(&all, &global);
+    assert_eq!(filtered.len(), total - 1);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!names.contains("MD013"));
 }

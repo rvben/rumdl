@@ -475,11 +475,6 @@ impl Rule for MD073TocValidation {
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
-        // Skip if rule is disabled (opt-in rule)
-        if !self.enabled {
-            return true;
-        }
-
         // Quick check: skip if no TOC markers
         let has_toc_marker = ctx.content.contains("<!-- toc") || ctx.content.contains("<!--toc");
         !has_toc_marker

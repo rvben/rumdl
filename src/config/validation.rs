@@ -111,6 +111,46 @@ pub(super) fn validate_config_sourced_internal<S>(
         }
     }
 
+    for rule_name in &sourced.global.extend_enable.value {
+        if !is_valid_rule_name(rule_name) {
+            let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
+                let formatted = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                format!("Unknown rule in global.extend-enable: {rule_name} (did you mean: {formatted}?)")
+            } else {
+                format!("Unknown rule in global.extend-enable: {rule_name}")
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: Some(rule_name.clone()),
+                key: None,
+            });
+        }
+    }
+
+    for rule_name in &sourced.global.extend_disable.value {
+        if !is_valid_rule_name(rule_name) {
+            let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
+                let formatted = if suggestion.starts_with("MD") {
+                    suggestion
+                } else {
+                    suggestion.to_lowercase()
+                };
+                format!("Unknown rule in global.extend-disable: {rule_name} (did you mean: {formatted}?)")
+            } else {
+                format!("Unknown rule in global.extend-disable: {rule_name}")
+            };
+            warnings.push(ConfigValidationWarning {
+                message,
+                rule: Some(rule_name.clone()),
+                key: None,
+            });
+        }
+    }
+
     warnings
 }
 
@@ -187,6 +227,8 @@ fn validate_config_sourced_impl(
     let known_global_keys = vec![
         "enable".to_string(),
         "disable".to_string(),
+        "extend-enable".to_string(),
+        "extend-disable".to_string(),
         "include".to_string(),
         "exclude".to_string(),
         "respect-gitignore".to_string(),
