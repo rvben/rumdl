@@ -312,6 +312,9 @@ mod tests {
         // Abbreviations preceded by emphasis markers
         assert!(text_ends_with_abbreviation("*e.g.", &abbrevs));
         assert!(text_ends_with_abbreviation("**e.g.", &abbrevs));
+        // Nested punctuation (quote + paren)
+        assert!(text_ends_with_abbreviation("(\"e.g.", &abbrevs));
+        assert!(text_ends_with_abbreviation("([Dr.", &abbrevs));
         // Non-abbreviations with leading punctuation should still not match
         assert!(!text_ends_with_abbreviation("(paradigms.", &abbrevs));
         assert!(!text_ends_with_abbreviation("[Doctor.", &abbrevs));
@@ -460,6 +463,17 @@ mod tests {
         // i.e. and e.g. should not be sentence endings
         assert!(!is_after_sentence_ending("i.e.  example", 4));
         assert!(!is_after_sentence_ending("e.g.  example", 4));
+    }
+
+    #[test]
+    fn test_abbreviations_after_opening_punctuation() {
+        // Abbreviations preceded by parentheses, brackets, quotes
+        assert!(!is_after_sentence_ending("(e.g.  Wasm)", 5));
+        assert!(!is_after_sentence_ending("(i.e.  PyO3)", 5));
+        assert!(!is_after_sentence_ending("[e.g.  Chapter]", 5));
+        assert!(!is_after_sentence_ending("(Dr.  Smith)", 4));
+        // Nested punctuation: quote + paren
+        assert!(!is_after_sentence_ending("(\"e.g.  something\")", 6));
     }
 
     #[test]
