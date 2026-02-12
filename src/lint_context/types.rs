@@ -69,6 +69,10 @@ pub struct LineInfo {
     pub in_obsidian_comment: bool,
     /// Whether this line is inside a PyMdown Blocks region (/// ... ///, MkDocs flavor only)
     pub in_pymdown_block: bool,
+    /// Whether this line is inside a kramdown extension block ({::comment}...{:/comment}, {::nomarkdown}...{:/nomarkdown})
+    pub in_kramdown_extension_block: bool,
+    /// Whether this line is a kramdown block IAL ({:.class #id}) or ALD ({:ref: .class})
+    pub is_kramdown_block_ial: bool,
 }
 
 impl LineInfo {

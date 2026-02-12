@@ -38,7 +38,12 @@ impl SourcedConfig<ConfigLoaded> {
         self.global.extend_enable.merge_union(
             fragment.global.extend_enable.value,
             fragment.global.extend_enable.source,
-            fragment.global.extend_enable.overrides.first().and_then(|o| o.file.clone()),
+            fragment
+                .global
+                .extend_enable
+                .overrides
+                .first()
+                .and_then(|o| o.file.clone()),
             fragment.global.extend_enable.overrides.first().and_then(|o| o.line),
         );
 
@@ -46,7 +51,12 @@ impl SourcedConfig<ConfigLoaded> {
         self.global.extend_disable.merge_union(
             fragment.global.extend_disable.value,
             fragment.global.extend_disable.source,
-            fragment.global.extend_disable.overrides.first().and_then(|o| o.file.clone()),
+            fragment
+                .global
+                .extend_disable
+                .overrides
+                .first()
+                .and_then(|o| o.file.clone()),
             fragment.global.extend_disable.overrides.first().and_then(|o| o.line),
         );
 
@@ -835,18 +845,15 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         let opt_in_with_enabled = ["MD060", "MD063", "MD072", "MD073"];
         let mut global = global;
         for rule_name in opt_in_with_enabled {
-            if let Some(rule_cfg) = rules.get(rule_name) {
-                if let Some(toml::Value::Boolean(true)) = rule_cfg.values.get("enabled") {
-                    if !global.extend_enable.contains(&rule_name.to_string()) {
-                        log::warn!(
-                            "[DEPRECATED] [{}] enabled = true is deprecated. \
-                             Use `extend-enable = [\"{}\"]` in [global] instead.",
-                            rule_name,
-                            rule_name
-                        );
-                        global.extend_enable.push(rule_name.to_string());
-                    }
-                }
+            if let Some(rule_cfg) = rules.get(rule_name)
+                && let Some(toml::Value::Boolean(true)) = rule_cfg.values.get("enabled")
+                && !global.extend_enable.contains(&rule_name.to_string())
+            {
+                log::warn!(
+                    "[DEPRECATED] [{rule_name}] enabled = true is deprecated. \
+                     Use `extend-enable = [\"{rule_name}\"]` in [global] instead.",
+                );
+                global.extend_enable.push(rule_name.to_string());
             }
         }
 

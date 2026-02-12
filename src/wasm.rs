@@ -156,7 +156,7 @@ pub struct LinterConfig {
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
-    /// Markdown flavor: "standard", "mkdocs", "mdx", or "quarto"
+    /// Markdown flavor: "standard", "mkdocs", "mdx", "quarto", "obsidian", or "kramdown"
     pub flavor: Option<String>,
 
     /// Rule-specific configurations
@@ -259,6 +259,7 @@ impl LinterConfig {
             Some("mdx") => MarkdownFlavor::MDX,
             Some("quarto") => MarkdownFlavor::Quarto,
             Some("obsidian") => MarkdownFlavor::Obsidian,
+            Some("kramdown") | Some("jekyll") => MarkdownFlavor::Kramdown,
             _ => MarkdownFlavor::Standard,
         }
     }
@@ -395,6 +396,7 @@ impl Linter {
                 MarkdownFlavor::MDX => "mdx",
                 MarkdownFlavor::Quarto => "quarto",
                 MarkdownFlavor::Obsidian => "obsidian",
+                MarkdownFlavor::Kramdown => "kramdown",
             },
             "rules": rules_json
         })
@@ -518,6 +520,22 @@ mod tests {
         );
         assert_eq!(
             LinterConfig {
+                flavor: Some("kramdown".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Kramdown
+        );
+        assert_eq!(
+            LinterConfig {
+                flavor: Some("jekyll".to_string()),
+                ..Default::default()
+            }
+            .markdown_flavor(),
+            MarkdownFlavor::Kramdown
+        );
+        assert_eq!(
+            LinterConfig {
                 flavor: None,
                 ..Default::default()
             }
@@ -538,6 +556,7 @@ mod tests {
             MarkdownFlavor::MDX,
             MarkdownFlavor::Quarto,
             MarkdownFlavor::Obsidian,
+            MarkdownFlavor::Kramdown,
         ];
 
         for flavor in flavors {
@@ -548,6 +567,7 @@ mod tests {
                 MarkdownFlavor::MDX => "mdx",
                 MarkdownFlavor::Quarto => "quarto",
                 MarkdownFlavor::Obsidian => "obsidian",
+                MarkdownFlavor::Kramdown => "kramdown",
             };
 
             let config = LinterConfig {

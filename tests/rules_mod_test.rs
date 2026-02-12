@@ -36,8 +36,10 @@ fn test_filter_rules_with_empty_config() {
     // Opt-in rules should NOT be in the default set
     let filtered_names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
     for opt_in_name in opt_in_rules() {
-        assert!(!filtered_names.contains(opt_in_name),
-            "Opt-in rule {opt_in_name} should not be in default filter_rules output");
+        assert!(
+            !filtered_names.contains(opt_in_name),
+            "Opt-in rule {opt_in_name} should not be in default filter_rules output"
+        );
     }
 }
 

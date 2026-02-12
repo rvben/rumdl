@@ -36,14 +36,17 @@ pub enum MarkdownFlavor {
     /// Obsidian flavor with tag syntax support (#tagname as tags, not headings)
     #[serde(rename = "obsidian")]
     Obsidian,
+    /// Kramdown flavor for Jekyll sites with IAL, ALD, and extension block support
+    #[serde(rename = "kramdown")]
+    Kramdown,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto, obsidian. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, quarto, obsidian, kramdown. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown", "obsidian"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll"]
     })
 }
 
@@ -65,6 +68,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::MDX => write!(f, "mdx"),
             MarkdownFlavor::Quarto => write!(f, "quarto"),
             MarkdownFlavor::Obsidian => write!(f, "obsidian"),
+            MarkdownFlavor::Kramdown => write!(f, "kramdown"),
         }
     }
 }
@@ -79,6 +83,7 @@ impl FromStr for MarkdownFlavor {
             "mdx" => Ok(MarkdownFlavor::MDX),
             "quarto" | "qmd" | "rmd" | "rmarkdown" => Ok(MarkdownFlavor::Quarto),
             "obsidian" => Ok(MarkdownFlavor::Obsidian),
+            "kramdown" | "jekyll" => Ok(MarkdownFlavor::Kramdown),
             // GFM and CommonMark are aliases for Standard since the base parser
             // (pulldown-cmark) already supports GFM extensions (tables, task lists,
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
@@ -95,6 +100,7 @@ impl MarkdownFlavor {
             "mdx" => Self::MDX,
             "qmd" => Self::Quarto,
             "rmd" => Self::Quarto,
+            "kramdown" => Self::Kramdown,
             _ => Self::Standard,
         }
     }
@@ -122,6 +128,11 @@ impl MarkdownFlavor {
         matches!(self, Self::MkDocs)
     }
 
+    /// Check if this flavor supports kramdown syntax (IALs, ALDs, extension blocks)
+    pub fn supports_kramdown_syntax(self) -> bool {
+        matches!(self, Self::Kramdown)
+    }
+
     /// Get a human-readable name for this flavor
     pub fn name(self) -> &'static str {
         match self {
@@ -130,6 +141,7 @@ impl MarkdownFlavor {
             Self::MDX => "MDX",
             Self::Quarto => "Quarto",
             Self::Obsidian => "Obsidian",
+            Self::Kramdown => "Kramdown",
         }
     }
 }

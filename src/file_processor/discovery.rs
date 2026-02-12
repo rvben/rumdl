@@ -45,8 +45,18 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
     // Config file settings (resolved to canonical IDs)
     let config_enable_set: HashSet<String> = config.global.enable.iter().map(|s| resolve_rule_name(s)).collect();
     let config_disable_set: HashSet<String> = config.global.disable.iter().map(|s| resolve_rule_name(s)).collect();
-    let config_extend_enable_set: HashSet<String> = config.global.extend_enable.iter().map(|s| resolve_rule_name(s)).collect();
-    let config_extend_disable_set: HashSet<String> = config.global.extend_disable.iter().map(|s| resolve_rule_name(s)).collect();
+    let config_extend_enable_set: HashSet<String> = config
+        .global
+        .extend_enable
+        .iter()
+        .map(|s| resolve_rule_name(s))
+        .collect();
+    let config_extend_disable_set: HashSet<String> = config
+        .global
+        .extend_disable
+        .iter()
+        .map(|s| resolve_rule_name(s))
+        .collect();
 
     let config_enable_all = config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
     let opt_in_set = rumdl_lib::rules::opt_in_rules();
@@ -105,9 +115,7 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         let already_enabled: HashSet<&str> = current_rules.iter().map(|r| r.name()).collect();
         let additional: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config)
             .into_iter()
-            .filter(|rule| {
-                combined_extend_enable.contains(rule.name()) && !already_enabled.contains(rule.name())
-            })
+            .filter(|rule| combined_extend_enable.contains(rule.name()) && !already_enabled.contains(rule.name()))
             .collect();
         current_rules.extend(additional);
     }

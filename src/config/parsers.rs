@@ -503,13 +503,16 @@ pub(super) fn parse_rumdl_toml(
                 "enable" | "disable" | "include" | "exclude" | "extend-enable" | "extend-disable" => {
                     if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
                         let values: Vec<String> = formatted_array
-                                .iter()
-                                .filter_map(|item| item.as_str())
-                                .map(|s| s.to_string())
-                                .collect();
+                            .iter()
+                            .filter_map(|item| item.as_str())
+                            .map(|s| s.to_string())
+                            .collect();
 
                         // Resolve rule name aliases for enable/disable/extend variants
-                        let is_rule_list = matches!(norm_key.as_str(), "enable" | "disable" | "extend-enable" | "extend-disable");
+                        let is_rule_list = matches!(
+                            norm_key.as_str(),
+                            "enable" | "disable" | "extend-enable" | "extend-disable"
+                        );
                         let final_values = if is_rule_list {
                             values
                                 .into_iter()

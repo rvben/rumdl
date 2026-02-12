@@ -502,6 +502,58 @@ pub(super) fn compute_obsidian_comment_ranges(
     ranges
 }
 
+/// Detect kramdown-specific constructs (extension blocks, IALs, ALDs)
+/// and populate the corresponding fields in LineInfo
+pub(super) fn detect_kramdown_line_info(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+    if !flavor.supports_kramdown_syntax() {
+        return;
+    }
+
+    use crate::utils::kramdown_utils;
+
+    let mut in_extension_block = false;
+
+    for line in lines.iter_mut() {
+        let line_content = line.content(content);
+        let trimmed = line_content.trim();
+
+        // Extension block tracking takes priority over base parser flags.
+        // The base parser doesn't know about kramdown extensions, so it may
+        // mark lines inside {::nomarkdown} or {::comment} as code blocks
+        // or HTML blocks. We need to keep tracking the extension block
+        // through these regions.
+        if in_extension_block {
+            line.in_kramdown_extension_block = true;
+            if kramdown_utils::is_kramdown_extension_close(trimmed) {
+                in_extension_block = false;
+            }
+            continue;
+        }
+
+        // Outside extension blocks, skip code blocks, front matter, and HTML comments
+        if line.in_code_block || line.in_front_matter || line.in_html_comment {
+            continue;
+        }
+
+        // Check for extension block opening
+        if kramdown_utils::is_kramdown_extension_open(trimmed) {
+            line.in_kramdown_extension_block = true;
+            in_extension_block = true;
+            continue;
+        }
+
+        // Check for block IAL or ALD (standalone lines with {: ...} syntax)
+        if kramdown_utils::is_kramdown_block_attribute(trimmed) {
+            line.is_kramdown_block_ial = true;
+        }
+
+        // Check for kramdown options directive ({::options ... /})
+        if kramdown_utils::is_kramdown_options(trimmed) {
+            line.in_kramdown_extension_block = true;
+        }
+    }
+}
+
 /// Helper to mark lines within a byte range
 pub(super) fn mark_lines_in_range<F>(lines: &mut [LineInfo], content: &str, start: usize, end: usize, mut f: F)
 where

@@ -12,6 +12,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [mdx](flavors/mdx.md)           | MDX (JSX in Markdown)                | MD013, MD033, MD037, MD039, MD044, MD049                                                  |
 | [obsidian](flavors/obsidian.md) | Obsidian knowledge base              | MD011, MD012, MD018, MD028, MD033, MD034, MD037, MD038, MD044, MD049, MD061, MD064, MD069 |
 | [quarto](flavors/quarto.md)     | Quarto / RMarkdown                   | MD034, MD037, MD038, MD040, MD042, MD049, MD050, MD051, MD052                             |
+| [kramdown](flavors/kramdown.md) | Jekyll / kramdown                    | MD022, MD041, MD051                                                                       |
 
 ## Configuration
 
@@ -43,6 +44,7 @@ When no flavor is configured, rumdl auto-detects based on file extension:
 | ------------------ | --------------- |
 | `.mdx`             | `mdx`           |
 | `.qmd`, `.Rmd`     | `quarto`        |
+| `.kramdown`        | `kramdown`      |
 | `.md`, `.markdown` | `standard`      |
 
 ## Specification Versions
@@ -59,6 +61,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[MDX](flavors/mdx.md)** - JSX components, JSX attributes, expressions, ESM imports
 - **[Obsidian](flavors/obsidian.md)** - Callouts, comments, highlights, Dataview queries, Templater syntax, tags
 - **[Quarto](flavors/quarto.md)** - Citations, shortcodes, div blocks, math blocks, executable code
+- **[Kramdown](flavors/kramdown.md)** - IALs, ALDs, extension blocks, kramdown anchor generation
 
 ## Adding Flavor Support
 

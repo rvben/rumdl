@@ -201,6 +201,13 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_mkdocs_line_info(&content_lines, &mut lines, flavor)
         );
 
+        // Detect kramdown constructs (extension blocks, IALs, ALDs) in kramdown flavor
+        profile_section!(
+            "Kramdown constructs",
+            profile,
+            flavor_detection::detect_kramdown_line_info(content, &mut lines, flavor)
+        );
+
         // Detect Obsidian comments (%%...%%) in Obsidian flavor
         let obsidian_comment_ranges = profile_section!(
             "Obsidian comments",

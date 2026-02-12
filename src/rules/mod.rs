@@ -178,74 +178,346 @@ struct RuleEntry {
 /// Rules marked `opt_in: true` are excluded from the default rule set and must
 /// be explicitly enabled via `extend-enable` or `enable = ["ALL"]`.
 const RULES: &[RuleEntry] = &[
-    RuleEntry { name: "MD001", ctor: MD001HeadingIncrement::from_config, opt_in: false },
-    RuleEntry { name: "MD003", ctor: MD003HeadingStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD004", ctor: MD004UnorderedListStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD005", ctor: MD005ListIndent::from_config, opt_in: false },
-    RuleEntry { name: "MD007", ctor: MD007ULIndent::from_config, opt_in: false },
-    RuleEntry { name: "MD009", ctor: MD009TrailingSpaces::from_config, opt_in: false },
-    RuleEntry { name: "MD010", ctor: MD010NoHardTabs::from_config, opt_in: false },
-    RuleEntry { name: "MD011", ctor: MD011NoReversedLinks::from_config, opt_in: false },
-    RuleEntry { name: "MD012", ctor: MD012NoMultipleBlanks::from_config, opt_in: false },
-    RuleEntry { name: "MD013", ctor: MD013LineLength::from_config, opt_in: false },
-    RuleEntry { name: "MD014", ctor: MD014CommandsShowOutput::from_config, opt_in: false },
-    RuleEntry { name: "MD018", ctor: MD018NoMissingSpaceAtx::from_config, opt_in: false },
-    RuleEntry { name: "MD019", ctor: MD019NoMultipleSpaceAtx::from_config, opt_in: false },
-    RuleEntry { name: "MD020", ctor: MD020NoMissingSpaceClosedAtx::from_config, opt_in: false },
-    RuleEntry { name: "MD021", ctor: MD021NoMultipleSpaceClosedAtx::from_config, opt_in: false },
-    RuleEntry { name: "MD022", ctor: MD022BlanksAroundHeadings::from_config, opt_in: false },
-    RuleEntry { name: "MD023", ctor: MD023HeadingStartLeft::from_config, opt_in: false },
-    RuleEntry { name: "MD024", ctor: MD024NoDuplicateHeading::from_config, opt_in: false },
-    RuleEntry { name: "MD025", ctor: MD025SingleTitle::from_config, opt_in: false },
-    RuleEntry { name: "MD026", ctor: MD026NoTrailingPunctuation::from_config, opt_in: false },
-    RuleEntry { name: "MD027", ctor: MD027MultipleSpacesBlockquote::from_config, opt_in: false },
-    RuleEntry { name: "MD028", ctor: MD028NoBlanksBlockquote::from_config, opt_in: false },
-    RuleEntry { name: "MD029", ctor: MD029OrderedListPrefix::from_config, opt_in: false },
-    RuleEntry { name: "MD030", ctor: MD030ListMarkerSpace::from_config, opt_in: false },
-    RuleEntry { name: "MD031", ctor: MD031BlanksAroundFences::from_config, opt_in: false },
-    RuleEntry { name: "MD032", ctor: MD032BlanksAroundLists::from_config, opt_in: false },
-    RuleEntry { name: "MD033", ctor: MD033NoInlineHtml::from_config, opt_in: false },
-    RuleEntry { name: "MD034", ctor: MD034NoBareUrls::from_config, opt_in: false },
-    RuleEntry { name: "MD035", ctor: MD035HRStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD036", ctor: MD036NoEmphasisAsHeading::from_config, opt_in: false },
-    RuleEntry { name: "MD037", ctor: MD037NoSpaceInEmphasis::from_config, opt_in: false },
-    RuleEntry { name: "MD038", ctor: MD038NoSpaceInCode::from_config, opt_in: false },
-    RuleEntry { name: "MD039", ctor: MD039NoSpaceInLinks::from_config, opt_in: false },
-    RuleEntry { name: "MD040", ctor: MD040FencedCodeLanguage::from_config, opt_in: false },
-    RuleEntry { name: "MD041", ctor: MD041FirstLineHeading::from_config, opt_in: false },
-    RuleEntry { name: "MD042", ctor: MD042NoEmptyLinks::from_config, opt_in: false },
-    RuleEntry { name: "MD043", ctor: MD043RequiredHeadings::from_config, opt_in: false },
-    RuleEntry { name: "MD044", ctor: MD044ProperNames::from_config, opt_in: false },
-    RuleEntry { name: "MD045", ctor: MD045NoAltText::from_config, opt_in: false },
-    RuleEntry { name: "MD046", ctor: MD046CodeBlockStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD047", ctor: MD047SingleTrailingNewline::from_config, opt_in: false },
-    RuleEntry { name: "MD048", ctor: MD048CodeFenceStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD049", ctor: MD049EmphasisStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD050", ctor: MD050StrongStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD051", ctor: MD051LinkFragments::from_config, opt_in: false },
-    RuleEntry { name: "MD052", ctor: MD052ReferenceLinkImages::from_config, opt_in: false },
-    RuleEntry { name: "MD053", ctor: MD053LinkImageReferenceDefinitions::from_config, opt_in: false },
-    RuleEntry { name: "MD054", ctor: MD054LinkImageStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD055", ctor: MD055TablePipeStyle::from_config, opt_in: false },
-    RuleEntry { name: "MD056", ctor: MD056TableColumnCount::from_config, opt_in: false },
-    RuleEntry { name: "MD057", ctor: MD057ExistingRelativeLinks::from_config, opt_in: false },
-    RuleEntry { name: "MD058", ctor: MD058BlanksAroundTables::from_config, opt_in: false },
-    RuleEntry { name: "MD059", ctor: MD059LinkText::from_config, opt_in: false },
-    RuleEntry { name: "MD060", ctor: MD060TableFormat::from_config, opt_in: true },
-    RuleEntry { name: "MD061", ctor: MD061ForbiddenTerms::from_config, opt_in: false },
-    RuleEntry { name: "MD062", ctor: MD062LinkDestinationWhitespace::from_config, opt_in: false },
-    RuleEntry { name: "MD063", ctor: MD063HeadingCapitalization::from_config, opt_in: true },
-    RuleEntry { name: "MD064", ctor: MD064NoMultipleConsecutiveSpaces::from_config, opt_in: false },
-    RuleEntry { name: "MD065", ctor: MD065BlanksAroundHorizontalRules::from_config, opt_in: false },
-    RuleEntry { name: "MD066", ctor: MD066FootnoteValidation::from_config, opt_in: false },
-    RuleEntry { name: "MD067", ctor: MD067FootnoteDefinitionOrder::from_config, opt_in: false },
-    RuleEntry { name: "MD068", ctor: MD068EmptyFootnoteDefinition::from_config, opt_in: false },
-    RuleEntry { name: "MD069", ctor: MD069NoDuplicateListMarkers::from_config, opt_in: false },
-    RuleEntry { name: "MD070", ctor: MD070NestedCodeFence::from_config, opt_in: false },
-    RuleEntry { name: "MD071", ctor: MD071BlankLineAfterFrontmatter::from_config, opt_in: false },
-    RuleEntry { name: "MD072", ctor: MD072FrontmatterKeySort::from_config, opt_in: true },
-    RuleEntry { name: "MD073", ctor: MD073TocValidation::from_config, opt_in: true },
-    RuleEntry { name: "MD074", ctor: MD074MkDocsNav::from_config, opt_in: true },
+    RuleEntry {
+        name: "MD001",
+        ctor: MD001HeadingIncrement::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD003",
+        ctor: MD003HeadingStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD004",
+        ctor: MD004UnorderedListStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD005",
+        ctor: MD005ListIndent::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD007",
+        ctor: MD007ULIndent::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD009",
+        ctor: MD009TrailingSpaces::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD010",
+        ctor: MD010NoHardTabs::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD011",
+        ctor: MD011NoReversedLinks::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD012",
+        ctor: MD012NoMultipleBlanks::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD013",
+        ctor: MD013LineLength::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD014",
+        ctor: MD014CommandsShowOutput::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD018",
+        ctor: MD018NoMissingSpaceAtx::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD019",
+        ctor: MD019NoMultipleSpaceAtx::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD020",
+        ctor: MD020NoMissingSpaceClosedAtx::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD021",
+        ctor: MD021NoMultipleSpaceClosedAtx::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD022",
+        ctor: MD022BlanksAroundHeadings::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD023",
+        ctor: MD023HeadingStartLeft::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD024",
+        ctor: MD024NoDuplicateHeading::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD025",
+        ctor: MD025SingleTitle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD026",
+        ctor: MD026NoTrailingPunctuation::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD027",
+        ctor: MD027MultipleSpacesBlockquote::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD028",
+        ctor: MD028NoBlanksBlockquote::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD029",
+        ctor: MD029OrderedListPrefix::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD030",
+        ctor: MD030ListMarkerSpace::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD031",
+        ctor: MD031BlanksAroundFences::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD032",
+        ctor: MD032BlanksAroundLists::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD033",
+        ctor: MD033NoInlineHtml::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD034",
+        ctor: MD034NoBareUrls::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD035",
+        ctor: MD035HRStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD036",
+        ctor: MD036NoEmphasisAsHeading::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD037",
+        ctor: MD037NoSpaceInEmphasis::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD038",
+        ctor: MD038NoSpaceInCode::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD039",
+        ctor: MD039NoSpaceInLinks::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD040",
+        ctor: MD040FencedCodeLanguage::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD041",
+        ctor: MD041FirstLineHeading::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD042",
+        ctor: MD042NoEmptyLinks::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD043",
+        ctor: MD043RequiredHeadings::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD044",
+        ctor: MD044ProperNames::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD045",
+        ctor: MD045NoAltText::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD046",
+        ctor: MD046CodeBlockStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD047",
+        ctor: MD047SingleTrailingNewline::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD048",
+        ctor: MD048CodeFenceStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD049",
+        ctor: MD049EmphasisStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD050",
+        ctor: MD050StrongStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD051",
+        ctor: MD051LinkFragments::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD052",
+        ctor: MD052ReferenceLinkImages::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD053",
+        ctor: MD053LinkImageReferenceDefinitions::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD054",
+        ctor: MD054LinkImageStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD055",
+        ctor: MD055TablePipeStyle::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD056",
+        ctor: MD056TableColumnCount::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD057",
+        ctor: MD057ExistingRelativeLinks::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD058",
+        ctor: MD058BlanksAroundTables::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD059",
+        ctor: MD059LinkText::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD060",
+        ctor: MD060TableFormat::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD061",
+        ctor: MD061ForbiddenTerms::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD062",
+        ctor: MD062LinkDestinationWhitespace::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD063",
+        ctor: MD063HeadingCapitalization::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD064",
+        ctor: MD064NoMultipleConsecutiveSpaces::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD065",
+        ctor: MD065BlanksAroundHorizontalRules::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD066",
+        ctor: MD066FootnoteValidation::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD067",
+        ctor: MD067FootnoteDefinitionOrder::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD068",
+        ctor: MD068EmptyFootnoteDefinition::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD069",
+        ctor: MD069NoDuplicateListMarkers::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD070",
+        ctor: MD070NestedCodeFence::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD071",
+        ctor: MD071BlankLineAfterFrontmatter::from_config,
+        opt_in: false,
+    },
+    RuleEntry {
+        name: "MD072",
+        ctor: MD072FrontmatterKeySort::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD073",
+        ctor: MD073TocValidation::from_config,
+        opt_in: true,
+    },
+    RuleEntry {
+        name: "MD074",
+        ctor: MD074MkDocsNav::from_config,
+        opt_in: true,
+    },
 ];
 
 /// Returns all rule instances (including opt-in) for config validation and CLI
@@ -297,9 +569,7 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
 
     // Helper: should this rule be removed by any disable source?
     let is_disabled = |name: &str| -> bool {
-        disabled_rules.contains(name)
-            || extend_disable_all
-            || extend_disable_set.contains(name)
+        disabled_rules.contains(name) || extend_disable_all || extend_disable_set.contains(name)
     };
 
     // Handle 'disable: ["all"]'

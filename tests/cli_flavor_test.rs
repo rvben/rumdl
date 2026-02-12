@@ -38,7 +38,7 @@ fn test_flavor_cli_all_variants() {
     fs::write(&md_path, "# Test\n\nSome content.\n").unwrap();
 
     // Test all valid flavor values
-    for flavor in ["standard", "mkdocs", "mdx", "quarto", "obsidian"] {
+    for flavor in ["standard", "mkdocs", "mdx", "quarto", "obsidian", "kramdown", "jekyll"] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
             success,

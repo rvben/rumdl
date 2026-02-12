@@ -294,7 +294,9 @@ impl MD041FirstLineHeading {
             let is_preamble = trimmed.is_empty()
                 || line_info.in_html_comment
                 || Self::is_non_content_line(line_content)
-                || (is_mkdocs && is_mkdocs_anchor_line(line_content));
+                || (is_mkdocs && is_mkdocs_anchor_line(line_content))
+                || line_info.in_kramdown_extension_block
+                || line_info.is_kramdown_block_ial;
 
             if is_preamble {
                 continue;
@@ -388,6 +390,10 @@ impl Rule for MD041FirstLineHeading {
             }
             // Skip MkDocs anchor lines (empty link with attr_list) when in MkDocs flavor
             if is_mkdocs && is_mkdocs_anchor_line(line_content) {
+                continue;
+            }
+            // Skip kramdown extension blocks, block IALs, and options directives
+            if line_info.in_kramdown_extension_block || line_info.is_kramdown_block_ial {
                 continue;
             }
             if !trimmed.is_empty() && !Self::is_non_content_line(line_content) {

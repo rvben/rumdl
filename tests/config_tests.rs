@@ -2649,9 +2649,8 @@ extend-enable = ["MD060", "MD063"]
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(config.global.extend_enable.len(), 2);
@@ -2670,9 +2669,8 @@ extend-disable = ["MD013", "MD033"]
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(config.global.extend_disable.len(), 2);
@@ -2692,9 +2690,8 @@ extend-disable = ["MD013"]
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert!(config.global.extend_enable.contains(&"MD060".to_string()));
@@ -2713,16 +2710,21 @@ extend-enable = ["table-format", "heading-capitalization"]
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     // Aliases should resolve to canonical rule names
-    assert!(config.global.extend_enable.contains(&"MD060".to_string()),
-        "table-format should resolve to MD060, got: {:?}", config.global.extend_enable);
-    assert!(config.global.extend_enable.contains(&"MD063".to_string()),
-        "heading-capitalization should resolve to MD063, got: {:?}", config.global.extend_enable);
+    assert!(
+        config.global.extend_enable.contains(&"MD060".to_string()),
+        "table-format should resolve to MD060, got: {:?}",
+        config.global.extend_enable
+    );
+    assert!(
+        config.global.extend_enable.contains(&"MD063".to_string()),
+        "heading-capitalization should resolve to MD063, got: {:?}",
+        config.global.extend_enable
+    );
 }
 
 #[test]
@@ -2737,9 +2739,8 @@ extend_enable = ["MD060"]
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert!(config.global.extend_enable.contains(&"MD060".to_string()));
@@ -2756,8 +2757,10 @@ fn test_opt_in_rules_excluded_by_default() {
 
     // Opt-in rules should NOT be in the default set
     for name in &opt_in_set {
-        assert!(!filtered_names.contains(*name),
-            "Opt-in rule {name} should not be in default filtered rules");
+        assert!(
+            !filtered_names.contains(*name),
+            "Opt-in rule {name} should not be in default filtered rules"
+        );
     }
 
     // Non-opt-in rules should be present
@@ -2902,15 +2905,16 @@ enabled = true
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     // The bridge should add MD060 to extend_enable
-    assert!(config.global.extend_enable.contains(&"MD060".to_string()),
+    assert!(
+        config.global.extend_enable.contains(&"MD060".to_string()),
         "Backward compat bridge should add MD060 to extend_enable, got: {:?}",
-        config.global.extend_enable);
+        config.global.extend_enable
+    );
 }
 
 #[test]
@@ -2928,17 +2932,18 @@ enabled = true
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     // The bridge adds to extend_enable, but disable should still win
     let all = all_rules(&config);
     let filtered = filter_rules(&all, &config.global);
     let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
-    assert!(!names.contains("MD060"),
-        "disable should win over backward-compat bridge");
+    assert!(
+        !names.contains("MD060"),
+        "disable should win over backward-compat bridge"
+    );
 }
 
 #[test]
@@ -2953,14 +2958,15 @@ enabled = false
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
 
-    let sourced = SourcedConfig::load_with_discovery(
-        Some(config_path.to_str().unwrap()), None, true
-    ).expect("Should load config");
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     // enabled = false should NOT add to extend_enable
-    assert!(!config.global.extend_enable.contains(&"MD060".to_string()),
-        "enabled=false should not add to extend_enable");
+    assert!(
+        !config.global.extend_enable.contains(&"MD060".to_string()),
+        "enabled=false should not add to extend_enable"
+    );
 }
 
 #[test]
@@ -2973,8 +2979,12 @@ fn test_extend_enable_all_keyword() {
     let mut global = config.global.clone();
     global.extend_enable = vec!["ALL".to_string()];
     let filtered = filter_rules(&all, &global);
-    assert_eq!(filtered.len(), total,
-        "extend-enable = [\"ALL\"] should enable all {} rules", total);
+    assert_eq!(
+        filtered.len(),
+        total,
+        "extend-enable = [\"ALL\"] should enable all {} rules",
+        total
+    );
 }
 
 #[test]
@@ -2988,8 +2998,11 @@ fn test_extend_enable_all_with_specific_enable() {
     global.enable = vec!["MD001".to_string()];
     global.extend_enable = vec!["ALL".to_string()];
     let filtered = filter_rules(&all, &global);
-    assert_eq!(filtered.len(), total,
-        "enable + extend-enable=[\"ALL\"] should enable all rules");
+    assert_eq!(
+        filtered.len(),
+        total,
+        "enable + extend-enable=[\"ALL\"] should enable all rules"
+    );
 }
 
 #[test]
@@ -3001,8 +3014,7 @@ fn test_extend_disable_all_keyword() {
     let mut global = config.global.clone();
     global.extend_disable = vec!["all".to_string()];
     let filtered = filter_rules(&all, &global);
-    assert_eq!(filtered.len(), 0,
-        "extend-disable = [\"all\"] should disable all rules");
+    assert_eq!(filtered.len(), 0, "extend-disable = [\"all\"] should disable all rules");
 }
 
 #[test]
@@ -3014,8 +3026,11 @@ fn test_extend_disable_all_case_insensitive() {
     let mut global = config.global.clone();
     global.extend_disable = vec!["ALL".to_string()];
     let filtered = filter_rules(&all, &global);
-    assert_eq!(filtered.len(), 0,
-        "extend-disable = [\"ALL\"] should disable all rules (case-insensitive)");
+    assert_eq!(
+        filtered.len(),
+        0,
+        "extend-disable = [\"ALL\"] should disable all rules (case-insensitive)"
+    );
 }
 
 #[test]

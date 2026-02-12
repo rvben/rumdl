@@ -114,6 +114,8 @@ pub(super) fn compute_basic_line_info(
             in_definition_list: false,
             in_obsidian_comment: false,
             in_pymdown_block,
+            in_kramdown_extension_block: false,
+            is_kramdown_block_ial: false,
         });
     }
 
