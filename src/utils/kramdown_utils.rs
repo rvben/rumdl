@@ -9,15 +9,17 @@ use std::sync::LazyLock;
 /// Pattern for Kramdown span IAL: text{:.class #id key="value"}
 static SPAN_IAL_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{[:\.#][^}]*\}$").unwrap());
 
-/// Pattern for Kramdown extensions opening: {::comment}, {::nomarkdown}, etc.
+/// Pattern for Kramdown extensions opening (multi-line): {::comment}, {::nomarkdown}, etc.
+/// Does NOT match self-closing blocks like {::options ... /}
 static EXTENSION_OPEN_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\{::([a-z]+)(?:\s+[^}]*)?\}\s*$").unwrap());
 
+/// Pattern for self-closing extension blocks: {::options ... /}, {::comment /}
+static EXTENSION_SELF_CLOSING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\{::[a-z]+(?:\s+[^}]*)?\s*/\}\s*$").unwrap());
+
 /// Pattern for Kramdown extensions closing: {:/comment}, {:/}, etc.
 static EXTENSION_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{:/([a-z]+)?\}\s*$").unwrap());
-
-/// Pattern for Kramdown options: {::options key="value" /}
-static OPTIONS_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{::options\s+[^}]+/\}\s*$").unwrap());
 
 /// Pattern for math blocks: $$
 static MATH_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\$\$").unwrap());
@@ -72,21 +74,21 @@ pub fn has_span_ial(text: &str) -> bool {
     SPAN_IAL_PATTERN.is_match(text.trim())
 }
 
-/// Check if a line is a Kramdown extension opening tag
+/// Check if a line is a self-closing Kramdown extension: {::options ... /}, {::comment /}
+pub fn is_kramdown_extension_self_closing(line: &str) -> bool {
+    EXTENSION_SELF_CLOSING_PATTERN.is_match(line)
+}
+
+/// Check if a line is a Kramdown extension opening tag (multi-line, not self-closing)
 ///
 /// Extensions include: comment, nomarkdown, options
 pub fn is_kramdown_extension_open(line: &str) -> bool {
-    EXTENSION_OPEN_PATTERN.is_match(line)
+    EXTENSION_OPEN_PATTERN.is_match(line) && !is_kramdown_extension_self_closing(line)
 }
 
 /// Check if a line is a Kramdown extension closing tag
 pub fn is_kramdown_extension_close(line: &str) -> bool {
     EXTENSION_CLOSE_PATTERN.is_match(line)
-}
-
-/// Check if a line is a Kramdown options directive
-pub fn is_kramdown_options(line: &str) -> bool {
-    OPTIONS_PATTERN.is_match(line)
 }
 
 /// Check if a line starts a math block
@@ -146,5 +148,31 @@ mod tests {
         assert!(is_kramdown_block_attribute("  {:.wrap}  "));
         assert!(is_kramdown_block_attribute("\t{:#id}\t"));
         assert!(is_kramdown_block_attribute(" {:.class #id} "));
+    }
+
+    #[test]
+    fn test_self_closing_extension_blocks() {
+        // Self-closing extension blocks end with /}
+        assert!(is_kramdown_extension_self_closing("{::options toc_levels=\"2..4\" /}"));
+        assert!(is_kramdown_extension_self_closing("{::comment /}"));
+        assert!(is_kramdown_extension_self_closing("{::nomarkdown this='is' .ignore /}"));
+        assert!(is_kramdown_extension_self_closing("  {::options key=\"val\" /}  "));
+
+        // Multi-line openers should NOT match
+        assert!(!is_kramdown_extension_self_closing("{::comment}"));
+        assert!(!is_kramdown_extension_self_closing("{::nomarkdown}"));
+        assert!(!is_kramdown_extension_self_closing("{::nomarkdown type='html'}"));
+    }
+
+    #[test]
+    fn test_extension_open_excludes_self_closing() {
+        // Multi-line openers should match
+        assert!(is_kramdown_extension_open("{::comment}"));
+        assert!(is_kramdown_extension_open("{::nomarkdown}"));
+        assert!(is_kramdown_extension_open("{::nomarkdown type='html'}"));
+
+        // Self-closing should NOT match as multi-line opener
+        assert!(!is_kramdown_extension_open("{::options toc_levels=\"2..4\" /}"));
+        assert!(!is_kramdown_extension_open("{::comment /}"));
     }
 }

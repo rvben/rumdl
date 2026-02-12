@@ -535,7 +535,13 @@ pub(super) fn detect_kramdown_line_info(content: &str, lines: &mut [LineInfo], f
             continue;
         }
 
-        // Check for extension block opening
+        // Check for self-closing extension blocks first ({::options ... /}, {::comment /})
+        if kramdown_utils::is_kramdown_extension_self_closing(trimmed) {
+            line.in_kramdown_extension_block = true;
+            continue;
+        }
+
+        // Check for multi-line extension block opening
         if kramdown_utils::is_kramdown_extension_open(trimmed) {
             line.in_kramdown_extension_block = true;
             in_extension_block = true;
@@ -545,11 +551,6 @@ pub(super) fn detect_kramdown_line_info(content: &str, lines: &mut [LineInfo], f
         // Check for block IAL or ALD (standalone lines with {: ...} syntax)
         if kramdown_utils::is_kramdown_block_attribute(trimmed) {
             line.is_kramdown_block_ial = true;
-        }
-
-        // Check for kramdown options directive ({::options ... /})
-        if kramdown_utils::is_kramdown_options(trimmed) {
-            line.in_kramdown_extension_block = true;
         }
     }
 }
