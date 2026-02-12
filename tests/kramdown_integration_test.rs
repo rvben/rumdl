@@ -926,6 +926,30 @@ fn test_kramdown_extension_block_lineinfo_flags() {
     }
 }
 
+#[test]
+fn test_kramdown_unclosed_fence_in_extension_does_not_leak_code_block_state() {
+    // A fence opened inside an extension block should never mark following real markdown
+    // as in_code_block once the extension closes.
+    let content = "{::comment}\ninside comment\n```\nunclosed fence\n{:/comment}\n\n# Real Heading\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Kramdown, None);
+
+    // Line 7 (1-indexed) is "# Real Heading"
+    let heading_line = ctx
+        .line_info(7)
+        .expect("Expected heading line to exist in test document");
+    assert!(
+        !heading_line.in_code_block,
+        "Heading after extension close should not be marked in_code_block"
+    );
+
+    let rule = rumdl_lib::MD041FirstLineHeading::default();
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD041 should not fire when first real heading follows an extension block with unclosed fence"
+    );
+}
+
 /// Comprehensive test: no rule should fire on content inside kramdown extension blocks.
 /// This test constructs markdown with many types of violations inside {::comment}
 /// and verifies that ALL rules skip the extension block content.

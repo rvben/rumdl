@@ -135,6 +135,8 @@ impl MD022BlanksAroundHeadings {
                         // Check for single-line HTML comments too
                         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
                             // Transparent - HTML comment
+                        } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
+                            // Transparent - Kramdown preamble line
                         } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed))
                         {
                             // Transparent - Quarto div marker in Quarto flavor
@@ -342,6 +344,8 @@ impl Rule for MD022BlanksAroundHeadings {
                         // Check for single-line HTML comments too
                         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
                             // Transparent - HTML comment
+                        } else if line.in_kramdown_extension_block || line.is_kramdown_block_ial {
+                            // Transparent - Kramdown preamble line
                         } else if is_quarto && (quarto_divs::is_div_open(trimmed) || quarto_divs::is_div_close(trimmed))
                         {
                             // Transparent - Quarto div marker in Quarto flavor
@@ -1726,6 +1730,32 @@ More content."#;
         assert!(
             warnings.is_empty(),
             "Mixed headings with IAL should all work: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_extension_block_before_first_heading_is_document_start() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "{::comment}\nhidden\n{:/comment}\n# Heading\n\nBody\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Kramdown, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Kramdown extension preamble should not require blank above first heading: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_kramdown_ial_before_first_heading_is_document_start() {
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "{:.doc-class}\n# Heading\n\nBody\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Kramdown, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "Kramdown IAL preamble should not require blank above first heading: {warnings:?}"
         );
     }
 

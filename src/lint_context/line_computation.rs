@@ -19,8 +19,23 @@ pub(super) fn compute_basic_line_info(
 ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
     let mut lines = Vec::with_capacity(content_lines.len());
 
-    // Pre-compute which lines are in code blocks
-    let code_block_map = compute_code_block_line_map(content, line_offsets, code_blocks);
+    // Pre-compute which lines are in code blocks.
+    //
+    // Kramdown extension blocks are non-markdown regions. Fences inside them may cause
+    // pulldown-cmark to report a code block that leaks past {:/...} when the fence is
+    // unclosed inside the extension block. Filter out code blocks that start inside
+    // extension blocks so post-block lines are not incorrectly marked as code.
+    let filtered_code_blocks;
+    let code_blocks_for_map = if flavor.supports_kramdown_syntax() {
+        let extension_line_map = compute_kramdown_extension_line_map(content_lines);
+        filtered_code_blocks =
+            filter_code_blocks_starting_in_extension_blocks(content, line_offsets, code_blocks, &extension_line_map);
+        filtered_code_blocks.as_slice()
+    } else {
+        code_blocks
+    };
+
+    let code_block_map = compute_code_block_line_map(content, line_offsets, code_blocks_for_map);
 
     // Pre-compute which lines are in math blocks ($$ ... $$)
     let math_block_map = compute_math_block_line_map(content_lines, &code_block_map);
@@ -120,6 +135,67 @@ pub(super) fn compute_basic_line_info(
     }
 
     (lines, emphasis_spans)
+}
+
+/// Build a per-line map of kramdown extension-block membership.
+fn compute_kramdown_extension_line_map(content_lines: &[&str]) -> Vec<bool> {
+    use crate::utils::kramdown_utils;
+
+    let mut in_extension_block = false;
+    let mut extension_lines = vec![false; content_lines.len()];
+
+    for (i, line) in content_lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        if in_extension_block {
+            extension_lines[i] = true;
+            if kramdown_utils::is_kramdown_extension_close(trimmed) {
+                in_extension_block = false;
+            }
+            continue;
+        }
+
+        if kramdown_utils::is_kramdown_extension_self_closing(trimmed) {
+            extension_lines[i] = true;
+            continue;
+        }
+
+        if kramdown_utils::is_kramdown_extension_open(trimmed) {
+            extension_lines[i] = true;
+            in_extension_block = true;
+        }
+    }
+
+    extension_lines
+}
+
+/// Remove parser-reported code blocks that begin inside kramdown extension blocks.
+fn filter_code_blocks_starting_in_extension_blocks(
+    content: &str,
+    line_offsets: &[usize],
+    code_blocks: &[(usize, usize)],
+    extension_line_map: &[bool],
+) -> Vec<(usize, usize)> {
+    code_blocks
+        .iter()
+        .copied()
+        .filter(|(start, _end)| {
+            let safe_start = if *start > 0 && !content.is_char_boundary(*start) {
+                let mut boundary = *start;
+                while boundary > 0 && !content.is_char_boundary(boundary) {
+                    boundary -= 1;
+                }
+                boundary
+            } else {
+                *start
+            };
+
+            let first_line_after = line_offsets.partition_point(|&offset| offset <= safe_start);
+            let first_line = first_line_after.saturating_sub(1);
+
+            !extension_line_map.get(first_line).copied().unwrap_or(false)
+        })
+        .collect()
 }
 
 /// Pre-compute which lines are in code blocks - O(m*n) where m=code_blocks, n=lines
