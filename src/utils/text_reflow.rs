@@ -2323,6 +2323,15 @@ mod tests {
         assert!(!text_ends_with_abbreviation("paradigms?", &abbreviations)); // question mark
         assert!(!text_ends_with_abbreviation("word", &abbreviations)); // no punctuation
         assert!(!text_ends_with_abbreviation("", &abbreviations)); // empty string
+
+        // Abbreviations preceded by opening punctuation
+        assert!(text_ends_with_abbreviation("(e.g.", &abbreviations));
+        assert!(text_ends_with_abbreviation("(i.e.", &abbreviations));
+        assert!(text_ends_with_abbreviation("word (e.g.", &abbreviations));
+        assert!(text_ends_with_abbreviation("word (i.e.", &abbreviations));
+        assert!(text_ends_with_abbreviation("[e.g.", &abbreviations));
+        assert!(text_ends_with_abbreviation("\"Dr.", &abbreviations));
+        assert!(!text_ends_with_abbreviation("(paradigms.", &abbreviations));
     }
 
     #[test]

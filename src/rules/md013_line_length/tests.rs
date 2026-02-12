@@ -1820,6 +1820,41 @@ fn test_sentence_per_line_abbreviations() {
 }
 
 #[test]
+fn test_sentence_per_line_abbreviations_in_parentheses() {
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        line_length: crate::types::LineLength::from_const(0),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "In addition, not all platforms (e.g. Wasm) are supported by `inventory`, which is used in the implementation of the feature.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "e.g. inside parentheses should not be detected as sentence boundary, got: {result:?}"
+    );
+
+    let content = "This `#[cfg]` marks code that is only available when building for the unlimited Python API (i.e. PyO3's `abi3` feature is not enabled).";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "i.e. inside parentheses should not be detected as sentence boundary, got: {result:?}"
+    );
+
+    let content = "See the documentation [e.g. Chapter 5] for more details about this feature.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "e.g. inside brackets should not be detected as sentence boundary, got: {result:?}"
+    );
+}
+
+#[test]
 fn test_sentence_per_line_with_markdown() {
     let config = MD013Config {
         reflow: true,

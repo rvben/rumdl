@@ -937,6 +937,57 @@ fn test_abbreviations_in_sentence_per_line_integration() {
 }
 
 #[test]
+fn test_abbreviations_inside_parentheses() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        semantic_line_breaks: false,
+        abbreviations: None,
+        ..Default::default()
+    };
+
+    let input = "In addition, not all platforms (e.g. Wasm) are supported by `inventory`, which is used in the implementation of the feature.";
+    let result = reflow_line(input, &options);
+    assert_eq!(
+        result.len(),
+        1,
+        "e.g. inside parentheses should not split sentence: {result:?}"
+    );
+
+    let input = "This marks code for the unlimited Python API (i.e. PyO3's `abi3` feature is not enabled).";
+    let result = reflow_line(input, &options);
+    assert_eq!(
+        result.len(),
+        1,
+        "i.e. inside parentheses should not split sentence: {result:?}"
+    );
+
+    let input = "See the documentation [e.g. Chapter 5] for more details about this feature.";
+    let result = reflow_line(input, &options);
+    assert_eq!(
+        result.len(),
+        1,
+        "e.g. inside brackets should not split sentence: {result:?}"
+    );
+
+    let input = "The doctor (Dr. Smith) performed the surgery successfully.";
+    let result = reflow_line(input, &options);
+    assert_eq!(
+        result.len(),
+        1,
+        "Dr. inside parentheses should not split sentence: {result:?}"
+    );
+
+    let text = "Not all platforms (e.g. Wasm) are supported.";
+    let sentences = split_into_sentences(text);
+    assert_eq!(
+        sentences.len(),
+        1,
+        "split_into_sentences should not split at (e.g.: {sentences:?}"
+    );
+}
+
+#[test]
 fn test_issue_150_all_reported_variations() {
     // Test all variations mentioned in issue #150
     let options = ReflowOptions {
