@@ -208,6 +208,19 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_kramdown_line_info(content, &mut lines, flavor)
         );
 
+        // Layer 1: Sanitize content-derived fields inside kramdown extension blocks
+        // so downstream heading detection and collection builders never see them.
+        // This must run BEFORE detect_headings_and_blockquotes to prevent headings
+        // from being populated inside extension blocks.
+        for line in &mut lines {
+            if line.in_kramdown_extension_block {
+                line.list_item = None;
+                line.is_horizontal_rule = false;
+                line.blockquote = None;
+                line.is_kramdown_block_ial = false;
+            }
+        }
+
         // Detect Obsidian comments (%%...%%) in Obsidian flavor
         let obsidian_comment_ranges = profile_section!(
             "Obsidian comments",
@@ -235,6 +248,13 @@ impl<'a> LintContext<'a> {
                 front_matter_end,
             )
         );
+
+        // Clear headings that were detected inside kramdown extension blocks
+        for line in &mut lines {
+            if line.in_kramdown_extension_block {
+                line.heading = None;
+            }
+        }
 
         // Parse code spans early so we can exclude them from link/image parsing
         let code_spans = profile_section!(
@@ -275,13 +295,6 @@ impl<'a> LintContext<'a> {
             link_parser::parse_reference_defs(content, &lines)
         );
 
-        // Build O(1) lookup map for reference definitions by lowercase ID
-        let reference_defs_map: HashMap<String, usize> = reference_defs
-            .iter()
-            .enumerate()
-            .map(|(idx, def)| (def.id.to_lowercase(), idx))
-            .collect();
-
         let list_blocks = profile_section!("List blocks", profile, list_blocks::parse_list_blocks(content, &lines));
 
         // Compute character frequency for fast content analysis
@@ -302,6 +315,63 @@ impl<'a> LintContext<'a> {
                 &html_comment_ranges,
             )
         );
+
+        // Layer 2: Filter pre-computed collections to exclude items inside kramdown extension blocks.
+        // Rules that iterate these collections automatically skip kramdown content.
+        let links = links
+            .into_iter()
+            .filter(|link| !lines.get(link.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+            .collect::<Vec<_>>();
+        let images = images
+            .into_iter()
+            .filter(|img| !lines.get(img.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+            .collect::<Vec<_>>();
+        let broken_links = broken_links
+            .into_iter()
+            .filter(|bl| {
+                // BrokenLinkInfo has span but no line field; find line from byte offset
+                let line_idx = line_offsets
+                    .partition_point(|&offset| offset <= bl.span.start)
+                    .saturating_sub(1);
+                !lines.get(line_idx).is_some_and(|l| l.in_kramdown_extension_block)
+            })
+            .collect::<Vec<_>>();
+        let footnote_refs = footnote_refs
+            .into_iter()
+            .filter(|fr| !lines.get(fr.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+            .collect::<Vec<_>>();
+        let reference_defs = reference_defs
+            .into_iter()
+            .filter(|def| !lines.get(def.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+            .collect::<Vec<_>>();
+        let list_blocks = list_blocks
+            .into_iter()
+            .filter(|block| {
+                !lines
+                    .get(block.start_line - 1)
+                    .is_some_and(|l| l.in_kramdown_extension_block)
+            })
+            .collect::<Vec<_>>();
+        let table_blocks = table_blocks
+            .into_iter()
+            .filter(|block| {
+                // TableBlock.start_line is 0-indexed
+                !lines
+                    .get(block.start_line)
+                    .is_some_and(|l| l.in_kramdown_extension_block)
+            })
+            .collect::<Vec<_>>();
+        let emphasis_spans = emphasis_spans
+            .into_iter()
+            .filter(|span| !lines.get(span.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
+            .collect::<Vec<_>>();
+
+        // Rebuild reference_defs_map after filtering
+        let reference_defs_map: HashMap<String, usize> = reference_defs
+            .iter()
+            .enumerate()
+            .map(|(idx, def)| (def.id.to_lowercase(), idx))
+            .collect();
 
         // Reuse already-computed line_offsets and code_blocks instead of re-detecting
         let line_index = profile_section!(
@@ -459,12 +529,18 @@ impl<'a> LintContext<'a> {
     /// Get HTML tags - computed lazily on first access
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
         Arc::clone(self.html_tags_cache.get_or_init(|| {
-            Arc::new(element_parsers::parse_html_tags(
-                self.content,
-                &self.lines,
-                &self.code_blocks,
-                self.flavor,
-            ))
+            let tags = element_parsers::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
+            // Filter out HTML tags inside kramdown extension blocks
+            Arc::new(
+                tags.into_iter()
+                    .filter(|tag| {
+                        !self
+                            .lines
+                            .get(tag.line - 1)
+                            .is_some_and(|l| l.in_kramdown_extension_block)
+                    })
+                    .collect(),
+            )
         }))
     }
 

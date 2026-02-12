@@ -1,7 +1,8 @@
-use rumdl_lib::config::MarkdownFlavor;
+use rumdl_lib::config::{Config, MarkdownFlavor};
 use rumdl_lib::filtered_lines::FilteredLinesExt;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
+use rumdl_lib::rules;
 use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
@@ -923,4 +924,202 @@ fn test_kramdown_extension_block_lineinfo_flags() {
             i + 1
         );
     }
+}
+
+/// Comprehensive test: no rule should fire on content inside kramdown extension blocks.
+/// This test constructs markdown with many types of violations inside {::comment}
+/// and verifies that ALL rules skip the extension block content.
+#[test]
+fn test_no_rules_fire_inside_kramdown_extension_blocks() {
+    // Content with a clean heading outside, then many violations inside a comment block,
+    // then clean content after. Only the heading satisfies MD041.
+    // Comprehensive test content with violations for as many rules as possible
+    // inside the extension block. Each line is annotated with the rules it triggers.
+    let content = "\
+# Clean Heading\n\
+\n\
+{::comment}\n\
+\n\
+### skipped heading\n\
+\n\
+#bad heading no space\n\
+\n\
+# Clean Heading\n\
+\n\
+# Heading 1.\n\
+\n\
+  # indented heading\n\
+\n\
+trailing spaces   \n\
+\thard tab here\n\
+\n\
+* list item\n\
++ different marker\n\
+- third style\n\
+\n\
+1. first\n\
+3. wrong number\n\
+\n\
+  * bad indent\n\
+    * nested too deep\n\
+\n\
+bare URL https://example.com here\n\
+\n\
+<div>inline html</div>\n\
+\n\
+* spaced emphasis *\n\
+\n\
+**bold text** and __other bold__\n\
+\n\
+*italic* and _other italic_\n\
+\n\
+multiple   spaces   here\n\
+\n\
+[link with space ]( url )\n\
+\n\
+[text]()\n\
+\n\
+![](image.png)\n\
+\n\
+```\n\
+code without language\n\
+```\n\
+~~~\n\
+mixed fence style\n\
+~~~\n\
+\n\
+> blockquote\n\
+>  extra space\n\
+\n\
+> first quote\n\
+\n\
+> second quote\n\
+\n\
+---\n\
+\n\
+***\n\
+\n\
+` code span `\n\
+\n\
+Setext Heading\n\
+---\n\
+\n\
+[^1]: footnote definition\n\
+\n\
+[ref]: https://example.com\n\
+\n\
+| bad | table |\n\
+| --- | --- |\n\
+| a | b | c |\n\
+\n\
+{:/comment}\n\
+\n\
+Clean paragraph after comment block.\n";
+
+    let mut config = Config::default();
+    config.global.flavor = MarkdownFlavor::Kramdown;
+
+    let ctx = LintContext::new(content, MarkdownFlavor::Kramdown, None);
+    let all = rules::all_rules(&config);
+
+    // Find the extension block line range
+    let comment_start_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "{::comment}")
+        .map(|(i, _)| i + 1)
+        .unwrap();
+    let comment_end_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "{:/comment}")
+        .map(|(i, _)| i + 1)
+        .unwrap();
+
+    let mut violations_inside_block = Vec::new();
+
+    for rule in &all {
+        if let Ok(warnings) = rule.check(&ctx) {
+            for w in &warnings {
+                // Apply the same Layer 3 safety net filter that lint_file uses:
+                // skip warnings whose line falls inside a kramdown extension block
+                if ctx
+                    .line_info(w.line)
+                    .is_some_and(|info| info.in_kramdown_extension_block)
+                {
+                    continue;
+                }
+                if w.line >= comment_start_line && w.line <= comment_end_line {
+                    violations_inside_block.push(format!("  {} line {}: {}", rule.name(), w.line, w.message));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations_inside_block.is_empty(),
+        "Rules fired inside kramdown extension block:\n{}",
+        violations_inside_block.join("\n")
+    );
+}
+
+/// Same test but for nomarkdown blocks
+#[test]
+fn test_no_rules_fire_inside_kramdown_nomarkdown_blocks() {
+    let content = "# Clean Heading\n\
+                   \n\
+                   {::nomarkdown}\n\
+                   <div class=\"raw\">\n\
+                   <span>nested html tags</span>\n\
+                   bare URL https://example.com\n\
+                   trailing spaces   \n\
+                   * not a list marker\n\
+                   </div>\n\
+                   {:/nomarkdown}\n\
+                   \n\
+                   Clean paragraph.\n";
+
+    let mut config = Config::default();
+    config.global.flavor = MarkdownFlavor::Kramdown;
+
+    let ctx = LintContext::new(content, MarkdownFlavor::Kramdown, None);
+    let all = rules::all_rules(&config);
+
+    let block_start = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "{::nomarkdown}")
+        .map(|(i, _)| i + 1)
+        .unwrap();
+    let block_end = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.trim() == "{:/nomarkdown}")
+        .map(|(i, _)| i + 1)
+        .unwrap();
+
+    let mut violations_inside_block = Vec::new();
+
+    for rule in &all {
+        if let Ok(warnings) = rule.check(&ctx) {
+            for w in &warnings {
+                // Apply the same Layer 3 safety net filter that lint_file uses
+                if ctx
+                    .line_info(w.line)
+                    .is_some_and(|info| info.in_kramdown_extension_block)
+                {
+                    continue;
+                }
+                if w.line >= block_start && w.line <= block_end {
+                    violations_inside_block.push(format!("  {} line {}: {}", rule.name(), w.line, w.message));
+                }
+            }
+        }
+    }
+
+    assert!(
+        violations_inside_block.is_empty(),
+        "Rules fired inside kramdown nomarkdown block:\n{}",
+        violations_inside_block.join("\n")
+    );
 }

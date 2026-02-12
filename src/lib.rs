@@ -326,10 +326,19 @@ pub fn lint_and_index(
 
         match result {
             Ok(rule_warnings) => {
-                // Filter out warnings for rules disabled via inline comments
+                // Filter out warnings inside kramdown extension blocks (Layer 3 safety net)
+                // and warnings for rules disabled via inline comments
                 let filtered_warnings: Vec<_> = rule_warnings
                     .into_iter()
                     .filter(|warning| {
+                        // Layer 3: Suppress warnings inside kramdown extension blocks
+                        if lint_ctx
+                            .line_info(warning.line)
+                            .is_some_and(|info| info.in_kramdown_extension_block)
+                        {
+                            return false;
+                        }
+
                         // Use the warning's rule_name if available, otherwise use the rule's name
                         let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
 

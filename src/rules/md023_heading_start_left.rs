@@ -26,7 +26,7 @@ impl Rule for MD023HeadingStartLeft {
 
         // Process all headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip lines inside PyMdown blocks (MkDocs flavor)
+            // Skip lines inside PyMdown blocks
             if line_info.in_pymdown_block {
                 continue;
             }

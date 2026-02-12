@@ -156,7 +156,7 @@ impl Rule for MD004UnorderedListStyle {
                 if let Some(line_info) = ctx.line_info(item_line)
                     && let Some(list_item) = &line_info.list_item
                 {
-                    // Skip lines inside PyMdown blocks (MkDocs flavor)
+                    // Skip lines inside PyMdown blocks
                     if line_info.in_pymdown_block {
                         continue;
                     }

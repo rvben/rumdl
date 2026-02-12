@@ -644,7 +644,7 @@ impl Rule for MD051LinkFragments {
         // default to the flavor's native anchor generation
         let anchor_style = explicit_style.unwrap_or(match config.global.flavor {
             crate::config::MarkdownFlavor::MkDocs => AnchorStyle::PythonMarkdown,
-            crate::config::MarkdownFlavor::Kramdown => AnchorStyle::Kramdown,
+            crate::config::MarkdownFlavor::Kramdown => AnchorStyle::KramdownGfm,
             _ => AnchorStyle::GitHub,
         });
 

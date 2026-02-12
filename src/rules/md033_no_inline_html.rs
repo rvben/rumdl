@@ -4,7 +4,6 @@
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::kramdown_utils::{is_kramdown_block_attribute, is_kramdown_extension};
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
 
@@ -911,36 +910,6 @@ impl Rule for MD033NoInlineHtml {
         }
 
         let mut warnings = Vec::new();
-        let lines = ctx.raw_lines();
-
-        // Track nomarkdown and comment blocks (Kramdown extension)
-        let mut in_nomarkdown = false;
-        let mut in_comment = false;
-        let mut nomarkdown_ranges: Vec<(usize, usize)> = Vec::new();
-        let mut nomarkdown_start = 0;
-        let mut comment_start = 0;
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-
-            // Check for nomarkdown start
-            if line.trim() == "{::nomarkdown}" {
-                in_nomarkdown = true;
-                nomarkdown_start = line_num;
-            } else if line.trim() == "{:/nomarkdown}" && in_nomarkdown {
-                in_nomarkdown = false;
-                nomarkdown_ranges.push((nomarkdown_start, line_num));
-            }
-
-            // Check for comment blocks
-            if line.trim() == "{::comment}" {
-                in_comment = true;
-                comment_start = line_num;
-            } else if line.trim() == "{:/comment}" && in_comment {
-                in_comment = false;
-                nomarkdown_ranges.push((comment_start, line_num));
-            }
-        }
 
         // Use centralized HTML parser to get all HTML tags (including multiline)
         let html_tags = ctx.html_tags();
@@ -957,25 +926,10 @@ impl Rule for MD033NoInlineHtml {
             // Reconstruct tag string from byte offsets
             let tag = &content[html_tag.byte_offset..html_tag.byte_end];
 
-            // Skip tags in code blocks or PyMdown blocks (uses proper detection from LintContext)
+            // Skip tags in code blocks, PyMdown blocks, and block IALs
             if ctx
                 .line_info(line_num)
-                .is_some_and(|info| info.in_code_block || info.in_pymdown_block)
-            {
-                continue;
-            }
-
-            // Skip Kramdown extensions and block attributes
-            if let Some(line) = lines.get(line_num.saturating_sub(1))
-                && (is_kramdown_extension(line) || is_kramdown_block_attribute(line))
-            {
-                continue;
-            }
-
-            // Skip lines inside nomarkdown blocks
-            if nomarkdown_ranges
-                .iter()
-                .any(|(start, end)| line_num >= *start && line_num <= *end)
+                .is_some_and(|info| info.in_code_block || info.in_pymdown_block || info.is_kramdown_block_ial)
             {
                 continue;
             }

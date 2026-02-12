@@ -461,8 +461,7 @@ impl Rule for MD057ExistingRelativeLinks {
                     continue;
                 }
 
-                // Skip lines inside PyMdown blocks (MkDocs flavor)
-                // This must be checked BEFORE processed_lines to skip the entire line
+                // Skip lines inside PyMdown blocks
                 if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
                     continue;
                 }

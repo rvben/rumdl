@@ -207,6 +207,7 @@ impl Rule for MD001HeadingIncrement {
         for valid_heading in ctx.valid_headings() {
             let heading = valid_heading.heading;
             let line_info = valid_heading.line_info;
+
             let level = heading.level as usize;
 
             let (fix_info, new_prev) = Self::compute_heading_fix(prev_level, heading);

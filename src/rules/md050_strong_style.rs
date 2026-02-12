@@ -120,7 +120,7 @@ impl MD050StrongStyle {
         for m in BOLD_ASTERISK_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, col) = ctx.offset_to_line_col(m.start());
-            let in_front_matter = ctx
+            let skip_context = ctx
                 .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
@@ -130,7 +130,7 @@ impl MD050StrongStyle {
                 .get(line_num.saturating_sub(1))
                 .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
-            if !in_front_matter
+            if !skip_context
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
@@ -146,7 +146,7 @@ impl MD050StrongStyle {
         for m in BOLD_UNDERSCORE_REGEX.find_iter(content) {
             // Skip matches in front matter
             let (line_num, col) = ctx.offset_to_line_col(m.start());
-            let in_front_matter = ctx
+            let skip_context = ctx
                 .line_info(line_num)
                 .map(|info| info.in_front_matter)
                 .unwrap_or(false);
@@ -156,7 +156,7 @@ impl MD050StrongStyle {
                 .get(line_num.saturating_sub(1))
                 .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
-            if !in_front_matter
+            if !skip_context
                 && !ctx.is_in_code_block_or_span(m.start())
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())

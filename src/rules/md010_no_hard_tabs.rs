@@ -176,7 +176,7 @@ impl Rule for MD010NoHardTabs {
                 continue;
             }
 
-            // Skip lines inside PyMdown blocks (MkDocs flavor)
+            // Skip lines inside PyMdown blocks
             if ctx.line_info(line_num + 1).is_some_and(|info| info.in_pymdown_block) {
                 continue;
             }

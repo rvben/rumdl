@@ -164,7 +164,7 @@ impl Rule for MD059LinkText {
                 continue;
             }
 
-            // Skip links inside PyMdown blocks (MkDocs flavor)
+            // Skip links inside PyMdown blocks
             if ctx.line_info(link.line).is_some_and(|info| info.in_pymdown_block) {
                 continue;
             }

@@ -392,7 +392,7 @@ impl Rule for MD041FirstLineHeading {
             if is_mkdocs && is_mkdocs_anchor_line(line_content) {
                 continue;
             }
-            // Skip kramdown extension blocks, block IALs, and options directives
+            // Skip kramdown extension blocks and block IALs (preamble detection)
             if line_info.in_kramdown_extension_block || line_info.is_kramdown_block_ial {
                 continue;
             }

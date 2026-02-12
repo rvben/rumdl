@@ -305,7 +305,10 @@ impl LineFilterConfig {
 
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
-        (self.skip_front_matter && line_info.in_front_matter)
+        // Kramdown extension blocks are always filtered unconditionally.
+        // Their content should never be linted by any rule.
+        line_info.in_kramdown_extension_block
+            || (self.skip_front_matter && line_info.in_front_matter)
             || (self.skip_code_blocks && line_info.in_code_block)
             || (self.skip_html_blocks && line_info.in_html_block)
             || (self.skip_html_comments && line_info.in_html_comment)
@@ -321,7 +324,6 @@ impl LineFilterConfig {
             || (self.skip_definition_lists && line_info.in_definition_list)
             || (self.skip_obsidian_comments && line_info.in_obsidian_comment)
             || (self.skip_pymdown_blocks && line_info.in_pymdown_block)
-            || (self.skip_kramdown_extension_blocks && line_info.in_kramdown_extension_block)
             || (self.skip_div_markers && line_info.is_div_marker)
     }
 }

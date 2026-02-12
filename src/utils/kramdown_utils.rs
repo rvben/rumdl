@@ -89,11 +89,6 @@ pub fn is_kramdown_options(line: &str) -> bool {
     OPTIONS_PATTERN.is_match(line)
 }
 
-/// Check if a line is a Kramdown extension (any type)
-pub fn is_kramdown_extension(line: &str) -> bool {
-    is_kramdown_extension_open(line) || is_kramdown_extension_close(line) || is_kramdown_options(line)
-}
-
 /// Check if a line starts a math block
 pub fn is_math_block_delimiter(line: &str) -> bool {
     let trimmed = line.trim();

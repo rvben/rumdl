@@ -2982,8 +2982,7 @@ fn test_extend_enable_all_keyword() {
     assert_eq!(
         filtered.len(),
         total,
-        "extend-enable = [\"ALL\"] should enable all {} rules",
-        total
+        "extend-enable = [\"ALL\"] should enable all {total} rules",
     );
 }
 

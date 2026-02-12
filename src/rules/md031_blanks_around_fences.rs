@@ -240,7 +240,7 @@ impl Rule for MD031BlanksAroundFences {
 
         // Check blank lines around each fenced code block
         for (opening_line, closing_line) in &fenced_blocks {
-            // Skip fenced code blocks inside PyMdown blocks (MkDocs flavor)
+            // Skip fenced code blocks inside PyMdown blocks
             if ctx
                 .line_info(*opening_line + 1)
                 .is_some_and(|info| info.in_pymdown_block)
