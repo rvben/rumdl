@@ -13,7 +13,6 @@ use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_icons;
 use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
-use crate::utils::mkdocstrings_refs;
 use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -102,76 +101,6 @@ pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
 }
 
 /// Check if a byte position is within any context that should be skipped
-pub fn is_in_skip_context(ctx: &LintContext, byte_pos: usize) -> bool {
-    // Check standard code contexts
-    if ctx.is_in_code_block_or_span(byte_pos) {
-        return true;
-    }
-
-    // Check HTML comments
-    if is_in_html_comment(ctx.content, byte_pos) {
-        return true;
-    }
-
-    // Check math contexts
-    if is_in_math_context(ctx, byte_pos) {
-        return true;
-    }
-
-    // Check if in HTML tag
-    if is_in_html_tag(ctx, byte_pos) {
-        return true;
-    }
-
-    // Check MDX-specific contexts
-    if ctx.flavor == MarkdownFlavor::MDX {
-        // Check JSX expressions
-        if ctx.is_in_jsx_expression(byte_pos) {
-            return true;
-        }
-        // Check MDX comments
-        if ctx.is_in_mdx_comment(byte_pos) {
-            return true;
-        }
-    }
-
-    // Check MkDocs snippet sections and multi-line blocks
-    if ctx.flavor == MarkdownFlavor::MkDocs {
-        if mkdocs_snippets::is_within_snippet_section(ctx.content, byte_pos) {
-            return true;
-        }
-        if mkdocs_snippets::is_within_snippet_block(ctx.content, byte_pos) {
-            return true;
-        }
-    }
-
-    // Check MkDocs admonition blocks
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_admonitions::is_within_admonition(ctx.content, byte_pos) {
-        return true;
-    }
-
-    // Check MkDocs footnote definitions
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_footnotes::is_within_footnote_definition(ctx.content, byte_pos) {
-        return true;
-    }
-
-    // Check MkDocs content tabs
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_tabs::is_within_tab_content(ctx.content, byte_pos) {
-        return true;
-    }
-
-    // Check MkDocstrings autodoc blocks
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocstrings_refs::is_within_autodoc_block(ctx.content, byte_pos) {
-        return true;
-    }
-
-    // Check MkDocs Critic Markup
-    if ctx.flavor == MarkdownFlavor::MkDocs && mkdocs_critic::is_within_critic_markup(ctx.content, byte_pos) {
-        return true;
-    }
-
-    false
-}
 
 /// Check if a byte position is within a JSX expression (MDX: {expression})
 #[inline]
@@ -203,14 +132,6 @@ pub fn is_mkdocs_footnote_line(line: &str, flavor: MarkdownFlavor) -> bool {
 /// Check if a line is a MkDocs tab marker
 pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
     flavor == MarkdownFlavor::MkDocs && mkdocs_tabs::is_tab_marker(line)
-}
-
-/// Check if a line is a MkDocstrings autodoc marker
-///
-/// Autodoc blocks (`::: module.Class`) are detected regardless of flavor because
-/// the `:::` syntax is structurally unique and should never be reflowed as prose.
-pub fn is_mkdocstrings_autodoc_line(line: &str, _flavor: MarkdownFlavor) -> bool {
-    mkdocstrings_refs::is_autodoc_marker(line)
 }
 
 /// Check if a line contains MkDocs Critic Markup

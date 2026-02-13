@@ -158,11 +158,12 @@ mod malformed_syntax_tests {
         let content = "=== \"Tab\"\n\n=== \"Tab 2\"";
         assert!(mkdocs_tabs::is_within_tab_content(content, 0));
 
-        // Empty autodoc block
+        // Empty autodoc block (use pre-computed ranges API)
         let content = "::: module.Class\n\nNext paragraph";
-        assert!(mkdocstrings_refs::is_within_autodoc_block(content, 0));
-        assert!(!mkdocstrings_refs::is_within_autodoc_block(
-            content,
+        let ranges = mkdocstrings_refs::detect_autodoc_block_ranges(content);
+        assert!(mkdocstrings_refs::is_within_autodoc_block_ranges(&ranges, 0));
+        assert!(!mkdocstrings_refs::is_within_autodoc_block_ranges(
+            &ranges,
             content.find("Next").unwrap()
         ));
     }

@@ -179,56 +179,6 @@ pub fn is_within_autodoc_block_ranges(ranges: &[crate::utils::skip_context::Byte
     crate::utils::skip_context::is_in_html_comment_ranges(ranges, position)
 }
 
-/// Check if content at a byte position is within an autodoc block (DEPRECATED: use detect_autodoc_block_ranges + is_within_autodoc_block_ranges)
-pub fn is_within_autodoc_block(content: &str, position: usize) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut byte_pos = 0;
-    let mut in_autodoc = false;
-    let mut autodoc_indent = 0;
-
-    for line in lines {
-        let line_end = byte_pos + line.len();
-
-        // Check if we're starting an autodoc block
-        if is_autodoc_marker(line) {
-            in_autodoc = true;
-            autodoc_indent = get_autodoc_indent(line).unwrap_or(0);
-            // Check if position is on the autodoc marker line itself
-            if byte_pos <= position && position <= line_end {
-                return true;
-            }
-        } else if in_autodoc {
-            // Check if we're still in autodoc options
-            if is_autodoc_options(line, autodoc_indent) {
-                // This line is part of autodoc options
-                if byte_pos <= position && position <= line_end {
-                    return true;
-                }
-            } else {
-                // Not part of options - check if this ends the block
-                // Completely empty lines (no indentation) don't end the block
-                if line.is_empty() {
-                    // Continue in autodoc
-                } else {
-                    // Non-option, non-empty line ends the autodoc block
-                    in_autodoc = false;
-                    autodoc_indent = 0;
-                    // If the position is on this line, it's NOT in the autodoc block
-                    // (since we just ended the block)
-                    if byte_pos <= position && position <= line_end {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        // Account for newline character
-        byte_pos = line_end + 1;
-    }
-
-    false
-}
-
 /// Check if a reference should be treated as a cross-reference (not a broken link)
 pub fn is_valid_crossref(ref_text: &str) -> bool {
     // Cross-references typically follow module.Class or module:function patterns
@@ -296,33 +246,6 @@ mod tests {
         // Test YAML list items
         assert!(is_autodoc_options("            - window", 0));
         assert!(is_autodoc_options("            - app", 0));
-    }
-
-    #[test]
-    fn test_within_autodoc_block() {
-        let content = r#"# API Documentation
-
-::: mymodule.MyClass
-    handler: python
-    options:
-      show_source: true
-      show_root_heading: true
-
-Regular text here.
-
-::: another.Class
-
-More text."#;
-
-        let handler_pos = content.find("handler:").unwrap();
-        let options_pos = content.find("show_source:").unwrap();
-        let regular_pos = content.find("Regular text").unwrap();
-        let more_pos = content.find("More text").unwrap();
-
-        assert!(is_within_autodoc_block(content, handler_pos));
-        assert!(is_within_autodoc_block(content, options_pos));
-        assert!(!is_within_autodoc_block(content, regular_pos));
-        assert!(!is_within_autodoc_block(content, more_pos));
     }
 
     #[test]
