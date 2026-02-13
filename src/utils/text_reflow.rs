@@ -1672,9 +1672,8 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
             if !prev_ends_at_sentence {
                 let prev = merged.last_mut().unwrap();
                 let combined = format!("{prev} {line}");
-                // Only merge if the combined line doesn't wildly exceed the limit
-                // (allow up to 10% overflow to avoid orphan words)
-                if display_len(&combined, length_mode) <= options.line_length + options.line_length / 10 {
+                // Only merge if the combined line fits within the limit
+                if display_len(&combined, length_mode) <= options.line_length {
                     *prev = combined;
                     continue;
                 }

@@ -4680,3 +4680,56 @@ fn test_autolink_exceeding_line_length_preserved() {
         "Autolink exceeding line length must remain intact. Got: {result:?}"
     );
 }
+
+// Issue #414: Semantic line breaks merge must not produce overlength lines
+#[test]
+fn test_semantic_merge_does_not_exceed_line_length() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    // Two sentences that individually fit in 80 chars but combined would exceed 80
+    // "First sentence here." = 20 chars, "And this is another sentence that fills up space." = 49 chars
+    // Combined with space = 70, which fits. But let's create one that would overflow at 110% but not at 100%.
+    let short = "Short sentence here.";
+    let long = "This is a somewhat longer sentence that pushes close to the limit of eighty chars.";
+    // short (20) + " " + long (82) = 103, which exceeds 80 but is within 88 (110%)
+    // With the fix, these should NOT be merged.
+    let input = format!("{short}\n{long}");
+    let result = reflow_markdown(&input, &options);
+
+    for line in result.lines() {
+        let len = line.len();
+        assert!(
+            len <= 80,
+            "Reflow produced line exceeding line_length (80): {len} chars: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_semantic_merge_short_trailing_at_exact_limit() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    // The merge step only applies to short trailing lines (< 30% of line_length = 24 chars).
+    // A long non-sentence-ending line + a short trailing fragment that together fit at limit.
+    let line1 = "This is a long line that fills up most of the available space and";
+    let line2 = "then merges";
+    assert!(line2.len() < 24, "Second line must be short enough to trigger merge");
+    assert!(line1.len() + 1 + line2.len() <= 80, "Combined must fit within limit");
+    let input = format!("{line1}\n{line2}");
+    let result = reflow_markdown(&input, &options);
+
+    // Should be merged into one line since trailing line is short and combined fits
+    let line_count = result.lines().count();
+    assert_eq!(
+        line_count, 1,
+        "Short trailing line at exact limit should be merged. Got {line_count} lines: {result:?}"
+    );
+}
