@@ -1157,6 +1157,7 @@ rumdl is used by these notable open source projects:
 rumdl is free and open source. If it saves you time, consider [sponsoring the project](https://github.com/sponsors/rvben).
 
 <!-- sponsors -->
+- [David Hewitt](https://github.com/davidhewitt)
 <!-- sponsors -->
 
 ## License
