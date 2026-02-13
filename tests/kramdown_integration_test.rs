@@ -950,6 +950,26 @@ fn test_kramdown_unclosed_fence_in_extension_does_not_leak_code_block_state() {
     );
 }
 
+#[test]
+fn test_kramdown_unclosed_fence_in_extension_does_not_suppress_list_rules() {
+    // A fence opened inside an extension block should not suppress list parsing
+    // for real markdown lines that follow the extension close.
+    let content = "{::comment}\ninside comment\n```\nunclosed fence\n{:/comment}\n\n- first\n* second\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Kramdown, None);
+
+    let rule = rumdl_lib::MD004UnorderedListStyle::default();
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert!(
+        !warnings.is_empty(),
+        "MD004 should detect mixed list marker styles after extension block with unclosed fence"
+    );
+    assert!(
+        warnings.iter().any(|w| w.line == 8),
+        "Expected MD004 warning on second list item line (line 8), got: {warnings:?}"
+    );
+}
+
 /// Comprehensive test: no rule should fire on content inside kramdown extension blocks.
 /// This test constructs markdown with many types of violations inside {::comment}
 /// and verifies that ALL rules skip the extension block content.

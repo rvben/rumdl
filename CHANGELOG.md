@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-02-13
+
+### Added
+
+- **Kramdown flavor**: Add kramdown/Jekyll markdown flavor support with block
+  IAL (`{:.class}`, `{:#id}`), span IAL, and extension block
+  (`{::comment}`, `{::nomarkdown}`, `{::options}`) detection. Enable with
+  `flavor = "kramdown"` or `flavor = "jekyll"`. MD041 skips IALs and
+  extension blocks as preamble; MD051 defaults to kramdown anchor style
+- **Config**: Add `extend-enable` and `extend-disable` global config keys
+  for additive rule activation, following Ruff's extend-select pattern.
+  Five rules are now opt-in by default: MD060, MD063, MD072, MD073, MD074.
+  Use `extend-enable = ["MD060"]` to enable individual opt-in rules without
+  overriding the full `enable` list
+
+### Fixed
+
+- **MD013**: Prevent reflow from splitting autolinks (`<https://...>`) at the
+  colon in URL schemes by treating them as atomic elements
+  ([#416](https://github.com/rvben/rumdl/issues/416),
+  [#417](https://github.com/rvben/rumdl/issues/417))
+- **MD013**: Prevent reflow from splitting inside markdown link text, code
+  spans, and HTML tag attributes by tracking element byte spans during
+  word-wrap fallback
+  ([#412](https://github.com/rvben/rumdl/issues/412),
+  [#413](https://github.com/rvben/rumdl/issues/413))
+- **MD013**: Thread `length-mode` (chars/visual/bytes) through all reflow
+  length calculations so CJK and other wide characters are measured correctly
+  ([#414](https://github.com/rvben/rumdl/issues/414))
+- **MD013**: Abbreviations like `e.g.` and `i.e.` inside parentheses no longer
+  trigger false sentence boundary detection in `sentence-per-line` mode
+  ([#422](https://github.com/rvben/rumdl/issues/422))
+- **MkDocs**: Track fenced code blocks inside admonitions to prevent false
+  `in_code_block` overrides that caused reflow corruption
+  ([#415](https://github.com/rvben/rumdl/issues/415))
+- **MD060**: Fix table formatter idempotency bug where ATX headings containing
+  pipe characters were misidentified as table rows and reformatted
+- **Kramdown**: Fix self-closing extension blocks (`{::options ... /}`)
+  incorrectly disabling linting for all subsequent lines
+- **Kramdown**: Fix extension fence leakage causing MD022 false positives
+
+### Changed
+
+- **Kramdown**: Add three-layer architectural filtering for extension blocks
+  (LineInfo sanitization, collection filtering, warning pipeline safety net)
+  so rules automatically skip kramdown extension blocks without per-rule
+  opt-in
+
 ## [0.1.18] - 2026-02-10
 
 ### Added

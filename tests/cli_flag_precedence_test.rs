@@ -290,3 +290,33 @@ fn test_flag_combinations() {
     assert!(!stdout.contains("MD013"), "MD013 should be disabled via extend-disable");
     assert!(!stdout.contains("MD033"), "MD033 should be disabled via --disable");
 }
+
+#[test]
+fn test_enable_overrides_config_extend_enable_all() {
+    let temp_dir = setup_test_file();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Config enables all rules, but explicit CLI --enable should override selection.
+    fs::write(base_path.join("rumdl.toml"), "[global]\nextend-enable = [\"ALL\"]\n").unwrap();
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "test.md", "--enable", "MD001", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    println!("Enable over extend-enable=ALL output: {stdout}");
+
+    assert!(stdout.contains("MD001"), "MD001 should be enabled");
+    assert!(
+        !stdout.contains("MD013"),
+        "MD013 should not be enabled when CLI --enable selects only MD001"
+    );
+    assert!(
+        !stdout.contains("MD033"),
+        "MD033 should not be enabled when CLI --enable selects only MD001"
+    );
+    assert!(!output.status.success(), "Command should fail due to MD001 violation");
+}

@@ -19,6 +19,12 @@ pub(super) fn compute_basic_line_info(
 ) -> (Vec<LineInfo>, Vec<EmphasisSpan>) {
     let mut lines = Vec::with_capacity(content_lines.len());
 
+    let extension_line_map = if flavor.supports_kramdown_syntax() {
+        Some(compute_kramdown_extension_line_map(content_lines))
+    } else {
+        None
+    };
+
     // Pre-compute which lines are in code blocks.
     //
     // Kramdown extension blocks are non-markdown regions. Fences inside them may cause
@@ -26,10 +32,9 @@ pub(super) fn compute_basic_line_info(
     // unclosed inside the extension block. Filter out code blocks that start inside
     // extension blocks so post-block lines are not incorrectly marked as code.
     let filtered_code_blocks;
-    let code_blocks_for_map = if flavor.supports_kramdown_syntax() {
-        let extension_line_map = compute_kramdown_extension_line_map(content_lines);
+    let code_blocks_for_map = if let Some(extension_line_map) = &extension_line_map {
         filtered_code_blocks =
-            filter_code_blocks_starting_in_extension_blocks(content, line_offsets, code_blocks, &extension_line_map);
+            filter_code_blocks_starting_in_extension_blocks(content, line_offsets, code_blocks, extension_line_map);
         filtered_code_blocks.as_slice()
     } else {
         code_blocks
@@ -40,9 +45,25 @@ pub(super) fn compute_basic_line_info(
     // Pre-compute which lines are in math blocks ($$ ... $$)
     let math_block_map = compute_math_block_line_map(content_lines, &code_block_map);
 
+    // Run pulldown on a masked view of kramdown extension-block lines so parser state
+    // from non-Markdown regions (like unclosed fences) can't leak into real Markdown.
+    // The masked content preserves byte length and newline positions for offset stability.
+    let pulldown_content;
+    let pulldown_input = if let Some(extension_line_map) = &extension_line_map {
+        pulldown_content = mask_kramdown_extension_lines(content, line_offsets, extension_line_map);
+        pulldown_content.as_str()
+    } else {
+        content
+    };
+
     // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
-    let (list_item_map, emphasis_spans) =
-        detect_list_items_and_emphasis_with_pulldown(content, line_offsets, flavor, front_matter_end, code_blocks);
+    let (list_item_map, emphasis_spans) = detect_list_items_and_emphasis_with_pulldown(
+        pulldown_input,
+        line_offsets,
+        flavor,
+        front_matter_end,
+        code_blocks_for_map,
+    );
 
     for (i, line) in content_lines.iter().enumerate() {
         let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
@@ -167,6 +188,42 @@ fn compute_kramdown_extension_line_map(content_lines: &[&str]) -> Vec<bool> {
     }
 
     extension_lines
+}
+
+/// Replace every non-newline byte on kramdown extension-block lines with spaces.
+///
+/// This preserves byte length and line offsets while preventing pulldown-cmark from
+/// interpreting extension-block contents as real Markdown.
+fn mask_kramdown_extension_lines(content: &str, line_offsets: &[usize], extension_line_map: &[bool]) -> String {
+    let mut masked = content.as_bytes().to_vec();
+
+    for (line_idx, in_extension) in extension_line_map.iter().enumerate() {
+        if !in_extension {
+            continue;
+        }
+
+        let Some(start) = line_offsets.get(line_idx).copied() else {
+            continue;
+        };
+        let end = line_offsets
+            .get(line_idx + 1)
+            .copied()
+            .unwrap_or(content.len())
+            .min(content.len());
+        if start >= end || start >= masked.len() {
+            continue;
+        }
+        let end = end.min(masked.len());
+
+        for b in &mut masked[start..end] {
+            if *b != b'\n' && *b != b'\r' {
+                *b = b' ';
+            }
+        }
+    }
+
+    // Replacing bytes with ASCII space preserves UTF-8 validity.
+    String::from_utf8(masked).expect("masked kramdown content should remain valid UTF-8")
 }
 
 /// Remove parser-reported code blocks that begin inside kramdown extension blocks.

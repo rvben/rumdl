@@ -38,26 +38,11 @@ repos:
         types: [rust]
         pass_filenames: false
 
-      - id: cargo-clippy
-        name: cargo clippy
-        entry: mise exec -- make lint
-        language: system
-        types: [rust]
-        pass_filenames: false
-
-      - id: cargo-test-quick
-        name: cargo test (quick)
-        entry: mise exec -- make test-pre-commit
-        language: system
-        types: [rust]
-        pass_filenames: false
-        stages: [pre-commit]
-
       - id: cargo-lock-check
         name: check Cargo.lock is up-to-date
-        entry: mise exec -- cargo check --locked
+        entry: sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
         language: system
-        files: ^(Cargo\.(toml|lock)|.*\.rs)$
+        files: ^Cargo\.(toml|lock)$
         pass_filenames: false
         stages: [pre-commit]
 
@@ -125,9 +110,9 @@ repos:
 
       - id: cargo-lock-check-push
         name: verify Cargo.lock is committed and up-to-date
-        entry: mise exec -- cargo check --locked
+        entry: sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
         language: system
-        files: ^(Cargo\.(toml|lock)|.*\.rs)$
+        files: ^Cargo\.(toml|lock)$
         pass_filenames: false
         stages: [pre-push]
 

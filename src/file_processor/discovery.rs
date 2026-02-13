@@ -42,6 +42,61 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
     let cli_extend_enable_set: Option<HashSet<String>> = args.extend_enable.as_deref().map(resolve_rule_names);
     let cli_extend_disable_set: Option<HashSet<String>> = args.extend_disable.as_deref().map(resolve_rule_names);
 
+    // CLI --enable acts like Ruff --select: explicit selection overrides config
+    // rule selection, including config `enable` and config `extend-enable`.
+    // CLI extend flags remain additive/subtractive within this explicit scope.
+    if let Some(enabled_cli) = &cli_enable_set {
+        let cli_enable_all = enabled_cli.iter().any(|v| v.eq_ignore_ascii_case("all"));
+        let cli_extend_enable_all = cli_extend_enable_set
+            .as_ref()
+            .is_some_and(|s| s.iter().any(|v| v.eq_ignore_ascii_case("all")));
+        let cli_extend_disable_all = cli_extend_disable_set
+            .as_ref()
+            .is_some_and(|s| s.iter().any(|v| v.eq_ignore_ascii_case("all")));
+
+        let mut current_rules = if cli_enable_all || cli_extend_enable_all {
+            all_rules
+        } else {
+            all_rules
+                .into_iter()
+                .filter(|rule| enabled_cli.contains(rule.name()))
+                .collect::<Vec<_>>()
+        };
+
+        if !cli_extend_enable_all && let Some(extend_enabled_cli) = &cli_extend_enable_set {
+            let already_enabled: HashSet<&str> = current_rules.iter().map(|r| r.name()).collect();
+            let additional: Vec<Box<dyn Rule>> = rumdl_lib::rules::all_rules(config)
+                .into_iter()
+                .filter(|rule| extend_enabled_cli.contains(rule.name()) && !already_enabled.contains(rule.name()))
+                .collect();
+            current_rules.extend(additional);
+        }
+
+        if cli_extend_disable_all {
+            current_rules.clear();
+        } else {
+            if let Some(extend_disabled_cli) = &cli_extend_disable_set {
+                current_rules.retain(|rule| !extend_disabled_cli.contains(rule.name()));
+            }
+            if let Some(disabled_cli) = &cli_disable_set {
+                current_rules.retain(|rule| !disabled_cli.contains(rule.name()));
+            }
+        }
+
+        final_rules = current_rules;
+
+        // 4. Print enabled rules if verbose
+        if args.verbose {
+            println!("Enabled rules:");
+            for rule in &final_rules {
+                println!("  - {} ({})", rule.name(), rule.description());
+            }
+            println!();
+        }
+
+        return final_rules;
+    }
+
     // Config file settings (resolved to canonical IDs)
     let config_enable_set: HashSet<String> = config.global.enable.iter().map(|s| resolve_rule_name(s)).collect();
     let config_disable_set: HashSet<String> = config.global.disable.iter().map(|s| resolve_rule_name(s)).collect();
@@ -73,25 +128,15 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         combined_extend_disable.extend(cli_ed.iter().cloned());
     }
 
-    let cli_enable_all = cli_enable_set
-        .as_ref()
-        .is_some_and(|s| s.iter().any(|v| v.eq_ignore_ascii_case("all")));
-
     // Check for "ALL" keyword in extend-enable (case-insensitive)
     let extend_enable_all = combined_extend_enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
     // Check for "all" keyword in extend-disable (case-insensitive)
     let extend_disable_all = combined_extend_disable.iter().any(|s| s.eq_ignore_ascii_case("all"));
 
     // Step 1: Determine the base rule set
-    let mut current_rules = if cli_enable_all || extend_enable_all {
-        // CLI --enable ALL or extend-enable: ["ALL"] → all rules including opt-in
+    let mut current_rules = if extend_enable_all {
+        // extend-enable: ["ALL"] → all rules including opt-in
         all_rules
-    } else if let Some(enabled_cli) = &cli_enable_set {
-        // CLI --enable with specific rules
-        all_rules
-            .into_iter()
-            .filter(|rule| enabled_cli.contains(rule.name()))
-            .collect::<Vec<_>>()
     } else if config_enable_all {
         // enable: ["ALL"] → all rules including opt-in
         all_rules
