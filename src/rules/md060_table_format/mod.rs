@@ -564,6 +564,49 @@ impl MD060TableFormat {
             }
         }
 
+        // Check 5: Content padding distribution matches column alignment
+        // For center-aligned columns, content must be centered (left/right padding differ by at most 1)
+        // For right-aligned columns, content must be right-aligned (left padding >= right padding)
+        // Padding is counted in space characters (always 1 byte each), so byte-length arithmetic is safe.
+        if let Some(delimiter_row) = parsed.get(1) {
+            let alignments = Self::parse_column_alignments(delimiter_row);
+            for (col_idx, alignment) in alignments.iter().enumerate() {
+                if *alignment == ColumnAlignment::Left {
+                    continue;
+                }
+                for (row_idx, row) in parsed.iter().enumerate() {
+                    // Skip delimiter row
+                    if row_idx == 1 {
+                        continue;
+                    }
+                    if let Some(cell) = row.get(col_idx) {
+                        if cell.trim().is_empty() {
+                            continue;
+                        }
+                        // Count leading/trailing space characters (always ASCII, so byte length = char count)
+                        let left_pad = cell.len() - cell.trim_start().len();
+                        let right_pad = cell.len() - cell.trim_end().len();
+
+                        match alignment {
+                            ColumnAlignment::Center => {
+                                // Center: left and right padding must differ by at most 1
+                                if left_pad.abs_diff(right_pad) > 1 {
+                                    return false;
+                                }
+                            }
+                            ColumnAlignment::Right => {
+                                // Right: content pushed right means more padding on the left
+                                if left_pad < right_pad {
+                                    return false;
+                                }
+                            }
+                            ColumnAlignment::Left => unreachable!(),
+                        }
+                    }
+                }
+            }
+        }
+
         true
     }
 

@@ -2913,3 +2913,99 @@ fn test_md060_heading_adjacent_to_table_not_absorbed() {
         "Heading must not be reformatted, got: {fixed:?}"
     );
 }
+
+// Issue #426: Center-aligned delimiter with left-aligned content should trigger reformatting
+#[test]
+fn test_md060_center_aligned_delimiter_triggers_reformatting() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table where delimiter says center but content is left-aligned
+    let content = "| Header  |\n|:-------:|\n| content |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // Should warn because content is not centered despite center-aligned delimiter
+    assert!(
+        !warnings.is_empty(),
+        "Center-aligned delimiter with left-aligned content should trigger a warning"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // After fix, content should be centered
+    let lines: Vec<&str> = fixed.lines().collect();
+    let content_line = lines[2];
+    // The cell should have balanced padding (center-aligned)
+    let trimmed = content_line.trim_start_matches('|');
+    let cell = trimmed.split('|').next().unwrap();
+    let left_spaces = cell.len() - cell.trim_start().len();
+    let right_spaces = cell.len() - cell.trim_end().len();
+    let diff = left_spaces.abs_diff(right_spaces);
+    assert!(
+        diff <= 1,
+        "Center-aligned content should have balanced padding (diff={diff}): {fixed:?}"
+    );
+}
+
+#[test]
+fn test_md060_right_aligned_delimiter_triggers_reformatting() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table where delimiter says right but content is left-aligned
+    let content = "| Header |\n| ------:|\n| data   |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert!(
+        !warnings.is_empty(),
+        "Right-aligned delimiter with left-aligned content should trigger a warning"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // After fix, content should be right-aligned
+    let lines: Vec<&str> = fixed.lines().collect();
+    let content_line = lines[2];
+    let trimmed = content_line.trim_start_matches('|');
+    let cell = trimmed.split('|').next().unwrap();
+    let left_spaces = cell.len() - cell.trim_start().len();
+    let right_spaces = cell.len() - cell.trim_end().len();
+    assert!(
+        left_spaces >= right_spaces,
+        "Right-aligned content should have left_pad >= right_pad (left={left_spaces}, right={right_spaces}): {fixed:?}"
+    );
+}
+
+#[test]
+fn test_md060_already_centered_content_passes() {
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    // Table with centered content that matches center alignment
+    let content = "| Header  |\n|:-------:|\n| content |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Run check on the fixed output - should have no warnings
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Already-centered content should not trigger warnings. Fixed content:\n{fixed}\nWarnings: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_md060_center_aligned_hyphen_content() {
+    // The reported case from issue #426: content with hyphens in center-aligned column
+    let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+    let content = "| Name   | Value |\n|:------:|:-----:|\n| alpha  | one   |\n| beta-2 | two   |\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Verify the fix is idempotent (re-fixing doesn't change anything)
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert_eq!(
+        fixed, fixed2,
+        "Center alignment fix should be idempotent.\nFirst fix:\n{fixed}\nSecond fix:\n{fixed2}"
+    );
+}
