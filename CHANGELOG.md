@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-02-13
+
+### Added
+
+- **Config**: Add `extends` key for config file inheritance — config files can
+  declare a base config to inherit from, with child settings merging on top.
+  Supports relative paths, absolute paths, `~/` expansion, recursive chains
+  (up to 10 levels), and circular reference detection. Works in both
+  `.rumdl.toml` and `pyproject.toml` ([#390](https://github.com/rvben/rumdl/issues/390))
+- **Code block tools**: Detect fenced code blocks inside MkDocs admonitions
+  and tab containers ([#423](https://github.com/rvben/rumdl/issues/423))
+
+### Fixed
+
+- **MD013**: Detect mkdocstrings autodoc blocks regardless of flavor setting
+  ([#396](https://github.com/rvben/rumdl/issues/396))
+- **MD013**: Enforce strict line-length limit in semantic-line-breaks merge
+  ([#414](https://github.com/rvben/rumdl/issues/414))
+- **MD060**: Detect misaligned content in center/right-aligned table columns
+  ([#426](https://github.com/rvben/rumdl/issues/426))
+
+### Changed
+
+- **Config**: `disable` now uses replace semantics (matching Ruff's `ignore`),
+  giving `extend-disable` a distinct purpose as the additive variant that
+  survives CLI overrides. Document the rule selection model with
+  `extend-enable` / `extend-disable` in global settings
+
 ## [0.1.19] - 2026-02-13
 
 ### Added
