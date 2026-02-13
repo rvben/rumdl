@@ -11,16 +11,28 @@ use super::types::ConfigError;
 use super::validation::to_relative_display_path;
 
 /// Parses pyproject.toml content and extracts the [tool.rumdl] section if present.
-pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<SourcedConfigFragment>, ConfigError> {
+pub(super) fn parse_pyproject_toml(
+    content: &str,
+    path: &str,
+    source: ConfigSource,
+) -> Result<Option<SourcedConfigFragment>, ConfigError> {
     let display_path = to_relative_display_path(path);
     let doc: toml::Value = toml::from_str(content)
         .map_err(|e| ConfigError::ParseError(format!("{display_path}: Failed to parse TOML: {e}")))?;
     let mut fragment = SourcedConfigFragment::default();
-    let source = ConfigSource::PyprojectToml;
     let file = Some(path.to_string());
 
     // Use the lazily-initialized default registry for alias resolution and schema validation
     let registry = super::registry::default_registry();
+
+    // Parse `extends` from [tool.rumdl] level
+    if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
+        && let Some(rumdl_table) = rumdl_config.as_table()
+        && let Some(extends_val) = rumdl_table.get("extends")
+        && let Ok(extends_str) = String::deserialize(extends_val.clone())
+    {
+        fragment.extends = Some(extends_str);
+    }
 
     // 1. Handle [tool.rumdl] and [tool.rumdl.global] sections
     if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
@@ -303,6 +315,7 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
                 "extend_enable",
                 "extend-disable",
                 "extend_disable",
+                "extends",
             ]
             .contains(&norm_rule_key.as_str());
 
@@ -459,7 +472,8 @@ pub(super) fn parse_pyproject_toml(content: &str, path: &str) -> Result<Option<S
     }
 
     // Only return Some(fragment) if any config was found
-    let has_any = !fragment.global.enable.value.is_empty()
+    let has_any = fragment.extends.is_some()
+        || !fragment.global.enable.value.is_empty()
         || !fragment.global.disable.value.is_empty()
         || !fragment.global.extend_enable.value.is_empty()
         || !fragment.global.extend_disable.value.is_empty()
@@ -489,6 +503,14 @@ pub(super) fn parse_rumdl_toml(
     let mut fragment = SourcedConfigFragment::default();
     // source parameter provided by caller
     let file = Some(path.to_string());
+
+    // Parse top-level `extends` key (not inside any section)
+    if let Some(extends_item) = doc.get("extends")
+        && let Some(extends_val) = extends_item.as_value()
+        && let Some(extends_str) = extends_val.as_str()
+    {
+        fragment.extends = Some(extends_str.to_string());
+    }
 
     // Use the lazily-initialized default registry for alias resolution and schema validation
     let registry = super::registry::default_registry();
@@ -829,8 +851,13 @@ pub(super) fn parse_rumdl_toml(
 
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
-        // Skip known special sections
-        if key == "global" || key == "per-file-ignores" || key == "per-file-flavor" || key == "code-block-tools" {
+        // Skip known special sections and top-level keys
+        if key == "global"
+            || key == "per-file-ignores"
+            || key == "per-file-flavor"
+            || key == "code-block-tools"
+            || key == "extends"
+        {
             continue;
         }
 

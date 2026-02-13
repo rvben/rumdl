@@ -11,6 +11,7 @@ Global settings are configured in the `[global]` section of your configuration f
 
 | Setting                                   | Type       | Default        | Description                               |
 | ----------------------------------------- | ---------- | -------------- | ----------------------------------------- |
+| [`extends`](#extends)                     | `string`   | not set        | Inherit settings from another config file |
 | [`enable`](#enable)                       | `string[]` | not set        | Enable only specific rules                |
 | [`disable`](#disable)                     | `string[]` | `[]`           | Disable specific rules                    |
 | [`extend-enable`](#extend-enable)         | `string[]` | `[]`           | Additional rules to enable (additive)     |
@@ -188,6 +189,81 @@ disable = ["MD013", "MD033"]
 ```
 
 ## Detailed Settings Reference
+
+### `extends`
+
+**Type**: `string`
+**Default**: not set
+**CLI Equivalent**: None (configuration file only)
+
+Specifies a base configuration file to inherit settings from. The current config file's settings are merged on top of the base config.
+
+This is a **top-level key** (not inside `[global]`).
+
+**In `.rumdl.toml`:**
+
+```toml
+extends = "../base.rumdl.toml"
+
+[global]
+disable = ["MD013"]
+```
+
+**In `pyproject.toml`:**
+
+```toml
+[tool.rumdl]
+extends = "../.rumdl.toml"
+
+[tool.rumdl.global]
+disable = ["MD013"]
+```
+
+**Path Resolution**:
+
+- Relative paths are resolved relative to the config file's directory (not the working directory)
+- `~/` prefix expands to the user's home directory
+- Absolute paths are used as-is
+- The extended file can be `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml`
+
+**Merge Behavior**:
+
+When config B extends config A:
+
+- **Replace fields** (`enable`, `disable`, `line-length`, `flavor`, `exclude`, etc.): B's value replaces A's if B specifies it
+- **Union fields** (`extend-enable`, `extend-disable`): B's values accumulate with A's
+- **Unspecified fields**: A's values are kept
+- **Rule-specific settings**: B's `[MD007]` overrides A's `[MD007]` (per-key)
+
+**Chains**:
+
+Configs can chain: A extends B extends C. The base config is loaded first recursively, then each child merges on top. Maximum chain depth is 10.
+
+**Circular Detection**:
+
+Circular references (A extends B extends A) are detected and produce a clear error.
+
+**Common Patterns**:
+
+**Subdirectory override:**
+
+```toml
+# docs/.rumdl.toml — relaxed rules for documentation
+extends = "../.rumdl.toml"
+
+[global]
+extend-disable = ["MD013"]
+```
+
+**Shared base config:**
+
+```toml
+# .rumdl.toml in each project
+extends = "~/.config/rumdl/base.rumdl.toml"
+
+[global]
+disable = ["MD033"]
+```
 
 ### `enable`
 

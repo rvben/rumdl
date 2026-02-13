@@ -176,6 +176,7 @@ mod tests {
 
         // Create project config fragment
         let mut project_fragment = SourcedConfigFragment {
+            extends: None,
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
@@ -189,8 +190,9 @@ mod tests {
         // Merge project config
         config.merge(project_fragment);
 
-        // Disable should be union: MD013, MD041 (user) + MD047 (project)
-        assert_vec_eq(&config.global.disable.value, &["MD013", "MD041", "MD047"]);
+        // Disable uses replace semantics (matching Ruff's `ignore`):
+        // project's disable replaces user's disable
+        assert_vec_eq(&config.global.disable.value, &["MD047"]);
 
         // Enable should be replaced: MD001 (project only)
         assert_vec_eq(&config.global.enable.value, &["MD001"]);
@@ -207,6 +209,7 @@ mod tests {
 
         // Project config enables MD013 (conflict!)
         let mut project_fragment = SourcedConfigFragment {
+            extends: None,
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),
@@ -273,6 +276,7 @@ mod tests {
 
         // Project config has empty enable (no rules explicitly enabled)
         let project_fragment = SourcedConfigFragment {
+            extends: None,
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(Default::default(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(Default::default(), ConfigSource::Default),

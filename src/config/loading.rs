@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use super::flavor::ConfigLoaded;
@@ -12,6 +12,139 @@ use super::source_tracking::{
 };
 use super::types::{Config, ConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RuleConfig};
 use super::validation::validate_config_sourced_internal;
+
+/// Maximum depth for extends chains to prevent runaway recursion
+const MAX_EXTENDS_DEPTH: usize = 10;
+
+/// Resolve an `extends` path relative to the config file that contains it.
+///
+/// - `~/` prefix: expanded to home directory
+/// - Relative paths: resolved against the config file's parent directory
+/// - Absolute paths: used as-is
+fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<PathBuf, ConfigError> {
+    let path = if extends_value.starts_with("~/") {
+        // Expand tilde to home directory
+        #[cfg(feature = "native")]
+        {
+            use etcetera::{BaseStrategy, choose_base_strategy};
+            let home = choose_base_strategy()
+                .map(|s| s.home_dir().to_path_buf())
+                .unwrap_or_else(|_| PathBuf::from("~"));
+            home.join(&extends_value[2..])
+        }
+        #[cfg(not(feature = "native"))]
+        {
+            // WASM: no home directory support
+            PathBuf::from(extends_value)
+        }
+    } else {
+        let path = PathBuf::from(extends_value);
+        if path.is_absolute() {
+            path
+        } else {
+            // Resolve relative to config file's directory
+            let config_dir = config_file_path.parent().unwrap_or(Path::new("."));
+            config_dir.join(extends_value)
+        }
+    };
+
+    Ok(path)
+}
+
+/// Determine ConfigSource from a config filename.
+fn source_from_filename(filename: &str) -> ConfigSource {
+    if filename == "pyproject.toml" {
+        ConfigSource::PyprojectToml
+    } else {
+        ConfigSource::ProjectConfig
+    }
+}
+
+/// Load a config file (and any base configs it extends) into a SourcedConfig.
+///
+/// This function handles the recursive `extends` chain:
+/// 1. Parse the config file into a fragment
+/// 2. If the fragment has `extends`, recursively load the base config first
+/// 3. Merge the base config, then merge this fragment on top
+fn load_config_with_extends(
+    sourced_config: &mut SourcedConfig<ConfigLoaded>,
+    config_file_path: &Path,
+    visited: &mut HashSet<PathBuf>,
+    chain_source: ConfigSource,
+) -> Result<(), ConfigError> {
+    // Canonicalize the path for circular reference detection
+    let canonical = config_file_path
+        .canonicalize()
+        .unwrap_or_else(|_| config_file_path.to_path_buf());
+
+    // Check for circular references
+    if visited.contains(&canonical) {
+        let chain: Vec<String> = visited.iter().map(|p| p.display().to_string()).collect();
+        return Err(ConfigError::CircularExtends {
+            path: config_file_path.display().to_string(),
+            chain,
+        });
+    }
+
+    // Check depth limit
+    if visited.len() >= MAX_EXTENDS_DEPTH {
+        return Err(ConfigError::ExtendsDepthExceeded {
+            path: config_file_path.display().to_string(),
+            max_depth: MAX_EXTENDS_DEPTH,
+        });
+    }
+
+    // Mark as visited
+    visited.insert(canonical);
+
+    let path_str = config_file_path.display().to_string();
+    let filename = config_file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+    // Read and parse the config file
+    let content = std::fs::read_to_string(config_file_path).map_err(|e| ConfigError::IoError {
+        source: e,
+        path: path_str.clone(),
+    })?;
+
+    let fragment = if filename == "pyproject.toml" {
+        match parsers::parse_pyproject_toml(&content, &path_str, chain_source)? {
+            Some(f) => f,
+            None => return Ok(()), // No [tool.rumdl] section
+        }
+    } else {
+        parsers::parse_rumdl_toml(&content, &path_str, chain_source)?
+    };
+
+    // If this fragment has `extends`, load the base config first
+    if let Some(ref extends_value) = fragment.extends {
+        let base_path = resolve_extends_path(extends_value, config_file_path)?;
+
+        if !base_path.exists() {
+            return Err(ConfigError::ExtendsNotFound {
+                path: base_path.display().to_string(),
+                from: path_str.clone(),
+            });
+        }
+
+        log::debug!(
+            "[rumdl-config] Config {} extends {}, loading base first",
+            path_str,
+            base_path.display()
+        );
+
+        // Recursively load the base config
+        load_config_with_extends(sourced_config, &base_path, visited, chain_source)?;
+    }
+
+    // Merge this fragment on top (base config was already merged if present)
+    // Strip the `extends` field since it's been consumed
+    let mut fragment_for_merge = fragment;
+    fragment_for_merge.extends = None;
+    sourced_config.merge(fragment_for_merge);
+    sourced_config.loaded_files.push(path_str);
+
+    Ok(())
+}
 
 impl SourcedConfig<ConfigLoaded> {
     /// Merges another SourcedConfigFragment into this SourcedConfig.
@@ -513,39 +646,25 @@ impl SourcedConfig<ConfigLoaded> {
         const MARKDOWNLINT_FILENAMES: &[&str] = &[".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml"];
 
         if filename == "pyproject.toml" || filename == ".rumdl.toml" || filename == "rumdl.toml" {
-            let content = std::fs::read_to_string(path).map_err(|e| ConfigError::IoError {
-                source: e,
-                path: path_str.clone(),
-            })?;
-            if filename == "pyproject.toml" {
-                if let Some(fragment) = parsers::parse_pyproject_toml(&content, &path_str)? {
-                    sourced_config.merge(fragment);
-                    sourced_config.loaded_files.push(path_str);
-                }
-            } else {
-                let fragment = parsers::parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
-                sourced_config.merge(fragment);
-                sourced_config.loaded_files.push(path_str);
-            }
+            // Use extends-aware loading for rumdl TOML configs
+            let mut visited = HashSet::new();
+            let chain_source = source_from_filename(filename);
+            load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
         } else if MARKDOWNLINT_FILENAMES.contains(&filename)
             || path_str.ends_with(".json")
             || path_str.ends_with(".jsonc")
             || path_str.ends_with(".yaml")
             || path_str.ends_with(".yml")
         {
-            // Parse as markdownlint config (JSON/YAML)
+            // Parse as markdownlint config (JSON/YAML) - no extends support
             let fragment = parsers::load_from_markdownlint(&path_str)?;
             sourced_config.merge(fragment);
             sourced_config.loaded_files.push(path_str);
         } else {
-            // Try TOML only
-            let content = std::fs::read_to_string(path).map_err(|e| ConfigError::IoError {
-                source: e,
-                path: path_str.clone(),
-            })?;
-            let fragment = parsers::parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
-            sourced_config.merge(fragment);
-            sourced_config.loaded_files.push(path_str);
+            // Try TOML with extends support
+            let mut visited = HashSet::new();
+            let chain_source = source_from_filename(filename);
+            load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
         }
 
         Ok(())
@@ -564,28 +683,18 @@ impl SourcedConfig<ConfigLoaded> {
 
         if let Some(user_config_path) = user_config_path {
             let path_str = user_config_path.display().to_string();
-            let filename = user_config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             log::debug!("[rumdl-config] Loading user config as fallback: {path_str}");
 
-            if filename == "pyproject.toml" {
-                let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                    source: e,
-                    path: path_str.clone(),
-                })?;
-                if let Some(fragment) = parsers::parse_pyproject_toml(&content, &path_str)? {
-                    sourced_config.merge(fragment);
-                    sourced_config.loaded_files.push(path_str);
-                }
-            } else {
-                let content = std::fs::read_to_string(&user_config_path).map_err(|e| ConfigError::IoError {
-                    source: e,
-                    path: path_str.clone(),
-                })?;
-                let fragment = parsers::parse_rumdl_toml(&content, &path_str, ConfigSource::UserConfig)?;
-                sourced_config.merge(fragment);
-                sourced_config.loaded_files.push(path_str);
-            }
+            // User config fallback also supports extends chains.
+            // Use a uniform source across the chain so child overrides are determined by chain order.
+            let mut visited = HashSet::new();
+            load_config_with_extends(
+                sourced_config,
+                &user_config_path,
+                &mut visited,
+                ConfigSource::UserConfig,
+            )?;
         } else {
             log::debug!("[rumdl-config] No user configuration file found");
         }
@@ -632,32 +741,16 @@ impl SourcedConfig<ConfigLoaded> {
             // Try to discover project config first
             if let Some((config_file, project_root)) = Self::discover_config_upward() {
                 // Project config found - use ONLY this (standalone, no user config)
-                let path_str = config_file.display().to_string();
-                let filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                log::debug!("[rumdl-config] Found project config: {path_str}");
+                log::debug!("[rumdl-config] Found project config: {}", config_file.display());
                 log::debug!("[rumdl-config] Project root: {}", project_root.display());
 
                 sourced_config.project_root = Some(project_root);
 
-                if filename == "pyproject.toml" {
-                    let content = std::fs::read_to_string(&config_file).map_err(|e| ConfigError::IoError {
-                        source: e,
-                        path: path_str.clone(),
-                    })?;
-                    if let Some(fragment) = parsers::parse_pyproject_toml(&content, &path_str)? {
-                        sourced_config.merge(fragment);
-                        sourced_config.loaded_files.push(path_str);
-                    }
-                } else if filename == ".rumdl.toml" || filename == "rumdl.toml" {
-                    let content = std::fs::read_to_string(&config_file).map_err(|e| ConfigError::IoError {
-                        source: e,
-                        path: path_str.clone(),
-                    })?;
-                    let fragment = parsers::parse_rumdl_toml(&content, &path_str, ConfigSource::ProjectConfig)?;
-                    sourced_config.merge(fragment);
-                    sourced_config.loaded_files.push(path_str);
-                }
+                // Use extends-aware loading for discovered configs
+                let mut visited = HashSet::new();
+                let root_filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let chain_source = source_from_filename(root_filename);
+                load_config_with_extends(&mut sourced_config, &config_file, &mut visited, chain_source)?;
             } else {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");

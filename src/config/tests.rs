@@ -1597,6 +1597,63 @@ line-length = 88
 }
 
 #[test]
+fn test_user_config_fallback_supports_extends() {
+    // User fallback config should support extends chains
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // Create a fake user config directory
+    let user_config_dir = temp_dir.path().join("user_config");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+
+    // Base config in user config directory
+    let base_config_path = rumdl_config_dir.join("base.toml");
+    fs::write(
+        &base_config_path,
+        r#"
+[global]
+disable = ["MD013"]
+line-length = 92
+"#,
+    )
+    .unwrap();
+
+    // User fallback config extends base config
+    let user_config_path = rumdl_config_dir.join("rumdl.toml");
+    fs::write(
+        &user_config_path,
+        r#"extends = "base.toml"
+
+[global]
+extend-disable = ["MD033"]
+"#,
+    )
+    .unwrap();
+
+    // Create a project directory WITHOUT any config
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+
+    // Change to project directory
+    env::set_current_dir(&project_dir).unwrap();
+
+    // Load config - should use user config as fallback and resolve extends
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Inherited from base config
+    assert!(config.global.disable.contains(&"MD013".to_string()));
+    assert_eq!(config.global.line_length.get(), 92);
+    // Added by child fallback config
+    assert!(config.global.extend_disable.contains(&"MD033".to_string()));
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[test]
 fn test_typestate_validate_method() {
     use tempfile::tempdir;
 
@@ -2176,4 +2233,562 @@ enable = ["MD001", "MD003"]
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(config.global.enable.len(), 2);
+}
+
+// ==================== extends tests ====================
+
+#[test]
+fn test_extends_basic_inheritance() {
+    // Parent config disables MD013, child extends it without overriding disable
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013"]
+line-length = 120
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+extend-disable = ["MD036"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Parent's disable should be inherited
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "Parent's disable should be inherited"
+    );
+    // Child's extend-disable should be present
+    assert!(
+        config.global.extend_disable.contains(&"MD036".to_string()),
+        "Child's extend-disable should be present"
+    );
+    // Parent's line-length should be inherited
+    assert_eq!(config.global.line_length.get(), 120);
+}
+
+#[test]
+fn test_extends_child_overrides_parent() {
+    // Child explicitly sets disable, which replaces parent's disable
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013", "MD033"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+disable = ["MD041"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Child's disable replaces parent's
+    assert_eq!(config.global.disable, vec!["MD041".to_string()]);
+}
+
+#[test]
+fn test_extends_additive_extend_enable() {
+    // Both parent and child have extend-enable — values should accumulate
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+extend-enable = ["MD060"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+extend-enable = ["MD063"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Both extend-enable values should be present (union semantics)
+    assert!(
+        config.global.extend_enable.contains(&"MD060".to_string()),
+        "Parent's extend-enable should be preserved"
+    );
+    assert!(
+        config.global.extend_enable.contains(&"MD063".to_string()),
+        "Child's extend-enable should be added"
+    );
+}
+
+#[test]
+fn test_extends_chain_three_levels() {
+    // A extends B extends C — all three contribute settings
+    let temp_dir = tempdir().unwrap();
+
+    let grandparent_path = temp_dir.path().join("grandparent.toml");
+    fs::write(
+        &grandparent_path,
+        r#"
+[global]
+line-length = 80
+extend-enable = ["MD060"]
+"#,
+    )
+    .unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+extend-enable = ["MD063"]
+"#,
+            grandparent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+extend-disable = ["MD013"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Grandparent's line-length should be inherited through chain
+    assert_eq!(config.global.line_length.get(), 80);
+    // Both grandparent and parent's extend-enable should accumulate
+    assert!(config.global.extend_enable.contains(&"MD060".to_string()));
+    assert!(config.global.extend_enable.contains(&"MD063".to_string()));
+    // Child's extend-disable
+    assert!(config.global.extend_disable.contains(&"MD013".to_string()));
+}
+
+#[test]
+fn test_extends_circular_detection() {
+    // A extends B, B extends A → should error
+    let temp_dir = tempdir().unwrap();
+
+    let a_path = temp_dir.path().join("a.toml");
+    let b_path = temp_dir.path().join("b.toml");
+
+    fs::write(
+        &a_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+disable = ["MD013"]
+"#,
+            b_path.display()
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        &b_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+disable = ["MD033"]
+"#,
+            a_path.display()
+        ),
+    )
+    .unwrap();
+
+    let result = SourcedConfig::load_with_discovery(Some(a_path.to_str().unwrap()), None, true);
+    assert!(result.is_err(), "Circular extends should produce an error");
+    let err = result.unwrap_err();
+    let err_msg = err.to_string();
+    assert!(
+        err_msg.contains("Circular extends") || err_msg.contains("circular"),
+        "Error should mention circular: {err_msg}"
+    );
+}
+
+#[test]
+fn test_extends_self_reference() {
+    // A extends A → circular error
+    let temp_dir = tempdir().unwrap();
+
+    let a_path = temp_dir.path().join("a.toml");
+    fs::write(
+        &a_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+disable = ["MD013"]
+"#,
+            a_path.display()
+        ),
+    )
+    .unwrap();
+
+    let result = SourcedConfig::load_with_discovery(Some(a_path.to_str().unwrap()), None, true);
+    assert!(result.is_err(), "Self-referencing extends should produce an error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Circular extends") || err_msg.contains("circular"),
+        "Error should mention circular: {err_msg}"
+    );
+}
+
+#[test]
+fn test_extends_depth_limit() {
+    // Create a chain of 12 configs (exceeds limit of 10)
+    let temp_dir = tempdir().unwrap();
+
+    let mut paths = Vec::new();
+    for i in 0..12 {
+        paths.push(temp_dir.path().join(format!("config_{i}.toml")));
+    }
+
+    // Write the leaf config (no extends)
+    fs::write(
+        &paths[11],
+        r#"
+[global]
+disable = ["MD013"]
+"#,
+    )
+    .unwrap();
+
+    // Write configs 1-10, each extending the next
+    for i in (0..11).rev() {
+        fs::write(
+            &paths[i],
+            &format!(
+                r#"extends = "{}"
+
+[global]
+extend-disable = ["MD{:03}"]
+"#,
+                paths[i + 1].display(),
+                i + 1
+            ),
+        )
+        .unwrap();
+    }
+
+    let result = SourcedConfig::load_with_discovery(Some(paths[0].to_str().unwrap()), None, true);
+    assert!(result.is_err(), "Deep extends chain should produce an error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("maximum depth") || err_msg.contains("depth"),
+        "Error should mention depth: {err_msg}"
+    );
+}
+
+#[test]
+fn test_extends_relative_path() {
+    // Child in subdirectory extends parent using relative path
+    let temp_dir = tempdir().unwrap();
+    let sub_dir = temp_dir.path().join("subdir");
+    fs::create_dir(&sub_dir).unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = sub_dir.join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        r#"extends = "../parent.toml"
+
+[global]
+extend-disable = ["MD033"]
+"#,
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Parent's disable inherited via relative path
+    assert!(config.global.disable.contains(&"MD013".to_string()));
+    // Child's extend-disable
+    assert!(config.global.extend_disable.contains(&"MD033".to_string()));
+}
+
+#[test]
+fn test_extends_missing_file() {
+    let temp_dir = tempdir().unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        r#"extends = "nonexistent.toml"
+
+[global]
+disable = ["MD013"]
+"#,
+    )
+    .unwrap();
+
+    let result = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true);
+    assert!(result.is_err(), "Missing extends target should produce an error");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("not found") || err_msg.contains("nonexistent"),
+        "Error should mention file not found: {err_msg}"
+    );
+}
+
+#[test]
+fn test_extends_pyproject_toml() {
+    // pyproject.toml with extends at [tool.rumdl] level
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join("pyproject.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"
+[tool.rumdl]
+extends = "{}"
+extend-disable = ["MD033"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Parent's disable inherited
+    assert!(config.global.disable.contains(&"MD013".to_string()));
+    // Child's extend-disable
+    assert!(config.global.extend_disable.contains(&"MD033".to_string()));
+}
+
+#[test]
+fn test_extends_pyproject_child_overrides_rumdl_parent() {
+    // pyproject child should override parent replace-fields from extended rumdl config
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013", "MD033"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join("pyproject.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"
+[tool.rumdl]
+extends = "{}"
+disable = ["MD041"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Child's disable should replace parent's disable
+    assert_eq!(config.global.disable, vec!["MD041".to_string()]);
+}
+
+#[test]
+fn test_extends_rule_specific_override() {
+    // Parent sets MD007 indent to 4, child overrides to 2
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[MD007]
+indent = 4
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[MD007]
+indent = 2
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Child's rule config should override parent's
+    let indent_val = get_rule_config_value::<i64>(&config, "MD007", "indent");
+    assert_eq!(indent_val, Some(2), "Child should override parent's MD007 indent");
+}
+
+#[test]
+fn test_extends_rule_inherited_when_not_overridden() {
+    // Parent sets MD007 indent to 4, child does not set MD007 at all
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[MD007]
+indent = 4
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+disable = ["MD013"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Parent's rule config should be inherited
+    let indent_val = get_rule_config_value::<i64>(&config, "MD007", "indent");
+    assert_eq!(indent_val, Some(4), "Parent's MD007 indent should be inherited");
+}
+
+#[test]
+fn test_extends_loaded_files_tracking() {
+    // Verify that both parent and child appear in loaded_files
+    let temp_dir = tempdir().unwrap();
+
+    let parent_path = temp_dir.path().join("parent.toml");
+    fs::write(
+        &parent_path,
+        r#"
+[global]
+disable = ["MD013"]
+"#,
+    )
+    .unwrap();
+
+    let child_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(
+        &child_path,
+        &format!(
+            r#"extends = "{}"
+
+[global]
+extend-disable = ["MD033"]
+"#,
+            parent_path.display()
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child_path.to_str().unwrap()), None, true).unwrap();
+
+    // Both files should appear in loaded_files
+    assert!(
+        sourced.loaded_files.len() >= 2,
+        "Both parent and child should be in loaded_files, got: {:?}",
+        sourced.loaded_files
+    );
+    assert!(
+        sourced.loaded_files.iter().any(|f| f.contains("parent.toml")),
+        "parent.toml should be in loaded_files"
+    );
+    assert!(
+        sourced.loaded_files.iter().any(|f| f.contains(".rumdl.toml")),
+        ".rumdl.toml should be in loaded_files"
+    );
 }

@@ -467,6 +467,9 @@ pub fn create_default_config(path: &str) -> Result<(), ConfigError> {
     // Default configuration content
     let default_config = r#"# rumdl configuration file
 
+# Inherit settings from another config file (relative to this file's directory)
+# extends = "../base.rumdl.toml"
+
 # Global configuration options
 [global]
 # List of rules to disable (uncomment and modify as needed)
@@ -557,6 +560,18 @@ pub enum ConfigError {
     /// Configuration file already exists
     #[error("Configuration file already exists at {path}")]
     FileExists { path: String },
+
+    /// Circular extends reference detected
+    #[error("Circular extends reference: {path} already in chain {chain:?}")]
+    CircularExtends { path: String, chain: Vec<String> },
+
+    /// Extends chain exceeds maximum depth
+    #[error("extends chain exceeds maximum depth of {max_depth} at {path}")]
+    ExtendsDepthExceeded { path: String, max_depth: usize },
+
+    /// Extends target file not found
+    #[error("extends target not found: {path} (referenced from {from})")]
+    ExtendsNotFound { path: String, from: String },
 }
 
 /// Get a rule-specific configuration value

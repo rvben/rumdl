@@ -196,6 +196,8 @@ pub struct SourcedRuleConfig {
 /// Used as an intermediate step before merging into the final SourcedConfig.
 #[derive(Debug, Clone)]
 pub struct SourcedConfigFragment {
+    /// Path to a base config file to inherit from (consumed during loading, not a config setting)
+    pub extends: Option<String>,
     pub global: SourcedGlobalConfig,
     pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
@@ -208,6 +210,7 @@ pub struct SourcedConfigFragment {
 impl Default for SourcedConfigFragment {
     fn default() -> Self {
         Self {
+            extends: None,
             global: SourcedGlobalConfig::default(),
             per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
