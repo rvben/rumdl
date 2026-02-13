@@ -206,8 +206,11 @@ pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
 }
 
 /// Check if a line is a MkDocstrings autodoc marker
-pub fn is_mkdocstrings_autodoc_line(line: &str, flavor: MarkdownFlavor) -> bool {
-    flavor == MarkdownFlavor::MkDocs && mkdocstrings_refs::is_autodoc_marker(line)
+///
+/// Autodoc blocks (`::: module.Class`) are detected regardless of flavor because
+/// the `:::` syntax is structurally unique and should never be reflowed as prose.
+pub fn is_mkdocstrings_autodoc_line(line: &str, _flavor: MarkdownFlavor) -> bool {
+    mkdocstrings_refs::is_autodoc_marker(line)
 }
 
 /// Check if a line contains MkDocs Critic Markup

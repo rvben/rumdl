@@ -124,14 +124,14 @@ impl<'a> LintContext<'a> {
             crate::utils::skip_context::compute_html_comment_ranges(content)
         );
 
-        // Pre-compute autodoc block ranges for MkDocs flavor (avoids O(n^2) scaling)
-        let autodoc_ranges = profile_section!("Autodoc block ranges", profile, {
-            if flavor == MarkdownFlavor::MkDocs {
-                crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
-            } else {
-                Vec::new()
-            }
-        });
+        // Pre-compute autodoc block ranges (avoids O(n^2) scaling)
+        // Detected for all flavors: `:::` blocks are structurally unique and should
+        // never be reflowed as prose, even without MkDocs flavor.
+        let autodoc_ranges = profile_section!(
+            "Autodoc block ranges",
+            profile,
+            crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
+        );
 
         // Pre-compute Quarto div block ranges for Quarto flavor
         let quarto_div_ranges = profile_section!("Quarto div ranges", profile, {

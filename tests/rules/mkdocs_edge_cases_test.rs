@@ -118,11 +118,19 @@ mod malformed_syntax_tests {
         assert!(!mkdocstrings_refs::is_autodoc_marker(":::"));
         assert!(!mkdocstrings_refs::is_autodoc_marker("::: "));
 
-        // Invalid module paths
-        assert!(mkdocstrings_refs::is_autodoc_marker("::: module"));
+        // Valid module paths (require at least one `.` or `:` separator)
         assert!(mkdocstrings_refs::is_autodoc_marker("::: module.Class"));
         assert!(mkdocstrings_refs::is_autodoc_marker("::: module:function"));
         assert!(mkdocstrings_refs::is_autodoc_marker("::: module.Class.method"));
+
+        // Single word without separator — ambiguous with Pandoc fenced divs, rejected
+        assert!(!mkdocstrings_refs::is_autodoc_marker("::: module"));
+
+        // Pandoc attribute syntax
+        assert!(!mkdocstrings_refs::is_autodoc_marker("::: {.note}"));
+        assert!(!mkdocstrings_refs::is_autodoc_marker("::: {#id .warning}"));
+
+        // Malformed separators
         assert!(!mkdocstrings_refs::is_autodoc_marker("::: module..Class"));
         assert!(!mkdocstrings_refs::is_autodoc_marker("::: .module.Class"));
         assert!(!mkdocstrings_refs::is_autodoc_marker("::: module.Class."));
@@ -355,13 +363,17 @@ mod security_tests {
 
     #[test]
     fn test_command_injection_attempts() {
-        // Command injection in autodoc paths
+        // Paths with `.` or `:` separators pass the autodoc marker check even
+        // if they contain suspicious content — the linter only needs to detect
+        // the syntax, not validate safety. Real validation happens at the
+        // mkdocstrings plugin level.
         assert!(mkdocstrings_refs::is_autodoc_marker("::: os.system('rm -rf /')"));
-        assert!(mkdocstrings_refs::is_autodoc_marker("::: module;ls"));
-        assert!(mkdocstrings_refs::is_autodoc_marker("::: module`whoami`"));
 
-        // These should be handled safely by the parser
-        // Real validation should happen when actually processing the paths
+        // Single-word paths without separators are now rejected (ambiguous
+        // with Pandoc divs), so injection attempts without `.` or `:` are
+        // also rejected
+        assert!(!mkdocstrings_refs::is_autodoc_marker("::: module;ls"));
+        assert!(!mkdocstrings_refs::is_autodoc_marker("::: module`whoami`"));
     }
 
     #[test]

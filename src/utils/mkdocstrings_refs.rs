@@ -11,13 +11,13 @@ use regex::Regex;
 /// - `::: module.Class` with options block (YAML indented)
 use std::sync::LazyLock;
 
-/// Pattern to match auto-doc insertion markers
-/// ::: module.path.ClassName or ::: handler:module.path
-/// Lenient: accepts any non-whitespace after ::: to detect potentially dangerous patterns
-/// Security validation should happen at a different layer (e.g., a specific rule)
+/// Pre-filter regex for auto-doc insertion markers.
+/// Matches any `:::` followed by non-whitespace. The actual validation
+/// (requiring `.` or `:` separators, rejecting Pandoc syntax) happens
+/// in `is_autodoc_marker()`.
 static AUTODOC_MARKER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(\s*):::\s+\S+.*$", // Just need non-whitespace after :::
+        r"^(\s*):::\s+\S+.*$", // Pre-filter: any non-whitespace after :::
     )
     .unwrap()
 });
@@ -31,39 +31,52 @@ static CROSSREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Check if a line is an auto-doc insertion marker
+///
+/// Matches mkdocstrings syntax `::: module.Class` but NOT Pandoc fenced divs
+/// like `::: warning` or `::: {.note}`. The key distinction is that autodoc
+/// paths contain at least one `.` or `:` separator (e.g., `package.module`,
+/// `handler:path`), while Pandoc divs use plain words or `{}`-wrapped classes.
 pub fn is_autodoc_marker(line: &str) -> bool {
     // First check with regex
     if !AUTODOC_MARKER.is_match(line) {
         return false;
     }
 
-    // Additional validation: reject obviously malformed paths
-    // like consecutive dots (module..Class) which Python/JS would reject
     let trimmed = line.trim();
     if let Some(start) = trimmed.find(":::") {
         let after_marker = &trimmed[start + 3..].trim();
         // Get the module path (first non-whitespace token)
         if let Some(module_path) = after_marker.split_whitespace().next() {
-            // Reject paths with consecutive dots/colons or starting/ending with separator
+            // Reject Pandoc attribute syntax: ::: {.note}, ::: {#id .class}
+            if module_path.starts_with('{') {
+                return false;
+            }
+
+            // Require at least one `.` or `:` separator to distinguish module
+            // paths (package.module.Class, handler:module) from Pandoc fenced
+            // div names (warning, note, danger)
+            if !module_path.contains('.') && !module_path.contains(':') {
+                return false;
+            }
+
+            // Reject malformed paths: can't start/end with separator
             if module_path.starts_with('.') || module_path.starts_with(':') {
-                return false; // Can't start with separator
+                return false;
             }
             if module_path.ends_with('.') || module_path.ends_with(':') {
-                return false; // Can't end with separator
+                return false;
             }
+            // Reject consecutive separators (module..Class, handler::path)
             if module_path.contains("..")
                 || module_path.contains("::")
                 || module_path.contains(".:")
                 || module_path.contains(":.")
             {
-                return false; // No consecutive separators
+                return false;
             }
         }
     }
 
-    // For a linter, we want to be lenient and detect most autodoc-like syntax
-    // even if it contains dangerous or potentially invalid module paths
-    // A separate rule can validate and warn about dangerous patterns
     true
 }
 
@@ -74,8 +87,7 @@ pub fn contains_crossref(line: &str) -> bool {
 
 /// Get the indentation level of an autodoc marker
 pub fn get_autodoc_indent(line: &str) -> Option<usize> {
-    if AUTODOC_MARKER.is_match(line) {
-        // Use consistent indentation calculation (tabs = 4 spaces)
+    if is_autodoc_marker(line) {
         return Some(super::mkdocs_common::get_line_indent(line));
     }
     None
@@ -230,12 +242,37 @@ mod tests {
 
     #[test]
     fn test_autodoc_marker_detection() {
+        // Valid mkdocstrings autodoc markers (dotted or colon-separated paths)
         assert!(is_autodoc_marker("::: mymodule.MyClass"));
         assert!(is_autodoc_marker("::: package.module.Class"));
         assert!(is_autodoc_marker("  ::: indented.Class"));
         assert!(is_autodoc_marker("::: module:function"));
+        assert!(is_autodoc_marker("::: handler:package.module"));
+        assert!(is_autodoc_marker("::: a.b"));
+
+        // Not autodoc: wrong syntax
         assert!(!is_autodoc_marker(":: Wrong number"));
         assert!(!is_autodoc_marker("Regular text"));
+        assert!(!is_autodoc_marker(":::"));
+        assert!(!is_autodoc_marker(":::    "));
+
+        // Not autodoc: Pandoc fenced divs (plain words, no separator)
+        assert!(!is_autodoc_marker("::: warning"));
+        assert!(!is_autodoc_marker("::: note"));
+        assert!(!is_autodoc_marker("::: danger"));
+        assert!(!is_autodoc_marker("::: sidebar"));
+        assert!(!is_autodoc_marker("  ::: callout"));
+
+        // Not autodoc: Pandoc attribute syntax
+        assert!(!is_autodoc_marker("::: {.note}"));
+        assert!(!is_autodoc_marker("::: {#myid .warning}"));
+        assert!(!is_autodoc_marker("::: {.note .important}"));
+
+        // Not autodoc: malformed paths
+        assert!(!is_autodoc_marker("::: .starts.with.dot"));
+        assert!(!is_autodoc_marker("::: ends.with.dot."));
+        assert!(!is_autodoc_marker("::: has..consecutive.dots"));
+        assert!(!is_autodoc_marker("::: :starts.with.colon"));
     }
 
     #[test]

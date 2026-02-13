@@ -85,8 +85,8 @@ pub(super) fn compute_basic_line_info(
         let in_code_block = code_block_map.get(i).copied().unwrap_or(false);
 
         // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
-        let in_mkdocstrings = flavor == MarkdownFlavor::MkDocs
-            && crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(skip_ranges.autodoc_ranges, byte_offset);
+        let in_mkdocstrings =
+            crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(skip_ranges.autodoc_ranges, byte_offset);
         let line_end_offset = byte_offset + line.len();
         let in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
             skip_ranges.html_comment_ranges,

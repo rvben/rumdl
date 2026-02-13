@@ -1,3 +1,4 @@
+use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD013LineLength;
@@ -1436,4 +1437,215 @@ fn test_length_mode_japanese_text() {
     let result_visual = rule_visual.check(&ctx).unwrap();
     assert_eq!(result_visual.len(), 1, "Should fail with 24 visual columns (limit 20)");
     assert_eq!(content.width(), 24, "Visual width should be 24");
+}
+
+// ───── Issue #396: autodoc blocks preserved without MkDocs flavor ─────
+
+#[test]
+fn test_autodoc_block_preserved_without_mkdocs_flavor() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Reproducer from issue #396: reflow enabled, NO flavor set
+    let content = "::: mymodule.MyClass\n    handler: python\n    options:\n      show_source: true\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Autodoc block should not generate warnings without MkDocs flavor, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "Autodoc block must not be modified by reflow without MkDocs flavor"
+    );
+}
+
+#[test]
+fn test_autodoc_block_preserved_with_mkdocs_flavor() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Regression check: with MkDocs flavor should also still work
+    let content = "::: mymodule.MyClass\n    handler: python\n    options:\n      show_source: true\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Autodoc block should not generate warnings with MkDocs flavor, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "Autodoc block must not be modified by reflow with MkDocs flavor"
+    );
+}
+
+#[test]
+fn test_autodoc_marker_skipped_regular_paragraph_reflowed() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Autodoc marker alone (no indented options) followed by a regular paragraph
+    let content = "::: mymodule.MyClass\n\nThis is a regular paragraph that is quite long and should be reflowed by MD013 when the reflow option is enabled in the configuration.\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    // The long paragraph should generate a warning
+    assert!(
+        !warnings.is_empty(),
+        "Regular paragraph after autodoc should generate a warning"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // Autodoc marker must be preserved
+    assert!(
+        fixed.starts_with("::: mymodule.MyClass\n"),
+        "Autodoc marker must be preserved in output"
+    );
+}
+
+#[test]
+fn test_bare_triple_colon_not_treated_as_autodoc() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Bare `:::` without a module path is NOT an autodoc marker
+    let content = ":::\n\nThis is a regular paragraph that is quite long and should be reflowed by MD013 when the reflow option is enabled in the configuration.\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Regular paragraph after bare ::: should still generate a warning"
+    );
+}
+
+#[test]
+fn test_pandoc_fenced_div_not_treated_as_autodoc() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Pandoc fenced divs use plain words (no dots/colons) — must NOT suppress reflow
+    let content = "::: warning\n\nThis is a regular paragraph that is quite long and should be reflowed by MD013 when the reflow option is enabled in the configuration.\n\n:::\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Pandoc div content should still be reflowed (not treated as autodoc)"
+    );
+}
+
+#[test]
+fn test_pandoc_div_with_attributes_not_treated_as_autodoc() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Pandoc div with class attribute syntax
+    let content = "::: {.note}\n\nThis is a regular paragraph that is quite long and should be reflowed by MD013 when the reflow option is enabled in the configuration.\n\n:::\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Pandoc div with attributes should still be reflowed (not treated as autodoc)"
+    );
+}
+
+#[test]
+fn test_pandoc_div_with_indented_yaml_like_content_not_suppressed() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // Pandoc div with indented content that happens to look like YAML (contains colons)
+    // This must NOT be treated as autodoc options
+    let content = "::: sidebar\n    Important: this content has a colon and is indented four spaces and is long enough to trigger reflow wrapping logic\n:::\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    // Verify the indented line is NOT marked as in_mkdocstrings
+    assert!(
+        !ctx.lines[1].in_mkdocstrings,
+        "Indented content in Pandoc div must not be marked as mkdocstrings"
+    );
+
+    // The long indented line should still be linted
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Indented content in Pandoc div should still be linted"
+    );
+}
+
+#[test]
+fn test_autodoc_with_handler_colon_syntax() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    // handler:module syntax is valid autodoc and must be preserved
+    let content = "::: handler:mypackage.module.Class\n    options:\n      show_source: true\n";
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "handler:module autodoc must be preserved");
 }
