@@ -11,8 +11,10 @@ Global settings are configured in the `[global]` section of your configuration f
 
 | Setting                                   | Type       | Default        | Description                               |
 | ----------------------------------------- | ---------- | -------------- | ----------------------------------------- |
-| [`enable`](#enable)                       | `string[]` | `[]`           | Enable only specific rules                |
+| [`enable`](#enable)                       | `string[]` | not set        | Enable only specific rules                |
 | [`disable`](#disable)                     | `string[]` | `[]`           | Disable specific rules                    |
+| [`extend-enable`](#extend-enable)         | `string[]` | `[]`           | Additional rules to enable (additive)     |
+| [`extend-disable`](#extend-disable)       | `string[]` | `[]`           | Additional rules to disable (additive)    |
 | [`per-file-ignores`](#per-file-ignores)   | `table`    | `{}`           | Disable specific rules for specific files |
 | [`exclude`](#exclude)                     | `string[]` | `[]`           | Files/directories to exclude              |
 | [`include`](#include)                     | `string[]` | `[]`           | Files/directories to include              |
@@ -30,11 +32,11 @@ Global settings are configured in the `[global]` section of your configuration f
 
 ```toml
 [global]
-# Enable only specific rules
-enable = ["MD001", "MD003", "MD013"]
-
-# Disable problematic rules
+# Disable specific rules
 disable = ["MD013", "MD033"]
+
+# Add opt-in rules on top of defaults (additive)
+extend-enable = ["MD060", "MD063"]
 
 # Exclude files and directories
 exclude = [
@@ -78,8 +80,8 @@ flavor = "mkdocs"
 ```toml
 [tool.rumdl]
 # Global options at root level (both snake_case and kebab-case supported)
-enable = ["MD001", "MD003", "MD013"]
 disable = ["MD013", "MD033"]
+extend-enable = ["MD060"]
 exclude = ["node_modules", "build", "dist"]
 include = ["docs/*.md", "README.md"]
 respect_gitignore = true
@@ -90,6 +92,99 @@ flavor = "standard"
 [tool.rumdl.per-file-ignores]
 "README.md" = ["MD033"]
 "SUMMARY.md" = ["MD025"]
+```
+
+## Rule Selection Model
+
+rumdl uses four settings to control which rules are active. These follow the same model as [Ruff's lint rule selection](https://docs.astral.sh/ruff/settings/#lint_select):
+
+| rumdl            | Ruff equivalent | CLI flag    | Behavior                      |
+| ---------------- | --------------- | ----------- | ----------------------------- |
+| `enable`         | `select`        | `--enable`  | Set the enabled rules         |
+| `disable`        | `ignore`        | `--disable` | Set the disabled rules        |
+| `extend-enable`  | `extend-select` | —           | Add rules to the enabled set  |
+| `extend-disable` | `extend-ignore` | —           | Add rules to the disabled set |
+
+### How rules are resolved
+
+1. **Start with the base set.** If `enable` is omitted, the base set is all rules except [opt-in rules](#opt-in-rules). If `enable` is set, only the listed rules form the base set.
+2. **Merge `extend-enable`.** Any rules listed in `extend-enable` are added to the base set. This is the way to activate opt-in rules without replacing the entire default set.
+3. **Apply `disable` and `extend-disable`.** Rules in either list are removed. Disabling always wins over enabling.
+
+Key behaviors:
+
+- **`enable` omitted** — all non-opt-in rules are active (the default)
+- **`enable = []`** (empty list) — *no rules are active*; this is an explicit empty allowlist, not the same as omitting `enable`
+- **`enable = ["ALL"]`** — every rule is active, including opt-in rules
+- **`extend-enable = ["ALL"]`** — every rule is active (same effect as `enable = ["ALL"]`)
+- **`disable = ["all"]`** with no `enable` — no rules are active
+- **Disabling wins** — if a rule appears in both an enable list and a disable list, it is disabled
+
+### Config precedence and merging
+
+rumdl loads configuration from a single config file, then applies CLI overrides on top. When CLI flags overlap with file settings:
+
+- `--enable` and `--disable` **replace** the config file value entirely.
+- `extend-enable` and `extend-disable` (config file only) **merge** additively with the base `enable`/`disable` values.
+
+```bash
+# Config file has disable = ["MD013"]
+# CLI replaces it — only MD033 is disabled, MD013 is re-enabled
+rumdl check --disable MD033 .
+```
+
+To disable MD033 *in addition to* whatever the config file disables, use `extend-disable` in the config file instead of CLI `--disable`.
+
+### Opt-in rules
+
+Some rules are excluded from the default set because they are opinionated, project-specific,
+or may require configuration.
+These rules must be explicitly activated via `extend-enable` or `enable = ["ALL"]`.
+
+Current opt-in rules:
+
+| Rule  | Description                  |
+| ----- | ---------------------------- |
+| MD060 | Table column formatting      |
+| MD063 | Heading capitalization       |
+| MD072 | Frontmatter key sort order   |
+| MD073 | Table of contents validation |
+| MD074 | MkDocs nav validation        |
+
+```toml
+[global]
+extend-enable = ["MD060", "MD063"]
+```
+
+### Common patterns
+
+**Use only a handful of rules (strict allowlist)**:
+
+```toml
+[global]
+enable = ["MD001", "MD003", "MD022", "MD025"]
+```
+
+**Use all defaults but disable a few**:
+
+```toml
+[global]
+disable = ["MD013", "MD033"]
+```
+
+**Use all defaults plus opt-in rules**:
+
+```toml
+[global]
+extend-enable = ["MD060", "MD072"]
+```
+
+**Use every rule including opt-in, minus a few**:
+
+```toml
+[global]
+enable = ["ALL"]
+disable = ["MD013", "MD033"]
 ```
 
 ## Detailed Settings Reference
@@ -111,15 +206,57 @@ enable = ["MD001", "MD003", "MD013", "MD022"]
 
 - Rule IDs are case-insensitive but conventionally uppercase (e.g., "MD001")
 - `enable = []` (empty list) disables **all** rules — nothing will be linted
-- Omitting `enable` entirely uses the default: all rules enabled, `disable` applied normally
-- `enable = ["ALL"]` explicitly enables every rule, equivalent to the default; `disable` still applies on top
-- If `enable` lists specific rules, only those rules run (subject to `disable`)
-- Useful for gradually adopting rumdl or focusing on specific rule categories
+- Omitting `enable` entirely uses the default: all non-opt-in rules enabled, `disable` applied normally
+- `enable = ["ALL"]` explicitly enables every rule including [opt-in rules](#opt-in-rules); `disable` still applies on top
+- If `enable` lists specific rules, only those rules run (subject to `disable` and `extend-disable`)
+- When `enable` is set, `extend-enable` entries are merged into the allowlist
+- To add opt-in rules without replacing the defaults, use [`extend-enable`](#extend-enable) instead
 
 **Example CLI usage**:
 
 ```bash
 rumdl check --enable MD001,MD003,MD013 .
+```
+
+### `extend-enable`
+
+**Type**: `string[]`
+**Default**: `[]` (no additional rules)
+**CLI Equivalent**: None (configuration file only)
+
+Adds rules to the enabled set.
+This is the primary way to activate [opt-in rules](#opt-in-rules)
+(MD060, MD063, MD072, MD073, MD074) without replacing the default rule set.
+
+When CLI `--enable` is used, it replaces the config file's `enable` list entirely.
+`extend-enable` in the config file is always additive —
+see [Config precedence and merging](#config-precedence-and-merging).
+
+```toml
+[global]
+extend-enable = ["MD060", "MD063"]
+```
+
+**Usage Notes**:
+
+- `extend-enable = ["ALL"]` enables every rule including opt-in rules (same as `enable = ["ALL"]`)
+- Can be combined with `enable` — when both are set, `extend-enable` entries are merged into the `enable` allowlist
+- Disabling always wins: if a rule appears in both `extend-enable` and `disable`/`extend-disable`, it is disabled
+- Rule IDs are case-insensitive but conventionally uppercase
+
+**Example: Enable opt-in rules alongside defaults**:
+
+```toml
+[global]
+extend-enable = ["MD060", "MD072"]  # Add table formatting and frontmatter key sort
+```
+
+**Example: Combine with disable**:
+
+```toml
+[global]
+extend-enable = ["MD060"]   # Add table formatting
+disable = ["MD013"]          # Remove line length checking
 ```
 
 ### `disable`
@@ -138,17 +275,50 @@ disable = ["MD013", "MD033", "MD041"]
 **Usage Notes**:
 
 - Rule IDs are case-insensitive but conventionally uppercase
+- `disable = ["all"]` disables every rule; only rules listed in `enable` (if set) are active
 - Commonly disabled rules include:
   - `MD013`: Line length (for projects with longer lines)
   - `MD033`: Inline HTML (for projects that use HTML in Markdown)
   - `MD041`: First line heading (for files that don't start with headings)
-- Can be combined with rule-specific configuration to fine-tune behavior
+- Disabling always wins over enabling — if a rule appears in both `enable` and `disable`, it is disabled
+- CLI `--disable` replaces the config file's `disable` list; use [`extend-disable`](#extend-disable) in the config file for values that shouldn't be overridden by CLI
 
 **Example CLI usage**:
 
 ```bash
 rumdl check --disable MD013,MD033 .
 ```
+
+### `extend-disable`
+
+**Type**: `string[]`
+**Default**: `[]` (no additional rules disabled)
+**CLI Equivalent**: None (configuration file only)
+
+Adds rules to the disabled set. Always merges additively with `disable`, regardless of source.
+Useful for adding disabled rules that survive CLI `--disable` overrides —
+see [Config precedence and merging](#config-precedence-and-merging).
+
+```toml
+[global]
+extend-disable = ["MD033", "MD041"]
+```
+
+**Usage Notes**:
+
+- `extend-disable = ["ALL"]` disables every rule (effectively stops all linting)
+- Disabling always wins over enabling: if a rule appears in both `extend-enable` and `extend-disable`, it is disabled
+- Rule IDs are case-insensitive but conventionally uppercase
+
+**Example: Disable rules that survive CLI overrides**:
+
+```toml
+[global]
+disable = ["MD013"]
+extend-disable = ["MD033"]  # Always disabled, even if --disable overrides the list above
+```
+
+With `rumdl check --disable MD041 .`, the result is: MD013 replaced by MD041 (from CLI), plus MD033 (from `extend-disable`, always additive). Final disabled set: MD041, MD033.
 
 ### `per-file-ignores`
 

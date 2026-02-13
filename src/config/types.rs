@@ -472,8 +472,15 @@ pub fn create_default_config(path: &str) -> Result<(), ConfigError> {
 # List of rules to disable (uncomment and modify as needed)
 # disable = ["MD013", "MD033"]
 
-# List of rules to enable exclusively (if provided, only these rules will run)
+# List of rules to enable exclusively (replaces defaults; only these rules will run)
 # enable = ["MD001", "MD003", "MD004"]
+
+# Additional rules to enable on top of defaults (additive, does not replace)
+# Use this to activate opt-in rules like MD060, MD063, MD072, MD073, MD074
+# extend-enable = ["MD060", "MD063"]
+
+# Additional rules to disable on top of the disable list (additive)
+# extend-disable = ["MD041"]
 
 # List of file/directory patterns to include for linting (if provided, only these will be linted)
 # include = [
@@ -587,6 +594,8 @@ pub fn generate_pyproject_config() -> String {
 # Global configuration options
 line-length = 100
 disable = []
+# extend-enable = ["MD060"]  # Add opt-in rules (additive, keeps defaults)
+# extend-disable = []  # Additional rules to disable (additive)
 exclude = [
     # Common directories to exclude
     ".git",

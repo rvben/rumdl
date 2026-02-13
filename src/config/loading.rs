@@ -26,8 +26,8 @@ impl SourcedConfig<ConfigLoaded> {
             fragment.global.enable.overrides.first().and_then(|o| o.line),
         );
 
-        // Disable uses union semantics (user can add to project disables)
-        self.global.disable.merge_union(
+        // Disable uses replace semantics (child config overrides parent, matching Ruff's `ignore`)
+        self.global.disable.merge_override(
             fragment.global.disable.value,
             fragment.global.disable.source,
             fragment.global.disable.overrides.first().and_then(|o| o.file.clone()),
