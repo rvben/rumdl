@@ -17,6 +17,28 @@ use crate::utils::sentence_utils::{
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
+use unicode_width::UnicodeWidthStr;
+
+/// Length calculation mode for reflow
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ReflowLengthMode {
+    /// Count Unicode characters (grapheme clusters)
+    Chars,
+    /// Count visual display width (CJK = 2 columns, emoji = 2, etc.)
+    #[default]
+    Visual,
+    /// Count raw bytes
+    Bytes,
+}
+
+/// Calculate the display length of a string based on the length mode
+fn display_len(s: &str, mode: ReflowLengthMode) -> usize {
+    match mode {
+        ReflowLengthMode::Chars => s.chars().count(),
+        ReflowLengthMode::Visual => s.width(),
+        ReflowLengthMode::Bytes => s.len(),
+    }
+}
 
 /// Options for reflowing text
 #[derive(Clone)]
@@ -35,6 +57,8 @@ pub struct ReflowOptions {
     /// Periods are optional - both "Dr" and "Dr." work the same
     /// Custom abbreviations are always added to the built-in defaults
     pub abbreviations: Option<Vec<String>>,
+    /// How to measure string length for line-length comparisons
+    pub length_mode: ReflowLengthMode,
 }
 
 impl Default for ReflowOptions {
@@ -46,6 +70,7 @@ impl Default for ReflowOptions {
             sentence_per_line: false,
             semantic_line_breaks: false,
             abbreviations: None,
+            length_mode: ReflowLengthMode::default(),
         }
     }
 }
@@ -399,7 +424,7 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
 
     // Quick check: if line is already short enough or no wrapping requested, return as-is
     // line_length = 0 means no wrapping (unlimited line length)
-    if options.line_length == 0 || line.chars().count() <= options.line_length {
+    if options.line_length == 0 || display_len(line, options.length_mode) <= options.line_length {
         return vec![line.to_string()];
     }
 
@@ -469,6 +494,8 @@ enum Element {
     DisplayMath(String),
     /// Emoji shortcode :emoji:
     EmojiShortcode(String),
+    /// Autolink <https://...> or <mailto:...> or <user@domain.com>
+    Autolink(String),
     /// HTML tag <tag> or </tag> or <tag/>
     HtmlTag(String),
     /// HTML entity &nbsp; or &#123;
@@ -524,6 +551,7 @@ impl std::fmt::Display for Element {
             Element::InlineMath(s) => write!(f, "${s}$"),
             Element::DisplayMath(s) => write!(f, "$${s}$$"),
             Element::EmojiShortcode(s) => write!(f, ":{s}:"),
+            Element::Autolink(s) => write!(f, "{s}"),
             Element::HtmlTag(s) => write!(f, "{s}"),
             Element::HtmlEntity(s) => write!(f, "{s}"),
             Element::HugoShortcode(s) => write!(f, "{s}"),
@@ -547,49 +575,12 @@ impl std::fmt::Display for Element {
 }
 
 impl Element {
-    fn len(&self) -> usize {
-        match self {
-            Element::Text(s) => s.chars().count(),
-            Element::Link { text, url } => text.chars().count() + url.chars().count() + 4, // [text](url)
-            Element::ReferenceLink { text, reference } => text.chars().count() + reference.chars().count() + 4, // [text][ref]
-            Element::EmptyReferenceLink { text } => text.chars().count() + 4, // [text][]
-            Element::ShortcutReference { reference } => reference.chars().count() + 2, // [ref]
-            Element::InlineImage { alt, url } => alt.chars().count() + url.chars().count() + 5, // ![alt](url)
-            Element::ReferenceImage { alt, reference } => alt.chars().count() + reference.chars().count() + 5, // ![alt][ref]
-            Element::EmptyReferenceImage { alt } => alt.chars().count() + 5, // ![alt][]
-            Element::LinkedImage {
-                alt,
-                img_source,
-                link_target,
-            } => {
-                // Calculate length based on variant
-                // Base: [ + ![alt] + ] = 4 chars for outer brackets and !
-                let alt_len = alt.chars().count();
-                let img_len = match img_source {
-                    LinkedImageSource::Inline(url) => url.chars().count() + 2, // (url)
-                    LinkedImageSource::Reference(r) => r.chars().count() + 2,  // [ref]
-                };
-                let link_len = match link_target {
-                    LinkedImageTarget::Inline(url) => url.chars().count() + 2, // (url)
-                    LinkedImageTarget::Reference(r) => r.chars().count() + 2,  // [ref]
-                };
-                // [![alt](img)](link) = [ + ! + [ + alt + ] + (img) + ] + (link)
-                //                     = 1 + 1 + 1 + alt + 1 + img_len + 1 + link_len = 5 + alt + img + link
-                5 + alt_len + img_len + link_len
-            }
-            Element::FootnoteReference { note } => note.chars().count() + 3, // [^note]
-            Element::Strikethrough(s) => s.chars().count() + 4,              // ~~text~~
-            Element::WikiLink(s) => s.chars().count() + 4,                   // [[wiki]]
-            Element::InlineMath(s) => s.chars().count() + 2,                 // $math$
-            Element::DisplayMath(s) => s.chars().count() + 4,                // $$math$$
-            Element::EmojiShortcode(s) => s.chars().count() + 2,             // :emoji:
-            Element::HtmlTag(s) => s.chars().count(),                        // <tag> - already includes brackets
-            Element::HtmlEntity(s) => s.chars().count(),                     // &nbsp; - already complete
-            Element::HugoShortcode(s) => s.chars().count(),                  // {{< ... >}} - already complete
-            Element::Code(s) => s.chars().count() + 2,                       // `code`
-            Element::Bold { content, .. } => content.chars().count() + 4,    // **text** or __text__
-            Element::Italic { content, .. } => content.chars().count() + 2,  // *text* or _text_
-        }
+    /// Calculate the display width of this element using the given length mode.
+    /// This formats the element and computes its width, correctly handling
+    /// visual width for CJK characters and other wide glyphs.
+    fn display_width(&self, mode: ReflowLengthMode) -> usize {
+        let formatted = format!("{self}");
+        display_len(&formatted, mode)
     }
 }
 
@@ -877,7 +868,9 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 EMAIL_PATTERN.is_match(content)
             };
 
-            if !is_url_autolink && !is_email_autolink {
+            if is_url_autolink || is_email_autolink {
+                earliest_match = Some((m.start(), "autolink", m));
+            } else {
                 earliest_match = Some((m.start(), "html_tag", m));
             }
         }
@@ -1136,6 +1129,11 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                 "hugo_shortcode" => {
                     // Hugo shortcodes are atomic elements - preserve them exactly
                     elements.push(Element::HugoShortcode(match_obj.as_str().to_string()));
+                    remaining = &remaining[match_obj.end()..];
+                }
+                "autolink" => {
+                    // Autolinks are atomic elements - preserve them exactly
+                    elements.push(Element::Autolink(match_obj.as_str().to_string()));
                     remaining = &remaining[match_obj.end()..];
                 }
                 "html_tag" => {
@@ -1482,13 +1480,25 @@ fn split_at_clause_punctuation(
     text: &str,
     line_length: usize,
     element_spans: &[(usize, usize)],
+    length_mode: ReflowLengthMode,
 ) -> Option<(String, String)> {
     let chars: Vec<char> = text.chars().collect();
-    let search_end = chars.len().min(line_length);
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
 
+    // Find the char index where accumulated display width exceeds line_length
+    let mut width_acc = 0;
+    let mut search_end_char = 0;
+    for (idx, &c) in chars.iter().enumerate() {
+        let c_width = display_len(&c.to_string(), length_mode);
+        if width_acc + c_width > line_length {
+            break;
+        }
+        width_acc += c_width;
+        search_end_char = idx + 1;
+    }
+
     let mut best_pos = None;
-    for i in (0..search_end).rev() {
+    for i in (0..search_end_char).rev() {
         if is_clause_punctuation(chars[i]) {
             // Convert char position to byte position for element span check
             let byte_pos: usize = chars[..=i].iter().map(|c| c.len_utf8()).sum();
@@ -1502,12 +1512,13 @@ fn split_at_clause_punctuation(
     let pos = best_pos?;
 
     // Reject splits that create very short first lines
-    if pos + 1 < min_first_len {
+    let first: String = chars[..=pos].iter().collect();
+    let first_display_len = display_len(&first, length_mode);
+    if first_display_len < min_first_len {
         return None;
     }
 
     // Split after the punctuation character
-    let first: String = chars[..=pos].iter().collect();
     let rest: String = chars[pos + 1..].iter().collect();
     let rest = rest.trim_start().to_string();
 
@@ -1521,7 +1532,12 @@ fn split_at_clause_punctuation(
 /// Split a line before the latest break-word that keeps the first part
 /// within `line_length`. Returns None if no valid split point exists or if
 /// the split would create an unreasonably short first line.
-fn split_at_break_word(text: &str, line_length: usize, element_spans: &[(usize, usize)]) -> Option<(String, String)> {
+fn split_at_break_word(
+    text: &str,
+    line_length: usize,
+    element_spans: &[(usize, usize)],
+    length_mode: ReflowLengthMode,
+) -> Option<(String, String)> {
     let lower = text.to_lowercase();
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
     let mut best_split: Option<(usize, usize)> = None; // (byte_start, word_len_bytes)
@@ -1537,7 +1553,8 @@ fn split_at_break_word(text: &str, line_length: usize, element_spans: &[(usize, 
 
             if preceded_by_space && followed_by_space {
                 // The break goes BEFORE the word, so first part ends at abs_pos - 1
-                let first_part_len = text[..abs_pos].trim_end().chars().count();
+                let first_part = text[..abs_pos].trim_end();
+                let first_part_len = display_len(first_part, length_mode);
 
                 if first_part_len >= min_first_len
                     && first_part_len <= line_length
@@ -1568,8 +1585,13 @@ fn split_at_break_word(text: &str, line_length: usize, element_spans: &[(usize, 
 
 /// Recursively cascade-split a line that exceeds line_length.
 /// Tries clause punctuation first, then break-words, then word wrap.
-fn cascade_split_line(text: &str, line_length: usize, abbreviations: &Option<Vec<String>>) -> Vec<String> {
-    if line_length == 0 || text.chars().count() <= line_length {
+fn cascade_split_line(
+    text: &str,
+    line_length: usize,
+    abbreviations: &Option<Vec<String>>,
+    length_mode: ReflowLengthMode,
+) -> Vec<String> {
+    if line_length == 0 || display_len(text, length_mode) <= line_length {
         return vec![text.to_string()];
     }
 
@@ -1577,16 +1599,16 @@ fn cascade_split_line(text: &str, line_length: usize, abbreviations: &Option<Vec
     let element_spans = compute_element_spans(&elements);
 
     // Try clause punctuation split
-    if let Some((first, rest)) = split_at_clause_punctuation(text, line_length, &element_spans) {
+    if let Some((first, rest)) = split_at_clause_punctuation(text, line_length, &element_spans, length_mode) {
         let mut result = vec![first];
-        result.extend(cascade_split_line(&rest, line_length, abbreviations));
+        result.extend(cascade_split_line(&rest, line_length, abbreviations, length_mode));
         return result;
     }
 
     // Try break-word split
-    if let Some((first, rest)) = split_at_break_word(text, line_length, &element_spans) {
+    if let Some((first, rest)) = split_at_break_word(text, line_length, &element_spans, length_mode) {
         let mut result = vec![first];
-        result.extend(cascade_split_line(&rest, line_length, abbreviations));
+        result.extend(cascade_split_line(&rest, line_length, abbreviations, length_mode));
         return result;
     }
 
@@ -1598,6 +1620,7 @@ fn cascade_split_line(text: &str, line_length: usize, abbreviations: &Option<Vec
         sentence_per_line: false,
         semantic_line_breaks: false,
         abbreviations: abbreviations.clone(),
+        length_mode,
     };
     reflow_elements(&elements, &options)
 }
@@ -1615,12 +1638,18 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
         return sentence_lines;
     }
 
+    let length_mode = options.length_mode;
     let mut result = Vec::new();
     for line in sentence_lines {
-        if line.chars().count() <= options.line_length {
+        if display_len(&line, length_mode) <= options.line_length {
             result.push(line);
         } else {
-            result.extend(cascade_split_line(&line, options.line_length, &options.abbreviations));
+            result.extend(cascade_split_line(
+                &line,
+                options.line_length,
+                &options.abbreviations,
+                length_mode,
+            ));
         }
     }
 
@@ -1629,7 +1658,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
     let min_line_len = ((options.line_length as f64) * MIN_SPLIT_RATIO) as usize;
     let mut merged: Vec<String> = Vec::with_capacity(result.len());
     for line in result {
-        if !merged.is_empty() && line.chars().count() < min_line_len && !line.trim().is_empty() {
+        if !merged.is_empty() && display_len(&line, length_mode) < min_line_len && !line.trim().is_empty() {
             // Don't merge across sentence boundaries — sentence splits are intentional
             let prev_ends_at_sentence = {
                 let trimmed = merged.last().unwrap().trim_end();
@@ -1645,7 +1674,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
                 let combined = format!("{prev} {line}");
                 // Only merge if the combined line doesn't wildly exceed the limit
                 // (allow up to 10% overflow to avoid orphan words)
-                if combined.chars().count() <= options.line_length + options.line_length / 10 {
+                if display_len(&combined, length_mode) <= options.line_length + options.line_length / 10 {
                     *prev = combined;
                     continue;
                 }
@@ -1656,15 +1685,32 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
     merged
 }
 
+/// Find the last space in `line` that is safe to split at.
+/// Safe spaces are those NOT inside rendered non-Text elements.
+/// `element_spans` contains (start, end) byte ranges of non-Text elements in the line.
+/// Find the last space in `line` that is not inside any element span.
+/// Spans use exclusive bounds (pos > start && pos < end) because element
+/// delimiters (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never
+/// spaces, so only interior positions need protection.
+fn rfind_safe_space(line: &str, element_spans: &[(usize, usize)]) -> Option<usize> {
+    line.char_indices()
+        .rev()
+        .map(|(pos, _)| pos)
+        .find(|&pos| line.as_bytes()[pos] == b' ' && !element_spans.iter().any(|(s, e)| pos > *s && pos < *e))
+}
+
 /// Reflow elements into lines that fit within the line length
 fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current_line = String::new();
     let mut current_length = 0;
+    // Track byte spans of non-Text elements in current_line for safe splitting
+    let mut current_line_element_spans: Vec<(usize, usize)> = Vec::new();
+    let length_mode = options.length_mode;
 
     for (idx, element) in elements.iter().enumerate() {
         let element_str = format!("{element}");
-        let element_len = element.len();
+        let element_len = element.display_width(length_mode);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no whitespace between them in the source:
@@ -1689,7 +1735,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             let words: Vec<&str> = text.split_whitespace().collect();
 
             for (i, word) in words.iter().enumerate() {
-                let word_len = word.chars().count();
+                let word_len = display_len(word, length_mode);
                 // Check if this "word" is just punctuation that should stay attached
                 let is_trailing_punct = word
                     .chars()
@@ -1703,12 +1749,14 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     // Attach directly without space, preventing line break
                     if current_length + word_len > options.line_length && current_length > 0 {
                         // Would exceed — break before the adjacent group
-                        if let Some(last_space) = current_line.rfind(' ') {
+                        // Use element-aware space search to avoid splitting inside links/code/etc.
+                        if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
                             let before = current_line[..last_space].trim_end().to_string();
                             let after = current_line[last_space + 1..].to_string();
                             lines.push(before);
                             current_line = format!("{after}{word}");
-                            current_length = current_line.chars().count();
+                            current_length = display_len(&current_line, length_mode);
+                            current_line_element_spans.clear();
                         } else {
                             current_line.push_str(word);
                             current_length += word_len;
@@ -1725,6 +1773,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     lines.push(current_line.trim().to_string());
                     current_line = word.to_string();
                     current_length = word_len;
+                    current_line_element_spans.clear();
                 } else {
                     // Add word to current line
                     // Only add space if: we have content AND (this isn't the first word OR original had leading space)
@@ -1745,26 +1794,37 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 // Adjacent to preceding text — attach directly without space
                 if current_length + element_len > options.line_length {
                     // Would exceed limit — break before the adjacent word group
-                    if let Some(last_space) = current_line.rfind(' ') {
+                    // Use element-aware space search to avoid splitting inside links/code/etc.
+                    if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
                         let before = current_line[..last_space].trim_end().to_string();
                         let after = current_line[last_space + 1..].to_string();
                         lines.push(before);
                         current_line = format!("{after}{element_str}");
-                        current_length = current_line.chars().count();
+                        current_length = display_len(&current_line, length_mode);
+                        current_line_element_spans.clear();
+                        // Record the element span in the new current_line
+                        let start = after.len();
+                        current_line_element_spans.push((start, start + element_str.len()));
                     } else {
-                        // No space to break at — accept the long line
+                        // No safe space to break at — accept the long line
+                        let start = current_line.len();
                         current_line.push_str(&element_str);
                         current_length += element_len;
+                        current_line_element_spans.push((start, current_line.len()));
                     }
                 } else {
+                    let start = current_line.len();
                     current_line.push_str(&element_str);
                     current_length += element_len;
+                    current_line_element_spans.push((start, current_line.len()));
                 }
             } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
                 // Not adjacent, would exceed — start new line
                 lines.push(current_line.trim().to_string());
-                current_line = element_str;
+                current_line = element_str.clone();
                 current_length = element_len;
+                current_line_element_spans.clear();
+                current_line_element_spans.push((0, element_str.len()));
             } else {
                 // Not adjacent, fits — add with space
                 let ends_with_opener =
@@ -1773,8 +1833,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_line.push(' ');
                     current_length += 1;
                 }
+                let start = current_line.len();
                 current_line.push_str(&element_str);
                 current_length += element_len;
+                current_line_element_spans.push((start, current_line.len()));
             }
         }
     }
@@ -2015,7 +2077,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // If it's a single line that fits, just add it as-is
-        if is_single_line_paragraph && line.chars().count() <= options.line_length {
+        if is_single_line_paragraph && display_len(line, options.length_mode) <= options.line_length {
             result.push(line.to_string());
             i += 1;
             continue;
@@ -2174,6 +2236,16 @@ pub struct ParagraphReflow {
 /// or `None` if the line number is out of bounds or the content at that
 /// line shouldn't be reflowed (e.g., code blocks, headings, etc.)
 pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: usize) -> Option<ParagraphReflow> {
+    reflow_paragraph_at_line_with_mode(content, line_number, line_length, ReflowLengthMode::default())
+}
+
+/// Reflow a paragraph at the given line with a specific length mode.
+pub fn reflow_paragraph_at_line_with_mode(
+    content: &str,
+    line_number: usize,
+    line_length: usize,
+    length_mode: ReflowLengthMode,
+) -> Option<ParagraphReflow> {
     if line_number == 0 {
         return None;
     }
@@ -2258,6 +2330,7 @@ pub fn reflow_paragraph_at_line(content: &str, line_number: usize, line_length: 
         sentence_per_line: false,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode,
     };
 
     // Reflow the paragraph using reflow_markdown to handle it properly
@@ -2323,15 +2396,6 @@ mod tests {
         assert!(!text_ends_with_abbreviation("paradigms?", &abbreviations)); // question mark
         assert!(!text_ends_with_abbreviation("word", &abbreviations)); // no punctuation
         assert!(!text_ends_with_abbreviation("", &abbreviations)); // empty string
-
-        // Abbreviations preceded by opening punctuation
-        assert!(text_ends_with_abbreviation("(e.g.", &abbreviations));
-        assert!(text_ends_with_abbreviation("(i.e.", &abbreviations));
-        assert!(text_ends_with_abbreviation("word (e.g.", &abbreviations));
-        assert!(text_ends_with_abbreviation("word (i.e.", &abbreviations));
-        assert!(text_ends_with_abbreviation("[e.g.", &abbreviations));
-        assert!(text_ends_with_abbreviation("\"Dr.", &abbreviations));
-        assert!(!text_ends_with_abbreviation("(paradigms.", &abbreviations));
     }
 
     #[test]

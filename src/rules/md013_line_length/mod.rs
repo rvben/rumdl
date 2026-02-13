@@ -11,7 +11,7 @@ use crate::utils::range_utils::LineIndex;
 use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
-use crate::utils::text_reflow::split_into_sentences;
+use crate::utils::text_reflow::{ReflowLengthMode, split_into_sentences};
 use pulldown_cmark::LinkType;
 use toml;
 
@@ -53,6 +53,15 @@ impl MD013LineLength {
 
     pub fn from_config_struct(config: MD013Config) -> Self {
         Self { config }
+    }
+
+    /// Convert MD013 LengthMode to text_reflow ReflowLengthMode
+    fn reflow_length_mode(&self) -> ReflowLengthMode {
+        match self.config.length_mode {
+            LengthMode::Chars => ReflowLengthMode::Chars,
+            LengthMode::Visual => ReflowLengthMode::Visual,
+            LengthMode::Bytes => ReflowLengthMode::Bytes,
+        }
     }
 
     fn should_ignore_line(
@@ -633,6 +642,7 @@ impl MD013LineLength {
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                     semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
+                    length_mode: self.reflow_length_mode(),
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -1349,6 +1359,7 @@ impl MD013LineLength {
                         sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                         semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                         abbreviations: config.abbreviations_for_reflow(),
+                        length_mode: self.reflow_length_mode(),
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -1827,6 +1838,7 @@ impl MD013LineLength {
                     sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
                     semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
+                    length_mode: self.reflow_length_mode(),
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 

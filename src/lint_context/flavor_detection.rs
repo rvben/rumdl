@@ -203,11 +203,15 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
     let mut in_admonition = false;
     let mut admonition_indent = 0;
 
+    // Track fenced code blocks within admonitions (separate from pulldown-cmark detection)
+    let mut in_admonition_fenced_code = false;
+    let mut admonition_fence_marker: Option<String> = None;
+
     // Track tab context
     let mut in_tab = false;
     let mut tab_indent = 0;
 
-    // Track fenced code blocks within MkDocs containers (separate from pulldown-cmark detection)
+    // Track fenced code blocks within tabs (separate from pulldown-cmark detection)
     let mut in_mkdocs_fenced_code = false;
     let mut mkdocs_fence_marker: Option<String> = None;
 
@@ -229,20 +233,57 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
             in_admonition = true;
             admonition_indent = mkdocs_admonitions::get_admonition_indent(line).unwrap_or(0);
             lines[i].in_admonition = true;
+            // Reset fenced code tracking when entering new admonition
+            in_admonition_fenced_code = false;
+            admonition_fence_marker = None;
         } else if in_admonition {
+            let trimmed = line.trim();
+
+            // Track fenced code blocks within admonitions
+            if !in_admonition_fenced_code {
+                // Check for fence start (``` or ~~~)
+                if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                    let fence_char = trimmed.chars().next().unwrap();
+                    let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+                    if fence_len >= 3 {
+                        in_admonition_fenced_code = true;
+                        admonition_fence_marker = Some(fence_char.to_string().repeat(fence_len));
+                    }
+                }
+            } else if let Some(ref marker) = admonition_fence_marker {
+                // Check for fence end (same or more chars)
+                let fence_char = marker.chars().next().unwrap();
+                if trimmed.starts_with(marker.as_str())
+                    && trimmed
+                        .chars()
+                        .skip(marker.len())
+                        .all(|c| c == fence_char || c.is_whitespace())
+                {
+                    in_admonition_fenced_code = false;
+                    admonition_fence_marker = None;
+                }
+            }
+
             // Check if still in admonition content
             if line.trim().is_empty() {
                 // Blank lines are part of admonitions
                 lines[i].in_admonition = true;
-                // Override code block detection for blank lines inside admonitions
-                lines[i].in_code_block = false;
+                // Only override code block if not in a fenced code block
+                if !in_admonition_fenced_code {
+                    lines[i].in_code_block = false;
+                }
             } else if mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
                 lines[i].in_admonition = true;
-                // Override code block detection - this is admonition content, not code
-                lines[i].in_code_block = false;
+                // Override INDENTED code block detection - this is admonition content, not code
+                // But preserve fenced code block detection (```...```)
+                if !in_admonition_fenced_code {
+                    lines[i].in_code_block = false;
+                }
             } else {
                 // End of admonition
                 in_admonition = false;
+                in_admonition_fenced_code = false;
+                admonition_fence_marker = None;
                 // Check if this line starts a new admonition
                 if mkdocs_admonitions::is_admonition_start(line) {
                     in_admonition = true;

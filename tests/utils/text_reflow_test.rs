@@ -14,6 +14,7 @@ fn test_list_item_trailing_whitespace_removal() {
         sentence_per_line: false,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode: ReflowLengthMode::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -177,6 +178,7 @@ fn test_sentence_per_line_reflow() {
         sentence_per_line: true,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode: ReflowLengthMode::default(),
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -504,6 +506,7 @@ fn test_ie_abbreviation_split_debug() {
         sentence_per_line: true,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode: ReflowLengthMode::default(),
     };
 
     let result = reflow_line(input, &options);
@@ -524,6 +527,7 @@ fn test_ie_abbreviation_paragraph() {
         sentence_per_line: true,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode: ReflowLengthMode::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -599,6 +603,7 @@ fn test_definition_list_with_paragraphs() {
         sentence_per_line: true,
         semantic_line_breaks: false,
         abbreviations: None,
+        length_mode: ReflowLengthMode::default(),
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
@@ -4025,5 +4030,653 @@ fn test_word_wrap_code_adjacent_to_text() {
     assert!(
         joined.contains("myconfig`value`"),
         "Text must stay attached to adjacent code span: {result:?}"
+    );
+}
+
+// =============================================================================
+// Regression tests for GitHub issues #412, #413, #414, #416, #417
+// =============================================================================
+
+#[test]
+fn test_autolink_not_broken_at_colon_issue_416() {
+    // Autolinks like <https://example.com> must not be split at the colon
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Visit <https://example.com/long/path/to/resource> for more info.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/long/path/to/resource>"),
+        "Autolink must remain intact, not split at colon. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_email_not_broken_issue_417() {
+    // Email autolinks like <user@example.com> must not be split at the @
+    let options = ReflowOptions {
+        line_length: 30,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Contact <user@example.com> for help with the project.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<user@example.com>"),
+        "Email autolink must remain intact. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_preserved_in_default_reflow() {
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = "See <https://example.com/path> for details about this topic.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/path>"),
+        "Autolink must remain intact in default reflow mode. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_text_spaces_not_used_for_split_issue_412() {
+    // Spaces inside markdown link text must not be used as split points
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = "Text with [a link that has many words](https://example.com) and more.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("[a link that has many words](https://example.com)"),
+        "Link must not be broken at spaces in link text. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_long_link_text_not_split_at_space_issue_412() {
+    // Even very long link text should stay as one unit
+    let options = ReflowOptions {
+        line_length: 60,
+        ..Default::default()
+    };
+
+    let input = "See [very long link text with many words inside it that should not be split](https://example.com/path) for details.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains(
+            "[very long link text with many words inside it that should not be split](https://example.com/path)"
+        ),
+        "Link must remain intact regardless of length. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_inline_html_tag_not_split_issue_413() {
+    // HTML tags with attributes must not be split
+    let options = ReflowOptions {
+        line_length: 50,
+        ..Default::default()
+    };
+
+    let input = "Click <a href=\"https://example.com\" target=\"_blank\">here</a> for info.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<a href=\"https://example.com\" target=\"_blank\">"),
+        "HTML tag must remain intact. Got: {result:?}"
+    );
+    assert!(
+        result.contains("</a>"),
+        "Closing HTML tag must be present. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_visual_width_cjk_reflow_issue_414() {
+    // CJK characters take 2 columns of visual width each
+    let options = ReflowOptions {
+        line_length: 20,
+        length_mode: ReflowLengthMode::Visual,
+        ..Default::default()
+    };
+
+    // 10 CJK chars = 20 visual columns, should fit exactly in line_length=20
+    let input = "测试十个中文字符号呢 additional text here.";
+    let result = reflow_markdown(input, &options);
+    let lines: Vec<&str> = result.trim().lines().collect();
+
+    // With visual width mode, CJK chars should cause earlier wrapping
+    assert!(
+        lines.len() > 1,
+        "CJK text should be wrapped based on visual width. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_visual_width_vs_char_count_issue_414() {
+    // Compare visual vs chars mode: CJK text should wrap differently
+    let visual_options = ReflowOptions {
+        line_length: 40,
+        length_mode: ReflowLengthMode::Visual,
+        ..Default::default()
+    };
+    let char_options = ReflowOptions {
+        line_length: 40,
+        length_mode: ReflowLengthMode::Chars,
+        ..Default::default()
+    };
+
+    // 20 CJK chars = 40 visual columns but only 20 char columns
+    let input = "开始测试这段文字的视觉宽度和字符宽度之间的差异 end.";
+    let visual_result = reflow_markdown(input, &visual_options);
+    let char_result = reflow_markdown(input, &char_options);
+
+    let visual_lines: Vec<&str> = visual_result.trim().lines().collect();
+    let char_lines: Vec<&str> = char_result.trim().lines().collect();
+
+    // Visual mode should produce more lines because CJK chars are 2 columns wide
+    assert!(
+        visual_lines.len() >= char_lines.len(),
+        "Visual mode should wrap CJK text earlier than char mode. Visual: {visual_lines:?}, Char: {char_lines:?}"
+    );
+}
+
+#[test]
+fn test_autolink_clause_punctuation_not_triggered() {
+    // The colon in https: must not be treated as clause punctuation
+    let options = ReflowOptions {
+        line_length: 30,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See <https://example.com> for info.";
+    let result = reflow_markdown(input, &options);
+
+    // Verify no line starts with "//example.com>" (which would mean split at colon)
+    for line in result.lines() {
+        assert!(
+            !line.trim_start().starts_with("//"),
+            "Autolink was broken at colon in URL scheme. Got: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_multiple_autolinks_preserved() {
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "First link <https://example.com/a> and second link <https://example.com/b> in the same paragraph.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/a>"),
+        "First autolink must be preserved. Got: {result:?}"
+    );
+    assert!(
+        result.contains("<https://example.com/b>"),
+        "Second autolink must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_image_link_not_broken_at_alt_text_spaces() {
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = "See ![an image with alt text](https://example.com/img.png) for reference.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("![an image with alt text](https://example.com/img.png)"),
+        "Image link must remain intact. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_reflow_paragraph_at_line_uses_visual_width() {
+    let content = "Hello 你好世界测试文本在这里显示出来 world.\n";
+    let result = reflow_paragraph_at_line(content, 1, 30);
+
+    // The function should succeed and produce a reflow
+    assert!(result.is_some(), "Should reflow the paragraph");
+}
+
+// =============================================================================
+// Defensive tests for #409: semantic-line-breaks with list items
+// =============================================================================
+
+#[test]
+fn test_semantic_line_breaks_sibling_list_items_preserved() {
+    // Sibling list items must not be indented/merged during reflow
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "- [AlphaTool](https://example.com/alpha) - This is a long description that definitely exceeds the line length limit and needs wrapping.\n- [BetaTool](https://example.com/beta) - Short description.\n- [GammaTool](https://example.com/gamma) - Short description.\n";
+    let result = reflow_markdown(input, &options);
+
+    // BetaTool must remain a top-level list item, not indented
+    assert!(
+        result.contains("\n- [BetaTool]"),
+        "BetaTool must remain a top-level sibling list item, not indented. Got:\n{result}"
+    );
+    assert!(
+        result.contains("\n- [GammaTool]"),
+        "GammaTool must remain a top-level sibling list item. Got:\n{result}"
+    );
+}
+
+#[test]
+fn test_semantic_line_breaks_numbered_list_sibling_preserved() {
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "1. First item with a very long description that exceeds the line length and requires proper semantic line breaking.\n2. Second item should stay as its own list item.\n3. Third item should also stay independent.\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("\n2. Second item"),
+        "Second numbered item must remain a sibling. Got:\n{result}"
+    );
+    assert!(
+        result.contains("\n3. Third item"),
+        "Third numbered item must remain a sibling. Got:\n{result}"
+    );
+}
+
+#[test]
+fn test_semantic_line_breaks_list_continuation_indented() {
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input =
+        "- This is a list item with a very long sentence that should be wrapped with continuation indentation.\n";
+    let result = reflow_markdown(input, &options);
+    let lines: Vec<&str> = result.trim().lines().collect();
+
+    // Should produce more than one line
+    assert!(lines.len() > 1, "Long list item should be wrapped. Got:\n{result}");
+
+    // Continuation lines must be indented to align with content after marker
+    for line in &lines[1..] {
+        assert!(
+            line.starts_with("  "),
+            "Continuation line must be indented: {line:?}. Full:\n{result}"
+        );
+    }
+}
+
+#[test]
+fn test_semantic_line_breaks_adjacent_long_list_items() {
+    // Two adjacent list items that both exceed line length
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "- First list item with text that is long enough to exceed the configured line length limit.\n- Second list item also with text long enough to exceed the configured line length limit.\n";
+    let result = reflow_markdown(input, &options);
+
+    // Count top-level list markers: must still be exactly 2
+    let top_markers: Vec<&str> = result.lines().filter(|l| l.starts_with("- ")).collect();
+    assert_eq!(
+        top_markers.len(),
+        2,
+        "Must have exactly 2 top-level list items. Got {}: {top_markers:?}\nFull:\n{result}",
+        top_markers.len()
+    );
+}
+
+#[test]
+fn test_semantic_line_breaks_nested_list_structure_preserved() {
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "- Parent item with some text that may be long enough to require wrapping.\n  - Child item one.\n  - Child item two.\n- Another parent item.\n";
+    let result = reflow_markdown(input, &options);
+
+    // Nested list markers must be preserved at correct indentation
+    assert!(
+        result.contains("\n  - Child item one."),
+        "Child items must remain nested. Got:\n{result}"
+    );
+    assert!(
+        result.contains("\n  - Child item two."),
+        "Child items must remain nested. Got:\n{result}"
+    );
+    assert!(
+        result.contains("\n- Another parent"),
+        "Second parent must remain top-level. Got:\n{result}"
+    );
+}
+
+#[test]
+fn test_default_reflow_sibling_list_items_preserved() {
+    // Same test but with default reflow mode (not semantic)
+    let options = ReflowOptions {
+        line_length: 60,
+        ..Default::default()
+    };
+
+    let input = "- First long item that exceeds the line length and needs to be wrapped properly by the reflow engine.\n- Second item should stay as sibling.\n";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("\n- Second item"),
+        "Second item must remain a sibling in default reflow. Got:\n{result}"
+    );
+}
+
+// =============================================================================
+// Edge case tests for autolink and element span tracking
+// =============================================================================
+
+#[test]
+fn test_autolink_with_query_params() {
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See <https://example.com/api?key=value&format=json> for the API.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/api?key=value&format=json>"),
+        "Autolink with query params must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_with_fragment() {
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See <https://example.com/page#section-heading> for details.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/page#section-heading>"),
+        "Autolink with fragment must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_multiple_adjacent_autolinks() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Links: <https://example.com/first><https://example.com/second> are both here.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/first>"),
+        "First adjacent autolink must be preserved. Got: {result:?}"
+    );
+    assert!(
+        result.contains("<https://example.com/second>"),
+        "Second adjacent autolink must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_mixed_with_markdown_link() {
+    let options = ReflowOptions {
+        line_length: 50,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See [the docs](https://example.com/docs) or <https://example.com/api> for info.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("[the docs](https://example.com/docs)"),
+        "Markdown link must be preserved. Got: {result:?}"
+    );
+    assert!(
+        result.contains("<https://example.com/api>"),
+        "Autolink must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_in_sentence_per_line_mode() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+
+    let input = "First sentence about <https://example.com/path>. Second sentence here.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/path>"),
+        "Autolink must be preserved in sentence-per-line mode. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_autolink_ftp_and_mailto_schemes() {
+    let options = ReflowOptions {
+        line_length: 40,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Download from <ftp://files.example.com/package.tar.gz> or email <mailto:admin@example.com> for help.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<ftp://files.example.com/package.tar.gz>"),
+        "FTP autolink must be preserved. Got: {result:?}"
+    );
+    assert!(
+        result.contains("<mailto:admin@example.com>"),
+        "Mailto autolink must be preserved. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_tag_with_many_attributes_not_split() {
+    let options = ReflowOptions {
+        line_length: 40,
+        ..Default::default()
+    };
+
+    let input = r#"Click <a href="https://example.com" target="_blank" rel="noopener noreferrer" class="link">here</a> for details."#;
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains(r#"<a href="https://example.com" target="_blank" rel="noopener noreferrer" class="link">"#),
+        "HTML tag with many attributes must not be split. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_code_span_with_spaces_not_split() {
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+
+    let input = "Use `some command with args` to run the task.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("`some command with args`"),
+        "Code span with spaces must not be split. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_reflow_idempotent_with_autolinks() {
+    // Running reflow twice should produce identical output
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See the documentation at <https://example.com/very/long/path/to/documentation> for more details about the configuration.";
+    let first = reflow_markdown(input, &options);
+    let second = reflow_markdown(&first, &options);
+
+    assert_eq!(
+        first, second,
+        "Reflow must be idempotent.\nFirst:  {first:?}\nSecond: {second:?}"
+    );
+}
+
+#[test]
+fn test_reflow_idempotent_with_links() {
+    let options = ReflowOptions {
+        line_length: 60,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "Reference: [Widget Entrypoint Location](https://example.com/docs/widget-entrypoint-location) for the configuration guide.";
+    let first = reflow_markdown(input, &options);
+    let second = reflow_markdown(&first, &options);
+
+    assert_eq!(
+        first, second,
+        "Reflow with links must be idempotent.\nFirst:  {first:?}\nSecond: {second:?}"
+    );
+}
+
+#[test]
+fn test_visual_width_reflow_idempotent() {
+    let options = ReflowOptions {
+        line_length: 40,
+        length_mode: ReflowLengthMode::Visual,
+        ..Default::default()
+    };
+
+    let input = "Test with CJK 这是一个测试句子 and more English text after.";
+    let first = reflow_markdown(input, &options);
+    let second = reflow_markdown(&first, &options);
+
+    assert_eq!(
+        first, second,
+        "Visual width reflow must be idempotent.\nFirst:  {first:?}\nSecond: {second:?}"
+    );
+}
+
+#[test]
+fn test_bytes_length_mode_reflow() {
+    let options = ReflowOptions {
+        line_length: 40,
+        length_mode: ReflowLengthMode::Bytes,
+        ..Default::default()
+    };
+
+    // UTF-8 multibyte: each CJK char is 3 bytes, so "你好" = 6 bytes
+    let input = "Hello 你好世界 this is a test line that should wrap.";
+    let result = reflow_markdown(input, &options);
+    let lines: Vec<&str> = result.trim().lines().collect();
+
+    // Bytes mode should wrap earlier than chars for multibyte content
+    assert!(
+        lines.len() > 1,
+        "Bytes mode should wrap multibyte content. Got:\n{result}"
+    );
+}
+
+#[test]
+fn test_rfind_safe_space_empty_spans() {
+    // When there are no element spans, should behave like normal rfind
+    let options = ReflowOptions {
+        line_length: 20,
+        ..Default::default()
+    };
+
+    let input = "Simple text without any special elements here.";
+    let result = reflow_markdown(input, &options);
+
+    // Should still wrap properly
+    assert!(
+        result.trim().lines().count() > 1,
+        "Should wrap long plain text. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_at_end_with_trailing_punctuation() {
+    // Trailing punctuation after a link should not cause the link to be split
+    let options = ReflowOptions {
+        line_length: 50,
+        ..Default::default()
+    };
+
+    for punct in ['.', ',', ';', '!', '?', ')'] {
+        let input = format!("See [the documentation page](https://example.com/docs){punct} More text follows here.");
+        let result = reflow_markdown(&input, &options);
+
+        assert!(
+            result.contains("[the documentation page](https://example.com/docs)"),
+            "Link must be preserved with trailing '{punct}'. Got: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_autolink_exceeding_line_length_preserved() {
+    // An autolink that is longer than line_length must still be preserved intact
+    let options = ReflowOptions {
+        line_length: 30,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "See <https://example.com/very/long/path/that/exceeds/the/line/length/limit> for details.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<https://example.com/very/long/path/that/exceeds/the/line/length/limit>"),
+        "Autolink exceeding line length must remain intact. Got: {result:?}"
     );
 }

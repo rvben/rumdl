@@ -196,3 +196,95 @@ More text."#;
     // In standard flavor, !!! is just text, not an admonition
     assert_eq!(warnings.len(), 0, "Standard flavor should not detect admonitions");
 }
+
+#[test]
+fn test_fenced_code_inside_admonition_not_flagged_issue_415() {
+    // Fenced code blocks inside admonitions must not trigger false positives
+    // for rules that check code block boundaries (e.g., MD031)
+    let content = r#"# Document
+
+!!! note "Example"
+    Some text before code.
+
+    ```python
+    def hello():
+        print("world")
+    ```
+
+    Some text after code.
+
+More text."#;
+
+    let rule = MD031BlanksAroundFences::default();
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    // The fenced code block inside the admonition should not cause false positives
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Fenced code inside admonition must not trigger MD031 warnings. Got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_multiple_fenced_code_blocks_inside_admonition_issue_415() {
+    // Multiple fenced code blocks within a single admonition
+    let content = r#"# Document
+
+!!! example "Code Samples"
+    First example:
+
+    ```python
+    x = 1
+    ```
+
+    Second example:
+
+    ```bash
+    echo "hello"
+    ```
+
+    End of admonition.
+
+More text."#;
+
+    let rule = MD031BlanksAroundFences::default();
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Multiple fenced code blocks inside admonition must not trigger MD031 warnings. Got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_tilde_fenced_code_inside_admonition_issue_415() {
+    // Tilde-style fenced code blocks inside admonitions
+    let content = r#"# Document
+
+!!! warning
+    Content here.
+
+    ~~~yaml
+    key: value
+    nested:
+      - item
+    ~~~
+
+    More content.
+
+End."#;
+
+    let rule = MD031BlanksAroundFences::default();
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let warnings = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Tilde-fenced code inside admonition must not trigger MD031 warnings. Got: {warnings:?}"
+    );
+}
