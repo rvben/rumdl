@@ -190,7 +190,10 @@ pub fn process_file_with_formatter(
 
         // Format code blocks using external tools if enabled
         if config.code_block_tools.enabled {
-            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools);
+            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+                &config.code_block_tools,
+                config.get_flavor_for_file(Path::new(file_path)),
+            );
             match processor.format(&content) {
                 Ok(output) => {
                     if output.content != content {
@@ -247,7 +250,10 @@ pub fn process_file_with_formatter(
 
         // Format code blocks using external tools if enabled
         if config.code_block_tools.enabled {
-            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools);
+            let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+                &config.code_block_tools,
+                config.get_flavor_for_file(Path::new(file_path)),
+            );
             match processor.format(&content) {
                 Ok(output) => {
                     if output.content != content {
@@ -605,7 +611,10 @@ pub fn process_file_with_index(
 
     // Run code block tools linting if enabled
     if config.code_block_tools.enabled {
-        let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(&config.code_block_tools);
+        let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
+            &config.code_block_tools,
+            config.get_flavor_for_file(Path::new(file_path)),
+        );
         match processor.lint(&content) {
             Ok(diagnostics) => {
                 let tool_warnings: Vec<_> = diagnostics.iter().map(|d| d.to_lint_warning()).collect();

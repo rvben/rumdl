@@ -9,6 +9,7 @@ use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing}
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
+use crate::config::MarkdownFlavor;
 use crate::rule::{LintWarning, Severity};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
@@ -155,6 +156,7 @@ pub struct FormatOutput {
 /// Main processor for code block tools.
 pub struct CodeBlockToolProcessor<'a> {
     config: &'a CodeBlockToolsConfig,
+    flavor: MarkdownFlavor,
     linguist: LinguistResolver,
     registry: ToolRegistry,
     executor: ToolExecutor,
@@ -162,8 +164,8 @@ pub struct CodeBlockToolProcessor<'a> {
 }
 
 impl<'a> CodeBlockToolProcessor<'a> {
-    /// Create a new processor with the given configuration.
-    pub fn new(config: &'a CodeBlockToolsConfig) -> Self {
+    /// Create a new processor with the given configuration and markdown flavor.
+    pub fn new(config: &'a CodeBlockToolsConfig, flavor: MarkdownFlavor) -> Self {
         let user_aliases = config
             .language_aliases
             .iter()
@@ -171,6 +173,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
             .collect();
         Self {
             config,
+            flavor,
             linguist: LinguistResolver::new(),
             registry: ToolRegistry::new(config.tools.clone()),
             executor: ToolExecutor::new(config.timeout),
@@ -258,6 +261,163 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // For MkDocs flavor, also extract code blocks inside admonitions and tabs
+        if self.flavor == MarkdownFlavor::MkDocs {
+            let mkdocs_blocks = self.extract_mkdocs_code_blocks(content);
+            for mb in mkdocs_blocks {
+                // Deduplicate: only add if no existing block starts at the same line
+                if !blocks.iter().any(|b| b.start_line == mb.start_line) {
+                    blocks.push(mb);
+                }
+            }
+            blocks.sort_by_key(|b| b.start_line);
+        }
+
+        blocks
+    }
+
+    /// Extract fenced code blocks that are inside MkDocs admonitions or tabs.
+    ///
+    /// pulldown_cmark doesn't parse MkDocs-specific constructs, so indented
+    /// code blocks inside `!!!`/`???` admonitions or `===` tabs are missed.
+    /// This method manually scans for them.
+    fn extract_mkdocs_code_blocks(&self, content: &str) -> Vec<FencedCodeBlockInfo> {
+        use crate::utils::mkdocs_admonitions;
+        use crate::utils::mkdocs_tabs;
+
+        let mut blocks = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Track current MkDocs context indent level
+        // We only need to know if we're inside any MkDocs block, so a simple stack suffices.
+        let mut context_indent_stack: Vec<usize> = Vec::new();
+
+        // Track fence state inside MkDocs context
+        let mut in_fence = false;
+        let mut fence_start_line: usize = 0;
+        let mut fence_content_start: usize = 0;
+        let mut fence_char: char = '`';
+        let mut fence_length: usize = 0;
+        let mut fence_indent: usize = 0;
+        let mut fence_indent_prefix = String::new();
+        let mut fence_language = String::new();
+        let mut fence_info_string = String::new();
+
+        // Compute byte offsets via pointer arithmetic.
+        // `content.lines()` returns slices into the original string,
+        // so each line's pointer offset from `content` gives its byte position.
+        // This correctly handles \n, \r\n, and empty lines.
+        let content_start_ptr = content.as_ptr() as usize;
+        let line_offsets: Vec<usize> = lines
+            .iter()
+            .map(|line| line.as_ptr() as usize - content_start_ptr)
+            .collect();
+
+        for (i, line) in lines.iter().enumerate() {
+            let line_indent = crate::utils::mkdocs_common::get_line_indent(line);
+            let is_admonition = mkdocs_admonitions::is_admonition_start(line);
+            let is_tab = mkdocs_tabs::is_tab_marker(line);
+
+            // Pop contexts when the current line is not indented enough to be content.
+            // This runs for ALL lines (including new admonition/tab starts) to clean
+            // up stale entries before potentially pushing a new context.
+            if !line.trim().is_empty() {
+                while let Some(&ctx_indent) = context_indent_stack.last() {
+                    if line_indent < ctx_indent + 4 {
+                        context_indent_stack.pop();
+                        if in_fence {
+                            in_fence = false;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            // Check for admonition start — push new context
+            if is_admonition {
+                if let Some(indent) = mkdocs_admonitions::get_admonition_indent(line) {
+                    context_indent_stack.push(indent);
+                    continue;
+                }
+            }
+
+            // Check for tab marker — push new context
+            if is_tab {
+                if let Some(indent) = mkdocs_tabs::get_tab_indent(line) {
+                    context_indent_stack.push(indent);
+                    continue;
+                }
+            }
+
+            // Only look for fences inside a MkDocs context
+            if context_indent_stack.is_empty() {
+                continue;
+            }
+
+            let trimmed = line.trim_start();
+            let leading_spaces = line.len() - trimmed.len();
+
+            if !in_fence {
+                // Check for fence opening
+                let (fc, fl) = if trimmed.starts_with("```") {
+                    ('`', trimmed.chars().take_while(|&c| c == '`').count())
+                } else if trimmed.starts_with("~~~") {
+                    ('~', trimmed.chars().take_while(|&c| c == '~').count())
+                } else {
+                    continue;
+                };
+
+                if fl >= 3 {
+                    in_fence = true;
+                    fence_start_line = i;
+                    fence_char = fc;
+                    fence_length = fl;
+                    fence_indent = leading_spaces;
+                    fence_indent_prefix = line.get(..leading_spaces).unwrap_or("").to_string();
+
+                    let after_fence = &trimmed[fl..];
+                    fence_info_string = after_fence.trim().to_string();
+                    fence_language = fence_info_string.split_whitespace().next().unwrap_or("").to_string();
+
+                    // Content starts at the next line's byte offset
+                    fence_content_start = line_offsets.get(i + 1).copied().unwrap_or(content.len());
+                }
+            } else {
+                // Check for fence closing
+                let is_closing = if fence_char == '`' {
+                    trimmed.starts_with("```")
+                        && trimmed.chars().take_while(|&c| c == '`').count() >= fence_length
+                        && trimmed.trim_start_matches('`').trim().is_empty()
+                } else {
+                    trimmed.starts_with("~~~")
+                        && trimmed.chars().take_while(|&c| c == '~').count() >= fence_length
+                        && trimmed.trim_start_matches('~').trim().is_empty()
+                };
+
+                if is_closing {
+                    let content_end = line_offsets.get(i).copied().unwrap_or(content.len());
+
+                    if content_end >= fence_content_start {
+                        blocks.push(FencedCodeBlockInfo {
+                            start_line: fence_start_line,
+                            end_line: i,
+                            content_start: fence_content_start,
+                            content_end,
+                            language: fence_language.clone(),
+                            info_string: fence_info_string.clone(),
+                            fence_char,
+                            fence_length,
+                            indent: fence_indent,
+                            indent_prefix: fence_indent_prefix.clone(),
+                        });
+                    }
+
+                    in_fence = false;
+                }
             }
         }
 
@@ -903,7 +1063,7 @@ mod tests {
     #[test]
     fn test_extract_code_blocks() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = r#"# Example
 
@@ -938,7 +1098,7 @@ fn main() {}
     #[test]
     fn test_extract_code_blocks_with_info_string() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python title=\"example.py\"\ncode\n```";
         let blocks = processor.extract_code_blocks(content);
@@ -951,7 +1111,7 @@ fn main() {}
     #[test]
     fn test_extract_code_blocks_tilde_fence() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "~~~bash\necho hello\n~~~";
         let blocks = processor.extract_code_blocks(content);
@@ -966,7 +1126,7 @@ fn main() {}
     #[test]
     fn test_extract_code_blocks_with_indent_prefix() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "  - item\n    ```python\n    print('hi')\n    ```";
         let blocks = processor.extract_code_blocks(content);
@@ -978,7 +1138,7 @@ fn main() {}
     #[test]
     fn test_extract_code_blocks_no_language() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```\nplain code\n```";
         let blocks = processor.extract_code_blocks(content);
@@ -991,7 +1151,7 @@ fn main() {}
     fn test_resolve_language_linguist() {
         let mut config = default_config();
         config.normalize_language = NormalizeLanguage::Linguist;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         assert_eq!(processor.resolve_language("py"), "python");
         assert_eq!(processor.resolve_language("bash"), "shell");
@@ -1002,7 +1162,7 @@ fn main() {}
     fn test_resolve_language_exact() {
         let mut config = default_config();
         config.normalize_language = NormalizeLanguage::Exact;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         assert_eq!(processor.resolve_language("py"), "py");
         assert_eq!(processor.resolve_language("BASH"), "bash");
@@ -1013,7 +1173,7 @@ fn main() {}
         let mut config = default_config();
         config.language_aliases.insert("py".to_string(), "python".to_string());
         config.normalize_language = NormalizeLanguage::Exact;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         assert_eq!(processor.resolve_language("PY"), "python");
     }
@@ -1021,7 +1181,7 @@ fn main() {}
     #[test]
     fn test_indent_strip_and_reapply_roundtrip() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let raw = "    def hello():\n        print('hi')";
         let stripped = processor.strip_indent_from_block(raw, "    ");
@@ -1034,7 +1194,7 @@ fn main() {}
     #[test]
     fn test_infer_severity() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         assert_eq!(
             processor.infer_severity("E501 line too long"),
@@ -1061,7 +1221,7 @@ fn main() {}
     #[test]
     fn test_parse_standard_format_windows_path() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let output = ToolOutput {
             stdout: "C:\\path\\file.py:2:5: E123 message".to_string(),
@@ -1080,7 +1240,7 @@ fn main() {}
     #[test]
     fn test_parse_eslint_severity() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let output = ToolOutput {
             stdout: "1:2 error Unexpected token".to_string(),
@@ -1100,7 +1260,7 @@ fn main() {}
     #[test]
     fn test_parse_shellcheck_multiline() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let output = ToolOutput {
             stdout: "In - line 3:\necho $var\n ^-- SC2086 (info): Double quote to prevent globbing".to_string(),
@@ -1119,7 +1279,7 @@ fn main() {}
     #[test]
     fn test_lint_no_config() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.lint(content);
@@ -1132,7 +1292,7 @@ fn main() {}
     #[test]
     fn test_format_no_config() {
         let config = default_config();
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.format(content);
@@ -1149,7 +1309,7 @@ fn main() {}
     fn test_lint_on_missing_language_definition_fail() {
         let mut config = default_config();
         config.on_missing_language_definition = OnMissing::Fail;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```\n\n```javascript\nconsole.log('hi');\n```";
         let result = processor.lint(content);
@@ -1167,7 +1327,7 @@ fn main() {}
     fn test_lint_on_missing_language_definition_fail_fast() {
         let mut config = default_config();
         config.on_missing_language_definition = OnMissing::FailFast;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```\n\n```javascript\nconsole.log('hi');\n```";
         let result = processor.lint(content);
@@ -1182,7 +1342,7 @@ fn main() {}
     fn test_format_on_missing_language_definition_fail() {
         let mut config = default_config();
         config.on_missing_language_definition = OnMissing::Fail;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.format(content);
@@ -1200,7 +1360,7 @@ fn main() {}
     fn test_format_on_missing_language_definition_fail_fast() {
         let mut config = default_config();
         config.on_missing_language_definition = OnMissing::FailFast;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.format(content);
@@ -1231,7 +1391,7 @@ fn main() {}
         };
         config.tools.insert("nonexistent-linter".to_string(), tool_def);
 
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.lint(content);
@@ -1263,7 +1423,7 @@ fn main() {}
         };
         config.tools.insert("nonexistent-linter".to_string(), tool_def);
 
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.lint(content);
@@ -1294,7 +1454,7 @@ fn main() {}
         };
         config.tools.insert("nonexistent-formatter".to_string(), tool_def);
 
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.format(content);
@@ -1328,7 +1488,7 @@ fn main() {}
         };
         config.tools.insert("nonexistent-formatter".to_string(), tool_def);
 
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```python\nprint('hello')\n```";
         let result = processor.format(content);
@@ -1353,7 +1513,7 @@ fn main() {}
             },
         );
         config.on_missing_language_definition = OnMissing::Fail;
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```markdown\n# Hello\n```";
         let result = processor.lint(content);
@@ -1375,7 +1535,7 @@ fn main() {}
                 on_error: None,
             },
         );
-        let processor = CodeBlockToolProcessor::new(&config);
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
 
         let content = "```markdown\n# Hello\n```";
         let result = processor.format(content);
@@ -1398,5 +1558,205 @@ fn main() {}
         assert!(!is_markdown_language("python"));
         assert!(!is_markdown_language("rust"));
         assert!(!is_markdown_language(""));
+    }
+
+    // Issue #423: MkDocs admonition code block detection
+
+    #[test]
+    fn test_extract_mkdocs_admonition_code_block() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "!!! note\n    Some text\n\n    ```python\n    def hello():\n        pass\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1, "Should detect code block inside MkDocs admonition");
+        assert_eq!(blocks[0].language, "python");
+    }
+
+    #[test]
+    fn test_extract_mkdocs_tab_code_block() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "=== \"Python\"\n\n    ```python\n    print(\"hello\")\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1, "Should detect code block inside MkDocs tab");
+        assert_eq!(blocks[0].language, "python");
+    }
+
+    #[test]
+    fn test_standard_flavor_ignores_admonition_indented_content() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // With standard flavor, pulldown_cmark parses this differently;
+        // our MkDocs extraction should NOT run
+        let content = "!!! note\n    Some text\n\n    ```python\n    def hello():\n        pass\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+
+        // Standard flavor relies on pulldown_cmark only, which may or may not detect
+        // indented fenced blocks. The key assertion is that we don't double-detect.
+        // With standard flavor, the MkDocs extraction path is skipped entirely.
+        for (i, b) in blocks.iter().enumerate() {
+            for (j, b2) in blocks.iter().enumerate() {
+                if i != j {
+                    assert_ne!(b.start_line, b2.start_line, "No duplicate blocks should exist");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_mkdocs_top_level_blocks_alongside_admonition() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content =
+            "```rust\nfn main() {}\n```\n\n!!! note\n    Some text\n\n    ```python\n    print(\"hello\")\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+
+        assert_eq!(
+            blocks.len(),
+            2,
+            "Should detect both top-level and admonition code blocks"
+        );
+        assert_eq!(blocks[0].language, "rust");
+        assert_eq!(blocks[1].language, "python");
+    }
+
+    #[test]
+    fn test_mkdocs_nested_admonition_code_block() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "\
+!!! note
+    Some text
+
+    !!! warning
+        Nested content
+
+        ```python
+        x = 1
+        ```
+";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1, "Should detect code block inside nested admonition");
+        assert_eq!(blocks[0].language, "python");
+    }
+
+    #[test]
+    fn test_mkdocs_consecutive_admonitions_no_stale_context() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        // Two consecutive admonitions at the same indent level.
+        // The first has no code block, the second does.
+        let content = "\
+!!! note
+    First admonition content
+
+!!! warning
+    Second admonition content
+
+    ```python
+    y = 2
+    ```
+";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1, "Should detect code block in second admonition only");
+        assert_eq!(blocks[0].language, "python");
+    }
+
+    #[test]
+    fn test_mkdocs_crlf_line_endings() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        // Use \r\n line endings
+        let content = "!!! note\r\n    Some text\r\n\r\n    ```python\r\n    x = 1\r\n    ```\r\n";
+        let blocks = processor.extract_code_blocks(content);
+
+        assert_eq!(blocks.len(), 1, "Should detect code block with CRLF line endings");
+        assert_eq!(blocks[0].language, "python");
+
+        // Verify byte offsets point to valid content
+        let extracted = &content[blocks[0].content_start..blocks[0].content_end];
+        assert!(
+            extracted.contains("x = 1"),
+            "Extracted content should contain code. Got: {extracted:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_unclosed_fence_in_admonition() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        // Unclosed fence should not produce a block
+        let content = "!!! note\n    ```python\n    x = 1\n    no closing fence\n";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 0, "Unclosed fence should not produce a block");
+    }
+
+    #[test]
+    fn test_mkdocs_tilde_fence_in_admonition() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "!!! note\n    ~~~ruby\n    puts 'hi'\n    ~~~\n";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1, "Should detect tilde-fenced code block");
+        assert_eq!(blocks[0].language, "ruby");
+    }
+
+    #[test]
+    fn test_mkdocs_empty_lines_in_code_block() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        // Code block with empty lines inside — verifies byte offsets are correct
+        // across empty lines (the previous find("") approach would break here)
+        let content = "!!! note\n    ```python\n    x = 1\n\n    y = 2\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+
+        let extracted = &content[blocks[0].content_start..blocks[0].content_end];
+        assert!(
+            extracted.contains("x = 1") && extracted.contains("y = 2"),
+            "Extracted content should span across the empty line. Got: {extracted:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_content_byte_offsets_lf() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "!!! note\n    ```python\n    print('hi')\n    ```\n";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+
+        // Verify the extracted content is exactly the code body
+        let extracted = &content[blocks[0].content_start..blocks[0].content_end];
+        assert_eq!(extracted, "    print('hi')\n", "Content offsets should be exact for LF");
+    }
+
+    #[test]
+    fn test_mkdocs_content_byte_offsets_crlf() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::MkDocs);
+
+        let content = "!!! note\r\n    ```python\r\n    print('hi')\r\n    ```\r\n";
+        let blocks = processor.extract_code_blocks(content);
+        assert_eq!(blocks.len(), 1);
+
+        let extracted = &content[blocks[0].content_start..blocks[0].content_end];
+        assert_eq!(
+            extracted, "    print('hi')\r\n",
+            "Content offsets should be exact for CRLF"
+        );
     }
 }
