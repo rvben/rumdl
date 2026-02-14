@@ -33,6 +33,10 @@ inputs:
     description: "Write results to this file path (optional)"
     required: false
     default: ""
+  args:
+    description: "Additional CLI arguments passed to `rumdl check` (e.g. --extend-disable MD013,MD024)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -47,3 +51,4 @@ runs:
         GHA_RUMDL_REPORT_TYPE: ${{ inputs.report-type }}
         GHA_RUMDL_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         GHA_RUMDL_OUTPUT_FILE: ${{ inputs.output-file }}
+        GHA_RUMDL_ARGS: ${{ inputs.args }}

@@ -168,6 +168,25 @@ jobs:
         with:
           path: "__tests__/fixtures/clean/test.md __tests__/fixtures/clean/test2.md"
 
+  test-args:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run action with extra CLI args
+        id: with-args
+        continue-on-error: true
+        uses: ./
+        with:
+          path: __tests__/fixtures/malformed/
+          args: "--extend-disable MD018"
+      - name: Verify action ran with args (MD018 disabled, other rules still fire)
+        run: |
+          if [ "${{ steps.with-args.outcome }}" == "success" ]; then
+            echo "Expected failure from remaining violations"
+            exit 1
+          fi
+          echo "Action correctly applied extra args"
+
   test-invalid-fail-on-error:
     runs-on: ubuntu-latest
     steps:
@@ -201,6 +220,7 @@ jobs:
       - test-output-file-subdirectory
       - test-combined-informational-with-output
       - test-multiple-paths
+      - test-args
       - test-invalid-fail-on-error
     if: always()
     steps:

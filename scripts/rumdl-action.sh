@@ -57,6 +57,14 @@ if [ "$fail_on_error" != "true" ] && [ "$fail_on_error" != "false" ]; then
     exit 1
 fi
 
+# Extra CLI arguments
+extra_args=()
+if [ -n "${GHA_RUMDL_ARGS:-}" ]; then
+    read -ra extra_args <<< "$GHA_RUMDL_ARGS"
+    rumdl_args+=("${extra_args[@]}")
+    echo "Extra args: ${extra_args[*]}"
+fi
+
 # Log settings for visibility
 if [ "$fail_on_error" = "false" ]; then
     echo "Informational mode: violations will not fail the workflow"
