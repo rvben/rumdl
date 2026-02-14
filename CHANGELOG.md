@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-02-14
+
+### Added
+
+- **CLI**: New `full` output format with ruff-style source line display showing
+  offending lines with caret underlines
+  ([#425](https://github.com/rvben/rumdl/issues/425))
+- **GitHub Action**: Add generic `args` input for passing extra CLI flags like
+  `--output-format json`
+  ([#406](https://github.com/rvben/rumdl/issues/406))
+- **MD060**: `loose-last-column` now caps last column width at header text width —
+  body cells shorter than header are padded, longer cells extend beyond
+  ([#424](https://github.com/rvben/rumdl/issues/424))
+
+### Changed
+
+- **CLI**: `--output-format` help text now documents all available formats with
+  descriptions ([#425](https://github.com/rvben/rumdl/issues/425))
+
+### Fixed
+
+- **CI**: SchemaStore sync workflow now formats schema with Prettier before
+  committing
+
 ## [0.1.20] - 2026-02-13
 
 ### Added
