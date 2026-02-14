@@ -2,7 +2,6 @@ use crate::rule_config_serde::RuleConfig;
 use crate::types::LineLength;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
-
 /// Controls how cell text is aligned within padded columns.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ColumnAlign {
@@ -140,11 +139,12 @@ pub struct MD060Config {
     #[serde(default, rename = "column-align-body")]
     pub column_align_body: Option<ColumnAlign>,
 
-    /// When enabled, the last column in body rows is not padded to match the header width.
+    /// Controls whether the last column in body rows is loosely formatted.
     ///
-    /// This is useful for tables where the last column contains descriptions or other
-    /// variable-length content. The header and delimiter rows remain fully aligned,
-    /// but body rows can have shorter or longer last columns.
+    /// - `false` (default): All columns padded to equal width across all rows.
+    /// - `true`: The last column width is capped at the header text width.
+    ///   Body cells shorter than the header are padded to the header width.
+    ///   Body cells longer than the header extend beyond without padding.
     ///
     /// Only applies when `style = "aligned"` or `style = "aligned-no-space"`.
     ///
@@ -154,14 +154,6 @@ pub struct MD060Config {
     /// [MD060]
     /// style = "aligned"
     /// loose-last-column = true
-    /// ```
-    ///
-    /// Result:
-    /// ```markdown
-    /// | Name   | Status   | Description |
-    /// |--------|----------|-------------|
-    /// | Foo    | Enabled  | Short |
-    /// | Bar    | Disabled | A much longer description that would waste space if padded |
     /// ```
     #[serde(default, rename = "loose-last-column")]
     pub loose_last_column: bool,

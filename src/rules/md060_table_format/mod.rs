@@ -47,8 +47,6 @@ struct RowFormatOptions {
     column_align_header: Option<ColumnAlign>,
     /// Body-specific column alignment (overrides column_align for body)
     column_align_body: Option<ColumnAlign>,
-    /// Whether to skip padding on the last column for body rows
-    loose_last_column: bool,
 }
 
 /// Rule MD060: Table Column Alignment
@@ -311,9 +309,15 @@ impl MD060TableFormat {
             .collect()
     }
 
-    fn calculate_column_widths(table_lines: &[&str], flavor: crate::config::MarkdownFlavor) -> Vec<usize> {
+    fn calculate_column_widths(
+        table_lines: &[&str],
+        flavor: crate::config::MarkdownFlavor,
+        loose_last_column: bool,
+    ) -> Vec<usize> {
         let mut column_widths = Vec::new();
         let mut delimiter_cells: Option<Vec<String>> = None;
+        let mut is_header = true;
+        let mut header_last_col_width: Option<usize> = None;
 
         for line in table_lines {
             let cells = Self::parse_table_row_with_flavor(line, flavor);
@@ -321,6 +325,7 @@ impl MD060TableFormat {
             // Save delimiter row for later processing, but don't use it for width calculation
             if Self::is_delimiter_row(&cells) {
                 delimiter_cells = Some(cells);
+                is_header = false;
                 continue;
             }
 
@@ -330,6 +335,22 @@ impl MD060TableFormat {
                     column_widths.push(width);
                 } else {
                     column_widths[i] = column_widths[i].max(width);
+                }
+            }
+
+            // Record the header row's last column width
+            if is_header && !cells.is_empty() {
+                let last_idx = cells.len() - 1;
+                header_last_col_width = Some(Self::calculate_cell_display_width(&cells[last_idx]));
+                is_header = false;
+            }
+        }
+
+        // When loose, cap the last column width at the header's width
+        if loose_last_column {
+            if let Some(header_width) = header_last_col_width {
+                if let Some(last) = column_widths.last_mut() {
+                    *last = header_width;
                 }
             }
         }
@@ -364,12 +385,10 @@ impl MD060TableFormat {
         column_alignments: &[ColumnAlignment],
         options: &RowFormatOptions,
     ) -> String {
-        let num_cells = cells.len();
         let formatted_cells: Vec<String> = cells
             .iter()
             .enumerate()
             .map(|(i, cell)| {
-                let is_last_column = i == num_cells - 1;
                 let target_width = column_widths.get(i).copied().unwrap_or(0);
 
                 match options.row_type {
@@ -411,16 +430,7 @@ impl MD060TableFormat {
                     RowType::Header | RowType::Body => {
                         let trimmed = cell.trim();
                         let current_width = Self::calculate_cell_display_width(cell);
-
-                        // For loose last column in body rows, don't add padding
-                        let skip_padding =
-                            options.loose_last_column && is_last_column && options.row_type == RowType::Body;
-
-                        let padding = if skip_padding {
-                            0
-                        } else {
-                            target_width.saturating_sub(current_width)
-                        };
+                        let padding = target_width.saturating_sub(current_width);
 
                         // Determine which alignment to use based on row type
                         let effective_align = match options.row_type {
@@ -751,7 +761,8 @@ impl MD060TableFormat {
                         "tight" => result.push(Self::format_table_tight(&cells)),
                         "compact" => result.push(Self::format_table_compact(&cells)),
                         _ => {
-                            let column_widths = Self::calculate_column_widths(&stripped_lines, flavor);
+                            let column_widths =
+                                Self::calculate_column_widths(&stripped_lines, flavor, self.config.loose_last_column);
                             let row_type = match row_idx {
                                 0 => RowType::Header,
                                 1 => RowType::Delimiter,
@@ -763,7 +774,6 @@ impl MD060TableFormat {
                                 column_align: self.config.column_align,
                                 column_align_header: self.config.column_align_header,
                                 column_align_body: self.config.column_align_body,
-                                loose_last_column: self.config.loose_last_column,
                             };
                             result.push(Self::format_table_row(
                                 &cells,
@@ -805,7 +815,8 @@ impl MD060TableFormat {
                     };
                 }
 
-                let column_widths = Self::calculate_column_widths(&stripped_lines, flavor);
+                let column_widths =
+                    Self::calculate_column_widths(&stripped_lines, flavor, self.config.loose_last_column);
 
                 // Calculate aligned table width: 1 (leading pipe) + num_columns * 3 (| cell |) + sum(column_widths)
                 let num_columns = column_widths.len();
@@ -837,7 +848,6 @@ impl MD060TableFormat {
                             column_align: self.config.column_align,
                             column_align_header: self.config.column_align_header,
                             column_align_body: self.config.column_align_body,
-                            loose_last_column: self.config.loose_last_column,
                         };
                         result.push(Self::format_table_row(
                             &cells,

@@ -1883,7 +1883,7 @@ fn default_md013_config() -> MD013Config {
 
 #[test]
 fn test_md060_loose_last_column_basic() {
-    // Test that loose-last-column allows unpadded last column in body rows
+    // Test that loose-last-column caps last column width at header text width
     let config = MD060Config {
         enabled: true,
         style: "aligned".to_string(),
@@ -1895,9 +1895,10 @@ fn test_md060_loose_last_column_basic() {
     };
     let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
 
-    // Input: header "Description" is 11 chars, but body has "Short" (5 chars) and long text (26 chars)
-    // The max width of last column = max(11, 5, 26) = 26
-    // Header is padded to 26, body rows are NOT padded (loose)
+    // Input: header "Description" is 11 chars, body has "Short" (5 chars) and long text (26 chars)
+    // Last column width is capped at header width (11)
+    // Body "Short" → padded to 11 → same length as header
+    // Body "A much longer description" → extends beyond header (26 > 11)
     let content = "| Name | Description |\n|---|---|\n| Foo | Short |\n| Bar | A much longer description |";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
@@ -1911,22 +1912,19 @@ fn test_md060_loose_last_column_basic() {
         "Header and delimiter should be same length"
     );
 
-    // KEY TEST: Body row with "Short" should be SHORTER than header row
-    // because loose_last_column=true means we don't pad the last column in body rows
-    // Header has "Description" padded to 26 chars, body has "Short" (5 chars) unpadded
-    assert!(
-        lines[2].len() < lines[0].len(),
-        "Body row with short content ({} chars) should be shorter than header ({} chars) when loose_last_column=true",
+    // Body row with "Short" should be padded to header width → same length as header
+    assert_eq!(
         lines[2].len(),
-        lines[0].len()
+        lines[0].len(),
+        "Body row with short content should be padded to header width"
     );
 
-    // Body row with longest content should equal header length (both have same last column width)
-    // Header is padded to match max content, body with max content doesn't need padding
-    assert_eq!(
+    // Body row with long content should extend beyond header
+    assert!(
+        lines[3].len() > lines[0].len(),
+        "Body row with long content ({} chars) should extend beyond header ({} chars)",
         lines[3].len(),
-        lines[0].len(),
-        "Body row with max content should equal header length (both use max column width)"
+        lines[0].len()
     );
 }
 
@@ -2356,16 +2354,15 @@ fn test_md060_loose_last_column_exact_output() {
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Expected: Header padded to max width, body rows NOT padded in last column
-    // Column widths: A=min(3)=3 (GFM minimum), B=max(1, 5, 16)=16
-    // Header: "| A   | B                |" (A padded to min 3, B padded to 16)
-    // Body1:  "| X   | Short |" (first column padded, last column NOT padded - loose)
-    // Body2:  "| Y   | Much longer text |" (first column padded, last no padding needed)
-    let expected =
-        "| A   | B                |\n| --- | ---------------- |\n| X   | Short |\n| Y   | Much longer text |";
+    // Column widths: A=3 (GFM min), B=header "B" (1) → capped at 1 → GFM min 3
+    // Body cells wider than 3 extend beyond the header width (saturating_sub = 0)
+    // Header: "| A   | B   |" (both padded to GFM min 3)
+    // Body1:  "| X   | Short |" (B: 5 > 3, no padding)
+    // Body2:  "| Y   | Much longer text |" (B: 16 > 3, no padding)
+    let expected = "| A   | B   |\n| --- | --- |\n| X   | Short |\n| Y   | Much longer text |";
     assert_eq!(
         fixed, expected,
-        "Loose last column should produce unpadded body rows in last column only"
+        "Loose last column should cap last column width at header text width"
     );
 }
 
@@ -2389,18 +2386,18 @@ fn test_md060_loose_last_column_empty_cell() {
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
 
-    // Empty cell row should be shortest
-    assert!(
-        lines[2].len() < lines[0].len(),
-        "Row with empty last cell ({}) should be shorter than header ({})",
+    // Empty cell should be padded to header width → same length as header
+    assert_eq!(
         lines[2].len(),
-        lines[0].len()
+        lines[0].len(),
+        "Row with empty last cell should be padded to header width"
     );
 
-    // Row with content should match or be close to header
-    assert!(
-        lines[3].len() <= lines[0].len(),
-        "Row with content should not exceed header length"
+    // "Has content" (11 chars) matches "Description" (11 chars) → same length
+    assert_eq!(
+        lines[3].len(),
+        lines[0].len(),
+        "Row with content matching header width should equal header length"
     );
 }
 
@@ -3007,5 +3004,329 @@ fn test_md060_center_aligned_hyphen_content() {
     assert_eq!(
         fixed, fixed2,
         "Center alignment fix should be idempotent.\nFirst fix:\n{fixed}\nSecond fix:\n{fixed2}"
+    );
+}
+
+// ==================== FollowHeader mode tests ====================
+
+#[test]
+fn test_md060_loose_last_column_header_caps_width() {
+    // Header/delimiter width should be based on header text only, not body cells
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Desc |\n|---|---|\n| A | Short |\n| B | A much longer description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header should use "Desc" width (4), not "A much longer description" width
+    // So header should be shorter than the longest body row
+    assert!(
+        lines[0].len() < lines[3].len(),
+        "Header ({} chars) should be shorter than body row with long content ({} chars) in follow-header mode",
+        lines[0].len(),
+        lines[3].len()
+    );
+
+    // Header and delimiter should have the same length
+    assert_eq!(
+        lines[0].len(),
+        lines[1].len(),
+        "Header and delimiter should have the same length"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_body_shorter_than_header() {
+    // When body cell is shorter than header, body is padded to header width
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Description |\n|---|---|\n| A | Hi |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header should contain "Description" at its natural width
+    assert!(lines[0].contains("Description"), "Header should contain 'Description'");
+
+    // Body row should be padded to header width → same length as header
+    assert_eq!(
+        lines[2].len(),
+        lines[0].len(),
+        "Body row with short content should be padded to header width"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_three_columns_exact_output() {
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content =
+        "| Name | Status | Desc |\n|---|---|---|\n| Foo | OK | Short |\n| Bar | Err | A much longer description here |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header and delimiter should match and use "Desc" (4 chars) for last column
+    assert_eq!(lines[0], "| Name | Status | Desc |");
+    assert_eq!(lines[1], "| ---- | ------ | ---- |");
+
+    // Body rows should have unpadded last column
+    assert_eq!(lines[2], "| Foo  | OK     | Short |");
+    assert_eq!(lines[3], "| Bar  | Err    | A much longer description here |");
+}
+
+#[test]
+fn test_md060_loose_last_column_idempotent() {
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Desc |\n|---|---|\n| A | Short |\n| B | A much longer description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(
+        fixed, fixed2,
+        "Loose last column fix should be idempotent.\nFirst:\n{fixed}\nSecond:\n{fixed2}"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_single_column_follow_header() {
+    // Edge case: single column table
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Header |\n|---|\n| Short |\n| A very long body cell |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header width should be based on "Header" (6 chars), not "A very long body cell"
+    assert_eq!(lines[0], "| Header |");
+    assert_eq!(lines[1], "| ------ |");
+}
+
+#[test]
+fn test_md060_loose_last_column_with_alignment_markers_follow() {
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Desc |\n|:---|---:|\n| A | Short |\n| B | Very long content |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Alignment markers should be preserved
+    assert!(
+        lines[1].contains(":---"),
+        "Left alignment marker should be preserved in delimiter"
+    );
+    assert!(
+        lines[1].contains("---:"),
+        "Right alignment marker should be preserved in delimiter"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_cjk_follow_header() {
+    // CJK characters have display width 2
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Info |\n|---|---|\n| A | 日本語のテキスト |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Header should use "Info" width, not the wider CJK body content
+    assert_eq!(lines[0], "| Name | Info |");
+}
+
+#[test]
+fn test_md060_loose_last_column_aligned_no_space_style() {
+    // Verify loose-last-column works with aligned-no-space delimiter style
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned-no-space".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content =
+        "| Name | Status | Desc |\n|---|---|---|\n| Foo | OK | Short |\n| Bar | Err | A much longer description |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // aligned-no-space: delimiter has no spaces around dashes
+    assert_eq!(lines[0], "| Name | Status | Desc |");
+    assert_eq!(lines[1], "|------|--------|------|");
+    assert_eq!(lines[2], "| Foo  | OK     | Short |");
+    assert_eq!(lines[3], "| Bar  | Err    | A much longer description |");
+}
+
+#[test]
+fn test_md060_loose_last_column_all_body_shorter_than_header() {
+    // When ALL body cells are shorter than header, output matches loose=false
+    let content = "| Name | Description |\n|---|---|\n| A | Hi |\n| B | Hey |";
+
+    let config_loose = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let config_strict = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: false,
+    };
+
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule_loose = MD060TableFormat::from_config_struct(config_loose, default_md013_config(), false);
+    let rule_strict = MD060TableFormat::from_config_struct(config_strict, default_md013_config(), false);
+
+    let fixed_loose = rule_loose.fix(&ctx).unwrap();
+    let fixed_strict = rule_strict.fix(&ctx).unwrap();
+
+    // When no body cell exceeds header width, loose is a no-op
+    assert_eq!(
+        fixed_loose, fixed_strict,
+        "Loose should produce identical output to strict when no body cell exceeds header width.\nLoose:\n{fixed_loose}\nStrict:\n{fixed_strict}"
+    );
+}
+
+#[test]
+fn test_md060_loose_last_column_header_only_table() {
+    // Table with header and delimiter but no body rows
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name | Description |\n|---|---|";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0], "| Name | Description |");
+    assert_eq!(lines[1], "| ---- | ----------- |");
+    assert_eq!(lines[0].len(), lines[1].len(), "Header and delimiter should match");
+}
+
+#[test]
+fn test_md060_loose_last_column_empty_header_last_col() {
+    // Edge case: empty header cell in last column, body has content
+    let config = MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(0),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: true,
+    };
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| Name |  |\n|---|---|\n| A | Some content |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Empty header = 0 width → GFM min 3. Body "Some content" = 12 → extends beyond
+    assert_eq!(lines[0].len(), lines[1].len(), "Header and delimiter should match");
+    assert!(
+        lines[2].len() > lines[0].len(),
+        "Body row with content should extend beyond empty-header column"
     );
 }
