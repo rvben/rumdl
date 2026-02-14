@@ -119,6 +119,9 @@ jobs:
           # Always create/reset branch from master for clean history
           git checkout -B "${BRANCH}" origin/master
 
+          # Install dependencies first (Prettier needs prettier-plugin-sort-json)
+          npm ci
+
           # Copy schema
           cp ../rumdl-schemastore.json src/schemas/json/rumdl.json
 
@@ -133,7 +136,6 @@ jobs:
 
           # Validate schema
           echo "Running SchemaStore validation..."
-          npm ci
           if ! node cli.js check --schema-name=rumdl.json; then
             echo "❌ Schema validation failed"
             exit 1
