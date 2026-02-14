@@ -68,6 +68,7 @@ mod md071_blank_line_after_frontmatter;
 mod md072_frontmatter_key_sort;
 mod md073_toc_validation;
 mod md074_mkdocs_nav;
+mod md075_orphaned_table_rows;
 
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
@@ -133,6 +134,7 @@ pub use md071_blank_line_after_frontmatter::MD071BlankLineAfterFrontmatter;
 pub use md072_frontmatter_key_sort::MD072FrontmatterKeySort;
 pub use md073_toc_validation::MD073TocValidation;
 pub use md074_mkdocs_nav::MD074MkDocsNav;
+pub use md075_orphaned_table_rows::MD075OrphanedTableRows;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -517,6 +519,11 @@ const RULES: &[RuleEntry] = &[
         name: "MD074",
         ctor: MD074MkDocsNav::from_config,
         opt_in: true,
+    },
+    RuleEntry {
+        name: "MD075",
+        ctor: MD075OrphanedTableRows::from_config,
+        opt_in: false,
     },
 ];
 

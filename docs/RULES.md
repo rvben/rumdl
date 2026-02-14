@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements 68 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements 69 rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -230,11 +230,12 @@ Severity affects:
 
 ## Table Rules
 
-| Rule ID           | Rule Name          | Description                                |
-| ----------------- | ------------------ | ------------------------------------------ |
-| [MD055](md055.md) | Table pipe style   | Table pipe style should be consistent      |
-| [MD056](md056.md) | Table column count | Table column count should be consistent    |
-| [MD058](md058.md) | Table spacing      | Tables should be surrounded by blank lines |
+| Rule ID           | Rule Name           | Description                                        |
+| ----------------- | ------------------- | -------------------------------------------------- |
+| [MD055](md055.md) | Table pipe style    | Table pipe style should be consistent              |
+| [MD056](md056.md) | Table column count  | Table column count should be consistent            |
+| [MD058](md058.md) | Table spacing       | Tables should be surrounded by blank lines         |
+| [MD075](md075.md) | Orphaned table rows | Orphaned table rows or headerless pipe content     |
 
 ## Footnote Rules
 
