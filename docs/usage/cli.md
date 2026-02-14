@@ -131,14 +131,14 @@ rumdl version                    # Detailed version info
 
 These options work with all commands:
 
-| Option                  | Description                              |
-| ----------------------- | ---------------------------------------- |
-| `--help`, `-h`          | Show help                                |
-| `--version`, `-V`       | Show version                             |
-| `--verbose`, `-v`       | Verbose output                           |
-| `--quiet`, `-q`         | Quiet output                             |
-| `--color <WHEN>`        | Color output (`auto`, `always`, `never`) |
-| `--output-format <FMT>` | Output format (`text`, `json`)           |
+| Option                  | Description                                            |
+| ----------------------- | ------------------------------------------------------ |
+| `--help`, `-h`          | Show help                                              |
+| `--version`, `-V`       | Show version                                           |
+| `--verbose`, `-v`       | Verbose output                                         |
+| `--quiet`, `-q`         | Quiet output                                           |
+| `--color <WHEN>`        | Color output (`auto`, `always`, `never`)               |
+| `--output-format <FMT>` | Output format (see [Output Formats](#output-formats))  |
 
 ## Exit Codes
 
@@ -210,34 +210,56 @@ cat README.md | rumdl check - --stdin-filename README.md
 pbpaste | rumdl fmt - | pbcopy
 ```
 
-### JSON Output
+### Output Formats
+
+Control how warnings are displayed with `--output-format`:
 
 ```bash
-# Get JSON output for tooling
+rumdl check --output-format full .
 rumdl check --output-format json .
+RUMDL_OUTPUT_FORMAT=github rumdl check .
 ```
 
-Output format:
+**Human-readable formats:**
 
-```json
-{
-  "files": [
-    {
-      "path": "README.md",
-      "issues": [
-        {
-          "rule": "MD013",
-          "line": 10,
-          "column": 81,
-          "message": "Line length",
-          "severity": "warning"
-        }
-      ]
-    }
-  ],
-  "summary": {
-    "files_checked": 5,
-    "issues_found": 3
-  }
-}
+| Format    | Description                                                     |
+| --------- | --------------------------------------------------------------- |
+| `text`    | One line per warning: `file:line:col: [RULE] message` (default) |
+| `full`    | Source lines with caret underlines highlighting the violation   |
+| `concise` | Minimal: `file:line:col rule message`                           |
+| `grouped` | Warnings grouped by file with a header per file                 |
+
+**Machine-readable formats:**
+
+| Format       | Description                             |
+| ------------ | --------------------------------------- |
+| `json`       | JSON array of all warnings (collected)  |
+| `json-lines` | One JSON object per warning (streaming) |
+| `sarif`      | SARIF 2.1.0 for static analysis tools   |
+| `junit`      | JUnit XML for CI test reporters         |
+
+**CI/CD formats:**
+
+| Format   | Description                                        |
+| -------- | -------------------------------------------------- |
+| `github` | GitHub Actions annotations (`::warning`/`::error`) |
+| `gitlab` | GitLab Code Quality report (JSON)                  |
+| `azure`  | Azure Pipelines logging commands                   |
+| `pylint` | Pylint-compatible format                           |
+
+**Example: `full` format output:**
+
+```text
+MD013 Line length 95 exceeds 80 characters
+ --> README.md:42:81
+   |
+42 | This is a long line that exceeds the configured maximum line length ...
+   |                                                                     ^^^
+   |
+```
+
+**Example: `text` format output (default):**
+
+```text
+README.md:42:81: [MD013] Line length 95 exceeds 80 characters
 ```

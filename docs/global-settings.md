@@ -819,18 +819,18 @@ output-format = "github"  # Use GitHub Actions format
 
 **Available Formats**:
 
-- `"text"` (default): Human-readable output with colors
-- `"full"`: Detailed output with context
-- `"concise"`: Minimal output (one line per warning)
-- `"grouped"`: Group warnings by file
-- `"json"`: JSON output for programmatic use
-- `"json-lines"`: One JSON object per line (streaming)
-- `"github"`: GitHub Actions annotations
-- `"gitlab"`: GitLab CI format
-- `"pylint"`: PyLint-compatible format
-- `"azure"`: Azure Pipelines format
-- `"sarif"`: SARIF format for security tools
-- `"junit"`: JUnit XML format for CI systems
+- `"text"` (default): One line per warning with file, line, column, rule, and message
+- `"full"`: Source lines with caret underlines highlighting the exact violation location
+- `"concise"`: Minimal output (one line per warning, no brackets)
+- `"grouped"`: Warnings grouped by file with a header per file
+- `"json"`: JSON array of all warnings (collected across files)
+- `"json-lines"`: One JSON object per warning (streaming)
+- `"github"`: GitHub Actions annotation format (`::warning`/`::error`)
+- `"gitlab"`: GitLab Code Quality report (JSON)
+- `"pylint"`: Pylint-compatible format
+- `"azure"`: Azure Pipelines logging commands
+- `"sarif"`: SARIF 2.1.0 for static analysis tools
+- `"junit"`: JUnit XML for CI test reporters
 
 **Precedence**:
 

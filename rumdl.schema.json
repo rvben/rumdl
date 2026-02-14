@@ -125,10 +125,28 @@
           "default": 80
         },
         "output-format": {
-          "description": "Output format for linting results (e.g., \"text\", \"json\", \"pylint\", etc.)",
-          "type": [
-            "string",
-            "null"
+          "description": "Output format for linting results",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "text",
+                "full",
+                "concise",
+                "grouped",
+                "json",
+                "json-lines",
+                "github",
+                "gitlab",
+                "pylint",
+                "azure",
+                "sarif",
+                "junit"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "fixable": {

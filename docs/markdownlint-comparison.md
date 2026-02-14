@@ -270,7 +270,9 @@ Both support:
 
 rumdl additionally supports:
 
+- Source line display with caret underlines (`--output-format full`)
 - GitHub Actions annotations (`--output-format github`)
+- GitLab, Azure, SARIF, JUnit, and Pylint formats
 - Statistics summary (`--statistics`)
 - Profiling information (`--profile`)
 

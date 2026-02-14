@@ -102,7 +102,24 @@ pub struct CheckArgs {
 
     /// Output format for linting results
     #[arg(long, value_parser = ["text", "full", "concise", "grouped", "json", "json-lines", "github", "gitlab", "pylint", "azure", "sarif", "junit"],
-          help = "Output format (default: text, or $RUMDL_OUTPUT_FORMAT, or output-format in config)")]
+          long_help = "Output format for linting results.
+
+Formats:
+  text       One-line-per-warning with file, line, column, rule, and message (default)
+  full       Show source lines with caret underlines highlighting the violation
+  concise    Minimal: file:line:col rule message
+  grouped    Warnings grouped by file with a header per file
+  json       JSON array of all warnings (collected across files)
+  json-lines One JSON object per warning (streaming)
+  github     GitHub Actions annotation format (::warning/::error)
+  gitlab     GitLab Code Quality report (JSON)
+  pylint     Pylint-compatible format
+  azure      Azure Pipelines logging commands
+  sarif      SARIF 2.1.0 for static analysis tools
+  junit      JUnit XML for CI test reporters
+
+Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text",
+          help = "Output format for linting results (default: text)")]
     pub output_format: Option<String>,
 
     /// Show absolute file paths instead of project-relative paths
