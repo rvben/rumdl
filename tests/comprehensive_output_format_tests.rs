@@ -41,10 +41,12 @@ fn test_full_output_format_alias() {
     let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("check").arg("--output-format").arg("full").arg(&test_file);
 
+    // Full format shows rule names without brackets and includes source context
     cmd.assert()
         .failure()
-        .stdout(predicate::str::contains("[MD022]"))
-        .stdout(predicate::str::contains("[MD009]"));
+        .stdout(predicate::str::contains("MD022"))
+        .stdout(predicate::str::contains("MD009"))
+        .stdout(predicate::str::contains("-->"));
 }
 
 #[test]
