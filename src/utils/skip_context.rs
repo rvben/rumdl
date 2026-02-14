@@ -100,8 +100,6 @@ pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
     false
 }
 
-/// Check if a byte position is within any context that should be skipped
-
 /// Check if a byte position is within a JSX expression (MDX: {expression})
 #[inline]
 pub fn is_in_jsx_expression(ctx: &LintContext, byte_pos: usize) -> bool {

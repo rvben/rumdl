@@ -22,7 +22,7 @@ const MAX_EXTENDS_DEPTH: usize = 10;
 /// - Relative paths: resolved against the config file's parent directory
 /// - Absolute paths: used as-is
 fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<PathBuf, ConfigError> {
-    let path = if extends_value.starts_with("~/") {
+    let path = if let Some(suffix) = extends_value.strip_prefix("~/") {
         // Expand tilde to home directory
         #[cfg(feature = "native")]
         {
@@ -30,7 +30,7 @@ fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<
             let home = choose_base_strategy()
                 .map(|s| s.home_dir().to_path_buf())
                 .unwrap_or_else(|_| PathBuf::from("~"));
-            home.join(&extends_value[2..])
+            home.join(suffix)
         }
         #[cfg(not(feature = "native"))]
         {

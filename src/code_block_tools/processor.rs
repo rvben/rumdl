@@ -338,19 +338,15 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
 
             // Check for admonition start — push new context
-            if is_admonition {
-                if let Some(indent) = mkdocs_admonitions::get_admonition_indent(line) {
-                    context_indent_stack.push(indent);
-                    continue;
-                }
+            if is_admonition && let Some(indent) = mkdocs_admonitions::get_admonition_indent(line) {
+                context_indent_stack.push(indent);
+                continue;
             }
 
             // Check for tab marker — push new context
-            if is_tab {
-                if let Some(indent) = mkdocs_tabs::get_tab_indent(line) {
-                    context_indent_stack.push(indent);
-                    continue;
-                }
+            if is_tab && let Some(indent) = mkdocs_tabs::get_tab_indent(line) {
+                context_indent_stack.push(indent);
+                continue;
             }
 
             // Only look for fences inside a MkDocs context

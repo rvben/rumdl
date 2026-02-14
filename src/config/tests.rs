@@ -2256,7 +2256,7 @@ line-length = 120
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2302,7 +2302,7 @@ disable = ["MD013", "MD033"]
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2338,7 +2338,7 @@ extend-enable = ["MD060"]
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2382,7 +2382,7 @@ extend-enable = ["MD060"]
     let parent_path = temp_dir.path().join("parent.toml");
     fs::write(
         &parent_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2396,7 +2396,7 @@ extend-enable = ["MD063"]
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2429,7 +2429,7 @@ fn test_extends_circular_detection() {
 
     fs::write(
         &a_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2442,7 +2442,7 @@ disable = ["MD013"]
 
     fs::write(
         &b_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2471,7 +2471,7 @@ fn test_extends_self_reference() {
     let a_path = temp_dir.path().join("a.toml");
     fs::write(
         &a_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2515,7 +2515,7 @@ disable = ["MD013"]
     for i in (0..11).rev() {
         fs::write(
             &paths[i],
-            &format!(
+            format!(
                 r#"extends = "{}"
 
 [global]
@@ -2616,7 +2616,7 @@ disable = ["MD013"]
     let child_path = temp_dir.path().join("pyproject.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"
 [tool.rumdl]
 extends = "{}"
@@ -2654,7 +2654,7 @@ disable = ["MD013", "MD033"]
     let child_path = temp_dir.path().join("pyproject.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"
 [tool.rumdl]
 extends = "{}"
@@ -2690,7 +2690,7 @@ indent = 4
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [MD007]
@@ -2727,7 +2727,7 @@ indent = 4
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]
@@ -2764,7 +2764,7 @@ disable = ["MD013"]
     let child_path = temp_dir.path().join(".rumdl.toml");
     fs::write(
         &child_path,
-        &format!(
+        format!(
             r#"extends = "{}"
 
 [global]

@@ -347,12 +347,11 @@ impl MD060TableFormat {
         }
 
         // When loose, cap the last column width at the header's width
-        if loose_last_column {
-            if let Some(header_width) = header_last_col_width {
-                if let Some(last) = column_widths.last_mut() {
-                    *last = header_width;
-                }
-            }
+        if loose_last_column
+            && let Some(header_width) = header_last_col_width
+            && let Some(last) = column_widths.last_mut()
+        {
+            *last = header_width;
         }
 
         // GFM requires delimiter rows to have at least 3 dashes per column.
