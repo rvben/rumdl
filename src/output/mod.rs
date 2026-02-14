@@ -17,6 +17,13 @@ pub trait OutputFormatter {
     /// Format a collection of warnings for output
     fn format_warnings(&self, warnings: &[LintWarning], file_path: &str) -> String;
 
+    /// Format warnings with file content for source line display.
+    /// Formatters that show source context (e.g., Full) override this.
+    /// Default delegates to `format_warnings`.
+    fn format_warnings_with_content(&self, warnings: &[LintWarning], file_path: &str, _content: &str) -> String {
+        self.format_warnings(warnings, file_path)
+    }
+
     /// Format a summary of results across multiple files
     fn format_summary(&self, _files_processed: usize, _total_warnings: usize, _duration_ms: u64) -> Option<String> {
         // Default: no summary
@@ -34,6 +41,8 @@ pub trait OutputFormatter {
 pub enum OutputFormat {
     /// Default human-readable format with colors and context
     Text,
+    /// Full format with source line display (ruff-style)
+    Full,
     /// Concise format: `file:line:col: [RULE] message`
     Concise,
     /// Grouped format: violations grouped by file
@@ -61,7 +70,8 @@ impl FromStr for OutputFormat {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "text" | "full" => Ok(OutputFormat::Text),
+            "text" => Ok(OutputFormat::Text),
+            "full" => Ok(OutputFormat::Full),
             "concise" => Ok(OutputFormat::Concise),
             "grouped" => Ok(OutputFormat::Grouped),
             "json" => Ok(OutputFormat::Json),
@@ -82,6 +92,7 @@ impl OutputFormat {
     pub fn create_formatter(&self) -> Box<dyn OutputFormatter> {
         match self {
             OutputFormat::Text => Box::new(TextFormatter::new()),
+            OutputFormat::Full => Box::new(FullFormatter::new()),
             OutputFormat::Concise => Box::new(ConciseFormatter::new()),
             OutputFormat::Grouped => Box::new(GroupedFormatter::new()),
             OutputFormat::Json => Box::new(JsonFormatter::new()),
@@ -191,7 +202,7 @@ mod tests {
     fn test_output_format_from_str() {
         // Valid formats
         assert_eq!(OutputFormat::from_str("text").unwrap(), OutputFormat::Text);
-        assert_eq!(OutputFormat::from_str("full").unwrap(), OutputFormat::Text);
+        assert_eq!(OutputFormat::from_str("full").unwrap(), OutputFormat::Full);
         assert_eq!(OutputFormat::from_str("concise").unwrap(), OutputFormat::Concise);
         assert_eq!(OutputFormat::from_str("grouped").unwrap(), OutputFormat::Grouped);
         assert_eq!(OutputFormat::from_str("json").unwrap(), OutputFormat::Json);
@@ -220,6 +231,7 @@ mod tests {
         // Test that each format creates the correct formatter
         let formats = [
             OutputFormat::Text,
+            OutputFormat::Full,
             OutputFormat::Concise,
             OutputFormat::Grouped,
             OutputFormat::Json,
@@ -404,6 +416,7 @@ mod tests {
 
         let formats = [
             OutputFormat::Text,
+            OutputFormat::Full,
             OutputFormat::Concise,
             OutputFormat::Grouped,
             OutputFormat::Json,

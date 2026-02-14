@@ -622,7 +622,9 @@ pub fn perform_check_run(
                     } else {
                         crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
                     };
-                    let formatted = formatter.format_warnings(&cross_file_warnings, &display_path);
+                    let file_content = std::fs::read_to_string(file_path).unwrap_or_default();
+                    let formatted =
+                        formatter.format_warnings_with_content(&cross_file_warnings, &display_path, &file_content);
                     if !formatted.is_empty() {
                         output_writer.writeln(&formatted).unwrap_or_else(|e| {
                             eprintln!("Error writing output: {e}");

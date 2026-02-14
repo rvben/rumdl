@@ -160,7 +160,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             // Only show diagnostics to stderr unless silent
             if !silent && !remaining_warnings.is_empty() {
                 let formatter = output_format.create_formatter();
-                let formatted = formatter.format_warnings(&remaining_warnings, display_filename);
+                let formatted = formatter.format_warnings_with_content(&remaining_warnings, display_filename, &content);
                 eprintln!("{formatted}");
                 eprintln!(
                     "\n{} issue(s) fixed, {} issue(s) remaining",
@@ -213,7 +213,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             // Use formatter for line-by-line output
             let formatter = output_format.create_formatter();
             if !all_warnings.is_empty() {
-                let formatted = formatter.format_warnings(&all_warnings, display_filename);
+                let formatted = formatter.format_warnings_with_content(&all_warnings, display_filename, &content);
                 output_writer.writeln(&formatted).unwrap_or_else(|e| {
                     eprintln!("Error writing output: {e}");
                 });

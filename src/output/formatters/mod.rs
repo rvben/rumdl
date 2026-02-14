@@ -2,6 +2,7 @@
 
 pub mod azure;
 pub mod concise;
+pub mod full;
 pub mod github;
 pub mod gitlab;
 pub mod grouped;
@@ -14,6 +15,7 @@ pub mod text;
 
 pub use azure::AzureFormatter;
 pub use concise::ConciseFormatter;
+pub use full::FullFormatter;
 pub use github::GitHubFormatter;
 pub use gitlab::GitLabFormatter;
 pub use grouped::GroupedFormatter;

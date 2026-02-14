@@ -138,7 +138,7 @@ pub fn process_file_with_formatter(
             let unfixable_warnings: Vec<_> = all_warnings.iter().filter(|w| w.fix.is_none()).cloned().collect();
 
             if !unfixable_warnings.is_empty() {
-                let formatted = formatter.format_warnings(&unfixable_warnings, &display_path);
+                let formatted = formatter.format_warnings_with_content(&unfixable_warnings, &display_path, &content);
                 if !formatted.is_empty() {
                     output_writer.writeln(&formatted).unwrap_or_else(|e| {
                         eprintln!("Error writing output: {e}");
@@ -159,7 +159,7 @@ pub fn process_file_with_formatter(
                     }
                 })
                 .collect();
-            let formatted = formatter.format_warnings(&display_warnings, &display_path);
+            let formatted = formatter.format_warnings_with_content(&display_warnings, &display_path, &content);
             if !formatted.is_empty() {
                 output_writer.writeln(&formatted).unwrap_or_else(|e| {
                     eprintln!("Error writing output: {e}");
