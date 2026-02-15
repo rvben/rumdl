@@ -123,7 +123,10 @@ Key behaviors:
 
 ### Config precedence and merging
 
-rumdl loads configuration from a single config file, then applies CLI overrides on top. When CLI flags overlap with file settings:
+rumdl loads configuration from config files
+(with [per-directory resolution](#per-directory-configuration) when available),
+then applies CLI overrides on top.
+When CLI flags overlap with file settings:
 
 - `--enable` and `--disable` **replace** the config file value entirely.
 - `extend-enable` and `extend-disable` (config file only) **merge** additively with the base `enable`/`disable` values.
@@ -944,12 +947,108 @@ RUMDL_CACHE_DIR=/tmp/rumdl-cache rumdl check .
 .rumdl_cache/
 ```
 
+## Per-Directory Configuration
+
+When running `rumdl check .` from the project root, rumdl discovers and applies
+configuration files on a per-directory basis. Files in a subdirectory with their
+own `.rumdl.toml` will use that config instead of the root config.
+
+This follows the same model as [Ruff's per-directory configuration](https://docs.astral.sh/ruff/configuration/config-file/#config-file-discovery).
+
+### How it works
+
+1. rumdl identifies the **project root** (the directory containing `.git`)
+2. For each file being linted, rumdl searches from the file's directory upward to the project root for the nearest config file
+3. Files are grouped by their effective config, and each group is linted with its own rules and settings
+
+### Config file search order
+
+At each directory level, rumdl checks for config files in this order:
+
+1. `.rumdl.toml`
+2. `rumdl.toml`
+3. `.config/rumdl.toml`
+4. `pyproject.toml` (only if it contains a `[tool.rumdl]` section)
+5. Markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.) as fallback
+
+### Subdirectory configs are standalone
+
+Subdirectory configs are **independent** by default — they do not inherit from the root config. To inherit settings from a parent config, use [`extends`](#extends):
+
+```text
+project/
+  .rumdl.toml              # line-length = 80
+  README.md                 # linted with line-length = 80
+  docs/
+    .rumdl.toml             # standalone: only settings in this file apply
+    guide.md                # linted with docs/.rumdl.toml
+    api/
+      endpoint.md           # also linted with docs/.rumdl.toml (walks up to docs/)
+```
+
+To make a subdirectory config inherit from the root:
+
+```toml
+# docs/.rumdl.toml
+extends = "../.rumdl.toml"
+
+[global]
+line-length = 120          # Override just this setting; inherit everything else
+```
+
+### When per-directory resolution is active
+
+Per-directory resolution only activates during **auto-discovery mode**. It is disabled when:
+
+- `--config <file>` is used (the explicit config applies to all files)
+- `--isolated` or `--no-config` is used (built-in defaults apply to all files)
+- No project root is found (no `.git` directory)
+
+### Example: monorepo with different standards
+
+```text
+monorepo/
+  .rumdl.toml                  # strict defaults for most code
+  docs/
+    .rumdl.toml                # relaxed rules for user-facing docs
+    getting-started.md
+    reference/
+      api.md                   # inherits docs/.rumdl.toml
+  blog/
+    .rumdl.toml                # different style for blog posts
+    2024-01-post.md
+  src/
+    README.md                  # uses root .rumdl.toml (no subdirectory config)
+```
+
+```toml
+# Root .rumdl.toml - strict defaults
+[global]
+line-length = 80
+```
+
+```toml
+# docs/.rumdl.toml - relaxed for documentation
+extends = "../.rumdl.toml"
+
+[global]
+line-length = 120
+extend-disable = ["MD013"]
+```
+
+```toml
+# blog/.rumdl.toml - standalone config for blog
+[global]
+line-length = 100
+disable = ["MD033", "MD041"]
+```
+
 ## Configuration Precedence
 
 Settings are applied in the following order (later sources override earlier ones):
 
 1. **Built-in defaults**
-2. **Configuration file** (`.rumdl.toml` or `pyproject.toml`)
+2. **Configuration file** (per-directory `.rumdl.toml` or `pyproject.toml`)
 3. **Command-line arguments**
 
 ### Example: Precedence in Action

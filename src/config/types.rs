@@ -446,7 +446,7 @@ impl Default for GlobalConfig {
     }
 }
 
-pub(super) const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
+pub(crate) const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
     ".markdownlint.json",
     ".markdownlint.jsonc",
     ".markdownlint.yaml",

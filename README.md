@@ -729,6 +729,26 @@ The search follows these rules:
 - Falls back to markdownlint config files (`.markdownlint.yaml`, etc.) using the same upward traversal
 - Falls back to user configuration if no project configuration is found (see Global Configuration below)
 
+#### Per-Directory Configuration
+
+When running `rumdl check .` from the project root, rumdl resolves configuration
+on a **per-directory** basis. Files in subdirectories with their own `.rumdl.toml`
+use that config instead of the root config. This matches the behavior of
+[Ruff](https://docs.astral.sh/ruff/) and
+[markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2).
+
+Subdirectory configs are **standalone** by default. Use `extends` to inherit from a parent config:
+
+```toml
+# docs/.rumdl.toml — inherits root config, overrides line-length
+extends = "../.rumdl.toml"
+
+[global]
+line-length = 120
+```
+
+Per-directory resolution is disabled when `--config`, `--isolated`, or `--no-config` is used.
+
 To disable all configuration discovery and use only built-in defaults, use the `--isolated` flag:
 
 ```bash

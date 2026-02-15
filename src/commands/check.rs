@@ -140,14 +140,18 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // Use the same cache directory for workspace index cache (when cache is enabled)
     let workspace_cache_dir = if cache_enabled { Some(cache_dir.as_path()) } else { None };
 
-    let (has_issues, has_warnings, has_errors, total_issues_fixed) = crate::watch::perform_check_run(
+    let ctx = crate::watch::CheckRunContext {
         args,
-        &config,
+        config: &config,
         quiet,
         cache,
         workspace_cache_dir,
-        project_root.as_deref(),
-    );
+        project_root: project_root.as_deref(),
+        explicit_config: global_config_path.is_some(),
+        isolated,
+    };
+
+    let (has_issues, has_warnings, has_errors, total_issues_fixed) = crate::watch::perform_check_run(&ctx);
 
     // In --check mode (for fmt), exit with code 1 if any formatting changes would be made
     if args.check && total_issues_fixed > 0 {

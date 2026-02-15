@@ -76,20 +76,35 @@ pub fn clear_screen() {
     let _ = io::stdout().flush();
 }
 
+/// Context for a single check run, grouping parameters to avoid too many function arguments.
+pub struct CheckRunContext<'a> {
+    pub args: &'a crate::CheckArgs,
+    pub config: &'a rumdl_config::Config,
+    pub quiet: bool,
+    pub cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
+    pub workspace_cache_dir: Option<&'a Path>,
+    pub project_root: Option<&'a Path>,
+    pub explicit_config: bool,
+    pub isolated: bool,
+}
+
 /// Perform a single check run (extracted from run_check for reuse in watch mode)
 /// Returns (has_issues, has_warnings, has_errors, total_issues_fixed):
 ///   - has_issues: any violations (info, warning, or error)
 ///   - has_warnings: any Warning or Error severity violations
 ///   - has_errors: any Error-severity violations
 ///   - total_issues_fixed: number of issues fixed (or would be fixed in diff mode)
-pub fn perform_check_run(
-    args: &crate::CheckArgs,
-    config: &rumdl_config::Config,
-    quiet: bool,
-    cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
-    workspace_cache_dir: Option<&Path>,
-    project_root: Option<&Path>,
-) -> (bool, bool, bool, usize) {
+pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize) {
+    let CheckRunContext {
+        args,
+        config,
+        quiet,
+        ref cache,
+        workspace_cache_dir,
+        project_root,
+        explicit_config,
+        isolated,
+    } = *ctx;
     use rumdl_lib::output::{OutputFormat, OutputWriter};
     use rumdl_lib::rule::Severity;
 
@@ -119,18 +134,12 @@ pub fn perform_check_run(
         }
     };
 
-    // Initialize rules with configuration
-    let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
-
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
+        let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
         crate::stdin_processor::process_stdin(&enabled_rules, args, config);
         return (false, false, false, 0);
     }
-
-    let cache_hashes = cache
-        .as_ref()
-        .map(|_| Arc::new(crate::file_processor::CacheHashes::new(config, &enabled_rules)));
 
     // Find all markdown files to check
     let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config, project_root) {
@@ -149,10 +158,21 @@ pub fn perform_check_run(
         return (false, false, false, 0);
     }
 
-    // Check if any enabled rule needs cross-file analysis
-    let needs_cross_file = enabled_rules
+    // Resolve files into config groups (per-directory config discovery)
+    let config_groups = crate::resolution::resolve_config_groups(
+        &file_paths,
+        config,
+        args,
+        project_root,
+        cache,
+        explicit_config,
+        isolated,
+    );
+
+    // Check if any enabled rule across any group needs cross-file analysis
+    let needs_cross_file = config_groups
         .iter()
-        .any(|r| r.cross_file_scope() != CrossFileScope::None);
+        .any(|g| g.rules.iter().any(|r| r.cross_file_scope() != CrossFileScope::None));
 
     // For formats that need to collect all warnings first
     let needs_collection = matches!(
@@ -172,46 +192,48 @@ pub fn perform_check_run(
         // Phase 1: Lint all files and collect FileIndex data (no second pass needed)
         let mut file_indices: HashMap<PathBuf, rumdl_lib::workspace_index::FileIndex> = HashMap::new();
 
-        for file_path in &file_paths {
-            let result = crate::file_processor::process_file_with_index(
-                file_path,
-                &enabled_rules,
-                args.verbose && !args.silent,
-                quiet,
-                args.silent,
-                config,
-                cache.as_ref().map(Arc::clone),
-                cache_hashes.as_deref(),
-            );
+        for group in &config_groups {
+            for file_path in &group.files {
+                let result = crate::file_processor::process_file_with_index(
+                    file_path,
+                    &group.rules,
+                    args.verbose && !args.silent,
+                    quiet,
+                    args.silent,
+                    &group.config,
+                    cache.as_ref().map(Arc::clone),
+                    group.cache_hashes.as_deref(),
+                );
 
-            if !result.warnings.is_empty() {
-                has_issues = true;
-                _files_with_issues += 1;
-                _total_issues += result.warnings.len();
-                if result
-                    .warnings
-                    .iter()
-                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
-                {
-                    has_warnings = true;
+                if !result.warnings.is_empty() {
+                    has_issues = true;
+                    _files_with_issues += 1;
+                    _total_issues += result.warnings.len();
+                    if result
+                        .warnings
+                        .iter()
+                        .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
+                    {
+                        has_warnings = true;
+                    }
+                    if result.warnings.iter().any(|w| w.severity == Severity::Error) {
+                        has_errors = true;
+                    }
+                    // Transform path for display (relative by default, absolute with --show-full-path)
+                    let display_path = if args.show_full_path {
+                        file_path.clone()
+                    } else {
+                        crate::file_processor::to_display_path(file_path, project_root)
+                    };
+                    all_file_warnings.push((display_path, result.warnings));
                 }
-                if result.warnings.iter().any(|w| w.severity == Severity::Error) {
-                    has_errors = true;
-                }
-                // Transform path for display (relative by default, absolute with --show-full-path)
-                let display_path = if args.show_full_path {
-                    file_path.clone()
-                } else {
-                    crate::file_processor::to_display_path(file_path, project_root)
-                };
-                all_file_warnings.push((display_path, result.warnings));
-            }
 
-            // Store FileIndex for cross-file analysis (extracted from single linting pass)
-            if needs_cross_file {
-                // Canonicalize path for consistent cache key matching
-                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                file_indices.insert(canonical, result.file_index);
+                // Store FileIndex for cross-file analysis (extracted from single linting pass)
+                if needs_cross_file {
+                    // Canonicalize path for consistent cache key matching
+                    let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                    file_indices.insert(canonical, result.file_index);
+                }
             }
         }
 
@@ -263,11 +285,13 @@ pub fn perform_check_run(
             }
 
             // Run cross-file checks for each file using the FileIndex (no re-parsing needed)
+            // Cross-file rules operate workspace-wide, so use the root config's rules
+            let cross_file_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
             for (file_path, file_index) in workspace_index.files() {
                 if let Ok(cross_file_warnings) = rumdl_lib::run_cross_file_checks(
                     file_path,
                     file_index,
-                    &enabled_rules,
+                    &cross_file_rules,
                     &workspace_index,
                     Some(config),
                 ) && !cross_file_warnings.is_empty()
@@ -349,6 +373,13 @@ pub fn perform_check_run(
     // Track files that already have issues from Phase 1 to avoid double-counting in Phase 2
     let mut files_already_with_issues: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
+    // Build flat list of (file_path, group_index) for parallel processing
+    let file_tasks: Vec<(usize, &str)> = config_groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gi, g)| g.files.iter().map(move |f| (gi, f.as_str())))
+        .collect();
+
     let (
         mut has_issues,
         mut has_warnings,
@@ -362,18 +393,15 @@ pub fn perform_check_run(
     ) = if use_parallel {
         // Parallel processing for multiple files with thread-safe cache
         // Each worker locks the mutex ONLY for brief cache get/set operations
-        let enabled_rules_arc = Arc::new(enabled_rules.clone());
-        let cache_hashes = cache_hashes.clone();
 
-        // Process files in parallel - now includes FileIndex in the result (no second pass needed)
-        let results: Vec<_> = file_paths
+        // Process files in parallel across all config groups
+        let results: Vec<_> = file_tasks
             .par_iter()
-            .map(|file_path| {
-                // Clone Arc (cheap - just increments reference count)
-                // process_file_with_formatter locks mutex briefly for cache operations
+            .map(|(gi, file_path)| {
+                let group = &config_groups[*gi];
                 let result = crate::file_processor::process_file_with_formatter(
                     file_path,
-                    &enabled_rules_arc,
+                    &group.rules,
                     args.fix_mode,
                     args.diff,
                     args.verbose && !args.silent,
@@ -381,13 +409,13 @@ pub fn perform_check_run(
                     args.silent,
                     &output_format,
                     &output_writer,
-                    config,
+                    &group.config,
                     cache.as_ref().map(Arc::clone),
                     project_root,
                     args.show_full_path,
-                    cache_hashes.as_deref(),
+                    group.cache_hashes.as_deref(),
                 );
-                (file_path.clone(), result)
+                (file_path.to_string(), result)
             })
             .collect();
 
@@ -406,11 +434,8 @@ pub fn perform_check_run(
         {
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
-            // Always accumulate total_issues from initial count (issues_found), regardless of whether
-            // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
             total_issues += issues_found;
 
-            // Track files that had at least one fix applied (for "Fixed X issues in Y files" message)
             if issues_fixed > 0 {
                 files_fixed += 1;
             }
@@ -438,7 +463,6 @@ pub fn perform_check_run(
                 all_warnings_for_stats.extend(warnings);
             }
 
-            // Store FileIndex for cross-file analysis (no second pass needed!)
             if needs_cross_file {
                 file_indices.insert(canonical, file_index);
             }
@@ -467,12 +491,12 @@ pub fn perform_check_run(
         let mut total_fixable_issues = 0;
         let mut total_files_processed = 0;
 
-        for file_path in &file_paths {
-            // process_file_with_formatter now returns FileIndex (no second pass needed)
+        for &(gi, file_path) in &file_tasks {
+            let group = &config_groups[gi];
             let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, file_index) =
                 crate::file_processor::process_file_with_formatter(
                     file_path,
-                    &enabled_rules,
+                    &group.rules,
                     args.fix_mode,
                     args.diff,
                     args.verbose && !args.silent,
@@ -480,16 +504,14 @@ pub fn perform_check_run(
                     args.silent,
                     &output_format,
                     &output_writer,
-                    config,
+                    &group.config,
                     cache.as_ref().map(Arc::clone),
                     project_root,
                     args.show_full_path,
-                    cache_hashes.as_deref(),
+                    group.cache_hashes.as_deref(),
                 );
 
-            // Store FileIndex for cross-file analysis (extracted from first pass)
             if needs_cross_file {
-                // Canonicalize path for consistent cache key matching
                 let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
                 file_indices.insert(canonical, file_index);
             }
@@ -497,11 +519,8 @@ pub fn perform_check_run(
             total_files_processed += 1;
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
-            // Always accumulate total_issues from initial count (issues_found), regardless of whether
-            // all issues were fixed. This is needed for the summary message "Fixed X/Y issues".
             total_issues += issues_found;
 
-            // Track files that had at least one fix applied (for "Fixed X issues in Y files" message)
             if issues_fixed > 0 {
                 files_fixed += 1;
             }
@@ -590,11 +609,17 @@ pub fn perform_check_run(
         }
 
         // Run cross-file checks using FileIndex (no re-parsing needed)
+        // Cross-file rules operate workspace-wide, so use the root config's rules
+        let cross_file_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
         let formatter = output_format.create_formatter();
         for (file_path, file_index) in workspace_index.files() {
-            if let Ok(cross_file_warnings) =
-                rumdl_lib::run_cross_file_checks(file_path, file_index, &enabled_rules, &workspace_index, Some(config))
-                && !cross_file_warnings.is_empty()
+            if let Ok(cross_file_warnings) = rumdl_lib::run_cross_file_checks(
+                file_path,
+                file_index,
+                &cross_file_rules,
+                &workspace_index,
+                Some(config),
+            ) && !cross_file_warnings.is_empty()
             {
                 has_issues = true;
                 if !files_already_with_issues.contains(file_path) {
@@ -758,7 +783,17 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
     println!("{}", "Press Ctrl-C to exit".cyan());
     println!();
 
-    let _has_issues = perform_check_run(args, &config, quiet, None, None, project_root.as_deref());
+    let explicit_config = global_config_path.is_some();
+    let _has_issues = perform_check_run(&CheckRunContext {
+        args,
+        config: &config,
+        quiet,
+        cache: None,
+        workspace_cache_dir: None,
+        project_root: project_root.as_deref(),
+        explicit_config,
+        isolated,
+    });
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
     }
@@ -836,7 +871,16 @@ pub fn run_watch_mode(args: &crate::CheckArgs, global_config_path: Option<&str>,
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(args, &config, quiet, None, None, project_root.as_deref());
+                        let _has_issues = perform_check_run(&CheckRunContext {
+                            args,
+                            config: &config,
+                            quiet,
+                            cache: None,
+                            workspace_cache_dir: None,
+                            project_root: project_root.as_deref(),
+                            explicit_config,
+                            isolated,
+                        });
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());
                         }

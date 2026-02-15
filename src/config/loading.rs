@@ -890,6 +890,96 @@ impl SourcedConfig<ConfigLoaded> {
             _state: PhantomData,
         }
     }
+
+    /// Discover the nearest config file for a specific directory,
+    /// walking upward to `project_root` (inclusive).
+    ///
+    /// Searches for rumdl config files (`.rumdl.toml`, `rumdl.toml`,
+    /// `.config/rumdl.toml`, `pyproject.toml` with `[tool.rumdl]`) and
+    /// markdownlint config files at each directory level.
+    ///
+    /// Returns the config file path if found. Does NOT use CWD.
+    pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        const RUMDL_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
+
+        let mut current_dir = dir.to_path_buf();
+
+        loop {
+            // Check rumdl config files first (higher precedence)
+            for config_name in RUMDL_CONFIG_FILES {
+                let config_path = current_dir.join(config_name);
+                if config_path.exists() {
+                    if *config_name == "pyproject.toml" {
+                        if let Ok(content) = std::fs::read_to_string(&config_path)
+                            && (content.contains("[tool.rumdl]") || content.contains("tool.rumdl"))
+                        {
+                            return Some(config_path);
+                        }
+                        continue;
+                    }
+                    return Some(config_path);
+                }
+            }
+
+            // Check markdownlint config files (lower precedence)
+            for config_name in MARKDOWNLINT_CONFIG_FILES {
+                let config_path = current_dir.join(config_name);
+                if config_path.exists() {
+                    return Some(config_path);
+                }
+            }
+
+            // Stop at project root (inclusive - we already checked it)
+            if current_dir == project_root {
+                break;
+            }
+
+            // Move to parent directory
+            match current_dir.parent() {
+                Some(parent) => current_dir = parent.to_path_buf(),
+                None => break,
+            }
+        }
+
+        None
+    }
+
+    /// Load a config from a specific file path, with extends resolution.
+    ///
+    /// Creates a fresh `SourcedConfig`, loads the config file using the
+    /// appropriate parser, and converts to `Config`. Used for per-directory
+    /// config loading where each subdirectory config is standalone.
+    pub fn load_config_for_path(config_path: &Path, project_root: &Path) -> Result<Config, ConfigError> {
+        let mut sourced_config = SourcedConfig {
+            project_root: Some(project_root.to_path_buf()),
+            ..SourcedConfig::default()
+        };
+
+        let filename = config_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let path_str = config_path.display().to_string();
+
+        // Determine if this is a markdownlint config or rumdl config
+        let is_markdownlint = MARKDOWNLINT_CONFIG_FILES.contains(&filename)
+            || (filename != "pyproject.toml"
+                && filename != ".rumdl.toml"
+                && filename != "rumdl.toml"
+                && (path_str.ends_with(".json")
+                    || path_str.ends_with(".jsonc")
+                    || path_str.ends_with(".yaml")
+                    || path_str.ends_with(".yml")));
+
+        if is_markdownlint {
+            let fragment = parsers::load_from_markdownlint(&path_str)?;
+            sourced_config.merge(fragment);
+            sourced_config.loaded_files.push(path_str);
+        } else {
+            let mut visited = HashSet::new();
+            let chain_source = source_from_filename(filename);
+            load_config_with_extends(&mut sourced_config, config_path, &mut visited, chain_source)?;
+        }
+
+        Ok(sourced_config.into_validated_unchecked().into())
+    }
 }
 
 /// Convert a validated configuration to the final Config type.

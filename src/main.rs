@@ -25,6 +25,7 @@ use rumdl_lib::exit_codes::exit;
 mod cache;
 mod file_processor;
 mod formatter;
+mod resolution;
 mod stdin_processor;
 mod watch;
 
