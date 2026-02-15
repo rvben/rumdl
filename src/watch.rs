@@ -169,6 +169,18 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         isolated,
     );
 
+    // Build file → group index mapping for cross-file analysis (Phase 2)
+    let file_group_map: HashMap<PathBuf, usize> = config_groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gi, g)| {
+            g.files.iter().map(move |f| {
+                let canonical = std::fs::canonicalize(f).unwrap_or_else(|_| PathBuf::from(f));
+                (canonical, gi)
+            })
+        })
+        .collect();
+
     // Check if any enabled rule across any group needs cross-file analysis
     let needs_cross_file = config_groups
         .iter()
@@ -284,17 +296,21 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 );
             }
 
-            // Run cross-file checks for each file using the FileIndex (no re-parsing needed)
-            // Cross-file rules operate workspace-wide, so use the root config's rules
-            let cross_file_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
+            // Run cross-file checks using per-file config group rules
             for (file_path, file_index) in workspace_index.files() {
-                if let Ok(cross_file_warnings) = rumdl_lib::run_cross_file_checks(
-                    file_path,
-                    file_index,
-                    &cross_file_rules,
-                    &workspace_index,
-                    Some(config),
-                ) && !cross_file_warnings.is_empty()
+                // Use the file's own config group for cross-file rules
+                let (cf_rules, cf_config) = match file_group_map.get(file_path) {
+                    Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
+                    None => {
+                        // File not in any group (e.g. loaded from workspace cache)
+                        // Fall back to root config
+                        continue;
+                    }
+                };
+
+                if let Ok(cross_file_warnings) =
+                    rumdl_lib::run_cross_file_checks(file_path, file_index, cf_rules, &workspace_index, Some(cf_config))
+                    && !cross_file_warnings.is_empty()
                 {
                     // Transform path for display (must match format used in all_file_warnings)
                     let display_path = if args.show_full_path {
@@ -608,18 +624,18 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             );
         }
 
-        // Run cross-file checks using FileIndex (no re-parsing needed)
-        // Cross-file rules operate workspace-wide, so use the root config's rules
-        let cross_file_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
+        // Run cross-file checks using per-file config group rules
         let formatter = output_format.create_formatter();
         for (file_path, file_index) in workspace_index.files() {
-            if let Ok(cross_file_warnings) = rumdl_lib::run_cross_file_checks(
-                file_path,
-                file_index,
-                &cross_file_rules,
-                &workspace_index,
-                Some(config),
-            ) && !cross_file_warnings.is_empty()
+            // Use the file's own config group for cross-file rules
+            let (cf_rules, cf_config) = match file_group_map.get(file_path) {
+                Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
+                None => continue,
+            };
+
+            if let Ok(cross_file_warnings) =
+                rumdl_lib::run_cross_file_checks(file_path, file_index, cf_rules, &workspace_index, Some(cf_config))
+                && !cross_file_warnings.is_empty()
             {
                 has_issues = true;
                 if !files_already_with_issues.contains(file_path) {

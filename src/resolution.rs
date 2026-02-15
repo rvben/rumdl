@@ -5,7 +5,7 @@
 //! the Ruff model: subdirectory configs are standalone by default, and
 //! users can use `extends` for inheritance.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -21,6 +21,25 @@ pub struct ConfigGroup {
     pub rules: Vec<Box<dyn Rule>>,
     pub cache_hashes: Option<Arc<CacheHashes>>,
     pub files: Vec<String>,
+}
+
+/// Check whether a config path is at a root-level location.
+///
+/// Root-level means the config lives directly in the project root
+/// or in `project_root/.config/`. Both are considered the "root config"
+/// and should not create a separate subdirectory group.
+fn is_root_level_config(config_path: &Path, project_root: &Path) -> bool {
+    if let Some(parent) = config_path.parent() {
+        // Direct child of project root: .rumdl.toml, rumdl.toml, pyproject.toml
+        if parent == project_root {
+            return true;
+        }
+        // Config in .config/ subdirectory: .config/rumdl.toml
+        if parent == project_root.join(".config") {
+            return true;
+        }
+    }
+    false
 }
 
 /// Resolve files into config groups based on per-directory config discovery.
@@ -61,8 +80,9 @@ pub fn resolve_config_groups(
     // None means "no subdirectory config found, use root"
     let mut dir_config_cache: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
 
-    // Map each file to its effective config path
-    let mut file_config_map: HashMap<Option<PathBuf>, Vec<String>> = HashMap::new();
+    // Map each file to its effective config path.
+    // BTreeMap ensures deterministic group ordering across runs.
+    let mut file_config_map: BTreeMap<Option<PathBuf>, Vec<String>> = BTreeMap::new();
 
     for file_path in file_paths {
         let path = Path::new(file_path);
@@ -74,9 +94,8 @@ pub fn resolve_config_groups(
         // Look up or discover the config for this directory
         let config_path = discover_with_cache(&parent_dir, project_root, &mut dir_config_cache);
 
-        // Check if this config is the root config (same directory as project root)
-        // If so, treat it as None (use root config directly)
-        let effective_config = config_path.filter(|cp| cp.parent().is_some_and(|cp_dir| cp_dir != project_root));
+        // Configs at the project root level use the already-loaded root config
+        let effective_config = config_path.filter(|cp| !is_root_level_config(cp, project_root));
 
         file_config_map
             .entry(effective_config)

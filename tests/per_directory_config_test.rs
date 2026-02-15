@@ -141,6 +141,24 @@ fn test_discover_config_no_config_at_all() {
     assert!(result.is_none());
 }
 
+#[test]
+fn test_discover_config_dot_config_dir_found() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    // Config in .config/ subdirectory (a root-level config location)
+    create_file(root, ".config/rumdl.toml", "[global]\nline-length = 100\n");
+
+    // Root-level files should find .config/rumdl.toml
+    let result = SourcedConfig::discover_config_for_dir(root, root);
+    assert_eq!(result.unwrap(), root.join(".config/rumdl.toml"));
+
+    // Files in subdirectories without their own config should also find it
+    fs::create_dir_all(root.join("docs")).unwrap();
+    let result = SourcedConfig::discover_config_for_dir(&root.join("docs"), root);
+    assert_eq!(result.unwrap(), root.join(".config/rumdl.toml"));
+}
+
 // ─── load_config_for_path() tests ───
 
 #[test]
