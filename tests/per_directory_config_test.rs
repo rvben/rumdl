@@ -360,3 +360,102 @@ fn test_no_project_root_uses_single_config() {
         output.status
     );
 }
+
+#[test]
+fn test_per_directory_config_controls_cross_file_checks() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    fs::create_dir_all(root.join(".git")).unwrap();
+
+    // Root config: all rules enabled (default)
+    create_file(root, ".rumdl.toml", "[global]\n");
+
+    // Docs config: disable MD051 (link fragment validation)
+    create_file(root, "docs/.rumdl.toml", "[global]\ndisable = [\"MD051\"]\n");
+
+    // Root file: has a broken fragment link → should get MD051 warning
+    create_file(
+        root,
+        "README.md",
+        "# README\n\n[link to nonexistent heading](#does-not-exist)\n",
+    );
+
+    // Docs file: has a broken fragment link → should NOT get MD051 (disabled in docs config)
+    create_file(
+        root,
+        "docs/guide.md",
+        "# Guide\n\n[link to nonexistent heading](#does-not-exist)\n",
+    );
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", "--no-cache", "."])
+        .current_dir(root)
+        .output()
+        .expect("Failed to run rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // README.md should have MD051 warning (root config has MD051 enabled)
+    let has_readme_md051 = combined
+        .lines()
+        .any(|line| line.contains("README.md") && line.contains("MD051"));
+    assert!(
+        has_readme_md051,
+        "Expected MD051 warning for README.md (root config), got:\n{combined}"
+    );
+
+    // docs/guide.md should NOT have MD051 warning (docs config disables MD051)
+    let has_docs_md051 = combined
+        .lines()
+        .any(|line| line.contains("docs/guide.md") && line.contains("MD051"));
+    assert!(
+        !has_docs_md051,
+        "Expected no MD051 warning for docs/guide.md (docs config disables MD051), got:\n{combined}"
+    );
+}
+
+#[test]
+fn test_dot_config_dir_treated_as_root_config() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+
+    fs::create_dir_all(root.join(".git")).unwrap();
+
+    // Config only in .config/ subdirectory (root-level location)
+    create_file(root, ".config/rumdl.toml", "[global]\nline-length = 40\n");
+
+    // Docs config: line-length = 120
+    create_file(root, "docs/.rumdl.toml", "[global]\nline-length = 120\n");
+
+    let long_line = "This is a line with real words that exceeds the configured limit easily.";
+    create_file(root, "README.md", &format!("# README\n\n{long_line}\n"));
+    create_file(root, "docs/guide.md", &format!("# Guide\n\n{long_line}\n"));
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", "--no-cache", "."])
+        .current_dir(root)
+        .output()
+        .expect("Failed to run rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+
+    // README.md should have MD013 warning (72 chars > 40 limit from .config/rumdl.toml)
+    assert!(
+        combined.contains("README.md") && combined.contains("MD013"),
+        "Expected MD013 for README.md with .config/rumdl.toml (line-length=40), got:\n{combined}"
+    );
+
+    // docs/guide.md should NOT have MD013 warning (72 chars < 120 limit from docs config)
+    let has_docs_md013 = combined
+        .lines()
+        .any(|line| line.contains("docs/guide.md") && line.contains("MD013"));
+    assert!(
+        !has_docs_md013,
+        "Expected no MD013 for docs/guide.md with docs config (line-length=120), got:\n{combined}"
+    );
+}
