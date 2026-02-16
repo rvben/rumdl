@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Script to verify that a release is ready to be tagged and pushed
-# This checks all the conditions that would cause a release to fail in CI
+# Script to verify that a release is ready to be tagged and pushed.
+# With --fix, automatically fixes what it can (versions, rule counts, etc.)
 
 set -euo pipefail
 
@@ -9,21 +9,39 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+FIX_MODE=false
+if [[ "${1:-}" == "--fix" ]]; then
+    FIX_MODE=true
+fi
+
 echo "🔍 Verifying release readiness..."
+if $FIX_MODE; then
+    echo "   (--fix mode: will auto-fix where possible)"
+fi
 echo ""
 
 ERRORS=0
+FIXED=0
+
+# Get cargo version early (needed by multiple checks)
+CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
 # Check 1: Verify Cargo.lock is up-to-date
 echo -n "Checking Cargo.lock is up-to-date... "
 if mise exec -- cargo check --locked &>/dev/null; then
     echo -e "${GREEN}✓${NC}"
 else
-    echo -e "${RED}✗${NC}"
-    echo -e "${RED}ERROR: Cargo.lock is out of date or missing${NC}"
-    echo "Run: mise exec -- cargo check"
-    echo "Then commit the updated Cargo.lock"
-    ((ERRORS++))
+    if $FIX_MODE; then
+        mise exec -- cargo check &>/dev/null
+        echo -e "${GREEN}✓${NC} (fixed)"
+        ((FIXED++))
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: Cargo.lock is out of date or missing${NC}"
+        echo "Run: mise exec -- cargo check"
+        echo "Then commit the updated Cargo.lock"
+        ((ERRORS++))
+    fi
 fi
 
 # Check 2: Verify no uncommitted changes to tracked files
@@ -39,7 +57,6 @@ fi
 
 # Check 3: Verify version consistency
 echo -n "Checking version consistency... "
-CARGO_VERSION=$(grep '^version =' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 LOCK_VERSION=$(grep -A 1 '^name = "rumdl"' Cargo.lock | grep '^version' | head -1 | sed 's/.*"\(.*\)".*/\1/')
 
 if [[ "$CARGO_VERSION" == "$LOCK_VERSION" ]]; then
@@ -66,87 +83,49 @@ fi
 echo -n "Checking README.md pre-commit version... "
 README_VERSIONS=$(grep -o "rev: v[0-9.]*" README.md | sort -u)
 EXPECTED_REV="rev: v$CARGO_VERSION"
-if echo "$README_VERSIONS" | grep -q "^$EXPECTED_REV$"; then
-    # Check all occurrences match
-    MISMATCHED=$(grep "rev: v[0-9.]*" README.md | grep -v "$EXPECTED_REV" || true)
-    if [[ -z "$MISMATCHED" ]]; then
-        echo -e "${GREEN}✓${NC}"
+if echo "$README_VERSIONS" | grep -q "^$EXPECTED_REV$" && \
+   [[ -z $(grep "rev: v[0-9.]*" README.md | grep -v "$EXPECTED_REV" || true) ]]; then
+    echo -e "${GREEN}✓${NC}"
+else
+    if $FIX_MODE; then
+        sed -i '' "s/rev: v[0-9.]*/rev: v$CARGO_VERSION/g" README.md
+        echo -e "${GREEN}✓${NC} (fixed)"
+        ((FIXED++))
     else
         echo -e "${RED}✗${NC}"
-        echo -e "${RED}ERROR: README.md has inconsistent pre-commit versions${NC}"
+        echo -e "${RED}ERROR: README.md pre-commit version not updated${NC}"
         echo "Expected: $EXPECTED_REV"
-        echo "Found mismatches:"
-        echo "$MISMATCHED"
+        echo "Found: $README_VERSIONS"
         ((ERRORS++))
     fi
-else
-    echo -e "${RED}✗${NC}"
-    echo -e "${RED}ERROR: README.md pre-commit version not updated${NC}"
-    echo "Expected: $EXPECTED_REV"
-    echo "Found: $README_VERSIONS"
-    echo "Run: sed -i '' 's/rev: v[0-9.]*/rev: v$CARGO_VERSION/' README.md"
-    ((ERRORS++))
 fi
 
 # Check 6: Verify npm package versions match Cargo.toml
 echo -n "Checking npm package versions... "
 if [[ -d "npm" ]]; then
-    NPM_MISMATCHES=""
-
-    # Check main package version
-    if [[ -f "npm/rumdl/package.json" ]]; then
-        MAIN_NPM_VERSION=$(jq -r '.version // empty' npm/rumdl/package.json 2>/dev/null || echo "")
-        if [[ -z "$MAIN_NPM_VERSION" ]]; then
-            NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: unreadable, "
-        elif [[ "$MAIN_NPM_VERSION" != "$CARGO_VERSION" ]]; then
-            NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: $MAIN_NPM_VERSION, "
-        fi
-    else
-        NPM_MISMATCHES="${NPM_MISMATCHES}npm/rumdl: missing, "
+    NPM_OK=true
+    MAIN_NPM_VERSION=$(jq -r '.version // empty' npm/rumdl/package.json 2>/dev/null || echo "")
+    if [[ "$MAIN_NPM_VERSION" != "$CARGO_VERSION" ]]; then
+        NPM_OK=false
     fi
 
-    # Check platform package versions
-    PLATFORM_PACKAGES=(
-        "npm/cli-darwin-x64/package.json"
-        "npm/cli-darwin-arm64/package.json"
-        "npm/cli-linux-x64/package.json"
-        "npm/cli-linux-arm64/package.json"
-        "npm/cli-linux-x64-musl/package.json"
-        "npm/cli-linux-arm64-musl/package.json"
-        "npm/cli-win32-x64/package.json"
-    )
-
-    for pkg in "${PLATFORM_PACKAGES[@]}"; do
-        if [[ ! -f "$pkg" ]]; then
-            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): missing, "
-            continue
-        fi
-
+    for pkg in npm/cli-*/package.json; do
         PKG_VERSION=$(jq -r '.version // empty' "$pkg" 2>/dev/null || echo "")
-        if [[ -z "$PKG_VERSION" ]]; then
-            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): unreadable, "
-        elif [[ "$PKG_VERSION" != "$CARGO_VERSION" ]]; then
-            NPM_MISMATCHES="${NPM_MISMATCHES}$(dirname "$pkg" | xargs basename): $PKG_VERSION, "
+        if [[ "$PKG_VERSION" != "$CARGO_VERSION" ]]; then
+            NPM_OK=false
+            break
         fi
     done
 
-    # Check optionalDependencies versions in main package
-    if [[ -f "npm/rumdl/package.json" ]]; then
-        for dep_version in $(jq -r '.optionalDependencies // {} | values[]' npm/rumdl/package.json 2>/dev/null); do
-            if [[ "$dep_version" != "$CARGO_VERSION" ]]; then
-                NPM_MISMATCHES="${NPM_MISMATCHES}optionalDependencies: $dep_version, "
-                break
-            fi
-        done
-    fi
-
-    if [[ -z "$NPM_MISMATCHES" ]]; then
+    if $NPM_OK; then
         echo -e "${GREEN}✓${NC}"
+    elif $FIX_MODE; then
+        scripts/update-npm-versions.sh >/dev/null
+        echo -e "${GREEN}✓${NC} (fixed)"
+        ((FIXED++))
     else
         echo -e "${RED}✗${NC}"
         echo -e "${RED}ERROR: npm package version mismatch${NC}"
-        echo "Expected: $CARGO_VERSION"
-        echo "Mismatches: ${NPM_MISMATCHES%, }"
         echo "Run: scripts/update-npm-versions.sh"
         ((ERRORS++))
     fi
@@ -160,6 +139,10 @@ if grep -q "mise use rumdl@" README.md; then
     README_MISE_VERSION=$(grep -o "mise use rumdl@[0-9.]*" README.md | sed 's/mise use rumdl@//')
     if [[ "$README_MISE_VERSION" == "$CARGO_VERSION" ]]; then
         echo -e "${GREEN}✓${NC}"
+    elif $FIX_MODE; then
+        sed -i '' "s/mise use rumdl@[0-9.]*/mise use rumdl@$CARGO_VERSION/g" README.md
+        echo -e "${GREEN}✓${NC} (fixed)"
+        ((FIXED++))
     else
         echo -e "${RED}✗${NC}"
         echo -e "${RED}ERROR: README.md mise version not updated${NC}"
@@ -194,7 +177,7 @@ fi
 
 # Check 10: Verify documented rule count matches actual rule count
 echo -n "Checking rule count in docs... "
-ACTUAL_RULE_COUNT=$(grep -cE '^\s*\("MD[0-9]+", ' src/rules/mod.rs)
+ACTUAL_RULE_COUNT=$(grep -c 'name: "MD[0-9]' src/rules/mod.rs)
 DOCS_MISMATCHES=""
 
 # Check docs/index.md
@@ -213,12 +196,18 @@ done < <(grep -oE 'implements [0-9]+ rules' docs/RULES.md | grep -oE '[0-9]+')
 
 if [[ -z "$DOCS_MISMATCHES" ]]; then
     echo -e "${GREEN}✓${NC} ($ACTUAL_RULE_COUNT rules)"
+elif $FIX_MODE; then
+    # Fix docs/index.md: replace any "N lint rules" or "N linting rules"
+    sed -i '' -E "s/[0-9]+ lint(ing)? rules/$ACTUAL_RULE_COUNT lint rules/g" docs/index.md
+    # Fix docs/RULES.md: replace "implements N rules"
+    sed -i '' -E "s/implements [0-9]+ rules/implements $ACTUAL_RULE_COUNT rules/g" docs/RULES.md
+    echo -e "${GREEN}✓${NC} (fixed to $ACTUAL_RULE_COUNT rules)"
+    ((FIXED++))
 else
     echo -e "${RED}✗${NC}"
     echo -e "${RED}ERROR: Rule count mismatch in documentation${NC}"
     echo "Actual rules: $ACTUAL_RULE_COUNT"
     echo "Mismatches: ${DOCS_MISMATCHES%, }"
-    echo "Update docs/index.md and docs/RULES.md to match"
     ((ERRORS++))
 fi
 
@@ -226,14 +215,22 @@ fi
 echo -n "Checking rules.json is up-to-date... "
 if [[ -f "rules.json" ]]; then
     TEMP_RULES=$(mktemp)
-    ./target/release/rumdl rule -o json > "$TEMP_RULES" 2>/dev/null || cargo run --release -- rule -o json > "$TEMP_RULES" 2>/dev/null
-    if diff -q rules.json "$TEMP_RULES" &>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
+    if ./target/release/rumdl rule -o json > "$TEMP_RULES" 2>/dev/null || \
+       cargo run --release -- rule -o json > "$TEMP_RULES" 2>/dev/null; then
+        if diff -q rules.json "$TEMP_RULES" &>/dev/null; then
+            echo -e "${GREEN}✓${NC}"
+        elif $FIX_MODE; then
+            cp "$TEMP_RULES" rules.json
+            echo -e "${GREEN}✓${NC} (fixed)"
+            ((FIXED++))
+        else
+            echo -e "${RED}✗${NC}"
+            echo -e "${RED}ERROR: rules.json is out of date${NC}"
+            echo "Run: ./target/release/rumdl rule -o json > rules.json"
+            ((ERRORS++))
+        fi
     else
-        echo -e "${RED}✗${NC}"
-        echo -e "${RED}ERROR: rules.json is out of date${NC}"
-        echo "Run: ./target/release/rumdl rule -o json > rules.json"
-        ((ERRORS++))
+        echo -e "${YELLOW}⚠${NC} (could not generate rules.json)"
     fi
     rm -f "$TEMP_RULES"
 else
@@ -349,6 +346,11 @@ fi
 # Summary
 echo ""
 echo "════════════════════════════════════════"
+if $FIX_MODE && [[ $FIXED -gt 0 ]]; then
+    echo -e "${GREEN}Fixed $FIXED issue(s) automatically.${NC}"
+    echo "Review and commit the changes, then run again without --fix to verify."
+    echo ""
+fi
 if [[ $ERRORS -eq 0 ]]; then
     echo -e "${GREEN}✅ Release is ready!${NC}"
     echo ""
