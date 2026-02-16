@@ -95,7 +95,7 @@ impl MD054LinkImageStyle {
             "full" => self.config.full,
             "inline" => self.config.inline,
             "shortcut" => self.config.shortcut,
-            "url_inline" => self.config.url_inline,
+            "url-inline" => self.config.url_inline,
             _ => false,
         }
     }
@@ -205,7 +205,7 @@ impl Rule for MD054LinkImageStyle {
                 let text = cap.get(1).unwrap().as_str();
                 let url = cap.get(2).unwrap().as_str();
                 all_matches.push(LinkMatch {
-                    style: if text == url { "url_inline" } else { "inline" },
+                    style: if text == url { "url-inline" } else { "inline" },
                     start: m.start(),
                     end: m.end(),
                 });
@@ -402,7 +402,7 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("'url_inline'"));
+        assert!(result[0].message.contains("'url-inline'"));
     }
 
     #[test]
