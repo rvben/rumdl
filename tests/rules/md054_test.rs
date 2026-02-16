@@ -96,7 +96,7 @@ This is a [https://example.com](https://example.com) URL-inline link.
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Link/image style 'url_inline' is not allowed");
+    assert_eq!(result[0].message, "Link/image style 'url-inline' is not allowed");
 }
 
 #[test]
