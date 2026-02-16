@@ -724,7 +724,10 @@ impl Rule for MD075OrphanedTableRows {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
+    use crate::config::MarkdownFlavor;
     use crate::lint_context::LintContext;
     use crate::utils::fix_utils::apply_warning_fixes;
 
@@ -1720,5 +1723,191 @@ Notes ||
             disabled_lines[2].len(),
             "Aligned table rows should share the same width"
         );
+    }
+
+    fn all_flavors() -> [MarkdownFlavor; 6] {
+        [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::MkDocs,
+            MarkdownFlavor::MDX,
+            MarkdownFlavor::Quarto,
+            MarkdownFlavor::Obsidian,
+            MarkdownFlavor::Kramdown,
+        ]
+    }
+
+    fn make_row(prefix: &str, cols: usize) -> String {
+        let cells: Vec<String> = (1..=cols).map(|idx| format!("{prefix}{idx}")).collect();
+        format!("| {} |", cells.join(" | "))
+    }
+
+    #[test]
+    fn test_issue_420_orphan_fix_matrix_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+| Value        | Description                                       |
+| ------------ | ------------------------------------------------- |
+| `consistent` | All code blocks must use the same style (default) |
+
+| `fenced` | All code blocks must use fenced style (``` or ~~~) |
+| `indented` | All code blocks must use indented style (4 spaces) |";
+
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(warnings.len(), 1, "Expected one warning for flavor {}", flavor.name());
+            assert!(
+                warnings[0].fix.is_some(),
+                "Expected fixable orphan warning for flavor {}",
+                flavor.name()
+            );
+            let fixed = rule.fix(&ctx).unwrap();
+            let fixed_ctx = LintContext::new(&fixed, flavor, None);
+            assert!(
+                rule.check(&fixed_ctx).unwrap().is_empty(),
+                "Expected no remaining MD075 warnings after fix for flavor {}",
+                flavor.name()
+            );
+        }
+    }
+
+    #[test]
+    fn test_column_mismatch_orphan_not_fixable_matrix_all_flavors() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+| H1 | H2 | H3 |
+| --- | --- | --- |
+| a | b | c |
+
+| d | e |";
+
+        for flavor in all_flavors() {
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert_eq!(
+                warnings.len(),
+                1,
+                "Expected one mismatch warning for flavor {}",
+                flavor.name()
+            );
+            assert!(
+                warnings[0].fix.is_none(),
+                "Mismatch must never auto-fix for flavor {}",
+                flavor.name()
+            );
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "Mismatch fix must be no-op for flavor {}",
+                flavor.name()
+            );
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn prop_md075_fix_is_idempotent_for_orphaned_rows(
+            cols in 2usize..6,
+            base_rows in 1usize..5,
+            orphan_rows in 1usize..4,
+            blank_lines in 1usize..4,
+            flavor in prop::sample::select(all_flavors().to_vec()),
+        ) {
+            let rule = MD075OrphanedTableRows::default();
+
+            let mut lines = Vec::new();
+            lines.push(make_row("H", cols));
+            lines.push(format!("| {} |", (0..cols).map(|_| "---").collect::<Vec<_>>().join(" | ")));
+            for idx in 0..base_rows {
+                lines.push(make_row(&format!("r{}c", idx + 1), cols));
+            }
+            for _ in 0..blank_lines {
+                lines.push(String::new());
+            }
+            for idx in 0..orphan_rows {
+                lines.push(make_row(&format!("o{}c", idx + 1), cols));
+            }
+
+            let content = lines.join("\n");
+            let ctx1 = LintContext::new(&content, flavor, None);
+            let fixed_once = rule.fix(&ctx1).unwrap();
+
+            let ctx2 = LintContext::new(&fixed_once, flavor, None);
+            let fixed_twice = rule.fix(&ctx2).unwrap();
+
+            prop_assert_eq!(fixed_once.as_str(), fixed_twice.as_str());
+            prop_assert!(
+                rule.check(&ctx2).unwrap().is_empty(),
+                "MD075 warnings remained after fix in flavor {}",
+                flavor.name()
+            );
+        }
+
+        #[test]
+        fn prop_md075_cli_lsp_fix_consistency(
+            cols in 2usize..6,
+            base_rows in 1usize..4,
+            orphan_rows in 1usize..3,
+            blank_lines in 1usize..3,
+            flavor in prop::sample::select(all_flavors().to_vec()),
+        ) {
+            let rule = MD075OrphanedTableRows::default();
+
+            let mut lines = Vec::new();
+            lines.push(make_row("H", cols));
+            lines.push(format!("| {} |", (0..cols).map(|_| "---").collect::<Vec<_>>().join(" | ")));
+            for idx in 0..base_rows {
+                lines.push(make_row(&format!("r{}c", idx + 1), cols));
+            }
+            for _ in 0..blank_lines {
+                lines.push(String::new());
+            }
+            for idx in 0..orphan_rows {
+                lines.push(make_row(&format!("o{}c", idx + 1), cols));
+            }
+            let content = lines.join("\n");
+
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            prop_assert!(
+                warnings.iter().any(|w| w.message.contains("Orphaned")),
+                "Expected orphan warning for flavor {}",
+                flavor.name()
+            );
+
+            let lsp_fixed = apply_warning_fixes(&content, &warnings).unwrap();
+            let cli_fixed = rule.fix(&ctx).unwrap();
+            prop_assert_eq!(lsp_fixed, cli_fixed);
+        }
+
+        #[test]
+        fn prop_md075_column_mismatch_is_never_fixable(
+            base_cols in 2usize..6,
+            orphan_cols in 1usize..6,
+            blank_lines in 1usize..4,
+            flavor in prop::sample::select(all_flavors().to_vec()),
+        ) {
+            prop_assume!(base_cols != orphan_cols);
+            let rule = MD075OrphanedTableRows::default();
+
+            let mut lines = vec![
+                make_row("H", base_cols),
+                format!("| {} |", (0..base_cols).map(|_| "---").collect::<Vec<_>>().join(" | ")),
+                make_row("r", base_cols),
+            ];
+            for _ in 0..blank_lines {
+                lines.push(String::new());
+            }
+            lines.push(make_row("o", orphan_cols));
+
+            let content = lines.join("\n");
+            let ctx = LintContext::new(&content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            prop_assert_eq!(warnings.len(), 1);
+            prop_assert!(warnings[0].fix.is_none());
+            prop_assert_eq!(rule.fix(&ctx).unwrap(), content);
+        }
     }
 }
