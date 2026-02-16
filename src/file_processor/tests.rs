@@ -348,12 +348,12 @@ fn test_format_embedded_markdown_blocks_multiple_blank_lines() {
     let config = rumdl_config::Config::default();
     let rules = rumdl_lib::rules::filter_rules(&rumdl_lib::rules::all_rules(&config), &config.global);
 
-    // MD012 should fix multiple consecutive blank lines
-    let mut content = "# Doc\n\n```markdown\n# Heading\n\n\n\nParagraph\n```\n".to_string();
+    // MD012 should fix multiple consecutive blank lines between non-heading content
+    let mut content = "# Doc\n\n```markdown\nParagraph 1\n\n\n\nParagraph 2\n```\n".to_string();
     let formatted = format_embedded_markdown_blocks(&mut content, &rules, &config);
 
     assert!(formatted > 0, "Should format block");
-    // After formatting, should have at most one blank line between heading and paragraph
+    // After formatting, should have at most one blank line between paragraphs
     let block_content = content
         .split("```markdown\n")
         .nth(1)

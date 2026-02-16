@@ -798,7 +798,8 @@ mod negative_tests {
 
     #[test]
     fn test_multiple_blank_lines_detected() {
-        let content = "# Test\n\n\n\nText after multiple blanks.\n";
+        // Use non-heading content so blanks are not heading-adjacent (MD022's domain)
+        let content = "# Test\n\nParagraph 1.\n\n\n\nParagraph 2.\n";
         let warnings = lint_mkdocs(content);
         let md012 = warnings
             .iter()
@@ -2173,7 +2174,12 @@ mod fix_validation {
 
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
         let fixed = rule.fix(&ctx).unwrap();
-        assert!(!fixed.contains("\n\n\n"), "MD012 should reduce multiple blanks");
+        // Heading-adjacent blanks are preserved (heading spacing is MD022's domain)
+        // Non-heading blanks (before === "Tab") are still reduced
+        assert!(
+            fixed.contains("Content.\n\n=== \"Tab\""),
+            "MD012 should reduce non-heading-adjacent blanks"
+        );
     }
 
     #[test]

@@ -1,4 +1,6 @@
 use crate::filtered_lines::FilteredLinesExt;
+use crate::lint_context::LintContext;
+use crate::lint_context::types::HeadingStyle;
 use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashSet;
@@ -82,6 +84,30 @@ impl MD012NoMultipleBlanks {
     }
 }
 
+/// Check if the given 0-based line index is part of a heading.
+///
+/// Returns true if:
+/// - The line has heading info (covers ATX headings and Setext text lines), OR
+/// - The previous line is a Setext heading text line (covers the Setext underline)
+fn is_heading_context(ctx: &LintContext, line_idx: usize) -> bool {
+    if let Some(line_info) = ctx.lines.get(line_idx) {
+        if line_info.heading.is_some() {
+            return true;
+        }
+    }
+    // Check if previous line is a Setext heading text line — if so, this line is the underline
+    if line_idx > 0 {
+        if let Some(prev_info) = ctx.lines.get(line_idx - 1) {
+            if let Some(ref heading) = prev_info.heading {
+                if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 impl Rule for MD012NoMultipleBlanks {
     fn name(&self) -> &'static str {
         "MD012"
@@ -122,6 +148,8 @@ impl Rule for MD012NoMultipleBlanks {
         let mut blank_count = 0;
         let mut blank_start = 0;
         let mut last_line_num: Option<usize> = None;
+        // Track the last non-blank content line for heading adjacency checks
+        let mut prev_content_line_num: Option<usize> = None;
 
         // Use HashSet for O(1) lookups of lines that need to be checked
         let mut lines_to_check: HashSet<usize> = HashSet::new();
@@ -152,16 +180,21 @@ impl Rule for MD012NoMultipleBlanks {
                 // Lines were skipped (code block or similar)
                 // Generate warnings for any accumulated blanks before the skip
                 if blank_count > self.config.maximum.get() {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        lines,
-                        &lines_to_check,
-                        line_index,
-                    ));
+                    let heading_adjacent = prev_content_line_num.is_some_and(|idx| is_heading_context(ctx, idx));
+                    if !heading_adjacent {
+                        warnings.extend(self.generate_excess_warnings(
+                            blank_start,
+                            blank_count,
+                            lines,
+                            &lines_to_check,
+                            line_index,
+                        ));
+                    }
                 }
                 blank_count = 0;
                 lines_to_check.clear();
+                // Reset heading context across skipped regions (code blocks, etc.)
+                prev_content_line_num = None;
             }
             last_line_num = Some(line_num);
 
@@ -176,16 +209,24 @@ impl Rule for MD012NoMultipleBlanks {
                 }
             } else {
                 if blank_count > self.config.maximum.get() {
-                    warnings.extend(self.generate_excess_warnings(
-                        blank_start,
-                        blank_count,
-                        lines,
-                        &lines_to_check,
-                        line_index,
-                    ));
+                    // Skip warnings if blanks are between content and a heading.
+                    // Start-of-file blanks (blank_start == 0) before a heading are still
+                    // flagged — no MD022 config requires blanks at the start of a file.
+                    let heading_adjacent = prev_content_line_num.is_some_and(|idx| is_heading_context(ctx, idx))
+                        || (blank_start > 0 && is_heading_context(ctx, line_num));
+                    if !heading_adjacent {
+                        warnings.extend(self.generate_excess_warnings(
+                            blank_start,
+                            blank_count,
+                            lines,
+                            &lines_to_check,
+                            line_index,
+                        ));
+                    }
                 }
                 blank_count = 0;
                 lines_to_check.clear();
+                prev_content_line_num = Some(line_num);
             }
         }
 
@@ -244,10 +285,15 @@ impl Rule for MD012NoMultipleBlanks {
         let mut in_code_block = false;
         let mut code_block_blanks = Vec::new();
         let mut in_front_matter = false;
+        // Track whether the last emitted content line is heading-adjacent
+        let mut last_content_is_heading: bool = false;
+        // Track whether we've seen any content (for start-of-file detection)
+        let mut has_seen_content: bool = false;
 
         // Process ALL lines (don't skip front-matter in fix mode)
         for filtered_line in ctx.filtered_lines() {
             let line = filtered_line.content;
+            let line_idx = filtered_line.line_num - 1; // Convert to 0-based
 
             // Pass through front-matter lines unchanged
             if filtered_line.line_info.in_front_matter {
@@ -259,23 +305,34 @@ impl Rule for MD012NoMultipleBlanks {
                     }
                     blank_count = 0;
                     in_front_matter = true;
+                    last_content_is_heading = false;
                 }
                 result.push(line);
                 continue;
             } else if in_front_matter {
                 // Exiting front-matter
                 in_front_matter = false;
+                last_content_is_heading = false;
             }
 
             // Track code blocks
             if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
                 // Handle accumulated blank lines before code block
                 if !in_code_block {
-                    let allowed_blanks = blank_count.min(self.config.maximum.get());
-                    if allowed_blanks > 0 {
-                        result.extend(vec![""; allowed_blanks]);
+                    let heading_adjacent = last_content_is_heading;
+                    if heading_adjacent {
+                        // Preserve all blanks adjacent to headings
+                        for _ in 0..blank_count {
+                            result.push("");
+                        }
+                    } else {
+                        let allowed_blanks = blank_count.min(self.config.maximum.get());
+                        if allowed_blanks > 0 {
+                            result.extend(vec![""; allowed_blanks]);
+                        }
                     }
                     blank_count = 0;
+                    last_content_is_heading = false;
                 } else {
                     // Add accumulated blank lines inside code block
                     result.append(&mut code_block_blanks);
@@ -295,12 +352,25 @@ impl Rule for MD012NoMultipleBlanks {
             } else if line.trim().is_empty() {
                 blank_count += 1;
             } else {
-                // Add allowed blank lines before content
-                let allowed_blanks = blank_count.min(self.config.maximum.get());
-                if allowed_blanks > 0 {
-                    result.extend(vec![""; allowed_blanks]);
+                // Check if blanks are between content and a heading.
+                // Start-of-file blanks before a heading are still reduced.
+                let heading_adjacent =
+                    last_content_is_heading || (has_seen_content && is_heading_context(ctx, line_idx));
+                if heading_adjacent {
+                    // Preserve all blanks adjacent to headings
+                    for _ in 0..blank_count {
+                        result.push("");
+                    }
+                } else {
+                    // Add allowed blank lines before content
+                    let allowed_blanks = blank_count.min(self.config.maximum.get());
+                    if allowed_blanks > 0 {
+                        result.extend(vec![""; allowed_blanks]);
+                    }
                 }
                 blank_count = 0;
+                last_content_is_heading = is_heading_context(ctx, line_idx);
+                has_seen_content = true;
                 result.push(line);
             }
         }
@@ -570,12 +640,12 @@ mod tests {
 
     #[test]
     fn test_blank_lines_between_sections() {
+        // Blanks adjacent to headings are heading spacing (MD022's domain)
         let rule = MD012NoMultipleBlanks::default();
         let content = "# Section 1\n\nContent\n\n\n# Section 2\n\nContent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].line, 5);
+        assert!(result.is_empty(), "Blanks adjacent to headings should not be flagged");
     }
 
     #[test]
@@ -603,15 +673,12 @@ mod tests {
 
     #[test]
     fn test_blanks_after_fenced_code_block_mid_document() {
-        // This is the pattern from React repo test files that was being missed
+        // Blanks between code block and heading are heading-adjacent
         let rule = MD012NoMultipleBlanks::default();
         let content = "## Input\n\n```javascript\ncode\n```\n\n\n## Error\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Should flag the double blank between code block and next heading
-        assert_eq!(result.len(), 1, "Should detect blanks after code block");
-        assert_eq!(result[0].line, 7, "Warning should be on line 7 (second blank)");
-        assert!(result[0].message.contains("between content"));
+        assert!(result.is_empty(), "Blanks adjacent to heading should not be flagged");
     }
 
     #[test]
@@ -709,20 +776,204 @@ mod tests {
 
     #[test]
     fn test_warning_fix_mid_document_blanks() {
-        // Test that mid-document blank line fixes also work via warnings
+        // Blanks adjacent to headings are heading spacing (MD022's domain)
         let rule = MD012NoMultipleBlanks::default();
-        // Content with 2 extra blank lines (3 blank lines total, should reduce to 1)
         let content = "# Heading\n\n\n\nParagraph\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
 
-        // With maximum=1 (default), 3 consecutive blanks produces 2 warnings
-        assert_eq!(warnings.len(), 2, "Should have 2 warnings for 2 extra blank lines");
-        assert!(warnings[0].fix.is_some());
-        assert!(warnings[1].fix.is_some());
+        // Blanks are adjacent to a heading, so no warnings
+        assert!(warnings.is_empty(), "Blanks adjacent to heading should not be flagged");
+    }
 
-        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
-        assert_eq!(fixed, "# Heading\n\nParagraph\n", "Should reduce to single blank");
+    // Heading awareness tests (issue #429)
+    // Heading spacing is MD022's domain, so MD012 skips heading-adjacent blanks
+
+    #[test]
+    fn test_heading_aware_atx_blanks_below() {
+        // Blanks below an ATX heading should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Blanks below ATX heading should not be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_atx_blanks_above() {
+        // Blanks above an ATX heading should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Paragraph\n\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Blanks above ATX heading should not be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_atx_blanks_between() {
+        // Blanks between two ATX headings should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading 1\n\n\n## Heading 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Blanks between headings should not be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_setext_equals_blanks_below() {
+        // Blanks below a Setext heading (===) should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Heading\n=======\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Blanks below Setext === heading should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_heading_aware_setext_dashes_blanks_below() {
+        // Blanks below a Setext heading (---) should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Heading\n-------\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Blanks below Setext --- heading should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_heading_aware_setext_blanks_above() {
+        // Blanks above a Setext heading should not be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Paragraph\n\n\nHeading\n=======\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Blanks above Setext heading should not be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_non_heading_blanks_still_flagged() {
+        // Blanks between non-heading content should still be flagged
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Paragraph 1\n\n\nParagraph 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Non-heading blanks should still be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_md022_coexistence() {
+        // The exact issue scenario: MD022 lines-above=2 with blanks before heading
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Title\n\n\n## Subtitle\n\nContent\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Should allow blanks for MD022 heading spacing");
+    }
+
+    #[test]
+    fn test_heading_aware_fix_preserves_heading_blanks() {
+        // Fix should preserve heading-adjacent blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "# Heading\n\n\n\nParagraph\n",
+            "Fix should preserve heading-adjacent blanks"
+        );
+    }
+
+    #[test]
+    fn test_heading_aware_fix_reduces_non_heading_blanks() {
+        // Fix should still reduce non-heading blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Paragraph 1\n\n\n\nParagraph 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "Paragraph 1\n\nParagraph 2\n",
+            "Fix should reduce non-heading blanks"
+        );
+    }
+
+    #[test]
+    fn test_heading_aware_mixed_heading_and_non_heading() {
+        // Document with both heading-adjacent and non-heading blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n\nParagraph 1\n\n\nParagraph 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Only the blanks between Paragraph 1 and Paragraph 2 should be flagged
+        assert_eq!(result.len(), 1, "Should flag only non-heading blanks");
+        assert_eq!(result[0].line, 6, "Warning should be on the non-heading blank");
+    }
+
+    #[test]
+    fn test_heading_aware_blanks_at_start_before_heading_still_flagged() {
+        // Start-of-file blanks are always flagged, even before a heading.
+        // No MD022 config requires blanks at the absolute start of a file.
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "\n\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Start-of-file blanks should be flagged even before heading"
+        );
+        assert!(result[0].message.contains("at start of file"));
+    }
+
+    #[test]
+    fn test_heading_aware_eof_blanks_after_heading_still_flagged() {
+        // EOF blanks should still be flagged even after a heading
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "EOF blanks should still be flagged");
+        assert!(result[0].message.contains("at end of file"));
+    }
+
+    #[test]
+    fn test_heading_aware_custom_maximum_with_headings() {
+        // Custom maximum should not affect heading-adjacent skipping
+        let rule = MD012NoMultipleBlanks::new(2);
+        let content = "# Heading\n\n\n\n\nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Any number of heading-adjacent blanks should be allowed"
+        );
+    }
+
+    #[test]
+    fn test_heading_aware_blanks_after_code_then_heading() {
+        // Blanks after code block followed by heading should not be flagged
+        // Tests that prev_content_line_num is reset across code blocks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Heading\n\n```\ncode\n```\n\n\n\nMore text\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // The blanks are between code block and "More text" (not heading-adjacent)
+        assert_eq!(result.len(), 2, "Non-heading blanks after code block should be flagged");
+    }
+
+    #[test]
+    fn test_heading_aware_fix_mixed_document() {
+        // Fix should preserve heading blanks but reduce non-heading blanks
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "# Title\n\n\n## Section\n\n\nPara 1\n\n\nPara 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Heading-adjacent blanks preserved, non-heading blanks reduced
+        assert_eq!(fixed, "# Title\n\n\n## Section\n\n\nPara 1\n\nPara 2\n");
     }
 
     // Quarto flavor tests
