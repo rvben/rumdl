@@ -35,14 +35,33 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    match s.as_str() {
+    match s.trim().to_ascii_lowercase().as_str() {
         "backtick" => Ok(CodeFenceStyle::Backtick),
         "tilde" => Ok(CodeFenceStyle::Tilde),
         "consistent" => Ok(CodeFenceStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid code fence style: {s}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "Invalid code fence style: {s}. Valid options: backtick, tilde, consistent"
+        ))),
     }
 }
 
 impl RuleConfig for MD048Config {
     const RULE_NAME: &'static str = "MD048";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_is_case_insensitive() {
+        let config: MD048Config = toml::from_str(r#"style = "Backtick""#).unwrap();
+        assert_eq!(config.style, CodeFenceStyle::Backtick);
+
+        let config: MD048Config = toml::from_str(r#"style = "TILDE""#).unwrap();
+        assert_eq!(config.style, CodeFenceStyle::Tilde);
+
+        let config: MD048Config = toml::from_str(r#"style = "Consistent""#).unwrap();
+        assert_eq!(config.style, CodeFenceStyle::Consistent);
+    }
 }

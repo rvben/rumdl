@@ -26,7 +26,7 @@ impl fmt::Display for EmphasisStyle {
 
 impl From<&str> for EmphasisStyle {
     fn from(s: &str) -> Self {
-        match s {
+        match s.trim().to_ascii_lowercase().as_str() {
             "asterisk" => EmphasisStyle::Asterisk,
             "underscore" => EmphasisStyle::Underscore,
             _ => EmphasisStyle::Consistent,

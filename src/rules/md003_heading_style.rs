@@ -212,8 +212,8 @@ impl Rule for MD003HeadingStyle {
                                 HeadingStyle::Setext1 => "Heading\n=======",
                                 HeadingStyle::Setext2 => "Heading\n-------",
                                 HeadingStyle::Consistent => "consistent with the first heading",
-                                HeadingStyle::SetextWithAtx => "setext_with_atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed style",
+                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
                             },
                             match current_style {
                                 HeadingStyle::Atx => "# Heading",
@@ -221,8 +221,8 @@ impl Rule for MD003HeadingStyle {
                                 HeadingStyle::Setext1 => "Heading (underlined with =)",
                                 HeadingStyle::Setext2 => "Heading (underlined with -)",
                                 HeadingStyle::Consistent => "consistent style",
-                                HeadingStyle::SetextWithAtx => "setext_with_atx style",
-                                HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed style",
+                                HeadingStyle::SetextWithAtx => "setext-with-atx style",
+                                HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed style",
                             }
                         ),
                         severity: Severity::Warning,

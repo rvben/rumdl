@@ -35,12 +35,12 @@ impl fmt::Display for HeadingStyle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
             HeadingStyle::Atx => "atx",
-            HeadingStyle::AtxClosed => "atx_closed",
+            HeadingStyle::AtxClosed => "atx-closed",
             HeadingStyle::Setext1 => "setext1",
             HeadingStyle::Setext2 => "setext2",
             HeadingStyle::Consistent => "consistent",
-            HeadingStyle::SetextWithAtx => "setext_with_atx",
-            HeadingStyle::SetextWithAtxClosed => "setext_with_atx_closed",
+            HeadingStyle::SetextWithAtx => "setext-with-atx",
+            HeadingStyle::SetextWithAtxClosed => "setext-with-atx-closed",
         };
         write!(f, "{s}")
     }
@@ -49,7 +49,8 @@ impl fmt::Display for HeadingStyle {
 impl FromStr for HeadingStyle {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
+        let normalized = s.trim().to_ascii_lowercase().replace('-', "_");
+        match normalized.as_str() {
             "atx" => Ok(HeadingStyle::Atx),
             "atx_closed" => Ok(HeadingStyle::AtxClosed),
             "setext1" | "setext" => Ok(HeadingStyle::Setext1),
@@ -1112,17 +1113,35 @@ mod tests {
         assert_eq!(HeadingStyle::from_str("atx"), Ok(HeadingStyle::Atx));
         assert_eq!(HeadingStyle::from_str("ATX"), Ok(HeadingStyle::Atx));
         assert_eq!(HeadingStyle::from_str("atx_closed"), Ok(HeadingStyle::AtxClosed));
+        assert_eq!(HeadingStyle::from_str("atx-closed"), Ok(HeadingStyle::AtxClosed));
+        assert_eq!(HeadingStyle::from_str("ATX-CLOSED"), Ok(HeadingStyle::AtxClosed));
         assert_eq!(HeadingStyle::from_str("setext1"), Ok(HeadingStyle::Setext1));
         assert_eq!(HeadingStyle::from_str("setext"), Ok(HeadingStyle::Setext1));
         assert_eq!(HeadingStyle::from_str("setext2"), Ok(HeadingStyle::Setext2));
         assert_eq!(HeadingStyle::from_str("consistent"), Ok(HeadingStyle::Consistent));
+        assert_eq!(
+            HeadingStyle::from_str("setext_with_atx"),
+            Ok(HeadingStyle::SetextWithAtx)
+        );
+        assert_eq!(
+            HeadingStyle::from_str("setext-with-atx"),
+            Ok(HeadingStyle::SetextWithAtx)
+        );
+        assert_eq!(
+            HeadingStyle::from_str("setext_with_atx_closed"),
+            Ok(HeadingStyle::SetextWithAtxClosed)
+        );
+        assert_eq!(
+            HeadingStyle::from_str("setext-with-atx-closed"),
+            Ok(HeadingStyle::SetextWithAtxClosed)
+        );
         assert_eq!(HeadingStyle::from_str("invalid"), Err(()));
     }
 
     #[test]
     fn test_heading_style_display() {
         assert_eq!(HeadingStyle::Atx.to_string(), "atx");
-        assert_eq!(HeadingStyle::AtxClosed.to_string(), "atx_closed");
+        assert_eq!(HeadingStyle::AtxClosed.to_string(), "atx-closed");
         assert_eq!(HeadingStyle::Setext1.to_string(), "setext1");
         assert_eq!(HeadingStyle::Setext2.to_string(), "setext2");
         assert_eq!(HeadingStyle::Consistent.to_string(), "consistent");

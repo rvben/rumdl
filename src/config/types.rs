@@ -65,7 +65,7 @@ pub struct Config {
     /// Common examples:
     /// - MD013: line_length, code_blocks, tables, headings
     /// - MD007: indent
-    /// - MD003: style ("atx", "atx_closed", "setext")
+    /// - MD003: style ("atx", "atx-closed", "setext")
     /// - MD044: names (array of proper names to check)
     ///
     /// See <https://github.com/rvben/rumdl> for full rule documentation.

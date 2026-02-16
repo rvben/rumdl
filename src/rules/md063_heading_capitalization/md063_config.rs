@@ -2,8 +2,7 @@ use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 
 /// Capitalization style for headings
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HeadingCapStyle {
     /// Title Case - capitalize major words (default)
     #[default]
@@ -12,6 +11,37 @@ pub enum HeadingCapStyle {
     SentenceCase,
     /// ALL CAPS - all letters uppercase
     AllCaps,
+}
+
+impl Serialize for HeadingCapStyle {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            HeadingCapStyle::TitleCase => serializer.serialize_str("title-case"),
+            HeadingCapStyle::SentenceCase => serializer.serialize_str("sentence-case"),
+            HeadingCapStyle::AllCaps => serializer.serialize_str("all-caps"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HeadingCapStyle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let normalized = s.trim().to_ascii_lowercase().replace('-', "_");
+        match normalized.as_str() {
+            "title_case" => Ok(HeadingCapStyle::TitleCase),
+            "sentence_case" => Ok(HeadingCapStyle::SentenceCase),
+            "all_caps" => Ok(HeadingCapStyle::AllCaps),
+            _ => Err(serde::de::Error::custom(format!(
+                "Invalid heading capitalization style: {s}. Valid options: title_case, sentence_case, all_caps"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -160,18 +190,30 @@ mod tests {
     }
 
     #[test]
+    fn test_style_accepts_kebab_case_aliases() {
+        let title_case: MD063Config = toml::from_str(r#"style = "title-case""#).unwrap();
+        assert_eq!(title_case.style, HeadingCapStyle::TitleCase);
+
+        let sentence_case: MD063Config = toml::from_str(r#"style = "sentence-case""#).unwrap();
+        assert_eq!(sentence_case.style, HeadingCapStyle::SentenceCase);
+
+        let all_caps: MD063Config = toml::from_str(r#"style = "all-caps""#).unwrap();
+        assert_eq!(all_caps.style, HeadingCapStyle::AllCaps);
+    }
+
+    #[test]
     fn test_style_serialization() {
         assert_eq!(
             serde_json::to_string(&HeadingCapStyle::TitleCase).unwrap(),
-            "\"title_case\""
+            "\"title-case\""
         );
         assert_eq!(
             serde_json::to_string(&HeadingCapStyle::SentenceCase).unwrap(),
-            "\"sentence_case\""
+            "\"sentence-case\""
         );
         assert_eq!(
             serde_json::to_string(&HeadingCapStyle::AllCaps).unwrap(),
-            "\"all_caps\""
+            "\"all-caps\""
         );
     }
 }

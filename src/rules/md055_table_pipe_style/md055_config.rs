@@ -35,29 +35,24 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
+    let normalized = s.trim().to_ascii_lowercase().replace('_', "-");
 
-    // Normalize to kebab-case (canonical format)
-    let normalized = match s.as_str() {
-        // Kebab-case (canonical)
-        "consistent" => "consistent",
-        "leading-and-trailing" => "leading-and-trailing",
-        "no-leading-or-trailing" => "no-leading-or-trailing",
-        "leading-only" => "leading-only",
-        "trailing-only" => "trailing-only",
-        // Snake_case (backward compatibility)
-        "leading_and_trailing" => "leading-and-trailing",
-        "no_leading_or_trailing" => "no-leading-or-trailing",
-        "leading_only" => "leading-only",
-        "trailing_only" => "trailing-only",
-        _ => {
-            return Err(serde::de::Error::custom(format!(
-                "Invalid table pipe style: {s}. Valid options: consistent, leading-and-trailing, \
-                 no-leading-or-trailing, leading-only, trailing-only"
-            )));
-        }
-    };
+    let valid_styles = [
+        "consistent",
+        "leading-and-trailing",
+        "no-leading-or-trailing",
+        "leading-only",
+        "trailing-only",
+    ];
 
-    Ok(normalized.to_string())
+    if valid_styles.contains(&normalized.as_str()) {
+        Ok(normalized)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "Invalid table pipe style: {s}. Valid options: consistent, leading-and-trailing, \
+             no-leading-or-trailing, leading-only, trailing-only"
+        )))
+    }
 }
 
 impl RuleConfig for MD055Config {

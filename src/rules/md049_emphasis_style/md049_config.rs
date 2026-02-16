@@ -41,3 +41,17 @@ where
 impl RuleConfig for MD049Config {
     const RULE_NAME: &'static str = "MD049";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_is_case_insensitive() {
+        let config: MD049Config = toml::from_str(r#"style = "Asterisk""#).unwrap();
+        assert_eq!(config.style, EmphasisStyle::Asterisk);
+
+        let config: MD049Config = toml::from_str(r#"style = "UNDERSCORE""#).unwrap();
+        assert_eq!(config.style, EmphasisStyle::Underscore);
+    }
+}

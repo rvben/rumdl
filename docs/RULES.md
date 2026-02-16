@@ -48,7 +48,7 @@ enabled = true
 
 [MD063]
 enabled = true
-style = "title_case"  # Optional: configure the style
+style = "title-case"  # Optional: configure the style
 
 [MD072]
 enabled = true
@@ -62,7 +62,7 @@ enabled = true
 
 [tool.rumdl.MD063]
 enabled = true
-style = "title_case"
+style = "title-case"
 
 [tool.rumdl.MD072]
 enabled = true
@@ -275,7 +275,7 @@ disable = ["MD013", "MD033"]
 
 # Rule-specific configurations
 [MD003]
-style = "atx"  # Heading style (atx, atx_closed, setext)
+style = "atx"  # Heading style (atx, atx-closed, setext)
 
 [MD004]
 style = "consistent"  # List style (asterisk, plus, dash, consistent)

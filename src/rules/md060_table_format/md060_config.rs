@@ -197,11 +197,12 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
+    let normalized = s.trim().to_ascii_lowercase().replace('_', "-");
 
     let valid_styles = ["aligned", "aligned-no-space", "compact", "tight", "any"];
 
-    if valid_styles.contains(&s.as_str()) {
-        Ok(s)
+    if valid_styles.contains(&normalized.as_str()) {
+        Ok(normalized)
     } else {
         Err(serde::de::Error::custom(format!(
             "Invalid table format style: {s}. Valid options: aligned, aligned-no-space, compact, tight, any"
@@ -211,4 +212,24 @@ where
 
 impl RuleConfig for MD060Config {
     const RULE_NAME: &'static str = "MD060";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_accepts_hyphen_and_underscore_variants() {
+        let kebab_case: MD060Config = toml::from_str("style = \"aligned-no-space\"").unwrap();
+        assert_eq!(kebab_case.style, "aligned-no-space");
+
+        let snake_case: MD060Config = toml::from_str("style = \"aligned_no_space\"").unwrap();
+        assert_eq!(snake_case.style, "aligned-no-space");
+    }
+
+    #[test]
+    fn test_style_normalizes_case_for_compatibility() {
+        let uppercase: MD060Config = toml::from_str("style = \"ALIGNED_NO_SPACE\"").unwrap();
+        assert_eq!(uppercase.style, "aligned-no-space");
+    }
 }

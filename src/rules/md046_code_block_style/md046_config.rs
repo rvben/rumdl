@@ -28,11 +28,13 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    match s.as_str() {
+    match s.trim().to_ascii_lowercase().as_str() {
         "fenced" => Ok(CodeBlockStyle::Fenced),
         "indented" => Ok(CodeBlockStyle::Indented),
         "consistent" => Ok(CodeBlockStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid code block style: {s}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "Invalid code block style: {s}. Valid options: fenced, indented, consistent"
+        ))),
     }
 }
 
@@ -45,4 +47,21 @@ where
 
 impl RuleConfig for MD046Config {
     const RULE_NAME: &'static str = "MD046";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_is_case_insensitive() {
+        let config: MD046Config = toml::from_str(r#"style = "Fenced""#).unwrap();
+        assert_eq!(config.style, CodeBlockStyle::Fenced);
+
+        let config: MD046Config = toml::from_str(r#"style = "INDENTED""#).unwrap();
+        assert_eq!(config.style, CodeBlockStyle::Indented);
+
+        let config: MD046Config = toml::from_str(r#"style = "Consistent""#).unwrap();
+        assert_eq!(config.style, CodeBlockStyle::Consistent);
+    }
 }

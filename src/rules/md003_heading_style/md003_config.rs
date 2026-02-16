@@ -43,3 +43,29 @@ impl Default for MD003Config {
 impl RuleConfig for MD003Config {
     const RULE_NAME: &'static str = "MD003";
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_accepts_kebab_case_variants() {
+        let config: MD003Config = toml::from_str(r#"style = "atx-closed""#).unwrap();
+        assert_eq!(config.style, HeadingStyle::AtxClosed);
+
+        let config: MD003Config = toml::from_str(r#"style = "setext-with-atx""#).unwrap();
+        assert_eq!(config.style, HeadingStyle::SetextWithAtx);
+
+        let config: MD003Config = toml::from_str(r#"style = "setext-with-atx-closed""#).unwrap();
+        assert_eq!(config.style, HeadingStyle::SetextWithAtxClosed);
+    }
+
+    #[test]
+    fn test_style_is_case_insensitive() {
+        let config: MD003Config = toml::from_str(r#"style = "ATX_CLOSED""#).unwrap();
+        assert_eq!(config.style, HeadingStyle::AtxClosed);
+
+        let config: MD003Config = toml::from_str(r#"style = "SETEXT-WITH-ATX""#).unwrap();
+        assert_eq!(config.style, HeadingStyle::SetextWithAtx);
+    }
+}

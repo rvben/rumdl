@@ -35,14 +35,30 @@ where
     D: serde::Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    match s.as_str() {
+    match s.trim().to_ascii_lowercase().as_str() {
         "asterisk" => Ok(StrongStyle::Asterisk),
         "underscore" => Ok(StrongStyle::Underscore),
         "consistent" => Ok(StrongStyle::Consistent),
-        _ => Err(serde::de::Error::custom(format!("Invalid strong style: {s}"))),
+        _ => Err(serde::de::Error::custom(format!(
+            "Invalid strong style: {s}. Valid options: asterisk, underscore, consistent"
+        ))),
     }
 }
 
 impl RuleConfig for MD050Config {
     const RULE_NAME: &'static str = "MD050";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_style_is_case_insensitive() {
+        let config: MD050Config = toml::from_str(r#"style = "Asterisk""#).unwrap();
+        assert_eq!(config.style, StrongStyle::Asterisk);
+
+        let config: MD050Config = toml::from_str(r#"style = "UNDERSCORE""#).unwrap();
+        assert_eq!(config.style, StrongStyle::Underscore);
+    }
 }
