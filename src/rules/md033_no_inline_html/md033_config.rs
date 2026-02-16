@@ -52,7 +52,19 @@ pub enum BrStyle {
     Backslash,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+/// Auto-fix conversion strictness for MD033.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MD033FixMode {
+    /// Preserve existing behavior: skip conversions when significant extra
+    /// attributes are present.
+    #[default]
+    Conservative,
+    /// Allow conversion by dropping configured extra attributes.
+    Relaxed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD033Config {
     #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
     pub allowed: Vec<String>,
@@ -75,11 +87,61 @@ pub struct MD033Config {
     #[serde(default)]
     pub fix: bool,
 
+    /// Attribute handling mode for auto-fix.
+    /// - conservative: current safe behavior (default)
+    /// - relaxed: allow dropping configured attributes during conversion
+    #[serde(default, rename = "fix-mode", alias = "fix_mode")]
+    pub fix_mode: MD033FixMode,
+
+    /// Extra attributes that may be dropped when `fix-mode = "relaxed"`.
+    /// These attributes are not representable in Markdown link/image syntax.
+    #[serde(
+        default = "default_drop_attributes",
+        rename = "drop-attributes",
+        alias = "drop_attributes"
+    )]
+    pub drop_attributes: Vec<String>,
+
+    /// Wrapper elements that may be stripped when `fix-mode = "relaxed"`.
+    /// Wrapper stripping is applied only when the wrapper's inner content no
+    /// longer contains HTML tags.
+    #[serde(
+        default = "default_strip_wrapper_elements",
+        rename = "strip-wrapper-elements",
+        alias = "strip_wrapper_elements"
+    )]
+    pub strip_wrapper_elements: Vec<String>,
+
     /// Style for converting `<br>` tags to Markdown line breaks.
     /// - "trailing-spaces": Two spaces + newline (CommonMark standard, default)
     /// - "backslash": Backslash + newline (Pandoc/extended markdown)
     #[serde(default, rename = "br-style", alias = "br_style")]
     pub br_style: BrStyle,
+}
+
+impl Default for MD033Config {
+    fn default() -> Self {
+        Self {
+            allowed: Vec::new(),
+            disallowed: Vec::new(),
+            fix: false,
+            fix_mode: MD033FixMode::default(),
+            drop_attributes: default_drop_attributes(),
+            strip_wrapper_elements: default_strip_wrapper_elements(),
+            br_style: BrStyle::default(),
+        }
+    }
+}
+
+fn default_drop_attributes() -> Vec<String> {
+    vec!["target", "rel", "width", "height", "align", "class", "id", "style"]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn default_strip_wrapper_elements() -> Vec<String> {
+    vec!["p".to_string()]
 }
 
 impl MD033Config {
@@ -119,6 +181,16 @@ impl MD033Config {
     /// Check if a tag requires attribute extraction for conversion
     pub fn requires_attribute_extraction(tag_name: &str) -> bool {
         ATTRIBUTE_FIXABLE_TAGS.contains(&tag_name.to_ascii_lowercase().as_str())
+    }
+
+    /// Convert drop attributes to lowercase `HashSet` for efficient lookup.
+    pub fn drop_attributes_set(&self) -> HashSet<String> {
+        self.drop_attributes.iter().map(|s| s.to_lowercase()).collect()
+    }
+
+    /// Convert wrapper elements to lowercase `HashSet` for efficient lookup.
+    pub fn strip_wrapper_elements_set(&self) -> HashSet<String> {
+        self.strip_wrapper_elements.iter().map(|s| s.to_lowercase()).collect()
     }
 
     /// Decode percent-encoded characters in a URL for safety checking.

@@ -8,13 +8,15 @@ use crate::utils::regex_cache::*;
 use std::collections::HashSet;
 
 mod md033_config;
-use md033_config::MD033Config;
+use md033_config::{MD033Config, MD033FixMode};
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
     config: MD033Config,
     allowed: HashSet<String>,
     disallowed: HashSet<String>,
+    drop_attributes: HashSet<String>,
+    strip_wrapper_elements: HashSet<String>,
 }
 
 impl Default for MD033NoInlineHtml {
@@ -22,10 +24,14 @@ impl Default for MD033NoInlineHtml {
         let config = MD033Config::default();
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
+        let drop_attributes = config.drop_attributes_set();
+        let strip_wrapper_elements = config.strip_wrapper_elements_set();
         Self {
             config,
             allowed,
             disallowed,
+            drop_attributes,
+            strip_wrapper_elements,
         }
     }
 }
@@ -40,14 +46,18 @@ impl MD033NoInlineHtml {
             allowed: allowed_vec.clone(),
             disallowed: Vec::new(),
             fix: false,
-            br_style: md033_config::BrStyle::default(),
+            ..MD033Config::default()
         };
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
+        let drop_attributes = config.drop_attributes_set();
+        let strip_wrapper_elements = config.strip_wrapper_elements_set();
         Self {
             config,
             allowed,
             disallowed,
+            drop_attributes,
+            strip_wrapper_elements,
         }
     }
 
@@ -56,14 +66,18 @@ impl MD033NoInlineHtml {
             allowed: Vec::new(),
             disallowed: disallowed_vec.clone(),
             fix: false,
-            br_style: md033_config::BrStyle::default(),
+            ..MD033Config::default()
         };
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
+        let drop_attributes = config.drop_attributes_set();
+        let strip_wrapper_elements = config.strip_wrapper_elements_set();
         Self {
             config,
             allowed,
             disallowed,
+            drop_attributes,
+            strip_wrapper_elements,
         }
     }
 
@@ -73,24 +87,32 @@ impl MD033NoInlineHtml {
             allowed: Vec::new(),
             disallowed: Vec::new(),
             fix,
-            br_style: md033_config::BrStyle::default(),
+            ..MD033Config::default()
         };
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
+        let drop_attributes = config.drop_attributes_set();
+        let strip_wrapper_elements = config.strip_wrapper_elements_set();
         Self {
             config,
             allowed,
             disallowed,
+            drop_attributes,
+            strip_wrapper_elements,
         }
     }
 
     pub fn from_config_struct(config: MD033Config) -> Self {
         let allowed = config.allowed_set();
         let disallowed = config.disallowed_set();
+        let drop_attributes = config.drop_attributes_set();
+        let strip_wrapper_elements = config.strip_wrapper_elements_set();
         Self {
             config,
             allowed,
             disallowed,
+            drop_attributes,
+            strip_wrapper_elements,
         }
     }
 
@@ -417,6 +439,75 @@ impl MD033NoInlineHtml {
             || content.starts_with("mailto:")
     }
 
+    #[inline]
+    fn is_relaxed_fix_mode(&self) -> bool {
+        self.config.fix_mode == MD033FixMode::Relaxed
+    }
+
+    #[inline]
+    fn is_droppable_attribute(&self, attr_name: &str) -> bool {
+        // Event handler attributes (onclick, onload, etc.) are never droppable
+        // because they can execute arbitrary JavaScript.
+        if attr_name.starts_with("on") && attr_name.len() > 2 {
+            return false;
+        }
+        self.drop_attributes.contains(attr_name)
+            || (attr_name.starts_with("data-")
+                && (self.drop_attributes.contains("data-*") || self.drop_attributes.contains("data-")))
+    }
+
+    #[inline]
+    fn is_strippable_wrapper(&self, tag_name: &str) -> bool {
+        self.is_relaxed_fix_mode() && self.strip_wrapper_elements.contains(tag_name)
+    }
+
+    /// Check whether `byte_offset` sits directly inside a top-level strippable
+    /// wrapper element (e.g. `<p>`).  Returns `true` only when:
+    ///  1. The nearest unclosed opening tag before the offset is a configured
+    ///     wrapper element, AND
+    ///  2. That wrapper is itself NOT nested inside another HTML element.
+    ///
+    /// Condition 2 prevents converting inner content when the wrapper cannot
+    /// be stripped (e.g. `<div><p><img/></p></div>` -- stripping `<p>` is
+    /// blocked because it is nested, so converting `<img>` would leave
+    /// markdown inside an HTML block where it won't render).
+    fn is_inside_strippable_wrapper(&self, content: &str, byte_offset: usize) -> bool {
+        if byte_offset == 0 {
+            return false;
+        }
+        let before = content[..byte_offset].trim_end();
+        if !before.ends_with('>') || before.ends_with("->") {
+            return false;
+        }
+        if let Some(last_lt) = before.rfind('<') {
+            let potential_tag = &before[last_lt..];
+            if potential_tag.starts_with("</") || potential_tag.starts_with("<!--") {
+                return false;
+            }
+            let parent_name = potential_tag
+                .trim_start_matches('<')
+                .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                .next()
+                .unwrap_or("")
+                .to_lowercase();
+            if !self.strip_wrapper_elements.contains(&parent_name) {
+                return false;
+            }
+            // Verify the wrapper itself is not nested inside another element.
+            let wrapper_before = before[..last_lt].trim_end();
+            if wrapper_before.ends_with('>') && !wrapper_before.ends_with("->") {
+                if let Some(outer_lt) = wrapper_before.rfind('<') {
+                    let outer_tag = &wrapper_before[outer_lt..];
+                    if !outer_tag.starts_with("</") && !outer_tag.starts_with("<!--") {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+        false
+    }
+
     /// Convert paired HTML tags to their Markdown equivalents.
     /// Returns None if the tag cannot be safely converted (has nested tags, HTML entities, etc.)
     fn convert_to_markdown(tag_name: &str, inner_content: &str) -> Option<String> {
@@ -459,7 +550,7 @@ impl MD033NoInlineHtml {
                 md033_config::BrStyle::Backslash => Some("\\\n".to_string()),
             },
             "hr" => Some("\n---\n".to_string()),
-            "img" => Self::convert_img_to_markdown(opening_tag),
+            "img" => self.convert_img_to_markdown(opening_tag),
             _ => None,
         }
     }
@@ -570,7 +661,7 @@ impl MD033NoInlineHtml {
 
     /// Check if an HTML tag has extra attributes beyond the specified allowed ones.
     /// Uses proper attribute parsing to avoid false positives from string matching.
-    fn has_extra_attributes(tag: &str, allowed_attrs: &[&str]) -> bool {
+    fn has_extra_attributes(&self, tag: &str, allowed_attrs: &[&str]) -> bool {
         let attrs = Self::parse_attributes(tag);
 
         // All event handlers (on*) are dangerous
@@ -599,9 +690,16 @@ impl MD033NoInlineHtml {
         ];
 
         for (attr_name, _) in attrs {
-            // Skip allowed attributes
+            // Skip allowed attributes (list is small, linear scan is efficient)
             if allowed_attrs.iter().any(|a| a.to_ascii_lowercase() == attr_name) {
                 continue;
+            }
+
+            if self.is_relaxed_fix_mode() {
+                if self.is_droppable_attribute(&attr_name) {
+                    continue;
+                }
+                return true;
             }
 
             // Check for event handlers (on*)
@@ -627,7 +725,7 @@ impl MD033NoInlineHtml {
 
     /// Convert `<a href="url">text</a>` to `[text](url)` or `[text](url "title")`
     /// Returns None if conversion is not safe.
-    fn convert_a_to_markdown(opening_tag: &str, inner_content: &str) -> Option<String> {
+    fn convert_a_to_markdown(&self, opening_tag: &str, inner_content: &str) -> Option<String> {
         // Extract href attribute
         let href = Self::extract_attribute(opening_tag, "href")?;
 
@@ -656,7 +754,7 @@ impl MD033NoInlineHtml {
         let title = Self::extract_attribute(opening_tag, "title");
 
         // Check for extra dangerous attributes (title is allowed)
-        if Self::has_extra_attributes(opening_tag, &["href", "title"]) {
+        if self.has_extra_attributes(opening_tag, &["href", "title"]) {
             return None;
         }
 
@@ -702,7 +800,7 @@ impl MD033NoInlineHtml {
 
     /// Convert `<img src="url" alt="text">` to `![alt](src)` or `![alt](src "title")`
     /// Returns None if conversion is not safe.
-    fn convert_img_to_markdown(tag: &str) -> Option<String> {
+    fn convert_img_to_markdown(&self, tag: &str) -> Option<String> {
         // Extract src attribute (required)
         let src = Self::extract_attribute(tag, "src")?;
 
@@ -718,7 +816,7 @@ impl MD033NoInlineHtml {
         let title = Self::extract_attribute(tag, "title");
 
         // Check for extra dangerous attributes (title is allowed)
-        if Self::has_extra_attributes(tag, &["src", "alt", "title"]) {
+        if self.has_extra_attributes(tag, &["src", "alt", "title"]) {
             return None;
         }
 
@@ -780,7 +878,7 @@ impl MD033NoInlineHtml {
         false
     }
 
-    /// Calculate fix to remove HTML tags while keeping content
+    /// Calculate fix to remove HTML tags while keeping content.
     ///
     /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
     /// For paired tags like `<span>text</span>`, returns the replacement text (just the content).
@@ -788,8 +886,12 @@ impl MD033NoInlineHtml {
     /// Returns (range, replacement_text) where range is the bytes to replace
     /// and replacement_text is what to put there (content without tags, or empty for self-closing).
     ///
-    /// When `fix` is enabled and `in_html_block` is true, returns None to avoid
-    /// converting tags that are nested inside HTML block elements (like `<pre>`).
+    /// When `in_html_block` is true, returns None in conservative mode.  In
+    /// relaxed mode two exceptions apply:
+    /// - Strippable wrapper elements (e.g. `<p>`) bypass the block guard so
+    ///   they can be stripped even though they ARE the HTML block.
+    /// - Self-closing tags whose direct parent is a strippable wrapper also
+    ///   bypass the guard so inner content can be converted first.
     fn calculate_fix(
         &self,
         content: &str,
@@ -809,11 +911,16 @@ impl MD033NoInlineHtml {
             opening_tag.ends_with("/>") || matches!(tag_name.as_str(), "br" | "hr" | "img" | "input" | "meta" | "link");
 
         if is_self_closing {
-            // When fix is enabled, try to convert to Markdown equivalent
-            // But skip if we're inside an HTML block (would break structure)
+            // When fix is enabled, try to convert to Markdown equivalent.
+            // Skip tags inside HTML blocks (would break structure), UNLESS we
+            // are in relaxed mode and the containing block is a strippable
+            // wrapper -- this lets the inner element be converted first so the
+            // wrapper can be stripped on a subsequent pass.
+            let block_ok = !in_html_block
+                || (self.is_relaxed_fix_mode() && self.is_inside_strippable_wrapper(content, tag_byte_start));
             if self.config.fix
                 && MD033Config::is_safe_fixable_tag(&tag_name)
-                && !in_html_block
+                && block_ok
                 && let Some(markdown) = self.convert_self_closing_to_markdown(&tag_name, opening_tag)
             {
                 return Some((tag_byte_start..tag_byte_start + opening_tag.len(), markdown));
@@ -840,6 +947,22 @@ impl MD033NoInlineHtml {
             // Extract the content between tags
             let inner_content = &content[search_start..closing_byte_start];
 
+            // In relaxed mode, check wrapper stripping BEFORE the in_html_block
+            // guard because the wrapper element itself IS the HTML block. We only
+            // strip when:
+            //  - the wrapper is not nested inside another HTML element
+            //  - the inner content no longer contains HTML tags (prevents
+            //    overlapping byte-range replacements within a single fix pass)
+            if self.config.fix && self.is_strippable_wrapper(&tag_name) {
+                if Self::is_nested_in_html(content, tag_byte_start, closing_byte_end) {
+                    return None;
+                }
+                if inner_content.contains('<') {
+                    return None;
+                }
+                return Some((tag_byte_start..closing_byte_end, inner_content.trim().to_string()));
+            }
+
             // Skip auto-fix if inside an HTML block (like <pre>, <div>, etc.)
             // Converting tags inside HTML blocks would break the intended structure
             if in_html_block {
@@ -856,7 +979,7 @@ impl MD033NoInlineHtml {
             if self.config.fix && MD033Config::is_safe_fixable_tag(&tag_name) {
                 // Handle <a> tags specially - they require attribute extraction
                 if tag_name == "a" {
-                    if let Some(markdown) = Self::convert_a_to_markdown(opening_tag, inner_content) {
+                    if let Some(markdown) = self.convert_a_to_markdown(opening_tag, inner_content) {
                         return Some((tag_byte_start..closing_byte_end, markdown));
                     }
                     // convert_a_to_markdown returned None - unsafe URL, nested HTML, etc.
@@ -1119,6 +1242,15 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+
+    fn relaxed_fix_rule() -> MD033NoInlineHtml {
+        let config = MD033Config {
+            fix: true,
+            fix_mode: MD033FixMode::Relaxed,
+            ..MD033Config::default()
+        };
+        MD033NoInlineHtml::from_config_struct(config)
+    }
 
     #[test]
     fn test_md033_basic_html() {
@@ -1734,6 +1866,7 @@ Regular text with <div>content</div> HTML tag.
             disallowed: Vec::new(),
             fix: true,
             br_style: md033_config::BrStyle::Backslash,
+            ..MD033Config::default()
         };
         let rule = MD033NoInlineHtml::from_config_struct(config);
         let content = "First line<br>Second line";
@@ -1855,6 +1988,253 @@ Regular text with <div>content</div> HTML tag.
         let fixed = rule.fix(&ctx).unwrap();
         // Has width attribute - not safe to convert
         assert_eq!(fixed, "Image: <img src=\"photo.jpg\" alt=\"My Photo\" width=\"100\">");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_a_with_target_is_converted() {
+        let rule = relaxed_fix_rule();
+        let content = "Link: <a href=\"https://example.com\" target=\"_blank\">Example</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Link: [Example](https://example.com)");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_img_with_width_is_converted() {
+        let rule = relaxed_fix_rule();
+        let content = "Image: <img src=\"photo.jpg\" alt=\"My Photo\" width=\"100\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Image: ![My Photo](photo.jpg)");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_rejects_unknown_extra_attributes() {
+        let rule = relaxed_fix_rule();
+        let content = "Image: <img src=\"photo.jpg\" alt=\"My Photo\" aria-label=\"hero\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Unknown attributes should not be dropped by default");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_still_blocks_unsafe_schemes() {
+        let rule = relaxed_fix_rule();
+        let content = "Link: <a href=\"javascript:alert(1)\" target=\"_blank\">Example</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Unsafe URL schemes must never be converted");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_wrapper_strip_requires_second_pass_for_nested_html() {
+        let rule = relaxed_fix_rule();
+        let content = "<p align=\"center\">\n  <img src=\"logo.svg\" alt=\"Logo\" width=\"120\" />\n</p>";
+        let ctx1 = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_once = rule.fix(&ctx1).unwrap();
+        assert!(
+            fixed_once.contains("<p"),
+            "First pass should keep wrapper when inner HTML is still present: {fixed_once}"
+        );
+        assert!(
+            fixed_once.contains("![Logo](logo.svg)"),
+            "Inner image should be converted on first pass: {fixed_once}"
+        );
+
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+        assert!(
+            !fixed_twice.contains("<p"),
+            "Second pass should strip configured wrapper: {fixed_twice}"
+        );
+        assert!(fixed_twice.contains("![Logo](logo.svg)"));
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_multiple_droppable_attrs() {
+        let rule = relaxed_fix_rule();
+        let content = "<a href=\"https://example.com\" target=\"_blank\" rel=\"noopener\" class=\"btn\">Click</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "[Click](https://example.com)");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_img_multiple_droppable_attrs() {
+        let rule = relaxed_fix_rule();
+        let content = "<img src=\"logo.png\" alt=\"Logo\" width=\"120\" height=\"40\" style=\"border:none\" />";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "![Logo](logo.png)");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_event_handler_never_dropped() {
+        let rule = relaxed_fix_rule();
+        let content = "<a href=\"https://example.com\" onclick=\"track()\">Link</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Event handler attributes must block conversion");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_event_handler_even_with_custom_config() {
+        // Even if someone adds on* to drop-attributes, event handlers must be rejected
+        let config = MD033Config {
+            fix: true,
+            fix_mode: MD033FixMode::Relaxed,
+            drop_attributes: vec!["on*".to_string(), "target".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let content = "<a href=\"https://example.com\" onclick=\"alert(1)\">Link</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "on* event handlers must never be dropped");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_custom_drop_attributes() {
+        let config = MD033Config {
+            fix: true,
+            fix_mode: MD033FixMode::Relaxed,
+            drop_attributes: vec!["loading".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        // "loading" is in the custom list, "width" is NOT
+        let content = "<img src=\"x.jpg\" alt=\"\" loading=\"lazy\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "![](x.jpg)", "Custom drop-attributes should be respected");
+
+        let content2 = "<img src=\"x.jpg\" alt=\"\" width=\"100\">";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(
+            fixed2, content2,
+            "Attributes not in custom list should block conversion"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_custom_strip_wrapper() {
+        let config = MD033Config {
+            fix: true,
+            fix_mode: MD033FixMode::Relaxed,
+            strip_wrapper_elements: vec!["div".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let content = "<div>Some text content</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Some text content");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_wrapper_with_plain_text() {
+        let rule = relaxed_fix_rule();
+        let content = "<p align=\"center\">Just some text</p>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Just some text");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_data_attr_with_wildcard() {
+        let config = MD033Config {
+            fix: true,
+            fix_mode: MD033FixMode::Relaxed,
+            drop_attributes: vec!["data-*".to_string(), "target".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let content = "<a href=\"https://example.com\" data-tracking=\"abc\" target=\"_blank\">Link</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "[Link](https://example.com)");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_mixed_droppable_and_blocking_attrs() {
+        let rule = relaxed_fix_rule();
+        // "target" is droppable, "aria-label" is not in the default list
+        let content = "<a href=\"https://example.com\" target=\"_blank\" aria-label=\"nav\">Link</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Non-droppable attribute should block conversion");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_badge_pattern() {
+        // Common GitHub README badge pattern
+        let rule = relaxed_fix_rule();
+        let content = "<a href=\"https://crates.io/crates/rumdl\" target=\"_blank\"><img src=\"https://img.shields.io/crates/v/rumdl.svg\" alt=\"Crate\" width=\"120\" /></a>";
+        let ctx1 = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_once = rule.fix(&ctx1).unwrap();
+        // First pass should convert the inner <img>
+        assert!(
+            fixed_once.contains("![Crate](https://img.shields.io/crates/v/rumdl.svg)"),
+            "Inner img should be converted: {fixed_once}"
+        );
+
+        // Second pass converts the <a> wrapper
+        let ctx2 = LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+        assert!(
+            fixed_twice
+                .contains("[![Crate](https://img.shields.io/crates/v/rumdl.svg)](https://crates.io/crates/rumdl)"),
+            "Badge should produce nested markdown image link: {fixed_twice}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_conservative_mode_unchanged() {
+        // Verify conservative mode (default) is unaffected by the relaxed logic
+        let rule = MD033NoInlineHtml::with_fix(true);
+        let content = "<a href=\"https://example.com\" target=\"_blank\">Link</a>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Conservative mode should not drop target attribute");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_img_inside_pre_not_converted() {
+        // <img> inside <pre> must NOT be converted, even in relaxed mode
+        let rule = relaxed_fix_rule();
+        let content = "<pre>\n  <img src=\"diagram.png\" alt=\"d\" width=\"100\" />\n</pre>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(fixed.contains("<img"), "img inside pre must not be converted: {fixed}");
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_wrapper_nested_inside_div_not_stripped() {
+        // <p> nested inside <div> should not be stripped
+        let rule = relaxed_fix_rule();
+        let content = "<div><p>text</p></div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("<p>text</p>") || fixed.contains("<p>"),
+            "Nested <p> inside <div> should not be stripped: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md033_fix_relaxed_img_inside_nested_wrapper_not_converted() {
+        // <img> inside <div><p>...</p></div> must NOT be converted because the
+        // <p> wrapper can't be stripped (it's nested), so the markdown would be
+        // stuck inside an HTML block where it won't render.
+        let rule = relaxed_fix_rule();
+        let content = "<div><p><img src=\"x.jpg\" alt=\"pic\" width=\"100\" /></p></div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains("<img"),
+            "img inside nested wrapper must not be converted: {fixed}"
+        );
     }
 
     #[test]
