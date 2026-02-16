@@ -29,6 +29,55 @@ pub struct ListTableContext {
 pub struct TableUtils;
 
 impl TableUtils {
+    /// Returns true if the line has at least one unescaped pipe separator outside inline code spans.
+    ///
+    /// This helps distinguish actual table separators from command/prose examples like
+    /// `` `echo a | sed 's/a/b/'` `` where the pipe is fully inside inline code.
+    fn has_unescaped_pipe_outside_inline_code(text: &str) -> bool {
+        let chars: Vec<char> = text.chars().collect();
+        let mut i = 0;
+        let mut in_code = false;
+        let mut code_delim_len = 0usize;
+
+        while i < chars.len() {
+            let ch = chars[i];
+
+            if ch == '\\' {
+                // Skip escaped character.
+                i += if i + 1 < chars.len() { 2 } else { 1 };
+                continue;
+            }
+
+            if ch == '`' {
+                let mut run = 1usize;
+                while i + run < chars.len() && chars[i + run] == '`' {
+                    run += 1;
+                }
+
+                if in_code {
+                    if run == code_delim_len {
+                        in_code = false;
+                        code_delim_len = 0;
+                    }
+                } else {
+                    in_code = true;
+                    code_delim_len = run;
+                }
+
+                i += run;
+                continue;
+            }
+
+            if ch == '|' && !in_code {
+                return true;
+            }
+
+            i += 1;
+        }
+
+        false
+    }
+
     /// Check if a line looks like a potential table row
     pub fn is_potential_table_row(line: &str) -> bool {
         let trimmed = line.trim();
@@ -73,8 +122,10 @@ impl TableUtils {
             }
         }
 
-        // Skip lines that are clearly code or inline code
-        if trimmed.starts_with("`") || trimmed.contains("``") {
+        // For rows without explicit outer pipes, require a real separator outside
+        // inline code spans to avoid prose/command false positives.
+        let has_outer_pipes = trimmed.starts_with('|') && trimmed.ends_with('|');
+        if !has_outer_pipes && !Self::has_unescaped_pipe_outside_inline_code(trimmed) {
             return false;
         }
 
@@ -884,51 +935,7 @@ impl TableUtils {
 
     /// Internal helper: Check if content (without list/blockquote prefix) looks like a table row.
     fn is_potential_table_row_content(content: &str) -> bool {
-        let trimmed = content.trim();
-        if trimmed.is_empty() || !trimmed.contains('|') {
-            return false;
-        }
-
-        // Skip lines that are clearly code or inline code
-        if trimmed.starts_with('`') || trimmed.contains("``") {
-            return false;
-        }
-
-        // Must have at least 2 parts when split by |
-        let parts: Vec<&str> = trimmed.split('|').collect();
-        if parts.len() < 2 {
-            return false;
-        }
-
-        // Check if it looks like a table row by having reasonable content between pipes
-        let mut valid_parts = 0;
-        let mut total_non_empty_parts = 0;
-
-        for part in &parts {
-            let part_trimmed = part.trim();
-            if part_trimmed.is_empty() {
-                continue;
-            }
-            total_non_empty_parts += 1;
-
-            if !part_trimmed.contains('\n') {
-                valid_parts += 1;
-            }
-        }
-
-        if total_non_empty_parts > 0 && valid_parts != total_non_empty_parts {
-            return false;
-        }
-
-        if total_non_empty_parts == 0 {
-            return trimmed.starts_with('|') && trimmed.ends_with('|') && parts.len() >= 3;
-        }
-
-        if trimmed.starts_with('|') && trimmed.ends_with('|') {
-            valid_parts >= 1
-        } else {
-            valid_parts >= 2
-        }
+        Self::is_potential_table_row(content)
     }
 }
 
@@ -963,6 +970,10 @@ mod tests {
         // Code blocks
         assert!(!TableUtils::is_potential_table_row("`code with | pipe`"));
         assert!(!TableUtils::is_potential_table_row("``multiple | backticks``"));
+        assert!(!TableUtils::is_potential_table_row("Use ``a|b`` in prose"));
+        assert!(TableUtils::is_potential_table_row("| `fenced` | Uses ``` and ~~~ |"));
+        assert!(TableUtils::is_potential_table_row("`!foo && bar` | `(!foo) && bar`"));
+        assert!(!TableUtils::is_potential_table_row("`echo a | sed 's/a/b/'`"));
 
         // Single pipe not enough
         assert!(!TableUtils::is_potential_table_row("Just one |"));

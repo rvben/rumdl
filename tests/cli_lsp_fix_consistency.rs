@@ -215,6 +215,20 @@ fn test_md039_no_space_in_links_consistency() {
     }
 }
 
+#[test]
+fn test_md075_orphaned_table_rows_issue_420_consistency() {
+    let rule = MD075OrphanedTableRows::default();
+    let content = "\
+| Value        | Description                                       |
+| ------------ | ------------------------------------------------- |
+| `consistent` | All code blocks must use the same style (default) |
+
+| `fenced` | All code blocks must use fenced style (``` or ~~~) |
+| `indented` | All code blocks must use indented style (4 spaces) |";
+
+    test_cli_lsp_consistency(&rule, content, "MD075: issue #420 inline-fence orphan rows");
+}
+
 /// Create appropriate test content for each rule based on what it checks
 fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
     match rule_name {
