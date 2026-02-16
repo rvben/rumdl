@@ -119,24 +119,8 @@ impl FrontMatterUtils {
 
     /// Check if a content contains front matter with a specific field
     pub fn has_front_matter_field(content: &str, field_prefix: &str) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() < 3 {
-            return false;
-        }
-
-        let front_matter_type = Self::detect_front_matter_type(content);
-        if front_matter_type == FrontMatterType::None {
-            return false;
-        }
-
-        let front_matter = Self::extract_front_matter(content);
-        for line in front_matter {
-            if line.trim().starts_with(field_prefix) {
-                return true;
-            }
-        }
-
-        false
+        let field_name = field_prefix.trim_end_matches(':');
+        Self::get_front_matter_field_value(content, field_name).is_some()
     }
 
     /// Get the value of a specific front matter field

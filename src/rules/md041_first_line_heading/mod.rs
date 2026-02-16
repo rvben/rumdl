@@ -267,19 +267,17 @@ impl MD041FirstLineHeading {
     /// Analyze document to determine if it can be fixed and gather metadata.
     /// Returns None if not fixable, Some(analysis) if fixable.
     fn analyze_for_fix(&self, ctx: &crate::lint_context::LintContext) -> Option<FixAnalysis> {
-        let lines = ctx.raw_lines();
-        if lines.is_empty() {
+        if ctx.lines.is_empty() {
             return None;
         }
 
-        // Find front matter end
+        // Find front matter end (handles YAML, TOML, JSON, malformed)
         let mut front_matter_end_idx = 0;
-        if lines.first().map(|l| l.trim()) == Some("---") {
-            for (idx, line) in lines.iter().enumerate().skip(1) {
-                if line.trim() == "---" {
-                    front_matter_end_idx = idx + 1;
-                    break;
-                }
+        for line_info in &ctx.lines {
+            if line_info.in_front_matter {
+                front_matter_end_idx += 1;
+            } else {
+                break;
             }
         }
 
@@ -363,14 +361,12 @@ impl Rule for MD041FirstLineHeading {
         let mut first_content_line_num = None;
         let mut skip_lines = 0;
 
-        // Check for front matter
-        if ctx.lines.first().map(|l| l.content(ctx.content).trim()) == Some("---") {
-            // Skip front matter
-            for (idx, line_info) in ctx.lines.iter().enumerate().skip(1) {
-                if line_info.content(ctx.content).trim() == "---" {
-                    skip_lines = idx + 1;
-                    break;
-                }
+        // Skip front matter (YAML, TOML, JSON, malformed)
+        for line_info in &ctx.lines {
+            if line_info.in_front_matter {
+                skip_lines += 1;
+            } else {
+                break;
             }
         }
 
@@ -936,19 +932,23 @@ mod tests {
     fn test_multiple_front_matter_types() {
         let rule = MD041FirstLineHeading::new(1, true);
 
-        // TOML front matter with title (should fail - rule only checks for "title:" pattern)
+        // TOML front matter with title (should pass - title satisfies heading requirement)
         let content = "+++\ntitle = \"My Document\"\n+++\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("level 1 heading"));
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for TOML front matter with title"
+        );
 
-        // JSON front matter with title (should fail - doesn't have "title:" pattern, has "\"title\":")
+        // JSON front matter with title (should pass)
         let content = "{\n\"title\": \"My Document\"\n}\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("level 1 heading"));
+        assert!(
+            result.is_empty(),
+            "Expected no warnings for JSON front matter with title"
+        );
 
         // YAML front matter with title field (standard case)
         let content = "---\ntitle: My Document\n---\n\nContent.";
@@ -958,12 +958,74 @@ mod tests {
             result.is_empty(),
             "Expected no warnings for YAML front matter with title"
         );
+    }
 
-        // Test mixed format edge case - YAML-style in TOML
-        let content = "+++\ntitle: My Document\n+++\n\nContent.";
+    #[test]
+    fn test_toml_front_matter_with_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // TOML front matter followed by correct heading (should pass)
+        let content = "+++\nauthor = \"John\"\n+++\n\n# My Document\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(result.is_empty(), "Expected no warnings when title: pattern is found");
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when heading follows TOML front matter"
+        );
+    }
+
+    #[test]
+    fn test_toml_front_matter_without_title_no_heading() {
+        let rule = MD041FirstLineHeading::new(1, true);
+
+        // TOML front matter without title, no heading (should warn)
+        let content = "+++\nauthor = \"John\"\ndate = \"2024-01-01\"\n+++\n\nSome content here.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 6);
+    }
+
+    #[test]
+    fn test_toml_front_matter_level_2_heading() {
+        // Reproduces the exact scenario from issue #427
+        let rule = MD041FirstLineHeading::new(2, true);
+
+        let content = "+++\ntitle = \"Title\"\n+++\n\n## Documentation\n\nWrite stuff here...";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Issue #427: TOML front matter with title and correct heading level should not warn"
+        );
+    }
+
+    #[test]
+    fn test_toml_front_matter_level_2_heading_with_yaml_style_pattern() {
+        // Reproduces the exact config shape from issue #427
+        let rule = MD041FirstLineHeading::with_pattern(2, true, Some("^(title|header):".to_string()), false);
+
+        let content = "+++\ntitle = \"Title\"\n+++\n\n## Documentation\n\nWrite stuff here...";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Issue #427 regression: TOML front matter must be skipped when locating first heading"
+        );
+    }
+
+    #[test]
+    fn test_json_front_matter_with_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // JSON front matter followed by correct heading
+        let content = "{\n\"author\": \"John\"\n}\n\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Expected no warnings when heading follows JSON front matter"
+        );
     }
 
     #[test]
@@ -1484,6 +1546,26 @@ mod tests {
         assert!(
             fixed.starts_with("---\nauthor: John\n---\n# Title\n"),
             "Heading should be right after front matter, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_with_toml_front_matter() {
+        use crate::rule::Rule;
+        let rule = MD041FirstLineHeading {
+            level: 1,
+            front_matter_title: false,
+            front_matter_title_pattern: None,
+            fix_enabled: true,
+        };
+
+        // Heading after TOML front matter and preamble
+        let content = "+++\nauthor = \"John\"\n+++\n\n<!-- Comment -->\n## Title\n\nContent.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.starts_with("+++\nauthor = \"John\"\n+++\n# Title\n"),
+            "Heading should be right after TOML front matter, got: {fixed}"
         );
     }
 
