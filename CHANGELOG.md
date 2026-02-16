@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.22] - 2026-02-16
+
+### Added
+
+- **Config**: Per-directory configuration resolution — place `.rumdl.toml` in
+  subdirectories to override settings for specific paths
+- **MD075**: New rule to detect orphaned table rows and headerless pipe content
+  ([#426](https://github.com/rvben/rumdl/issues/426))
+
+### Fixed
+
+- **MD041**: Support TOML (`+++`) and JSON (`{}`) front-matter formats alongside
+  YAML when checking for title field
+  ([#427](https://github.com/rvben/rumdl/issues/427), thanks @Nathan-Furnal)
+- **MD054**: Match warning message with rule configuration option
+  (thanks @eread in [#421](https://github.com/rvben/rumdl/pull/421))
+- **Style config**: All style configuration values now use kebab-case as the
+  canonical format and accept snake_case, kebab-case, and uppercase variants.
+  Affected rules: MD003, MD046, MD048, MD049, MD050, MD055, MD060, MD063
+  ([#428](https://github.com/rvben/rumdl/issues/428), thanks @eread)
+- **Config**: Fix root detection and cross-file rule resolution for
+  per-directory configs
+- **MD075**: Harden orphaned-table detection edge cases
+
 ## [0.1.21] - 2026-02-14
 
 ### Added
