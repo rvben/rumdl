@@ -1,4 +1,5 @@
 use assert_cmd::cargo::cargo_bin_cmd;
+use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
 
@@ -223,5 +224,80 @@ fn test_default_behavior_fixes_all_rules() {
     assert!(
         fixed_content.ends_with('\n'),
         "MD047 should be fixed by default, but content is: {fixed_content}"
+    );
+}
+
+/// Test that `check --fix` exits 1 when there are unfixable warnings (regression for #435).
+///
+/// MD057 reports broken relative links but has no auto-fix. When `check --fix` is used,
+/// the re-lint after applying fixes must retain the source file path so MD057 can still
+/// detect broken links. Without the path, MD057 silently returns no warnings, causing a
+/// false "Success: No issues found" with exit code 0.
+#[test]
+fn test_check_fix_exits_nonzero_for_unfixable_warnings() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // Create a markdown file with a broken relative link (MD057 - unfixable)
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(&test_file, "# Heading\n\n[Broken Link](./totally_bogus)\n").expect("Failed to write test file");
+
+    let mut cmd = cargo_bin_cmd!("rumdl");
+    cmd.arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(test_file.to_str().unwrap());
+
+    // Must exit 1 - the broken link warning is not fixable
+    cmd.assert()
+        .failure()
+        .stdout(predicate::str::contains("MD057"))
+        .stdout(predicate::str::contains("does not exist"));
+}
+
+/// Test that `check --fix` exits 0 when all issues are fixed (baseline sanity check).
+#[test]
+fn test_check_fix_exits_zero_when_all_fixed() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // MD009: trailing spaces - fully fixable
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(&test_file, "# Heading\n\nContent with trailing spaces   \n").expect("Failed to write test file");
+
+    let mut cmd = cargo_bin_cmd!("rumdl");
+    cmd.arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(test_file.to_str().unwrap());
+
+    cmd.assert().success();
+}
+
+/// Test that `check --fix` exits 1 when some issues are fixed but unfixable ones remain.
+#[test]
+fn test_check_fix_exits_nonzero_when_unfixable_warnings_remain_after_partial_fix() {
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+
+    // MD009 (fixable) + MD057 (unfixable)
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(
+        &test_file,
+        "# Heading\n\nContent with trailing spaces   \n\n[Broken Link](./totally_bogus)\n",
+    )
+    .expect("Failed to write test file");
+
+    let mut cmd = cargo_bin_cmd!("rumdl");
+    cmd.arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(test_file.to_str().unwrap());
+
+    // Must exit 1 - MD057 remains after MD009 is fixed
+    cmd.assert().failure().stdout(predicate::str::contains("MD057"));
+
+    // The fixable MD009 trailing spaces should have been removed
+    let fixed_content = fs::read_to_string(&test_file).expect("Failed to read fixed file");
+    assert!(
+        !fixed_content.contains("spaces   \n"),
+        "MD009 trailing spaces should have been fixed, content: {fixed_content}"
     );
 }

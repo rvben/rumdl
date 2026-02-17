@@ -8,7 +8,7 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::{FixCapability, LintWarning, Rule};
 use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::discovery::to_display_path;
 use super::embedded::{
@@ -317,7 +317,7 @@ pub fn process_file_with_formatter(
 
         // Use per-file flavor for re-lint (same as initial lint)
         let flavor = config.get_flavor_for_file(Path::new(file_path));
-        let fixed_ctx = LintContext::new(&content, flavor, None);
+        let fixed_ctx = LintContext::new(&content, flavor, Some(PathBuf::from(file_path)));
         let mut remaining_warnings = Vec::new();
 
         for rule in &filtered_rules {
