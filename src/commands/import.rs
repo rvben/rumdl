@@ -42,8 +42,8 @@ pub fn handle_import(file: String, output: Option<String>, format: String, dry_r
     };
 
     if dry_run {
-        // Just print the converted config
-        println!("{output_content}");
+        // Content already ends with a single newline; use print! to avoid adding another
+        print!("{output_content}");
     } else {
         // Write to output file
         let output_path = output.as_deref().unwrap_or(if format == "json" {
@@ -117,7 +117,12 @@ fn generate_toml_output(fragment: &rumdl_lib::config::SourcedConfigFragment, is_
             output.push('\n');
         }
     }
-    output
+
+    // Remove trailing blank line, keep exactly one trailing newline
+    let trimmed = output.trim_end_matches('\n');
+    let mut result = trimmed.to_string();
+    result.push('\n');
+    result
 }
 
 fn format_toml_value_line(output: &mut String, key: &str, value: &toml::Value) {
@@ -243,8 +248,10 @@ fn generate_json_output(fragment: &rumdl_lib::config::SourcedConfigFragment) -> 
         }
     }
 
-    serde_json::to_string_pretty(&json_config).unwrap_or_else(|e| {
+    let mut json = serde_json::to_string_pretty(&json_config).unwrap_or_else(|e| {
         eprintln!("{}: Failed to serialize to JSON: {}", "Error".red().bold(), e);
         exit::tool_error();
-    })
+    });
+    json.push('\n');
+    json
 }
