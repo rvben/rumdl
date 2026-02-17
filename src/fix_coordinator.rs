@@ -24,6 +24,14 @@ pub struct FixResult {
     pub fixed_rule_names: HashSet<String>,
     /// Whether the fix process converged (content stabilized)
     pub converged: bool,
+    /// Rules identified as participants in an oscillation cycle.
+    /// Populated only when `converged == false` and a cycle was detected.
+    /// Empty when the fix loop hit `max_iterations` without cycling.
+    pub conflicting_rules: Vec<String>,
+    /// Ordered rule sequence observed in the cycle.
+    /// If non-empty, this can be rendered as a loop by appending the first rule
+    /// at the end (e.g. `MD044 -> MD063 -> MD044`).
+    pub conflict_cycle: Vec<String>,
 }
 
 /// Calculate hash of content for convergence detection
@@ -187,7 +195,10 @@ impl FixCoordinator {
         let mut total_fixed = 0;
         let mut total_ctx_creations = 0;
         let mut iterations = 0;
-        let mut previous_hash = hash_content(content);
+
+        // History tracks (content_hash, rule_that_produced_this_state).
+        // The initial entry has an empty rule name (no rule produced the initial content).
+        let mut history: Vec<(u64, String)> = vec![(hash_content(content), String::new())];
 
         // Track which rules actually applied fixes
         let mut fixed_rule_names = HashSet::new();
@@ -212,6 +223,8 @@ impl FixCoordinator {
             total_ctx_creations += 1;
 
             let mut any_fix_applied = false;
+            // The rule that applied a fix this iteration (used for cycle reporting).
+            let mut this_iter_rule = String::new();
 
             // Check and fix each rule in dependency order
             for rule in &ordered_rules {
@@ -251,6 +264,7 @@ impl FixCoordinator {
                             *content = fixed_content;
                             total_fixed += 1;
                             any_fix_applied = true;
+                            this_iter_rule = rule.name().to_string();
                             fixed_rule_names.insert(rule.name().to_string());
 
                             // Break to re-check all rules with the new content
@@ -266,21 +280,54 @@ impl FixCoordinator {
                 }
             }
 
-            // Check if content has stabilized (hash-based convergence)
             let current_hash = hash_content(content);
-            if current_hash == previous_hash {
-                // Content unchanged - converged!
-                return Ok(FixResult {
-                    rules_fixed: total_fixed,
-                    iterations,
-                    context_creations: total_ctx_creations,
-                    fixed_rule_names,
-                    converged: true,
-                });
-            }
-            previous_hash = current_hash;
 
-            // If no fixes were applied this iteration, we've converged
+            // Check whether this content state has been seen before.
+            if let Some(cycle_start) = history.iter().position(|(h, _)| *h == current_hash) {
+                if cycle_start == history.len() - 1 {
+                    // Content matches the last recorded state: nothing changed this iteration.
+                    return Ok(FixResult {
+                        rules_fixed: total_fixed,
+                        iterations,
+                        context_creations: total_ctx_creations,
+                        fixed_rule_names,
+                        converged: true,
+                        conflicting_rules: Vec::new(),
+                        conflict_cycle: Vec::new(),
+                    });
+                } else {
+                    // Content matches an older state: oscillation cycle detected.
+                    // Collect the rules that participate in the cycle.
+                    let conflict_cycle: Vec<String> = history[cycle_start + 1..]
+                        .iter()
+                        .map(|(_, r)| r.clone())
+                        .chain(std::iter::once(this_iter_rule.clone()))
+                        .filter(|r| !r.is_empty())
+                        .collect();
+                    let conflicting_rules: Vec<String> = history[cycle_start + 1..]
+                        .iter()
+                        .map(|(_, r)| r.clone())
+                        .chain(std::iter::once(this_iter_rule))
+                        .filter(|r| !r.is_empty())
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect();
+                    return Ok(FixResult {
+                        rules_fixed: total_fixed,
+                        iterations,
+                        context_creations: total_ctx_creations,
+                        fixed_rule_names,
+                        converged: false,
+                        conflicting_rules,
+                        conflict_cycle,
+                    });
+                }
+            }
+
+            // New state - record it.
+            history.push((current_hash, this_iter_rule));
+
+            // If no fix was applied this iteration, content is stable.
             if !any_fix_applied {
                 return Ok(FixResult {
                     rules_fixed: total_fixed,
@@ -288,17 +335,21 @@ impl FixCoordinator {
                     context_creations: total_ctx_creations,
                     fixed_rule_names,
                     converged: true,
+                    conflicting_rules: Vec::new(),
+                    conflict_cycle: Vec::new(),
                 });
             }
         }
 
-        // Hit max iterations - did not converge
+        // Hit max iterations without detecting a cycle.
         Ok(FixResult {
             rules_fixed: total_fixed,
             iterations,
             context_creations: total_ctx_creations,
             fixed_rule_names,
             converged: false,
+            conflicting_rules: Vec::new(),
+            conflict_cycle: Vec::new(),
         })
     }
 }
@@ -683,6 +734,56 @@ mod tests {
         assert_eq!(content, "clean content");
         assert_eq!(result.rules_fixed, 0);
         assert!(result.converged);
+    }
+
+    #[test]
+    fn test_oscillation_detection() {
+        // Two rules that fight each other: Rule A changes "foo" → "bar", Rule B changes "bar" → "foo".
+        // The fix loop should detect this as an oscillation cycle and stop early with
+        // conflicting_rules populated rather than running all 100 iterations.
+        let coordinator = FixCoordinator::new();
+
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "RuleA",
+                check_fn: |content| content.contains("foo"),
+                fix_fn: |content| content.replace("foo", "bar"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "RuleB",
+                check_fn: |content| content.contains("bar"),
+                fix_fn: |content| content.replace("bar", "foo"),
+            }),
+        ];
+
+        let mut content = "foo".to_string();
+        let config = Config::default();
+
+        let result = coordinator
+            .apply_fixes_iterative(&rules, &[], &mut content, &config, 100, None)
+            .unwrap();
+
+        // Should detect the cycle quickly, not burn through all 100 iterations.
+        assert!(!result.converged, "Should not converge in an oscillating pair");
+        assert!(
+            result.iterations < 10,
+            "Cycle detection should stop well before max_iterations (got {})",
+            result.iterations
+        );
+
+        // Both conflicting rules should be identified.
+        let mut conflicting = result.conflicting_rules.clone();
+        conflicting.sort();
+        assert_eq!(
+            conflicting,
+            vec!["RuleA".to_string(), "RuleB".to_string()],
+            "Both oscillating rules must be reported"
+        );
+        assert_eq!(
+            result.conflict_cycle,
+            vec!["RuleA".to_string(), "RuleB".to_string()],
+            "Cycle should preserve the observed application order"
+        );
     }
 
     #[test]

@@ -719,13 +719,9 @@ pub fn apply_fixes_coordinated(
 
             // Warn if convergence failed (Ruff-style)
             if !result.converged && !silent {
-                eprintln!("Warning: Failed to converge after {} iterations.", result.iterations);
-                eprintln!("This likely indicates a bug in rumdl.");
-                if !result.fixed_rule_names.is_empty() {
-                    let rule_codes: Vec<&str> = result.fixed_rule_names.iter().map(|s| s.as_str()).collect();
-                    eprintln!("Rule codes: {}", rule_codes.join(", "));
+                for line in build_non_convergence_warning_lines(&result, file_path) {
+                    eprintln!("{line}");
                 }
-                eprintln!("Please report at: https://github.com/rvben/rumdl/issues/new?template=bug_report.yml");
             }
 
             // Count warnings for the rules that were successfully applied
@@ -745,5 +741,164 @@ pub fn apply_fixes_coordinated(
             }
             0
         }
+    }
+}
+
+fn format_loop(cycle: &[String]) -> Option<String> {
+    if cycle.is_empty() {
+        return None;
+    }
+
+    let mut parts = cycle.to_vec();
+    if let Some(first) = parts.first().cloned() {
+        parts.push(first);
+    }
+    Some(parts.join(" -> "))
+}
+
+fn build_non_convergence_warning_lines(
+    result: &rumdl_lib::fix_coordinator::FixResult,
+    file_path: Option<&Path>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let location = file_path.map(|p| format!(" for {}", p.display())).unwrap_or_default();
+
+    if !result.conflicting_rules.is_empty() {
+        let mut rules = result.conflicting_rules.clone();
+        rules.sort();
+        let rule_list = rules.join(", ");
+        let primary_rule = rules[0].clone();
+
+        lines.push(format!(
+            "Warning: Auto-fix detected a rule conflict loop after {} iterations{}.",
+            result.iterations, location
+        ));
+        lines.push(format!("Conflicting rules: {rule_list}"));
+        if let Some(loop_str) = format_loop(&result.conflict_cycle) {
+            lines.push(format!("Observed cycle: {loop_str}"));
+        }
+        lines.push("Actionable options:".to_string());
+        lines.push(format!(
+            "  - Keep linting but stop auto-fixing one rule: [global] unfixable = [\"{primary_rule}\"]"
+        ));
+        lines.push(format!(
+            "  - Disable one rule entirely for this run: rumdl check --fix --disable {primary_rule}"
+        ));
+        lines.push(format!(
+            "  - Disable one rule in config: [global] disable = [\"{primary_rule}\"]"
+        ));
+        lines.push(
+            "If this looks wrong, please report it: https://github.com/rvben/rumdl/issues/new?template=bug_report.yml"
+                .to_string(),
+        );
+        return lines;
+    }
+
+    let mut fixed_rules: Vec<String> = result.fixed_rule_names.iter().cloned().collect();
+    fixed_rules.sort();
+    let fixed_rules_list = if fixed_rules.is_empty() {
+        "(none)".to_string()
+    } else {
+        fixed_rules.join(", ")
+    };
+
+    lines.push(format!(
+        "Warning: Auto-fix did not converge after {} iterations{}.",
+        result.iterations, location
+    ));
+    lines.push("No repeatable cycle was detected; this is likely a convergence bug.".to_string());
+    lines.push(format!("Rules that changed content: {fixed_rules_list}"));
+    if !fixed_rules.is_empty() {
+        let quoted_rules = fixed_rules
+            .iter()
+            .map(|r| format!("\"{r}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "Try narrowing auto-fix scope: [global] fixable = [{quoted_rules}]"
+        ));
+    }
+    lines.push("Please report it: https://github.com/rvben/rumdl/issues/new?template=bug_report.yml".to_string());
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rumdl_lib::fix_coordinator::FixResult;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_build_non_convergence_warning_lines_conflict_loop() {
+        let result = FixResult {
+            rules_fixed: 3,
+            iterations: 6,
+            context_creations: 6,
+            fixed_rule_names: ["MD044".to_string(), "MD063".to_string()].into_iter().collect(),
+            converged: false,
+            conflicting_rules: vec!["MD063".to_string(), "MD044".to_string()],
+            conflict_cycle: vec!["MD044".to_string(), "MD063".to_string()],
+        };
+
+        let lines = build_non_convergence_warning_lines(&result, Some(Path::new("docs/guide.md")));
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("rule conflict loop"));
+        assert!(rendered.contains("for docs/guide.md"));
+        assert!(rendered.contains("Conflicting rules: MD044, MD063"));
+        assert!(rendered.contains("Observed cycle: MD044 -> MD063 -> MD044"));
+        assert!(rendered.contains("[global] unfixable = [\"MD044\"]"));
+        assert!(rendered.contains("rumdl check --fix --disable MD044"));
+    }
+
+    #[test]
+    fn test_build_non_convergence_warning_lines_max_iterations() {
+        let result = FixResult {
+            rules_fixed: 10,
+            iterations: 100,
+            context_creations: 100,
+            fixed_rule_names: ["MD009".to_string(), "MD012".to_string()].into_iter().collect(),
+            converged: false,
+            conflicting_rules: Vec::new(),
+            conflict_cycle: Vec::new(),
+        };
+
+        let lines = build_non_convergence_warning_lines(&result, None);
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("did not converge after 100 iterations"));
+        assert!(rendered.contains("Rules that changed content: MD009, MD012"));
+        assert!(rendered.contains("[global] fixable = [\"MD009\", \"MD012\"]"));
+        assert!(rendered.contains("Please report it"));
+    }
+
+    #[test]
+    fn test_format_loop_renders_closed_cycle() {
+        let cycle = vec!["MD044".to_string(), "MD063".to_string()];
+        assert_eq!(format_loop(&cycle).as_deref(), Some("MD044 -> MD063 -> MD044"));
+    }
+
+    #[test]
+    fn test_format_loop_empty() {
+        assert!(format_loop(&[]).is_none());
+    }
+
+    #[test]
+    fn test_build_non_convergence_warning_lines_handles_empty_rule_set() {
+        let result = FixResult {
+            rules_fixed: 0,
+            iterations: 100,
+            context_creations: 100,
+            fixed_rule_names: HashSet::new(),
+            converged: false,
+            conflicting_rules: Vec::new(),
+            conflict_cycle: Vec::new(),
+        };
+
+        let lines = build_non_convergence_warning_lines(&result, Some(Path::new("README.md")));
+        let rendered = lines.join("\n");
+
+        assert!(rendered.contains("for README.md"));
+        assert!(rendered.contains("Rules that changed content: (none)"));
     }
 }
