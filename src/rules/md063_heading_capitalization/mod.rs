@@ -171,9 +171,9 @@ impl MD063HeadingCapitalization {
                 };
 
                 // Require word boundaries
-                let before_ok = abs_pos == 0 || !text[..abs_pos].chars().last().map_or(false, |c| c.is_alphanumeric());
+                let before_ok = abs_pos == 0 || !text[..abs_pos].chars().last().is_some_and(|c| c.is_alphanumeric());
                 let after_ok =
-                    end_pos >= text.len() || !text[end_pos..].chars().next().map_or(false, |c| c.is_alphanumeric());
+                    end_pos >= text.len() || !text[end_pos..].chars().next().is_some_and(|c| c.is_alphanumeric());
 
                 if before_ok && after_ok {
                     // Map each word in the matched region to its canonical form.

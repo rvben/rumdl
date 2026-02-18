@@ -495,13 +495,13 @@ impl MD033NoInlineHtml {
             }
             // Verify the wrapper itself is not nested inside another element.
             let wrapper_before = before[..last_lt].trim_end();
-            if wrapper_before.ends_with('>') && !wrapper_before.ends_with("->") {
-                if let Some(outer_lt) = wrapper_before.rfind('<') {
-                    let outer_tag = &wrapper_before[outer_lt..];
-                    if !outer_tag.starts_with("</") && !outer_tag.starts_with("<!--") {
-                        return false;
-                    }
-                }
+            if wrapper_before.ends_with('>') && !wrapper_before.ends_with("->")
+                && let Some(outer_lt) = wrapper_before.rfind('<')
+                && let outer_tag = &wrapper_before[outer_lt..]
+                && !outer_tag.starts_with("</")
+                && !outer_tag.starts_with("<!--")
+            {
+                return false;
             }
             return true;
         }

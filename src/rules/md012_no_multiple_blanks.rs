@@ -90,20 +90,16 @@ impl MD012NoMultipleBlanks {
 /// - The line has heading info (covers ATX headings and Setext text lines), OR
 /// - The previous line is a Setext heading text line (covers the Setext underline)
 fn is_heading_context(ctx: &LintContext, line_idx: usize) -> bool {
-    if let Some(line_info) = ctx.lines.get(line_idx) {
-        if line_info.heading.is_some() {
-            return true;
-        }
+    if ctx.lines.get(line_idx).is_some_and(|li| li.heading.is_some()) {
+        return true;
     }
     // Check if previous line is a Setext heading text line — if so, this line is the underline
-    if line_idx > 0 {
-        if let Some(prev_info) = ctx.lines.get(line_idx - 1) {
-            if let Some(ref heading) = prev_info.heading {
-                if matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2) {
-                    return true;
-                }
-            }
-        }
+    if line_idx > 0
+        && let Some(prev_info) = ctx.lines.get(line_idx - 1)
+        && let Some(ref heading) = prev_info.heading
+        && matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2)
+    {
+        return true;
     }
     false
 }
@@ -322,7 +318,7 @@ impl Rule for MD012NoMultipleBlanks {
                     let heading_adjacent = last_content_is_heading;
                     if heading_adjacent {
                         // Preserve all blanks adjacent to headings
-                        result.extend(std::iter::repeat("").take(blank_count));
+                        result.extend(std::iter::repeat_n("", blank_count));
                     } else {
                         let allowed_blanks = blank_count.min(self.config.maximum.get());
                         if allowed_blanks > 0 {
@@ -356,7 +352,7 @@ impl Rule for MD012NoMultipleBlanks {
                     last_content_is_heading || (has_seen_content && is_heading_context(ctx, line_idx));
                 if heading_adjacent {
                     // Preserve all blanks adjacent to headings
-                    result.extend(std::iter::repeat("").take(blank_count));
+                    result.extend(std::iter::repeat_n("", blank_count));
                 } else {
                     // Add allowed blank lines before content
                     let allowed_blanks = blank_count.min(self.config.maximum.get());
