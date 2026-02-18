@@ -64,6 +64,9 @@ enum HeadingSegment {
 pub struct MD063HeadingCapitalization {
     config: MD063Config,
     lowercase_set: HashSet<String>,
+    /// Multi-word proper names from MD044 that must survive sentence-case transformation.
+    /// Populated via `from_config` when both rules are active.
+    proper_names: Vec<String>,
 }
 
 impl Default for MD063HeadingCapitalization {
@@ -76,12 +79,129 @@ impl MD063HeadingCapitalization {
     pub fn new() -> Self {
         let config = MD063Config::default();
         let lowercase_set = config.lowercase_words.iter().cloned().collect();
-        Self { config, lowercase_set }
+        Self {
+            config,
+            lowercase_set,
+            proper_names: Vec::new(),
+        }
     }
 
     pub fn from_config_struct(config: MD063Config) -> Self {
         let lowercase_set = config.lowercase_words.iter().cloned().collect();
-        Self { config, lowercase_set }
+        Self {
+            config,
+            lowercase_set,
+            proper_names: Vec::new(),
+        }
+    }
+
+    /// Match `pattern_lower` at `start` in `text` using Unicode-aware lowercasing.
+    /// Returns the end byte offset in `text` when the match succeeds.
+    ///
+    /// This avoids converting the full `text` to lowercase and then reusing those
+    /// offsets on the original string, which can panic for case-fold expansions
+    /// (e.g. `İ` -> `i̇`).
+    fn match_case_insensitive_at(text: &str, start: usize, pattern_lower: &str) -> Option<usize> {
+        if start > text.len() || !text.is_char_boundary(start) || pattern_lower.is_empty() {
+            return None;
+        }
+
+        let mut matched_bytes = 0;
+
+        for (offset, ch) in text[start..].char_indices() {
+            if matched_bytes >= pattern_lower.len() {
+                break;
+            }
+
+            let lowered: String = ch.to_lowercase().collect();
+            if !pattern_lower[matched_bytes..].starts_with(&lowered) {
+                return None;
+            }
+
+            matched_bytes += lowered.len();
+
+            if matched_bytes == pattern_lower.len() {
+                return Some(start + offset + ch.len_utf8());
+            }
+        }
+
+        None
+    }
+
+    /// Find the next case-insensitive match of `pattern_lower` in `text`,
+    /// returning byte offsets in the ORIGINAL string.
+    fn find_case_insensitive_match(text: &str, pattern_lower: &str, search_start: usize) -> Option<(usize, usize)> {
+        if pattern_lower.is_empty() || search_start >= text.len() || !text.is_char_boundary(search_start) {
+            return None;
+        }
+
+        for (offset, _) in text[search_start..].char_indices() {
+            let start = search_start + offset;
+            if let Some(end) = Self::match_case_insensitive_at(text, start, pattern_lower) {
+                return Some((start, end));
+            }
+        }
+
+        None
+    }
+
+    /// Build a map from word byte-position → canonical form for all proper names
+    /// that appear in the heading text (case-insensitive phrase match).
+    ///
+    /// This is used in `apply_sentence_case` so that words belonging to a proper
+    /// name phrase are never lowercased to begin with.
+    fn proper_name_canonical_forms(&self, text: &str) -> std::collections::HashMap<usize, &str> {
+        let mut map = std::collections::HashMap::new();
+
+        for name in &self.proper_names {
+            if name.is_empty() {
+                continue;
+            }
+            let name_lower = name.to_lowercase();
+            let canonical_words: Vec<&str> = name.split_whitespace().collect();
+            if canonical_words.is_empty() {
+                continue;
+            }
+            let mut search_start = 0;
+
+            while search_start < text.len() {
+                let Some((abs_pos, end_pos)) = Self::find_case_insensitive_match(text, &name_lower, search_start)
+                else {
+                    break;
+                };
+
+                // Require word boundaries
+                let before_ok = abs_pos == 0 || !text[..abs_pos].chars().last().map_or(false, |c| c.is_alphanumeric());
+                let after_ok =
+                    end_pos >= text.len() || !text[end_pos..].chars().next().map_or(false, |c| c.is_alphanumeric());
+
+                if before_ok && after_ok {
+                    // Map each word in the matched region to its canonical form.
+                    // We zip the words found in the text slice with the words of the
+                    // canonical name so that every word gets the right casing.
+                    let text_slice = &text[abs_pos..end_pos];
+                    let mut word_idx = 0;
+                    let mut slice_offset = 0;
+
+                    for text_word in text_slice.split_whitespace() {
+                        if let Some(w_rel) = text_slice[slice_offset..].find(text_word) {
+                            let word_abs = abs_pos + slice_offset + w_rel;
+                            if let Some(&canonical_word) = canonical_words.get(word_idx) {
+                                map.insert(word_abs, canonical_word);
+                            }
+                            slice_offset += w_rel + text_word.len();
+                            word_idx += 1;
+                        }
+                    }
+                }
+
+                // Advance by one Unicode scalar value to allow overlapping matches
+                // while staying on a UTF-8 char boundary.
+                search_start = abs_pos + text[abs_pos..].chars().next().map_or(1, |c| c.len_utf8());
+            }
+        }
+
+        map
     }
 
     /// Check if a word has internal capitals (like "iPhone", "macOS", "GitHub", "iOS")
@@ -207,6 +327,24 @@ impl MD063HeadingCapitalization {
         self.capitalize_first(word)
     }
 
+    /// Apply canonical proper-name casing while preserving any trailing punctuation
+    /// attached to the original whitespace token (e.g. `javascript,` -> `JavaScript,`).
+    fn apply_canonical_form_to_word(word: &str, canonical: &str) -> String {
+        let canonical_lower = canonical.to_lowercase();
+        if canonical_lower.is_empty() {
+            return canonical.to_string();
+        }
+
+        if let Some(end_pos) = Self::match_case_insensitive_at(word, 0, &canonical_lower) {
+            let mut out = String::with_capacity(canonical.len() + word.len().saturating_sub(end_pos));
+            out.push_str(canonical);
+            out.push_str(&word[end_pos..]);
+            out
+        } else {
+            canonical.to_string()
+        }
+    }
+
     /// Capitalize the first letter of a word, handling Unicode properly
     fn capitalize_first(&self, word: &str) -> String {
         let mut chars = word.chars();
@@ -222,11 +360,23 @@ impl MD063HeadingCapitalization {
 
     /// Apply title case to text (using titlecase crate as base, then our customizations)
     fn apply_title_case(&self, text: &str) -> String {
+        let canonical_forms = self.proper_name_canonical_forms(text);
+
+        // Pre-compute byte position of each original word for canonical form lookup.
+        let original_words: Vec<&str> = text.split_whitespace().collect();
+        let mut word_positions: Vec<usize> = Vec::with_capacity(original_words.len());
+        let mut pos = 0;
+        for word in &original_words {
+            if let Some(rel) = text[pos..].find(word) {
+                word_positions.push(pos + rel);
+                pos = pos + rel + word.len();
+            } else {
+                word_positions.push(0);
+            }
+        }
+
         // Use the titlecase crate for the base transformation
         let base_result = titlecase::titlecase(text);
-
-        // Get words from both original and transformed text to compare
-        let original_words: Vec<&str> = text.split_whitespace().collect();
         let transformed_words: Vec<&str> = base_result.split_whitespace().collect();
         let total_words = transformed_words.len();
 
@@ -236,6 +386,14 @@ impl MD063HeadingCapitalization {
             .map(|(i, word)| {
                 let is_first = i == 0;
                 let is_last = i == total_words - 1;
+
+                // Words that are part of an MD044 proper name use the canonical form directly.
+                if let Some(&canonical) = word_positions.get(i).and_then(|&p| canonical_forms.get(&p)) {
+                    if let Some(original_word) = original_words.get(i) {
+                        return Self::apply_canonical_form_to_word(original_word, canonical);
+                    }
+                    return canonical.to_string();
+                }
 
                 // Check if the ORIGINAL word should be preserved (for acronyms like "API")
                 if let Some(original_word) = original_words.get(i)
@@ -318,6 +476,7 @@ impl MD063HeadingCapitalization {
             return text.to_string();
         }
 
+        let canonical_forms = self.proper_name_canonical_forms(text);
         let mut result = String::new();
         let mut current_pos = 0;
         let mut is_first_word = true;
@@ -330,8 +489,12 @@ impl MD063HeadingCapitalization {
                 // Preserve whitespace before this word
                 result.push_str(&text[current_pos..abs_pos]);
 
-                // Process the word
-                if is_first_word {
+                // Words that are part of an MD044 proper name use the canonical form
+                // directly, bypassing sentence-case lowercasing entirely.
+                if let Some(&canonical) = canonical_forms.get(&abs_pos) {
+                    result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
+                    is_first_word = false;
+                } else if is_first_word {
                     // Check if word should be preserved BEFORE any capitalization
                     if self.should_preserve_word(word) {
                         // Preserve ignore-words exactly as-is, even at start
@@ -374,6 +537,7 @@ impl MD063HeadingCapitalization {
             return text.to_string();
         }
 
+        let canonical_forms = self.proper_name_canonical_forms(text);
         let mut result = String::new();
         let mut current_pos = 0;
 
@@ -385,8 +549,11 @@ impl MD063HeadingCapitalization {
                 // Preserve whitespace before this word
                 result.push_str(&text[current_pos..abs_pos]);
 
-                // Check if this word should be preserved
-                if self.should_preserve_word(word) {
+                // Words that are part of an MD044 proper name use the canonical form directly.
+                // This prevents oscillation with MD044 when all-caps style is active.
+                if let Some(&canonical) = canonical_forms.get(&abs_pos) {
+                    result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
+                } else if self.should_preserve_word(word) {
                     result.push_str(word);
                 } else {
                     result.push_str(&word.to_uppercase());
@@ -588,11 +755,24 @@ impl MD063HeadingCapitalization {
 
     /// Apply title case to a text segment with first/last awareness
     fn apply_title_case_segment(&self, text: &str, is_first_segment: bool, is_last_segment: bool) -> String {
+        let canonical_forms = self.proper_name_canonical_forms(text);
         let words: Vec<&str> = text.split_whitespace().collect();
         let total_words = words.len();
 
         if total_words == 0 {
             return text.to_string();
+        }
+
+        // Pre-compute byte position of each word so we can look up canonical forms.
+        let mut word_positions: Vec<usize> = Vec::with_capacity(words.len());
+        let mut pos = 0;
+        for word in &words {
+            if let Some(rel) = text[pos..].find(word) {
+                word_positions.push(pos + rel);
+                pos = pos + rel + word.len();
+            } else {
+                word_positions.push(0);
+            }
         }
 
         let result_words: Vec<String> = words
@@ -601,6 +781,11 @@ impl MD063HeadingCapitalization {
             .map(|(i, word)| {
                 let is_first = is_first_segment && i == 0;
                 let is_last = is_last_segment && i == total_words - 1;
+
+                // Words that are part of an MD044 proper name use the canonical form directly.
+                if let Some(&canonical) = word_positions.get(i).and_then(|&p| canonical_forms.get(&p)) {
+                    return Self::apply_canonical_form_to_word(word, canonical);
+                }
 
                 // Handle hyphenated words
                 if word.contains('-') {
@@ -639,23 +824,26 @@ impl MD063HeadingCapitalization {
             return text.to_string();
         }
 
-        let lower = text.to_lowercase();
+        let canonical_forms = self.proper_name_canonical_forms(text);
         let mut result = String::new();
         let mut current_pos = 0;
 
-        for word in lower.split_whitespace() {
-            if let Some(pos) = lower[current_pos..].find(word) {
+        // Iterate over words in the original text so byte positions are consistent
+        // with the positions in canonical_forms (built from the same text).
+        for word in text.split_whitespace() {
+            if let Some(pos) = text[current_pos..].find(word) {
                 let abs_pos = current_pos + pos;
 
                 // Preserve whitespace before this word
-                result.push_str(&lower[current_pos..abs_pos]);
+                result.push_str(&text[current_pos..abs_pos]);
 
-                // Check if this word should be preserved
-                let original_word = &text[abs_pos..abs_pos + word.len()];
-                if self.should_preserve_word(original_word) {
-                    result.push_str(original_word);
-                } else {
+                // Words that are part of an MD044 proper name use the canonical form directly.
+                if let Some(&canonical) = canonical_forms.get(&abs_pos) {
+                    result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
+                } else if self.should_preserve_word(word) {
                     result.push_str(word);
+                } else {
+                    result.push_str(&word.to_lowercase());
                 }
 
                 current_pos = abs_pos + word.len();
@@ -663,8 +851,8 @@ impl MD063HeadingCapitalization {
         }
 
         // Preserve any trailing whitespace
-        if current_pos < lower.len() {
-            result.push_str(&lower[current_pos..]);
+        if current_pos < text.len() {
+            result.push_str(&text[current_pos..]);
         }
 
         result
@@ -844,7 +1032,11 @@ impl Rule for MD063HeadingCapitalization {
         Self: Sized,
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD063Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
+        let md044_config =
+            crate::rule_config_serde::load_rule_config::<crate::rules::md044_proper_names::MD044Config>(config);
+        let mut rule = Self::from_config_struct(rule_config);
+        rule.proper_names = md044_config.names;
+        Box::new(rule)
     }
 }
 
@@ -2140,5 +2332,291 @@ mod tests {
         assert!(!rule.is_caret_notation("A")); // no caret
         assert!(!rule.is_caret_notation("^")); // caret alone
         assert!(!rule.is_caret_notation("^1")); // digit
+    }
+
+    // MD044 proper names integration tests
+    //
+    // When MD063 (sentence case) and MD044 (proper names) are both active, MD063 must
+    // preserve the exact capitalization of MD044 proper names rather than lowercasing them.
+    // Without this, the two rules oscillate: MD044 re-capitalizes what MD063 lowercases.
+
+    fn create_sentence_case_rule_with_proper_names(names: Vec<String>) -> MD063HeadingCapitalization {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            ..Default::default()
+        };
+        let mut rule = MD063HeadingCapitalization::from_config_struct(config);
+        rule.proper_names = names;
+        rule
+    }
+
+    #[test]
+    fn test_sentence_case_preserves_single_word_proper_name() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["JavaScript".to_string()]);
+        // "javascript" in non-first position should become "JavaScript", not "javascript"
+        let content = "# installing javascript\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("JavaScript"),
+            "Fix should preserve proper name 'JavaScript', got: {fix_text:?}"
+        );
+        assert!(
+            !fix_text.contains("javascript"),
+            "Fix should not have lowercase 'javascript', got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_preserves_multi_word_proper_name() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["Good Application".to_string()]);
+        // "Good Application" is a proper name; sentence case must not lowercase "Application"
+        let content = "# using good application features\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("Good Application"),
+            "Fix should preserve 'Good Application' as a phrase, got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_proper_name_at_start_of_heading() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["Good Application".to_string()]);
+        // The proper name "Good Application" starts the heading; both words must be canonical
+        let content = "# good application overview\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("Good Application"),
+            "Fix should produce 'Good Application' at start of heading, got: {fix_text:?}"
+        );
+        assert!(
+            fix_text.contains("overview"),
+            "Non-proper-name word 'overview' should be lowercase, got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_with_proper_names_no_oscillation() {
+        // This is the core convergence test: applying the fix once must produce
+        // output that is already correct (no further changes needed).
+        let rule = create_sentence_case_rule_with_proper_names(vec!["Good Application".to_string()]);
+
+        // First application of fix
+        let content = "# installing good application on your system\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed_heading = result[0].fix.as_ref().unwrap().replacement.as_str();
+
+        // The fixed heading should contain the proper name preserved
+        assert!(
+            fixed_heading.contains("Good Application"),
+            "After fix, proper name must be preserved: {fixed_heading:?}"
+        );
+
+        // Second application: must produce no further warnings (convergence)
+        let fixed_line = format!("{fixed_heading}\n");
+        let ctx2 = LintContext::new(&fixed_line, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "After one fix, heading must already satisfy both MD063 and MD044 - no oscillation. \
+             Second pass warnings: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_proper_names_already_correct() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["Good Application".to_string()]);
+        // Heading already has correct sentence case with proper name preserved
+        let content = "# Installing Good Application\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Correct sentence-case heading with proper name should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_multiple_proper_names_in_heading() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["TypeScript".to_string(), "React".to_string()]);
+        let content = "# using typescript with react\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("TypeScript"),
+            "Fix should preserve 'TypeScript', got: {fix_text:?}"
+        );
+        assert!(
+            fix_text.contains("React"),
+            "Fix should preserve 'React', got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_unicode_casefold_expansion_before_proper_name() {
+        // Regression for Unicode case-fold expansion: `İ` lowercases to `i̇` (2 code points),
+        // so matching offsets must be computed from the original text, not from a lowercased copy.
+        let rule = create_sentence_case_rule_with_proper_names(vec!["Österreich".to_string()]);
+        let content = "# İ österreich guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Should not panic and should preserve canonical proper-name casing.
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag heading for canonical proper-name casing");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("Österreich"),
+            "Fix should preserve canonical 'Österreich', got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_sentence_case_preserves_trailing_punctuation_on_proper_name() {
+        let rule = create_sentence_case_rule_with_proper_names(vec!["JavaScript".to_string()]);
+        let content = "# using javascript, today\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("JavaScript,"),
+            "Fix should preserve trailing punctuation, got: {fix_text:?}"
+        );
+    }
+
+    // Title case + MD044 conflict tests
+    //
+    // In title case, short words like "the", "a", "of" are kept lowercase by MD063.
+    // If those words are part of an MD044 proper name (e.g. "The Rolling Stones"),
+    // the same oscillation problem occurs.  The fix must extend to title case too.
+
+    fn create_title_case_rule_with_proper_names(names: Vec<String>) -> MD063HeadingCapitalization {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            ..Default::default()
+        };
+        let mut rule = MD063HeadingCapitalization::from_config_struct(config);
+        rule.proper_names = names;
+        rule
+    }
+
+    #[test]
+    fn test_title_case_preserves_proper_name_with_lowercase_article() {
+        // "The" is in the lowercase_words list for title case, so "the" in the middle
+        // of a heading would normally stay lowercase.  But "The Rolling Stones" is a
+        // proper name that must be capitalised exactly.
+        let rule = create_title_case_rule_with_proper_names(vec!["The Rolling Stones".to_string()]);
+        let content = "# listening to the rolling stones today\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("The Rolling Stones"),
+            "Fix should preserve proper name 'The Rolling Stones', got: {fix_text:?}"
+        );
+    }
+
+    #[test]
+    fn test_title_case_proper_name_no_oscillation() {
+        // One fix pass must produce output that title case already accepts.
+        let rule = create_title_case_rule_with_proper_names(vec!["The Rolling Stones".to_string()]);
+        let content = "# listening to the rolling stones today\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        let fixed_heading = result[0].fix.as_ref().unwrap().replacement.as_str();
+
+        let fixed_line = format!("{fixed_heading}\n");
+        let ctx2 = LintContext::new(&fixed_line, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "After one title-case fix, heading must already satisfy both rules. \
+             Second pass warnings: {result2:?}"
+        );
+    }
+
+    #[test]
+    fn test_title_case_unicode_casefold_expansion_before_proper_name() {
+        let rule = create_title_case_rule_with_proper_names(vec!["Österreich".to_string()]);
+        let content = "# İ österreich guide\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("Österreich"),
+            "Fix should preserve canonical proper-name casing, got: {fix_text:?}"
+        );
+    }
+
+    // End-to-end integration test: from_config wires MD044 names into MD063
+    //
+    // This tests the actual code path used in production, where both rules are
+    // configured in a rumdl.toml and the rule registry calls from_config.
+
+    #[test]
+    fn test_from_config_loads_md044_names_into_md063() {
+        use crate::config::{Config, RuleConfig};
+        use crate::rule::Rule;
+        use std::collections::BTreeMap;
+
+        let mut config = Config::default();
+
+        // Configure MD063 with sentence_case
+        let mut md063_values = BTreeMap::new();
+        md063_values.insert("style".to_string(), toml::Value::String("sentence_case".to_string()));
+        md063_values.insert("enabled".to_string(), toml::Value::Boolean(true));
+        config.rules.insert(
+            "MD063".to_string(),
+            RuleConfig {
+                values: md063_values,
+                severity: None,
+            },
+        );
+
+        // Configure MD044 with a proper name
+        let mut md044_values = BTreeMap::new();
+        md044_values.insert(
+            "names".to_string(),
+            toml::Value::Array(vec![toml::Value::String("Good Application".to_string())]),
+        );
+        config.rules.insert(
+            "MD044".to_string(),
+            RuleConfig {
+                values: md044_values,
+                severity: None,
+            },
+        );
+
+        // Build MD063 via the production code path
+        let rule = MD063HeadingCapitalization::from_config(&config);
+
+        // Verify MD044 names were loaded: the fix must preserve "Good Application"
+        let content = "# using good application features\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the heading");
+        let fix_text = result[0].fix.as_ref().unwrap().replacement.as_str();
+        assert!(
+            fix_text.contains("Good Application"),
+            "from_config should wire MD044 names into MD063; fix should preserve \
+             'Good Application', got: {fix_text:?}"
+        );
     }
 }

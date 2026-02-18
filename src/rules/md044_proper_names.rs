@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 mod md044_config;
-use md044_config::MD044Config;
+pub use md044_config::MD044Config;
 
 type WarningPosition = (usize, usize, String); // (line, column, found_name)
 
