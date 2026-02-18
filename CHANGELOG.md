@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] - 2026-02-18
+
+### Added
+
+- **MD033**: Relaxed fix mode that converts HTML tags with extra attributes (e.g. `target`, `rel`, `width`, `height`) by dropping non-essential attributes during conversion. Event handler attributes (`on*`) are never dropped. Enable via config.
+  ([#397](https://github.com/rvben/rumdl/issues/397))
+
+### Fixed
+
+- **Fix mode**: Rules depending on `ctx.source_file` (MD057, MD074) no longer silently skip validation during re-lint, preventing false "no issues found" results and exit code 0 when violations remained
+  ([#435](https://github.com/rvben/rumdl/issues/435))
+- **Fix coordinator**: Non-convergence now reports the conflicting rules, observed cycle path, and concrete remediation steps (unfixable/disable/config options)
+- **MD012**: Blank line sequences adjacent to ATX or Setext headings are now skipped, preventing conflicts with MD022's `lines-above`/`lines-below` settings
+  ([#429](https://github.com/rvben/rumdl/issues/429))
+- **MD063**: Proper-name preservation now uses unicode-safe case-folding with title/sentence/all-caps handling and link text coverage
+  ([#431](https://github.com/rvben/rumdl/issues/431))
+- **Import**: Generated TOML output no longer has a trailing blank line
+  ([#433](https://github.com/rvben/rumdl/issues/433))
+
 ## [0.1.22] - 2026-02-16
 
 ### Added
