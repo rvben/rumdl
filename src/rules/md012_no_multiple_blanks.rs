@@ -322,9 +322,7 @@ impl Rule for MD012NoMultipleBlanks {
                     let heading_adjacent = last_content_is_heading;
                     if heading_adjacent {
                         // Preserve all blanks adjacent to headings
-                        for _ in 0..blank_count {
-                            result.push("");
-                        }
+                        result.extend(std::iter::repeat("").take(blank_count));
                     } else {
                         let allowed_blanks = blank_count.min(self.config.maximum.get());
                         if allowed_blanks > 0 {
@@ -358,9 +356,7 @@ impl Rule for MD012NoMultipleBlanks {
                     last_content_is_heading || (has_seen_content && is_heading_context(ctx, line_idx));
                 if heading_adjacent {
                     // Preserve all blanks adjacent to headings
-                    for _ in 0..blank_count {
-                        result.push("");
-                    }
+                    result.extend(std::iter::repeat("").take(blank_count));
                 } else {
                     // Add allowed blank lines before content
                     let allowed_blanks = blank_count.min(self.config.maximum.get());
