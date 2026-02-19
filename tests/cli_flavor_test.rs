@@ -37,8 +37,22 @@ fn test_flavor_cli_all_variants() {
     let md_path = temp_dir.path().join("test.md");
     fs::write(&md_path, "# Test\n\nSome content.\n").unwrap();
 
-    // Test all valid flavor values
-    for flavor in ["standard", "mkdocs", "mdx", "quarto", "obsidian", "kramdown", "jekyll"] {
+    // Test all valid flavor values (including aliases accepted by clap parser).
+    for flavor in [
+        "standard",
+        "gfm",
+        "github",
+        "commonmark",
+        "mkdocs",
+        "mdx",
+        "quarto",
+        "qmd",
+        "rmd",
+        "rmarkdown",
+        "obsidian",
+        "kramdown",
+        "jekyll",
+    ] {
         let (success, stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--flavor", flavor, "test.md"]);
         assert!(
             success,

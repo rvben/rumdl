@@ -6,6 +6,64 @@ use toml;
 mod md048_config;
 use md048_config::MD048Config;
 
+/// Parsed fence marker candidate on a single line.
+#[derive(Debug, Clone, Copy)]
+struct FenceMarker<'a> {
+    /// Fence character (` or ~).
+    fence_char: char,
+    /// Length of the contiguous fence run.
+    fence_len: usize,
+    /// Byte index where the fence run starts.
+    fence_start: usize,
+    /// Remaining text after the fence run.
+    rest: &'a str,
+}
+
+/// Parse a candidate fence marker line.
+///
+/// CommonMark only recognizes fenced code block markers when indented by at most
+/// three spaces (outside container contexts). This parser enforces that bound and
+/// returns the marker run and trailing text for further opening/closing checks.
+#[inline]
+fn parse_fence_marker(line: &str) -> Option<FenceMarker<'_>> {
+    let bytes = line.as_bytes();
+    let mut pos = 0usize;
+    while pos < bytes.len() && bytes[pos] == b' ' {
+        pos += 1;
+    }
+    if pos > 3 {
+        return None;
+    }
+
+    let fence_char = match bytes.get(pos).copied() {
+        Some(b'`') => '`',
+        Some(b'~') => '~',
+        _ => return None,
+    };
+
+    let marker = if fence_char == '`' { b'`' } else { b'~' };
+    let mut end = pos;
+    while end < bytes.len() && bytes[end] == marker {
+        end += 1;
+    }
+    let fence_len = end - pos;
+    if fence_len < 3 {
+        return None;
+    }
+
+    Some(FenceMarker {
+        fence_char,
+        fence_len,
+        fence_start: pos,
+        rest: &line[end..],
+    })
+}
+
+#[inline]
+fn is_closing_fence(marker: FenceMarker<'_>, opening_fence_char: char, opening_fence_len: usize) -> bool {
+    marker.fence_char == opening_fence_char && marker.fence_len >= opening_fence_len && marker.rest.trim().is_empty()
+}
+
 /// Rule MD048: Code fence style
 ///
 /// See [docs/md048.md](../../docs/md048.md) for full documentation, configuration, and examples.
@@ -30,26 +88,26 @@ impl MD048CodeFenceStyle {
         let mut backtick_count = 0;
         let mut tilde_count = 0;
         let mut in_code_block = false;
+        let mut opening_fence_char = '`';
+        let mut opening_fence_len = 0usize;
 
         for line in ctx.content.lines() {
-            let trimmed = line.trim_start();
+            let Some(marker) = parse_fence_marker(line) else {
+                continue;
+            };
 
-            // Check for code fence markers
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-
-                if !in_code_block {
-                    // Opening fence - count it
-                    if fence_char == '`' {
-                        backtick_count += 1;
-                    } else {
-                        tilde_count += 1;
-                    }
-                    in_code_block = true;
+            if !in_code_block {
+                // Opening fence - count it
+                if marker.fence_char == '`' {
+                    backtick_count += 1;
                 } else {
-                    // Potential closing fence - exit code block
-                    in_code_block = false;
+                    tilde_count += 1;
                 }
+                in_code_block = true;
+                opening_fence_char = marker.fence_char;
+                opening_fence_len = marker.fence_len;
+            } else if is_closing_fence(marker, opening_fence_char, opening_fence_len) {
+                in_code_block = false;
             }
         }
 
@@ -92,23 +150,19 @@ fn max_inner_fence_length_of_char(
     let mut max_len = 0usize;
 
     for line in lines.iter().skip(opening_line + 1) {
-        let trimmed = line.trim_start();
+        let Some(marker) = parse_fence_marker(line) else {
+            continue;
+        };
 
         // Stop at the closing fence of the outer block.
-        if trimmed.starts_with(opening_char) {
-            let len = trimmed.chars().take_while(|&c| c == opening_char).count();
-            if len >= opening_fence_len && trimmed[len..].trim().is_empty() {
-                break;
-            }
+        if is_closing_fence(marker, opening_char, opening_fence_len) {
+            break;
         }
 
         // Count only bare sequences (no info string). Lines with info strings
         // can never be closing fences per CommonMark and pose no ambiguity risk.
-        if trimmed.starts_with(target_char) {
-            let len = trimmed.chars().take_while(|&c| c == target_char).count();
-            if trimmed[len..].trim().is_empty() {
-                max_len = max_len.max(len);
-            }
+        if marker.fence_char == target_char && marker.rest.trim().is_empty() {
+            max_len = max_len.max(marker.fence_len);
         }
     }
 
@@ -147,14 +201,11 @@ impl Rule for MD048CodeFenceStyle {
         let mut needs_lengthening = false;
 
         for (line_num, &line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-
-            if !trimmed.starts_with("```") && !trimmed.starts_with("~~~") {
+            let Some(marker) = parse_fence_marker(line) else {
                 continue;
-            }
-
-            let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-            let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+            };
+            let fence_char = marker.fence_char;
+            let fence_len = marker.fence_len;
 
             if !in_code_block {
                 in_code_block = true;
@@ -173,8 +224,8 @@ impl Rule for MD048CodeFenceStyle {
 
                     // Compute how many target_char characters the converted fence needs.
                     // Must be strictly greater than any inner bare fence of the target style.
-                    let prefix = &line[..line.len() - trimmed.len()];
-                    let info = &trimmed[fence_len..];
+                    let prefix = &line[..marker.fence_start];
+                    let info = marker.rest;
                     let max_inner =
                         max_inner_fence_length_of_char(&lines, line_num, fence_len, fence_char, target_char);
                     converted_fence_len = fence_len.max(max_inner + 1);
@@ -182,7 +233,7 @@ impl Rule for MD048CodeFenceStyle {
 
                     let replacement = format!("{prefix}{}{info}", target_char.to_string().repeat(converted_fence_len));
 
-                    let fence_start = line.len() - trimmed.len();
+                    let fence_start = marker.fence_start;
                     let fence_end = fence_start + fence_len;
                     let (start_line, start_col, end_line, end_col) =
                         calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
@@ -213,8 +264,8 @@ impl Rule for MD048CodeFenceStyle {
                     // if the interior contains same-style bare fences of equal or greater
                     // length, the outer fence cannot be distinguished from an inner
                     // closing fence and must be made longer.
-                    let prefix = &line[..line.len() - trimmed.len()];
-                    let info = &trimmed[fence_len..];
+                    let prefix = &line[..marker.fence_start];
+                    let info = marker.rest;
                     let max_inner = max_inner_fence_length_of_char(&lines, line_num, fence_len, fence_char, fence_char);
                     if max_inner >= fence_len {
                         converted_fence_len = max_inner + 1;
@@ -223,7 +274,7 @@ impl Rule for MD048CodeFenceStyle {
                         let replacement =
                             format!("{prefix}{}{info}", fence_char.to_string().repeat(converted_fence_len));
 
-                        let fence_start = line.len() - trimmed.len();
+                        let fence_start = marker.fence_start;
                         let fence_end = fence_start + fence_len;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
@@ -253,9 +304,7 @@ impl Rule for MD048CodeFenceStyle {
                 }
             } else {
                 // Inside a code block — check if this is the closing fence.
-                let is_closing = fence_char == code_block_fence_char
-                    && fence_len >= code_block_fence_len
-                    && trimmed[fence_len..].trim().is_empty();
+                let is_closing = is_closing_fence(marker, code_block_fence_char, code_block_fence_len);
 
                 if is_closing {
                     let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
@@ -272,10 +321,14 @@ impl Rule for MD048CodeFenceStyle {
                             fence_char
                         };
 
-                        let prefix = &line[..line.len() - trimmed.len()];
-                        let replacement = format!("{prefix}{}", target_char.to_string().repeat(converted_fence_len));
+                        let prefix = &line[..marker.fence_start];
+                        let replacement = format!(
+                            "{prefix}{}{}",
+                            target_char.to_string().repeat(converted_fence_len),
+                            marker.rest
+                        );
 
-                        let fence_start = line.len() - trimmed.len();
+                        let fence_start = marker.fence_start;
                         let fence_end = fence_start + fence_len;
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
@@ -348,11 +401,9 @@ impl Rule for MD048CodeFenceStyle {
         let mut needs_lengthening = false;
 
         for (line_idx, &line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-                let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+            if let Some(marker) = parse_fence_marker(line) {
+                let fence_char = marker.fence_char;
+                let fence_len = marker.fence_len;
 
                 if !in_code_block {
                     in_code_block = true;
@@ -362,8 +413,8 @@ impl Rule for MD048CodeFenceStyle {
                     let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
                         || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
 
-                    let prefix = &line[..line.len() - trimmed.len()];
-                    let info = &trimmed[fence_len..];
+                    let prefix = &line[..marker.fence_start];
+                    let info = marker.rest;
 
                     if needs_conversion {
                         let target_char = if target_style == CodeFenceStyle::Backtick {
@@ -399,9 +450,7 @@ impl Rule for MD048CodeFenceStyle {
                     }
                 } else {
                     // Inside a code block — check if this is the closing fence.
-                    let is_closing = fence_char == code_block_fence_char
-                        && fence_len >= code_block_fence_len
-                        && trimmed[fence_len..].trim().is_empty();
+                    let is_closing = is_closing_fence(marker, code_block_fence_char, code_block_fence_len);
 
                     if is_closing {
                         let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
@@ -417,9 +466,10 @@ impl Rule for MD048CodeFenceStyle {
                             } else {
                                 fence_char
                             };
-                            let prefix = &line[..line.len() - trimmed.len()];
+                            let prefix = &line[..marker.fence_start];
                             result.push_str(prefix);
                             result.push_str(&target_char.to_string().repeat(converted_fence_len));
+                            result.push_str(marker.rest);
                         } else {
                             result.push_str(line);
                         }
@@ -908,6 +958,46 @@ mod tests {
             0,
             "shorter bare interior sequences cannot close a 4-backtick outer (no info)"
         );
+    }
+
+    /// Regression: over-indented inner same-style sequence (4 spaces) is content,
+    /// not a closing fence, and must not trigger ambiguity warnings.
+    #[test]
+    fn test_overindented_inner_sequence_not_ambiguous() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "```text\n    ```\ncode\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 0, "over-indented inner fence should not warn");
+        assert_eq!(fixed, content, "over-indented inner fence should remain unchanged");
+    }
+
+    /// Regression: when converting outer style, over-indented same-style content
+    /// lines must not be mistaken for an outer closing fence.
+    #[test]
+    fn test_conversion_ignores_overindented_inner_sequence_for_closing_detection() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "~~~text\n    ~~~\n```rust\ncode\n```\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "````text\n    ~~~\n```rust\ncode\n```\n````");
+    }
+
+    /// CommonMark: a top-level fence marker indented 4 spaces is an indented code
+    /// block line, not a fenced code block marker, so MD048 should ignore it.
+    #[test]
+    fn test_top_level_four_space_fence_marker_is_ignored() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        let content = "    ```\n    code\n    ```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 0);
+        assert_eq!(fixed, content);
     }
 
     /// The combined MD013+MD048 fix must be idempotent: applying the fix twice
