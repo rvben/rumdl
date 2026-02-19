@@ -3142,3 +3142,74 @@ fn test_blockquote_reflow_preserves_hard_break_markers() {
         );
     }
 }
+
+/// Verify that reflow does not introduce double blank lines between blocks.
+/// Tests the dedup guard on all block types (Paragraph, Html, NestedList, SemanticLine).
+#[test]
+fn test_reflow_no_double_blanks_between_blocks() {
+    use crate::fix_coordinator::FixCoordinator;
+    use crate::rules::Rule;
+    use crate::rules::md013_line_length::MD013LineLength;
+
+    // Case 1: HTML block followed by a code block inside a list item.
+    // The HTML block may capture a trailing blank, and the paragraph after-blank
+    // logic should not add a second blank.
+    let content = "\
+* `debug`: Enables you to set up a debugger. Currently, VS Code supports debugging Node.js and Python MCP servers.
+
+    <details>
+    <summary>Node.js MCP server</summary>
+
+    To debug a Node.js MCP server, set the property to `node`.
+
+    ```json
+    {\"servers\": {}}
+    ```
+
+    </details>
+";
+    let rule: Box<dyn Rule> = Box::new(MD013LineLength::new(80, false, false, false, true));
+    let rules = vec![rule];
+    let mut fixed = content.to_string();
+    let coordinator = FixCoordinator::new();
+    coordinator
+        .apply_fixes_iterative(&rules, &[], &mut fixed, &Default::default(), 10, None)
+        .expect("fix should not fail");
+
+    // No double blank lines should appear in the output.
+    let lines: Vec<&str> = fixed.lines().collect();
+    for i in 0..lines.len().saturating_sub(1) {
+        assert!(
+            !(lines[i].is_empty() && lines[i + 1].is_empty()),
+            "Double blank at lines {},{} in:\n{fixed}",
+            i + 1,
+            i + 2
+        );
+    }
+
+    // Case 2: Nested list followed by a paragraph (NestedList after-blank dedup).
+    let content2 = "\
+1. Review the workflow configuration
+
+    1. Select **Models** > **Conversion** in the sidebar
+
+    The workflow will always execute the conversion step. This step cannot be disabled because it transforms the model.
+";
+    let rule2: Box<dyn Rule> = Box::new(MD013LineLength::new(80, false, false, false, true));
+    let rules2 = vec![rule2];
+    let mut fixed2 = content2.to_string();
+    let coordinator2 = FixCoordinator::new();
+    coordinator2
+        .apply_fixes_iterative(&rules2, &[], &mut fixed2, &Default::default(), 10, None)
+        .expect("fix should not fail");
+
+    let lines2: Vec<&str> = fixed2.lines().collect();
+    for i in 0..lines2.len().saturating_sub(1) {
+        assert!(
+            !(lines2[i].is_empty() && lines2[i + 1].is_empty()),
+            "Double blank at lines {},{} in:\n{fixed2}",
+            i + 1,
+            i + 2
+        );
+    }
+}

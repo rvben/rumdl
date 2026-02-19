@@ -1694,9 +1694,10 @@ impl MD013LineLength {
                                     }
                                 }
 
-                                // Add blank line after paragraph block if there's a next block
-                                // BUT: check if next block is a code block that doesn't want a preceding blank
-                                // Also don't add blank lines before snippet lines (they should stay tight)
+                                // Add blank line after paragraph block if there's a next block.
+                                // Check if next block is a code block that doesn't want a preceding blank.
+                                // Also don't add blank lines before snippet lines (they should stay tight).
+                                // Only add if not already ending with one (avoids double blanks).
                                 if block_idx < blocks.len() - 1 {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
@@ -1706,7 +1707,8 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank {
+                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
+                                    {
                                         result.push(String::new());
                                     }
                                 }
@@ -1735,8 +1737,10 @@ impl MD013LineLength {
                                 }
                             }
                             Block::NestedList(nested_items) => {
-                                // Preserve nested list items as-is with original indentation
-                                if !is_first_block {
+                                // Preserve nested list items as-is with original indentation.
+                                // Only add blank before if not already ending with one (avoids
+                                // double blanks when the preceding block already added one).
+                                if !is_first_block && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true) {
                                     result.push(String::new());
                                 }
 
@@ -1755,8 +1759,9 @@ impl MD013LineLength {
                                     }
                                 }
 
-                                // Add blank line after nested list if there's a next block
-                                // Check if next block is a code block that doesn't want a preceding blank
+                                // Add blank line after nested list if there's a next block.
+                                // Only add if not already ending with one (avoids double blanks
+                                // when the last nested item was already a blank line).
                                 if block_idx < blocks.len() - 1 {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
@@ -1766,15 +1771,16 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank {
+                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
+                                    {
                                         result.push(String::new());
                                     }
                                 }
                             }
                             Block::SemanticLine(content) => {
-                                // Preserve semantic lines (NOTE:, WARNING:, etc.) as-is on their own line
-                                // Add blank line before if not first block
-                                if !is_first_block {
+                                // Preserve semantic lines (NOTE:, WARNING:, etc.) as-is on their own line.
+                                // Only add blank before if not already ending with one.
+                                if !is_first_block && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true) {
                                     result.push(String::new());
                                 }
 
@@ -1787,8 +1793,8 @@ impl MD013LineLength {
                                     result.push(format!("{expected_indent}{content}"));
                                 }
 
-                                // Add blank line after semantic line if there's a next block
-                                // Check if next block is a code block that doesn't want a preceding blank
+                                // Add blank line after semantic line if there's a next block.
+                                // Only add if not already ending with one.
                                 if block_idx < blocks.len() - 1 {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
@@ -1798,7 +1804,8 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank {
+                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
+                                    {
                                         result.push(String::new());
                                     }
                                 }
@@ -1846,7 +1853,9 @@ impl MD013LineLength {
                                     }
                                 }
 
-                                // Add blank line after HTML block if there's a next block
+                                // Add blank line after HTML block if there's a next block.
+                                // Only add if not already ending with one (avoids double blanks
+                                // when the HTML block itself contained a trailing blank line).
                                 if block_idx < blocks.len() - 1 {
                                     let next_block = &blocks[block_idx + 1];
                                     let should_add_blank = match next_block {
@@ -1859,7 +1868,8 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank {
+                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
+                                    {
                                         result.push(String::new());
                                     }
                                 }
