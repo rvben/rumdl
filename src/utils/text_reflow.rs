@@ -1787,6 +1787,69 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_length += word_len;
                 }
             }
+        } else if matches!(element, Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough(_))
+            && element_len > options.line_length
+        {
+            // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
+            // Split content word-by-word, attach the opening marker to the first word
+            // and the closing marker to the last word.
+            let (content, marker): (&str, &str) = match element {
+                Element::Italic { content, underscore } => {
+                    (content.as_str(), if *underscore { "_" } else { "*" })
+                }
+                Element::Bold { content, underscore } => {
+                    (content.as_str(), if *underscore { "__" } else { "**" })
+                }
+                Element::Strikethrough(content) => (content.as_str(), "~~"),
+                _ => unreachable!(),
+            };
+
+            let words: Vec<&str> = content.split_whitespace().collect();
+            let n = words.len();
+
+            if n == 0 {
+                // Empty span — treat as atomic
+                let full = format!("{marker}{marker}");
+                let full_len = display_len(&full, length_mode);
+                if !is_adjacent_to_prev && current_length > 0 {
+                    current_line.push(' ');
+                    current_length += 1;
+                }
+                current_line.push_str(&full);
+                current_length += full_len;
+            } else {
+                for (i, word) in words.iter().enumerate() {
+                    let is_first = i == 0;
+                    let is_last = i == n - 1;
+                    let word_str: String = match (is_first, is_last) {
+                        (true, true) => format!("{marker}{word}{marker}"),
+                        (true, false) => format!("{marker}{word}"),
+                        (false, true) => format!("{word}{marker}"),
+                        (false, false) => word.to_string(),
+                    };
+                    let word_len = display_len(&word_str, length_mode);
+
+                    let needs_space = if is_first {
+                        !is_adjacent_to_prev && current_length > 0
+                    } else {
+                        current_length > 0
+                    };
+
+                    if needs_space && current_length + 1 + word_len > options.line_length {
+                        lines.push(current_line.trim_end().to_string());
+                        current_line = word_str;
+                        current_length = word_len;
+                        current_line_element_spans.clear();
+                    } else {
+                        if needs_space {
+                            current_line.push(' ');
+                            current_length += 1;
+                        }
+                        current_line.push_str(&word_str);
+                        current_length += word_len;
+                    }
+                }
+            }
         } else {
             // For non-text elements (code, links, references), treat as atomic units
             // These should never be broken across lines

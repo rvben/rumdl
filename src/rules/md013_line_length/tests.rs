@@ -994,6 +994,108 @@ fn test_reflow_with_unbalanced_markdown() {
 }
 
 #[test]
+fn test_reflow_italic_paragraph() {
+    // Issue #441: full-paragraph italic was not reflowed
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "# Lorem\n\n*Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.*\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Every non-empty line must fit within 80 chars
+    for line in fixed.lines() {
+        assert!(
+            line.len() <= 80,
+            "Line still exceeds limit after reflow: {:?} ({} chars)",
+            line,
+            line.len()
+        );
+    }
+    // Opening and closing markers must be preserved
+    assert!(fixed.contains('*'), "Italic markers lost after reflow: {fixed}");
+}
+
+#[test]
+fn test_reflow_bold_paragraph() {
+    // Issue #441: full-paragraph bold was not reflowed
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "**Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.**\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    for line in fixed.lines() {
+        assert!(
+            line.len() <= 80,
+            "Line still exceeds limit after reflow: {:?} ({} chars)",
+            line,
+            line.len()
+        );
+    }
+    assert!(fixed.contains("**"), "Bold markers lost after reflow: {fixed}");
+}
+
+#[test]
+fn test_reflow_underscore_italic_paragraph() {
+    // Underscore italic variant should also reflow
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "_Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo rhoncus._\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    for line in fixed.lines() {
+        assert!(
+            line.len() <= 40,
+            "Line still exceeds limit after reflow: {:?} ({} chars)",
+            line,
+            line.len()
+        );
+    }
+    assert!(fixed.contains('_'), "Underscore italic markers lost after reflow: {fixed}");
+}
+
+#[test]
+fn test_reflow_inline_italic_not_broken() {
+    // Inline italic (short) embedded in a longer line must remain intact
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(60),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Line is 62 chars; the italic span is short and should stay intact
+    let content = "This paragraph has some *italic text* that should stay intact.\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.contains("*italic text*"),
+        "Short inline italic broken: {fixed}"
+    );
+}
+
+#[test]
 fn test_reflow_fix_indicator() {
     // Test that reflow provides fix indicators
     let config = MD013Config {
