@@ -1630,6 +1630,24 @@ $$
     }
 
     #[test]
+    fn test_idempotent_blockquote_ordered_list_no_space() {
+        // "> 0.A" — blockquote containing ordered list marker without space after period.
+        // The fix must insert the space at the correct byte position (after the period,
+        // not before the digit), so applying the fix twice gives the same result.
+        assert_idempotent("> 0.A");
+
+        // Also verify the fix produces the correct output (space inserted after period)
+        let rule = MD030ListMarkerSpace::default();
+        let ctx = LintContext::new("> 0.A", rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap_or_default();
+        let fixed = apply_fixes("> 0.A", &warnings);
+        assert_eq!(
+            fixed, "> 0. A",
+            "Fix should insert space after period, not before digit"
+        );
+    }
+
+    #[test]
     fn test_idempotent_link_with_unicode_quote() {
         // "[](\u{2000}\"<)"
         assert_idempotent("[](\"<)");
@@ -1659,5 +1677,44 @@ $$
     fn test_idempotent_code_span_with_unicode() {
         // Code span with unicode followed by unclosed bold
         assert_idempotent("`\u{1D737}FM?FZ`\n**\u{023A}8!\u{FFFD}Q\u{11727}<<^ **");
+    }
+
+    #[test]
+    fn test_blockquote_ordered_marker_fix_position() {
+        // "> 0.A" — ordered marker inside blockquote, no space after marker.
+        // The fix must insert the space after `0.` (byte 4 in the original line),
+        // NOT before `0` (byte 2). The blockquote prefix `"> "` must be included
+        // in the byte offset calculation.
+        let rule = MD030ListMarkerSpace::default();
+        let content = "> 0.A";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap_or_default();
+        assert_eq!(warnings.len(), 1, "should flag '0.A' inside blockquote");
+        let fixed = apply_fixes(content, &warnings);
+        assert_eq!(fixed, "> 0. A", "fix must insert space after dot, not before digit");
+        assert_idempotent(content);
+    }
+
+    #[test]
+    fn test_blockquote_ordered_marker_multi_level() {
+        // Multi-level blockquote: ">> 1.Item"
+        let rule = MD030ListMarkerSpace::default();
+        let content = ">> 1.Item";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap_or_default();
+        assert_eq!(warnings.len(), 1, "should flag '1.Item' inside nested blockquote");
+        let fixed = apply_fixes(content, &warnings);
+        assert_eq!(
+            fixed, ">> 1. Item",
+            "fix must insert space after dot in nested blockquote"
+        );
+        assert_idempotent(content);
+    }
+
+    #[test]
+    fn test_blockquote_ordered_marker_with_indent() {
+        // Indented marker inside blockquote: ">  2.Item"
+        let content = ">  2.Item";
+        assert_idempotent(content);
     }
 }

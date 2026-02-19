@@ -522,8 +522,10 @@ impl MD030ListMarkerSpace {
         line_num: usize,
         lines: &[&str],
     ) -> Option<LintWarning> {
-        // Strip blockquote prefix to analyze the content
+        // Strip blockquote prefix to analyze the content.
+        // Track the prefix length so fix positions are relative to the original line.
         let (_blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+        let bq_prefix_len = line.len() - content.len();
 
         let trimmed = content.trim_start();
         let indent_len = content.len() - trimmed.len();
@@ -555,13 +557,15 @@ impl MD030ListMarkerSpace {
                         let marker = format!("{before_dot}.");
                         let marker_pos = indent_len;
                         let marker_end = marker_pos + marker.len();
+                        // Offset from the start of the original line (including blockquote prefix).
+                        let offset_in_line = bq_prefix_len + marker_end;
 
                         let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num, line, marker_end, 0);
+                            calculate_match_range(line_num, line, offset_in_line, 0);
 
                         let correct_spaces = " ".repeat(expected_spaces);
                         let line_start_byte = ctx.line_offsets.get(line_num - 1).copied().unwrap_or(0);
-                        let fix_position = line_start_byte + marker_end;
+                        let fix_position = line_start_byte + offset_in_line;
 
                         return Some(LintWarning {
                             rule_name: Some("MD030".to_string()),
