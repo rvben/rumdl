@@ -127,8 +127,8 @@ Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text",
     pub show_full_path: bool,
 
     /// Markdown flavor to use for linting
-    #[arg(long, value_parser = ["standard", "mkdocs", "mdx", "quarto", "obsidian", "kramdown", "jekyll"],
-          help = "Markdown flavor: standard (default), mkdocs, mdx, quarto, obsidian, or kramdown")]
+    #[arg(long, value_parser = ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll"],
+          help = "Markdown flavor: standard/gfm/commonmark (default), mkdocs, mdx, quarto, obsidian, or kramdown")]
     pub flavor: Option<String>,
 
     /// Read from stdin instead of files
