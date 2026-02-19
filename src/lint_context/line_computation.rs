@@ -1,4 +1,5 @@
 use crate::config::MarkdownFlavor;
+use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::element_cache::ElementCache;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -75,8 +76,8 @@ pub(super) fn compute_basic_line_info(
         let blockquote_parse = parse_blockquote_prefix(line);
 
         // For blank detection, consider blockquote context
-        let is_blank = if let Some((_, content)) = blockquote_parse {
-            content.trim().is_empty()
+        let is_blank = if let Some(parsed) = blockquote_parse {
+            parsed.content.trim().is_empty()
         } else {
             line.trim().is_empty()
         };
@@ -442,8 +443,8 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
                         .unwrap_or(line);
 
                     let blockquote_parse = parse_blockquote_prefix(line);
-                    let (blockquote_prefix_len, line_to_parse) = if let Some((prefix, content)) = blockquote_parse {
-                        (prefix.len(), content)
+                    let (blockquote_prefix_len, line_to_parse) = if let Some(parsed) = blockquote_parse {
+                        (parsed.prefix.len(), parsed.content)
                     } else {
                         (0, line)
                     };
@@ -511,44 +512,6 @@ pub(super) fn compute_char_frequency(content: &str) -> CharFrequency {
     }
 
     frequency
-}
-
-/// Fast blockquote prefix parser - replaces regex for 5-10x speedup
-/// Handles nested blockquotes like `> > > content`
-/// Returns: Some((prefix_with_ws, content_after_prefix)) or None
-#[inline]
-pub(super) fn parse_blockquote_prefix(line: &str) -> Option<(&str, &str)> {
-    let trimmed_start = line.trim_start();
-    if !trimmed_start.starts_with('>') {
-        return None;
-    }
-
-    let mut remaining = line;
-    let mut total_prefix_len = 0;
-
-    loop {
-        let trimmed = remaining.trim_start();
-        if !trimmed.starts_with('>') {
-            break;
-        }
-
-        let leading_ws_len = remaining.len() - trimmed.len();
-        total_prefix_len += leading_ws_len + 1;
-
-        let after_gt = &trimmed[1..];
-
-        if let Some(stripped) = after_gt.strip_prefix(' ') {
-            total_prefix_len += 1;
-            remaining = stripped;
-        } else if let Some(stripped) = after_gt.strip_prefix('\t') {
-            total_prefix_len += 1;
-            remaining = stripped;
-        } else {
-            remaining = after_gt;
-        }
-    }
-
-    Some((&line[..total_prefix_len], remaining))
 }
 
 /// Fast unordered list parser - replaces regex for 5-10x speedup

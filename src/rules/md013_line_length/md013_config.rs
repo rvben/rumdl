@@ -144,6 +144,27 @@ impl MD013Config {
             Some(self.abbreviations.clone())
         }
     }
+
+    /// Build a `ReflowOptions` from this configuration.
+    ///
+    /// Converts `reflow_mode`, `length_mode`, `abbreviations`, and `line_length`
+    /// into the unified `ReflowOptions` type used by the reflow engine.
+    pub fn to_reflow_options(&self) -> crate::utils::text_reflow::ReflowOptions {
+        let length_mode = match self.length_mode {
+            LengthMode::Chars => crate::utils::text_reflow::ReflowLengthMode::Chars,
+            LengthMode::Visual => crate::utils::text_reflow::ReflowLengthMode::Visual,
+            LengthMode::Bytes => crate::utils::text_reflow::ReflowLengthMode::Bytes,
+        };
+        crate::utils::text_reflow::ReflowOptions {
+            line_length: self.line_length.get(),
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: self.reflow_mode == ReflowMode::SentencePerLine,
+            semantic_line_breaks: self.reflow_mode == ReflowMode::SemanticLineBreaks,
+            abbreviations: self.abbreviations_for_reflow(),
+            length_mode,
+        }
+    }
 }
 
 impl RuleConfig for MD013Config {

@@ -3,6 +3,7 @@
 //! This module contains LSP-specific types and utilities for rumdl,
 //! following the Language Server Protocol specification.
 
+use crate::rules::md013_line_length::MD013Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
@@ -216,6 +217,18 @@ fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Op
 /// Create code actions from a rumdl warning
 /// Returns a vector of available actions: fix action (if available) and ignore actions
 pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Vec<CodeAction> {
+    warning_to_code_actions_with_md013_config(warning, uri, document_text, None)
+}
+
+/// Like [`warning_to_code_actions`] but uses the provided MD013 configuration when
+/// generating the "Reflow paragraph" action, so the LSP action respects user-configured
+/// reflow mode, abbreviations, and length mode rather than using defaults.
+pub(crate) fn warning_to_code_actions_with_md013_config(
+    warning: &crate::rule::LintWarning,
+    uri: &Url,
+    document_text: &str,
+    md013_config: Option<&MD013Config>,
+) -> Vec<CodeAction> {
     let mut actions = Vec::new();
 
     // Add fix action if available (marked as preferred)
@@ -227,7 +240,7 @@ pub fn warning_to_code_actions(warning: &crate::rule::LintWarning, uri: &Url, do
     // This allows users to manually reflow paragraphs without enabling reflow globally
     if warning.rule_name.as_deref() == Some("MD013")
         && warning.fix.is_none()
-        && let Some(reflow_action) = create_reflow_action(warning, uri, document_text)
+        && let Some(reflow_action) = create_reflow_action(warning, uri, document_text, md013_config)
     {
         actions.push(reflow_action);
     }
@@ -285,12 +298,27 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
 
 /// Create a manual reflow code action for MD013 line length warnings
 /// This allows users to manually reflow paragraphs even when reflow is disabled in config
-fn create_reflow_action(warning: &crate::rule::LintWarning, uri: &Url, document_text: &str) -> Option<CodeAction> {
-    // Extract line length limit from message (format: "Line length X exceeds Y characters")
-    let line_length = extract_line_length_from_message(&warning.message).unwrap_or(80);
+fn create_reflow_action(
+    warning: &crate::rule::LintWarning,
+    uri: &Url,
+    document_text: &str,
+    md013_config: Option<&MD013Config>,
+) -> Option<CodeAction> {
+    // Build reflow options from config when available, falling back to extracting
+    // the line length from the warning message and using defaults for other fields.
+    let options = if let Some(config) = md013_config {
+        config.to_reflow_options()
+    } else {
+        let line_length = extract_line_length_from_message(&warning.message).unwrap_or(80);
+        crate::utils::text_reflow::ReflowOptions {
+            line_length,
+            ..Default::default()
+        }
+    };
 
     // Use the reflow helper to find and reflow the paragraph
-    let reflow_result = crate::utils::text_reflow::reflow_paragraph_at_line(document_text, warning.line, line_length)?;
+    let reflow_result =
+        crate::utils::text_reflow::reflow_paragraph_at_line_with_options(document_text, warning.line, &options)?;
 
     // Convert byte offsets to LSP range
     let range = byte_range_to_lsp_range(document_text, reflow_result.start_byte..reflow_result.end_byte)?;
@@ -721,6 +749,45 @@ mod tests {
         let actions = warning_to_code_actions(&warning, &uri, document_text);
         // Should have ignore actions but no fix action (fix actions have is_preferred = true)
         assert!(actions.iter().all(|a| a.is_preferred != Some(true)));
+    }
+
+    #[test]
+    fn test_warning_to_code_actions_md013_blockquote_reflow_action() {
+        let warning = LintWarning {
+            line: 2,
+            column: 1,
+            end_line: 2,
+            end_column: 100,
+            rule_name: Some("MD013".to_string()),
+            message: "Line length 95 exceeds 40 characters".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
+
+        let uri = Url::parse("file:///test.md").unwrap();
+        let document_text = "> This quoted paragraph starts explicitly and is intentionally long enough for reflow.\nlazy continuation line should also be included when reflow is triggered from this warning.\n";
+
+        let actions = warning_to_code_actions(&warning, &uri, document_text);
+        let reflow_action = actions
+            .iter()
+            .find(|action| action.title == "Reflow paragraph")
+            .expect("Expected manual reflow action for MD013");
+
+        let changes = reflow_action
+            .edit
+            .as_ref()
+            .and_then(|edit| edit.changes.as_ref())
+            .expect("Expected edits for reflow action");
+        let file_edits = changes.get(&uri).expect("Expected edits for URI");
+        assert_eq!(file_edits.len(), 1);
+        assert!(
+            file_edits[0]
+                .new_text
+                .lines()
+                .next()
+                .is_some_and(|line| line.starts_with("> ")),
+            "Expected blockquote prefix in reflow output"
+        );
     }
 
     #[test]

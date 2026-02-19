@@ -12,7 +12,8 @@ use crate::rule::FixCapability;
 use crate::rules;
 
 use super::server::RumdlLanguageServer;
-use super::types::{IndexState, warning_to_code_actions, warning_to_diagnostic};
+use super::types::{IndexState, warning_to_code_actions_with_md013_config, warning_to_diagnostic};
+use crate::rules::md013_line_length::MD013Config;
 
 impl RumdlLanguageServer {
     /// Check if a file URI should be excluded based on exclude patterns
@@ -368,6 +369,12 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
+        // Extract MD013 config once so the "Reflow paragraph" action respects user settings.
+        let mut md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(&rumdl_config);
+        if md013_config.line_length.get() == 80 {
+            md013_config.line_length = rumdl_config.global.line_length;
+        }
+
         match crate::lint(text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
@@ -378,7 +385,8 @@ impl RumdlLanguageServer {
                     let warning_line = (warning.line.saturating_sub(1)) as u32;
                     if warning_line >= range.start.line && warning_line <= range.end.line {
                         // Get all code actions for this warning (fix + ignore actions)
-                        let mut warning_actions = warning_to_code_actions(warning, uri, text);
+                        let mut warning_actions =
+                            warning_to_code_actions_with_md013_config(warning, uri, text, Some(&md013_config));
                         actions.append(&mut warning_actions);
 
                         if warning.fix.is_some() {

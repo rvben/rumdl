@@ -67,6 +67,23 @@ pub fn is_definition_list_item(line: &str) -> bool {
         || (trimmed.starts_with(':') && trimmed.len() > 1 && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace()))
 }
 
+/// Check if a line consists only of a template directive with no surrounding text.
+///
+/// Detects template syntax used in static site generators:
+/// - Handlebars/mdBook/Mustache: `{{...}}`
+/// - Jinja2/Liquid/Jekyll: `{%...%}`
+/// - Hugo shortcodes: `{{<...>}}` or `{{%...%}}`
+///
+/// Template directives are preprocessor instructions that should not be merged
+/// into surrounding paragraphs during reflow.
+pub fn is_template_directive_only(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    (trimmed.starts_with("{{") && trimmed.ends_with("}}")) || (trimmed.starts_with("{%") && trimmed.ends_with("%}"))
+}
+
 /// Trait for string-related extensions
 pub trait StrExt {
     /// Replace trailing spaces with a specified replacement string

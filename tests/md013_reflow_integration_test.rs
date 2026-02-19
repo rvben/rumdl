@@ -216,7 +216,6 @@ tables = true
             && !line.starts_with('|')
             && !line.starts_with('[')
             && !line.trim().is_empty()
-            && !line.starts_with('>')
         {
             // Allow slightly more for list items and lines with URLs
             let is_list_item = line.trim_start().starts_with("- ")
@@ -522,4 +521,60 @@ reflow-mode = "semantic-line-breaks"
         stdout.contains("semantic line breaks"),
         "Should report semantic line breaks violation: {stdout}"
     );
+}
+
+#[test]
+fn test_md013_issue_437_blockquote_reflow_regression() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("issue_437.md");
+
+    let content = r#"# Lorem
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.
+
+> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.
+"#;
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 72
+reflow = true
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let _output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let after_first = fs::read_to_string(&file_path).unwrap();
+    let quote_lines: Vec<&str> = after_first.lines().filter(|line| line.starts_with('>')).collect();
+
+    assert!(
+        quote_lines.len() >= 2,
+        "Issue #437 regression: expected wrapped blockquote lines, got: {after_first}"
+    );
+    assert!(
+        quote_lines.iter().all(|line| line.chars().count() <= 72),
+        "Expected reflowed blockquote lines within limit: {after_first}"
+    );
+
+    // Idempotence: second pass should produce no further changes.
+    let _output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let after_second = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(after_first, after_second);
 }

@@ -3,51 +3,6 @@ use std::sync::LazyLock;
 
 use super::types::*;
 
-/// Detailed blockquote parse result with all components
-pub(super) struct BlockquoteComponents<'a> {
-    pub indent: &'a str,
-    pub markers: &'a str,
-    pub spaces_after: &'a str,
-    pub content: &'a str,
-}
-
-/// Parse blockquote prefix with detailed components using manual parsing
-#[inline]
-pub(super) fn parse_blockquote_detailed(line: &str) -> Option<BlockquoteComponents<'_>> {
-    let bytes = line.as_bytes();
-    let mut pos = 0;
-
-    // Parse leading whitespace (indent)
-    while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
-        pos += 1;
-    }
-    let indent_end = pos;
-
-    // Must have at least one '>' marker
-    if pos >= bytes.len() || bytes[pos] != b'>' {
-        return None;
-    }
-
-    // Parse '>' markers
-    while pos < bytes.len() && bytes[pos] == b'>' {
-        pos += 1;
-    }
-    let markers_end = pos;
-
-    // Parse spaces after markers
-    while pos < bytes.len() && (bytes[pos] == b' ' || bytes[pos] == b'\t') {
-        pos += 1;
-    }
-    let spaces_end = pos;
-
-    Some(BlockquoteComponents {
-        indent: &line[0..indent_end],
-        markers: &line[indent_end..markers_end],
-        spaces_after: &line[markers_end..spaces_end],
-        content: &line[spaces_end..],
-    })
-}
-
 /// Detect headings and blockquotes (called after HTML block detection)
 pub(super) fn detect_headings_and_blockquotes(
     content_lines: &[&str],
@@ -69,28 +24,31 @@ pub(super) fn detect_headings_and_blockquotes(
 
         // Detect blockquotes FIRST, before any skip conditions.
         if !(front_matter_end > 0 && i < front_matter_end)
-            && let Some(bq) = parse_blockquote_detailed(line)
+            && let Some(bq) = crate::utils::blockquote::parse_blockquote_prefix(line)
         {
-            let nesting_level = bq.markers.len();
+            let nesting_level = bq.nesting_level;
             let marker_column = bq.indent.len();
-            let prefix = format!("{}{}{}", bq.indent, bq.markers, bq.spaces_after);
-            let has_no_space = bq.spaces_after.is_empty() && !bq.content.is_empty();
-            let has_multiple_spaces = bq.spaces_after.chars().filter(|&c| c == ' ').count() > 1;
-            let needs_md028_fix = bq.content.is_empty() && bq.spaces_after.is_empty();
+            let content_leading_ws_len = bq.content.len() - bq.content.trim_start_matches([' ', '\t']).len();
+            let full_prefix = format!("{}{}", bq.prefix, &bq.content[..content_leading_ws_len]);
+            let normalized_content = &bq.content[content_leading_ws_len..];
+
+            let has_no_space = bq.spaces_after_marker.is_empty() && !normalized_content.is_empty();
+            let has_multiple_spaces = bq.spaces_after_marker.chars().filter(|&c| c == ' ').count() > 1;
+            let needs_md028_fix = normalized_content.is_empty() && bq.spaces_after_marker.is_empty();
 
             lines[i].blockquote = Some(Box::new(BlockquoteInfo {
                 nesting_level,
                 indent: bq.indent.to_string(),
                 marker_column,
-                prefix,
-                content: bq.content.to_string(),
+                prefix: full_prefix,
+                content: normalized_content.to_string(),
                 has_no_space_after_marker: has_no_space,
                 has_multiple_spaces_after_marker: has_multiple_spaces,
                 needs_md028_fix,
             }));
 
             // Update is_horizontal_rule for blockquote content
-            if !lines[i].in_code_block && is_horizontal_rule_content(bq.content.trim()) {
+            if !lines[i].in_code_block && is_horizontal_rule_content(normalized_content.trim()) {
                 lines[i].is_horizontal_rule = true;
             }
         }

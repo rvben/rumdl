@@ -5,6 +5,8 @@
 
 use crate::utils::element_cache::ElementCache;
 use crate::utils::is_definition_list_item;
+use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
+use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
     HUGO_SHORTCODE_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX,
@@ -2217,6 +2219,406 @@ pub struct ParagraphReflow {
     pub reflowed_text: String,
 }
 
+/// A collected blockquote line used for style-preserving reflow.
+///
+/// The invariant `is_explicit == true` iff `prefix.is_some()` is enforced by the
+/// constructors. Use [`BlockquoteLineData::explicit`] or [`BlockquoteLineData::lazy`]
+/// rather than constructing the struct directly.
+#[derive(Debug, Clone)]
+pub struct BlockquoteLineData {
+    /// Trimmed content without the `> ` prefix.
+    pub(crate) content: String,
+    /// Whether this line carries an explicit blockquote marker.
+    pub(crate) is_explicit: bool,
+    /// Full blockquote prefix (e.g. `"> "`, `"> > "`). `None` for lazy continuation lines.
+    pub(crate) prefix: Option<String>,
+}
+
+impl BlockquoteLineData {
+    /// Create an explicit (marker-bearing) blockquote line.
+    pub fn explicit(content: String, prefix: String) -> Self {
+        Self {
+            content,
+            is_explicit: true,
+            prefix: Some(prefix),
+        }
+    }
+
+    /// Create a lazy continuation line (no blockquote marker).
+    pub fn lazy(content: String) -> Self {
+        Self {
+            content,
+            is_explicit: false,
+            prefix: None,
+        }
+    }
+}
+
+/// Style for blockquote continuation lines after reflow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockquoteContinuationStyle {
+    Explicit,
+    Lazy,
+}
+
+/// Determine the continuation style for a blockquote paragraph from its collected lines.
+///
+/// The first line is always explicit (it carries the marker), so only continuation
+/// lines (index 1+) are counted. Ties resolve to `Explicit`.
+///
+/// When the slice has only one element (no continuation lines to inspect), both
+/// counts are zero and the tie-breaking rule returns `Explicit`.
+pub fn blockquote_continuation_style(lines: &[BlockquoteLineData]) -> BlockquoteContinuationStyle {
+    let mut explicit_count = 0usize;
+    let mut lazy_count = 0usize;
+
+    for line in lines.iter().skip(1) {
+        if line.is_explicit {
+            explicit_count += 1;
+        } else {
+            lazy_count += 1;
+        }
+    }
+
+    if explicit_count > 0 && lazy_count == 0 {
+        BlockquoteContinuationStyle::Explicit
+    } else if lazy_count > 0 && explicit_count == 0 {
+        BlockquoteContinuationStyle::Lazy
+    } else if explicit_count >= lazy_count {
+        BlockquoteContinuationStyle::Explicit
+    } else {
+        BlockquoteContinuationStyle::Lazy
+    }
+}
+
+/// Determine the dominant blockquote prefix for a paragraph.
+///
+/// The most frequently occurring explicit prefix wins. Ties are broken by earliest
+/// first appearance. Falls back to `fallback` when no explicit lines are present.
+pub fn dominant_blockquote_prefix(lines: &[BlockquoteLineData], fallback: &str) -> String {
+    let mut counts: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        let Some(prefix) = line.prefix.as_ref() else {
+            continue;
+        };
+        counts
+            .entry(prefix.clone())
+            .and_modify(|entry| entry.0 += 1)
+            .or_insert((1, idx));
+    }
+
+    counts
+        .into_iter()
+        .max_by(|(_, (count_a, first_idx_a)), (_, (count_b, first_idx_b))| {
+            count_a.cmp(count_b).then_with(|| first_idx_b.cmp(first_idx_a))
+        })
+        .map(|(prefix, _)| prefix)
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// Whether a reflowed blockquote content line must carry an explicit prefix.
+///
+/// Lines that would start a new block structure (headings, fences, lists, etc.)
+/// cannot safely use lazy continuation syntax.
+pub(crate) fn should_force_explicit_blockquote_line(content_line: &str) -> bool {
+    let trimmed = content_line.trim_start();
+    trimmed.starts_with('>')
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("```")
+        || trimmed.starts_with("~~~")
+        || is_unordered_list_marker(trimmed)
+        || is_numbered_list_item(trimmed)
+        || is_horizontal_rule(trimmed)
+        || is_definition_list_item(trimmed)
+        || (trimmed.starts_with('[') && trimmed.contains("]:"))
+        || trimmed.starts_with(":::")
+        || (trimmed.starts_with('<')
+            && !trimmed.starts_with("<http")
+            && !trimmed.starts_with("<https")
+            && !trimmed.starts_with("<mailto:"))
+}
+
+/// Reflow blockquote content lines and apply continuation style.
+///
+/// Segments separated by hard breaks are reflowed independently. The output lines
+/// receive blockquote prefixes according to `continuation_style`: the first line and
+/// any line that would start a new block structure always get an explicit prefix;
+/// other lines follow the detected style.
+///
+/// Returns the styled, reflowed lines (without a trailing newline).
+pub fn reflow_blockquote_content(
+    lines: &[BlockquoteLineData],
+    explicit_prefix: &str,
+    continuation_style: BlockquoteContinuationStyle,
+    options: &ReflowOptions,
+) -> Vec<String> {
+    let content_strs: Vec<&str> = lines.iter().map(|l| l.content.as_str()).collect();
+    let segments = split_into_segments_strs(&content_strs);
+    let mut reflowed_content_lines: Vec<String> = Vec::new();
+
+    for segment in segments {
+        let hard_break_type = segment.last().and_then(|&line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            if line.ends_with('\\') {
+                Some("\\")
+            } else if line.ends_with("  ") {
+                Some("  ")
+            } else {
+                None
+            }
+        });
+
+        let pieces: Vec<&str> = segment
+            .iter()
+            .map(|&line| {
+                if line.ends_with('\\') {
+                    line[..line.len() - 1].trim_end()
+                } else if line.ends_with("  ") {
+                    line[..line.len() - 2].trim_end()
+                } else {
+                    line.trim_end()
+                }
+            })
+            .collect();
+
+        let segment_text = pieces.join(" ");
+        let segment_text = segment_text.trim();
+        if segment_text.is_empty() {
+            continue;
+        }
+
+        let mut reflowed = reflow_line(segment_text, options);
+        if let Some(break_marker) = hard_break_type
+            && !reflowed.is_empty()
+        {
+            let last_idx = reflowed.len() - 1;
+            if !has_hard_break(&reflowed[last_idx]) {
+                reflowed[last_idx].push_str(break_marker);
+            }
+        }
+        reflowed_content_lines.extend(reflowed);
+    }
+
+    let mut styled_lines: Vec<String> = Vec::new();
+    for (idx, line) in reflowed_content_lines.iter().enumerate() {
+        let force_explicit = idx == 0
+            || continuation_style == BlockquoteContinuationStyle::Explicit
+            || should_force_explicit_blockquote_line(line);
+        if force_explicit {
+            styled_lines.push(format!("{explicit_prefix}{line}"));
+        } else {
+            styled_lines.push(line.clone());
+        }
+    }
+
+    styled_lines
+}
+
+fn is_blockquote_content_boundary(content: &str) -> bool {
+    let trimmed = content.trim();
+    trimmed.is_empty()
+        || is_block_boundary(trimmed)
+        || crate::utils::table_utils::TableUtils::is_potential_table_row(content)
+        || trimmed.starts_with(":::")
+        || crate::utils::is_template_directive_only(content)
+        || is_standalone_attr_list(content)
+        || is_snippet_block_delimiter(content)
+}
+
+fn split_into_segments_strs<'a>(lines: &[&'a str]) -> Vec<Vec<&'a str>> {
+    let mut segments = Vec::new();
+    let mut current = Vec::new();
+
+    for &line in lines {
+        current.push(line);
+        if has_hard_break(line) {
+            segments.push(current);
+            current = Vec::new();
+        }
+    }
+
+    if !current.is_empty() {
+        segments.push(current);
+    }
+
+    segments
+}
+
+fn reflow_blockquote_paragraph_at_line(
+    content: &str,
+    lines: &[&str],
+    target_idx: usize,
+    options: &ReflowOptions,
+) -> Option<ParagraphReflow> {
+    let mut anchor_idx = target_idx;
+    let mut target_level = if let Some(parsed) = crate::utils::blockquote::parse_blockquote_prefix(lines[target_idx]) {
+        parsed.nesting_level
+    } else {
+        let mut found = None;
+        let mut idx = target_idx;
+        loop {
+            if lines[idx].trim().is_empty() {
+                break;
+            }
+            if let Some(parsed) = crate::utils::blockquote::parse_blockquote_prefix(lines[idx]) {
+                found = Some((idx, parsed.nesting_level));
+                break;
+            }
+            if idx == 0 {
+                break;
+            }
+            idx -= 1;
+        }
+        let (idx, level) = found?;
+        anchor_idx = idx;
+        level
+    };
+
+    // Expand backward to capture prior quote content at the same nesting level.
+    let mut para_start = anchor_idx;
+    while para_start > 0 {
+        let prev_idx = para_start - 1;
+        let prev_line = lines[prev_idx];
+
+        if prev_line.trim().is_empty() {
+            break;
+        }
+
+        if let Some(parsed) = crate::utils::blockquote::parse_blockquote_prefix(prev_line) {
+            if parsed.nesting_level != target_level || is_blockquote_content_boundary(parsed.content) {
+                break;
+            }
+            para_start = prev_idx;
+            continue;
+        }
+
+        let prev_lazy = prev_line.trim_start();
+        if is_blockquote_content_boundary(prev_lazy) {
+            break;
+        }
+        para_start = prev_idx;
+    }
+
+    // Lazy continuation cannot precede the first explicit marker.
+    while para_start < lines.len() {
+        let Some(parsed) = crate::utils::blockquote::parse_blockquote_prefix(lines[para_start]) else {
+            para_start += 1;
+            continue;
+        };
+        target_level = parsed.nesting_level;
+        break;
+    }
+
+    if para_start >= lines.len() || para_start > target_idx {
+        return None;
+    }
+
+    // Collect explicit lines at target level and lazy continuation lines.
+    // Each entry is (original_line_idx, BlockquoteLineData).
+    let mut collected: Vec<(usize, BlockquoteLineData)> = Vec::new();
+    let mut idx = para_start;
+    while idx < lines.len() {
+        if !collected.is_empty() && has_hard_break(&collected[collected.len() - 1].1.content) {
+            break;
+        }
+
+        let line = lines[idx];
+        if line.trim().is_empty() {
+            break;
+        }
+
+        if let Some(parsed) = crate::utils::blockquote::parse_blockquote_prefix(line) {
+            if parsed.nesting_level != target_level || is_blockquote_content_boundary(parsed.content) {
+                break;
+            }
+            collected.push((
+                idx,
+                BlockquoteLineData::explicit(trim_preserving_hard_break(parsed.content), parsed.prefix.to_string()),
+            ));
+            idx += 1;
+            continue;
+        }
+
+        let lazy_content = line.trim_start();
+        if is_blockquote_content_boundary(lazy_content) {
+            break;
+        }
+
+        collected.push((idx, BlockquoteLineData::lazy(trim_preserving_hard_break(lazy_content))));
+        idx += 1;
+    }
+
+    if collected.is_empty() {
+        return None;
+    }
+
+    let para_end = collected[collected.len() - 1].0;
+    if target_idx < para_start || target_idx > para_end {
+        return None;
+    }
+
+    let line_data: Vec<BlockquoteLineData> = collected.iter().map(|(_, d)| d.clone()).collect();
+
+    let fallback_prefix = line_data
+        .iter()
+        .find_map(|d| d.prefix.clone())
+        .unwrap_or_else(|| "> ".to_string());
+    let explicit_prefix = dominant_blockquote_prefix(&line_data, &fallback_prefix);
+    let continuation_style = blockquote_continuation_style(&line_data);
+
+    let adjusted_line_length = options
+        .line_length
+        .saturating_sub(display_len(&explicit_prefix, options.length_mode))
+        .max(1);
+
+    let adjusted_options = ReflowOptions {
+        line_length: adjusted_line_length,
+        ..options.clone()
+    };
+
+    let styled_lines = reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &adjusted_options);
+
+    if styled_lines.is_empty() {
+        return None;
+    }
+
+    // Calculate byte offsets.
+    let mut start_byte = 0;
+    for line in lines.iter().take(para_start) {
+        start_byte += line.len() + 1;
+    }
+
+    let mut end_byte = start_byte;
+    for line in lines.iter().take(para_end + 1).skip(para_start) {
+        end_byte += line.len() + 1;
+    }
+
+    let includes_trailing_newline = para_end != lines.len() - 1 || content.ends_with('\n');
+    if !includes_trailing_newline {
+        end_byte -= 1;
+    }
+
+    let reflowed_joined = styled_lines.join("\n");
+    let reflowed_text = if includes_trailing_newline {
+        if reflowed_joined.ends_with('\n') {
+            reflowed_joined
+        } else {
+            format!("{reflowed_joined}\n")
+        }
+    } else if reflowed_joined.ends_with('\n') {
+        reflowed_joined.trim_end_matches('\n').to_string()
+    } else {
+        reflowed_joined
+    };
+
+    Some(ParagraphReflow {
+        start_byte,
+        end_byte,
+        reflowed_text,
+    })
+}
+
 /// Reflow a single paragraph at the specified line number
 ///
 /// This function finds the paragraph containing the given line number,
@@ -2245,6 +2647,29 @@ pub fn reflow_paragraph_at_line_with_mode(
     line_length: usize,
     length_mode: ReflowLengthMode,
 ) -> Option<ParagraphReflow> {
+    let options = ReflowOptions {
+        line_length,
+        length_mode,
+        ..Default::default()
+    };
+    reflow_paragraph_at_line_with_options(content, line_number, &options)
+}
+
+/// Reflow a paragraph at the given line using the provided options.
+///
+/// This is the canonical implementation used by both the rule's fix mode and the
+/// LSP "Reflow paragraph" action. Passing a fully configured `ReflowOptions` allows
+/// the LSP action to respect user-configured reflow mode, abbreviations, etc.
+///
+/// # Returns
+///
+/// Returns `Some(ParagraphReflow)` with byte offsets and reflowed text, or `None`
+/// if the line is out of bounds or sits inside a non-reflow-able construct.
+pub fn reflow_paragraph_at_line_with_options(
+    content: &str,
+    line_number: usize,
+    options: &ReflowOptions,
+) -> Option<ParagraphReflow> {
     if line_number == 0 {
         return None;
     }
@@ -2259,6 +2684,12 @@ pub fn reflow_paragraph_at_line_with_mode(
     let target_idx = line_number - 1; // Convert to 0-based
     let target_line = lines[target_idx];
     let trimmed = target_line.trim();
+
+    // Handle blockquote paragraphs (including lazy continuation lines) with
+    // style-preserving output.
+    if let Some(blockquote_reflow) = reflow_blockquote_paragraph_at_line(content, &lines, target_idx, options) {
+        return Some(blockquote_reflow);
+    }
 
     // Don't reflow special blocks
     if is_paragraph_boundary(trimmed, target_line) {
@@ -2321,19 +2752,8 @@ pub fn reflow_paragraph_at_line_with_mode(
     // Join paragraph lines and reflow
     let paragraph_text = paragraph_lines.join("\n");
 
-    // Create reflow options
-    let options = ReflowOptions {
-        line_length,
-        break_on_sentences: true,
-        preserve_breaks: false,
-        sentence_per_line: false,
-        semantic_line_breaks: false,
-        abbreviations: None,
-        length_mode,
-    };
-
     // Reflow the paragraph using reflow_markdown to handle it properly
-    let reflowed = reflow_markdown(&paragraph_text, &options);
+    let reflowed = reflow_markdown(&paragraph_text, options);
 
     // Ensure reflowed text matches whether the byte range includes a trailing newline
     // This is critical: if the range includes a newline, the replacement must too,

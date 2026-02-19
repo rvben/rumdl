@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **MD013**: Reflow now wraps blockquote paragraphs (including lazy continuation lines) in `fmt`/`check --fix`, with deterministic style preservation and LSP manual reflow parity
+  ([#437](https://github.com/rvben/rumdl/issues/437))
+
 ## [0.1.23] - 2026-02-18
 
 ### Added

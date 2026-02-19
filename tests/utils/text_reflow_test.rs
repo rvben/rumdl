@@ -4263,6 +4263,35 @@ fn test_reflow_paragraph_at_line_uses_visual_width() {
     assert!(result.is_some(), "Should reflow the paragraph");
 }
 
+#[test]
+fn test_reflow_paragraph_at_line_blockquote_explicit_target() {
+    let content = "> This is a long quoted line that should be wrapped by manual paragraph reflow for blockquotes.\n";
+    let result = reflow_paragraph_at_line(content, 1, 40).expect("Expected blockquote reflow");
+    let lines: Vec<&str> = result.reflowed_text.lines().collect();
+
+    assert!(!lines.is_empty(), "Expected reflowed output");
+    assert!(
+        lines.iter().all(|line| line.starts_with("> ")),
+        "Expected explicit quote prefix on all lines: {:?}",
+        lines
+    );
+}
+
+#[test]
+fn test_reflow_paragraph_at_line_blockquote_lazy_target() {
+    let content = "> This quoted paragraph begins explicitly and should still be detected when selecting a lazy continuation line.\nlazy continuation should be part of the same quoted paragraph for manual reflow.\n";
+    let result = reflow_paragraph_at_line(content, 2, 44).expect("Expected lazy continuation reflow");
+    let lines: Vec<&str> = result.reflowed_text.lines().collect();
+
+    assert!(!lines.is_empty(), "Expected reflowed output");
+    assert!(lines[0].starts_with("> "));
+    assert!(
+        lines.iter().skip(1).any(|line| !line.starts_with('>')),
+        "Expected at least one lazy continuation line: {:?}",
+        lines
+    );
+}
+
 // =============================================================================
 // Defensive tests for #409: semantic-line-breaks with list items
 // =============================================================================
@@ -4731,5 +4760,184 @@ fn test_semantic_merge_short_trailing_at_exact_limit() {
     assert_eq!(
         line_count, 1,
         "Short trailing line at exact limit should be merged. Got {line_count} lines: {result:?}"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Tests for shared blockquote reflow utilities
+// --------------------------------------------------------------------------
+
+#[test]
+fn test_blockquote_continuation_style_all_explicit() {
+    let lines = vec![
+        BlockquoteLineData::explicit("First line.".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("Second line.".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("Third line.".to_string(), "> ".to_string()),
+    ];
+    assert_eq!(
+        blockquote_continuation_style(&lines),
+        BlockquoteContinuationStyle::Explicit
+    );
+}
+
+#[test]
+fn test_blockquote_continuation_style_all_lazy() {
+    let lines = vec![
+        BlockquoteLineData::explicit("First line.".to_string(), "> ".to_string()),
+        BlockquoteLineData::lazy("Second line.".to_string()),
+        BlockquoteLineData::lazy("Third line.".to_string()),
+    ];
+    assert_eq!(blockquote_continuation_style(&lines), BlockquoteContinuationStyle::Lazy);
+}
+
+#[test]
+fn test_blockquote_continuation_style_tie_resolves_to_explicit() {
+    // One explicit continuation, one lazy continuation → tie → Explicit
+    let lines = vec![
+        BlockquoteLineData::explicit("First.".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("Second.".to_string(), "> ".to_string()),
+        BlockquoteLineData::lazy("Third.".to_string()),
+    ];
+    assert_eq!(
+        blockquote_continuation_style(&lines),
+        BlockquoteContinuationStyle::Explicit
+    );
+}
+
+#[test]
+fn test_blockquote_continuation_style_single_element() {
+    // Single-element slice: both counts are zero, tie-breaking returns Explicit
+    let lines = vec![BlockquoteLineData::explicit("Only line.".to_string(), "> ".to_string())];
+    assert_eq!(
+        blockquote_continuation_style(&lines),
+        BlockquoteContinuationStyle::Explicit
+    );
+}
+
+#[test]
+fn test_dominant_blockquote_prefix_single_variant() {
+    let lines = vec![
+        BlockquoteLineData::explicit("a".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("b".to_string(), "> ".to_string()),
+        BlockquoteLineData::lazy("c".to_string()),
+    ];
+    assert_eq!(dominant_blockquote_prefix(&lines, ">> "), "> ");
+}
+
+#[test]
+fn test_dominant_blockquote_prefix_majority_wins() {
+    let lines = vec![
+        BlockquoteLineData::explicit("a".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("b".to_string(), ">> ".to_string()),
+        BlockquoteLineData::explicit("c".to_string(), ">> ".to_string()),
+    ];
+    assert_eq!(dominant_blockquote_prefix(&lines, "> "), ">> ");
+}
+
+#[test]
+fn test_dominant_blockquote_prefix_tie_chooses_earliest() {
+    // Both prefixes appear once; the one with the smaller index wins.
+    let lines = vec![
+        BlockquoteLineData::explicit("a".to_string(), "> ".to_string()), // idx 0
+        BlockquoteLineData::explicit("b".to_string(), ">> ".to_string()), // idx 1
+    ];
+    assert_eq!(dominant_blockquote_prefix(&lines, ">>> "), "> ");
+}
+
+#[test]
+fn test_dominant_blockquote_prefix_no_explicit_uses_fallback() {
+    let lines = vec![
+        BlockquoteLineData::lazy("a".to_string()),
+        BlockquoteLineData::lazy("b".to_string()),
+    ];
+    assert_eq!(dominant_blockquote_prefix(&lines, "> "), "> ");
+}
+
+#[test]
+fn test_reflow_blockquote_content_explicit_style() {
+    let lines = vec![BlockquoteLineData::explicit(
+        "This is a long blockquote line that exceeds the limit.".to_string(),
+        "> ".to_string(),
+    )];
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+    let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Explicit, &options);
+    // All output lines must start with "> "
+    assert!(
+        result.iter().all(|l| l.starts_with("> ")),
+        "All lines must carry explicit prefix: {result:?}"
+    );
+    // No line may exceed the original line_length
+    assert!(
+        result.iter().all(|l| l.len() <= 36), // 30 + some slack for prefix
+        "Lines must be wrapped: {result:?}"
+    );
+}
+
+#[test]
+fn test_reflow_blockquote_content_lazy_style() {
+    let lines = vec![
+        BlockquoteLineData::explicit("First line.".to_string(), "> ".to_string()),
+        BlockquoteLineData::lazy("Second line.".to_string()),
+    ];
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+    let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Lazy, &options);
+    // First output line must have explicit prefix.
+    assert!(result[0].starts_with("> "), "First line must be explicit: {result:?}");
+    // If there are continuation lines, they should not have "> " prefix.
+    if result.len() > 1 {
+        assert!(
+            !result[1].starts_with("> "),
+            "Lazy continuation must not carry prefix: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_reflow_blockquote_content_hard_break_preserved() {
+    // Content ending with backslash: the marker must appear on the last wrapped line.
+    let lines = vec![BlockquoteLineData::explicit(
+        "Short line with hard break.\\".to_string(),
+        "> ".to_string(),
+    )];
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+    let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Explicit, &options);
+    assert!(
+        result.last().map_or(false, |l| l.ends_with('\\')),
+        "Hard break marker must be on the last output line: {result:?}"
+    );
+}
+
+#[test]
+fn test_reflow_blockquote_content_force_explicit_for_structural_lines() {
+    // Content starting with "#" must always get an explicit prefix, even when lazy
+    // style is requested, because lazy syntax would make the renderer treat it as a
+    // heading rather than blockquote content.
+    //
+    // "Normal line." (12 chars) + "# Heading" (9 chars) joined as one paragraph,
+    // then wrapped at line_length=13. This forces "# Heading" onto its own line,
+    // where should_force_explicit_blockquote_line detects the "#" and upgrades it
+    // to explicit even though continuation_style is Lazy.
+    let lines = vec![
+        BlockquoteLineData::explicit("Normal line.".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("# Heading".to_string(), "> ".to_string()),
+    ];
+    let options = ReflowOptions {
+        line_length: 13,
+        ..Default::default()
+    };
+    let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Lazy, &options);
+    // The line carrying "# Heading" must have an explicit ">" prefix.
+    assert!(
+        result.iter().any(|l| l.starts_with("> # ")),
+        "Heading content must carry explicit prefix even in lazy mode: {result:?}"
     );
 }

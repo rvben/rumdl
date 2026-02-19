@@ -201,6 +201,24 @@ fn test_blockquote_with_indented_content() {
 }
 
 #[test]
+fn test_blockquote_spaced_nested_markers_are_detected() {
+    let content = r#"> > Nested quote content
+> > Additional line
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let bq1 = ctx.lines.get(0).unwrap().blockquote.as_ref().unwrap();
+    assert_eq!(bq1.nesting_level, 2);
+    assert_eq!(bq1.prefix, "> > ");
+    assert_eq!(bq1.content, "Nested quote content");
+
+    let bq2 = ctx.lines.get(1).unwrap().blockquote.as_ref().unwrap();
+    assert_eq!(bq2.nesting_level, 2);
+    assert_eq!(bq2.prefix, "> > ");
+    assert_eq!(bq2.content, "Additional line");
+}
+
+#[test]
 fn test_footnote_definitions_not_parsed_as_reference_defs() {
     // Footnote definitions use [^id]: syntax and should NOT be parsed as reference definitions
     let content = r#"# Title

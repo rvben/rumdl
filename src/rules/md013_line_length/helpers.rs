@@ -170,37 +170,6 @@ pub(crate) fn is_list_item(line: &str) -> bool {
     is_numbered_list_item(line)
 }
 
-/// Check if a line contains only template directives (no other content)
-///
-/// Detects common template syntax used in static site generators:
-/// - Handlebars/mdBook/Mustache: `{{...}}`
-/// - Jinja2/Liquid/Jekyll: `{%...%}`
-/// - Hugo shortcodes: `{{<...>}}` or `{{%...%}}`
-///
-/// Template directives are preprocessor directives, not Markdown content,
-/// so they should be treated as paragraph boundaries like HTML comments.
-pub(crate) fn is_template_directive_only(line: &str) -> bool {
-    let trimmed = line.trim();
-
-    // Empty lines are not template directives
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    // Check for various template syntaxes
-    // Handlebars/mdBook/Mustache: {{...}}
-    if trimmed.starts_with("{{") && trimmed.ends_with("}}") {
-        return true;
-    }
-
-    // Jinja2/Liquid/Jekyll: {%...%}
-    if trimmed.starts_with("{%") && trimmed.ends_with("%}") {
-        return true;
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

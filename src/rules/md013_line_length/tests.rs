@@ -3014,3 +3014,131 @@ fn test_semantic_link_in_list_item() {
     // Text-only: "- Click [here] now." = 19 chars, under 40
     assert!(result.is_empty(), "Should suppress link URL excess in list items");
 }
+
+#[test]
+fn test_blockquote_reflow_generates_fix_for_explicit_quote() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a very long blockquote line that should be reflowed by MD013 when reflow is enabled.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(result.len(), 1);
+    assert!(result[0].fix.is_some(), "Expected a blockquote reflow fix");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_ne!(fixed, content);
+    assert!(fixed.lines().all(|line| line.starts_with("> ")));
+}
+
+#[test]
+fn test_blockquote_reflow_preserves_lazy_style() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(42),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This opening quoted line is long enough that reflow must wrap it to multiple lines and preserve style.\nthis lazy continuation should remain lazy when safe to do so.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(!fixed_lines.is_empty());
+    assert!(fixed_lines[0].starts_with("> "));
+    assert!(
+        fixed_lines.iter().skip(1).any(|line| !line.starts_with('>')),
+        "Expected at least one lazy continuation line: {fixed}"
+    );
+}
+
+#[test]
+fn test_blockquote_reflow_mixed_style_tie_resolves_explicit() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(44),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is an explicit quoted line that is intentionally long for wrapping behavior.\nlazy continuation text that participates in the same quote paragraph.\n> Another explicit continuation line to create a style tie for continuations.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(!fixed_lines.is_empty());
+    assert!(
+        fixed_lines.iter().all(|line| line.starts_with("> ")),
+        "Tie should resolve to explicit continuation style: {fixed}"
+    );
+}
+
+#[test]
+fn test_blockquote_reflow_preserves_nested_prefix_style() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> > This nested quote paragraph is very long and should be wrapped while preserving the spaced nested prefix style.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.lines().all(|line| line.starts_with("> > ")),
+        "Expected spaced nested blockquote prefix to be preserved: {fixed}"
+    );
+}
+
+#[test]
+fn test_blockquote_reflow_preserves_hard_break_markers() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(36),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Line 0 ends with backslash hard break; line 1 is a lazy continuation but
+    // follows a hard-break segment, so it becomes a separate paragraph.
+    let content = "> This quoted line ends with a hard break marker and should keep it after wrapping.\\\nsecond sentence that should remain in the same quote paragraph and be wrapped.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The backslash marker must appear on a blockquote line (with "> " prefix),
+    // not on an unwrapped or lazy continuation line.
+    assert!(
+        fixed.lines().any(|line| line.starts_with("> ") && line.ends_with('\\')),
+        "Expected hard break marker on a '> '-prefixed blockquote line: {fixed}"
+    );
+
+    // There should be exactly one hard-break marker in the output.
+    let backslash_count = fixed.lines().filter(|l| l.ends_with('\\')).count();
+    assert_eq!(
+        backslash_count, 1,
+        "Expected exactly one hard break marker in output, got {backslash_count}: {fixed}"
+    );
+
+    // All lines before the marker line must NOT end with '\' (marker is at segment boundary).
+    let lines: Vec<&str> = fixed.lines().collect();
+    let marker_pos = lines.iter().position(|l| l.ends_with('\\')).unwrap();
+    for line in &lines[..marker_pos] {
+        assert!(
+            !line.ends_with('\\'),
+            "Found unexpected backslash before segment boundary in: {line:?}\nFull output: {fixed}"
+        );
+    }
+}
