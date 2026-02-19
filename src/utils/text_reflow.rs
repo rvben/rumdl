@@ -1787,19 +1787,17 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_length += word_len;
                 }
             }
-        } else if matches!(element, Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough(_))
-            && element_len > options.line_length
+        } else if matches!(
+            element,
+            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough(_)
+        ) && element_len > options.line_length
         {
             // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
             // Split content word-by-word, attach the opening marker to the first word
             // and the closing marker to the last word.
             let (content, marker): (&str, &str) = match element {
-                Element::Italic { content, underscore } => {
-                    (content.as_str(), if *underscore { "_" } else { "*" })
-                }
-                Element::Bold { content, underscore } => {
-                    (content.as_str(), if *underscore { "__" } else { "**" })
-                }
+                Element::Italic { content, underscore } => (content.as_str(), if *underscore { "_" } else { "*" }),
+                Element::Bold { content, underscore } => (content.as_str(), if *underscore { "__" } else { "**" }),
                 Element::Strikethrough(content) => (content.as_str(), "~~"),
                 _ => unreachable!(),
             };

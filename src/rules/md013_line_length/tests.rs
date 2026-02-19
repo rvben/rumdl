@@ -1070,7 +1070,10 @@ fn test_reflow_underscore_italic_paragraph() {
             line.len()
         );
     }
-    assert!(fixed.contains('_'), "Underscore italic markers lost after reflow: {fixed}");
+    assert!(
+        fixed.contains('_'),
+        "Underscore italic markers lost after reflow: {fixed}"
+    );
 }
 
 #[test]
@@ -1089,10 +1092,7 @@ fn test_reflow_inline_italic_not_broken() {
 
     let fixed = rule.fix(&ctx).unwrap();
 
-    assert!(
-        fixed.contains("*italic text*"),
-        "Short inline italic broken: {fixed}"
-    );
+    assert!(fixed.contains("*italic text*"), "Short inline italic broken: {fixed}");
 }
 
 #[test]
