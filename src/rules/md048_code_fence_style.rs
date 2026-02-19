@@ -1,6 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
-use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
@@ -24,65 +23,6 @@ impl MD048CodeFenceStyle {
 
     pub fn from_config_struct(config: MD048Config) -> Self {
         Self { config }
-    }
-
-    /// Check a fence and generate warning if it doesn't match the target style
-    fn check_fence(
-        &self,
-        line: &str,
-        line_num: usize,
-        target_style: CodeFenceStyle,
-        _line_index: &LineIndex,
-    ) -> Option<LintWarning> {
-        let trimmed = line.trim_start();
-
-        if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
-            // Find the position and length of the backtick fence
-            let fence_start = line.len() - trimmed.len();
-            let fence_end = fence_start + trimmed.find(|c: char| c != '`').unwrap_or(trimmed.len());
-
-            // Calculate precise character range for the entire fence
-            let (start_line, start_col, end_line, end_col) =
-                calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-            return Some(LintWarning {
-                rule_name: Some(self.name().to_string()),
-                message: "Code fence style: use ~~~ instead of ```".to_string(),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                    replacement: line.replace("```", "~~~"),
-                }),
-            });
-        } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
-            // Find the position and length of the tilde fence
-            let fence_start = line.len() - trimmed.len();
-            let fence_end = fence_start + trimmed.find(|c: char| c != '~').unwrap_or(trimmed.len());
-
-            // Calculate precise character range for the entire fence
-            let (start_line, start_col, end_line, end_col) =
-                calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
-
-            return Some(LintWarning {
-                rule_name: Some(self.name().to_string()),
-                message: "Code fence style: use ``` instead of ~~~".to_string(),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
-                    replacement: line.replace("~~~", "```"),
-                }),
-            });
-        }
-
-        None
     }
 
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<CodeFenceStyle> {
@@ -125,6 +65,48 @@ impl MD048CodeFenceStyle {
     }
 }
 
+/// Find the maximum fence length using `target_char` within the body of a fenced block.
+///
+/// Scans from the line after `opening_line` until the matching closing fence
+/// (same `opening_char`, length >= `opening_fence_len`, no trailing content).
+/// Returns the maximum number of consecutive `target_char` characters found at
+/// the start of any interior line (after stripping leading whitespace).
+///
+/// This is used to compute the minimum fence length needed when converting a
+/// fence from one style to another so that nesting remains unambiguous.
+/// For example, converting a `~~~` outer fence that contains ```` ``` ```` inner
+/// fences to backtick style requires using ```` ```` ```` (4 backticks) so that
+/// the inner 3-backtick fences cannot inadvertently close the outer block.
+fn max_inner_fence_length_of_char(
+    lines: &[&str],
+    opening_line: usize,
+    opening_fence_len: usize,
+    opening_char: char,
+    target_char: char,
+) -> usize {
+    let mut max_len = 0usize;
+
+    for line in lines.iter().skip(opening_line + 1) {
+        let trimmed = line.trim_start();
+
+        // Stop at the closing fence of the outer block.
+        if trimmed.starts_with(opening_char) {
+            let len = trimmed.chars().take_while(|&c| c == opening_char).count();
+            if len >= opening_fence_len && trimmed[len..].trim().is_empty() {
+                break;
+            }
+        }
+
+        // Track the longest run of target_char at the start of any interior line.
+        if trimmed.starts_with(target_char) {
+            let len = trimmed.chars().take_while(|&c| c == target_char).count();
+            max_len = max_len.max(len);
+        }
+    }
+
+    max_len
+}
+
 impl Rule for MD048CodeFenceStyle {
     fn name(&self) -> &'static str {
         "MD048"
@@ -136,7 +118,7 @@ impl Rule for MD048CodeFenceStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -145,39 +127,132 @@ impl Rule for MD048CodeFenceStyle {
             _ => self.config.style,
         };
 
-        // Track if we're inside a code block
+        let lines: Vec<&str> = content.lines().collect();
         let mut in_code_block = false;
-        let mut code_block_fence = String::new();
+        let mut code_block_fence_char = '`';
+        let mut code_block_fence_len = 0usize;
+        // The fence length to use when writing the converted closing fence.
+        // May be longer than the original when inner fences of the target style
+        // require disambiguation by length.
+        let mut converted_fence_len = 0usize;
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, &line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
 
-            // Check for code fence markers
-            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-                let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
-                let current_fence = fence_char.to_string().repeat(fence_length);
+            if !trimmed.starts_with("```") && !trimmed.starts_with("~~~") {
+                continue;
+            }
 
-                if !in_code_block {
-                    // Entering a code block
-                    in_code_block = true;
-                    code_block_fence = current_fence.clone();
+            let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
+            let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
 
-                    // Check this opening fence
-                    if let Some(warning) = self.check_fence(line, line_num, target_style, _line_index) {
-                        warnings.push(warning);
-                    }
-                } else if trimmed.starts_with(&code_block_fence) && trimmed[code_block_fence.len()..].trim().is_empty()
-                {
-                    // Exiting the code block - check this closing fence too
-                    if let Some(warning) = self.check_fence(line, line_num, target_style, _line_index) {
-                        warnings.push(warning);
+            if !in_code_block {
+                in_code_block = true;
+                code_block_fence_char = fence_char;
+                code_block_fence_len = fence_len;
+
+                let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
+                    || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+
+                if needs_conversion {
+                    let target_char = if target_style == CodeFenceStyle::Backtick {
+                        '`'
+                    } else {
+                        '~'
+                    };
+
+                    // Compute how many target_char characters the converted fence needs.
+                    // Must be strictly greater than any inner fence of the target style.
+                    let max_inner =
+                        max_inner_fence_length_of_char(&lines, line_num, fence_len, fence_char, target_char);
+                    converted_fence_len = fence_len.max(max_inner + 1);
+
+                    let prefix = &line[..line.len() - trimmed.len()];
+                    let info = &trimmed[fence_len..];
+                    let replacement = format!("{prefix}{}{info}", target_char.to_string().repeat(converted_fence_len));
+
+                    let fence_start = line.len() - trimmed.len();
+                    let fence_end = fence_start + fence_len;
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
+
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!(
+                            "Code fence style: use {} instead of {}",
+                            if target_style == CodeFenceStyle::Backtick {
+                                "```"
+                            } else {
+                                "~~~"
+                            },
+                            if fence_char == '`' { "```" } else { "~~~" }
+                        ),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                            replacement,
+                        }),
+                    });
+                } else {
+                    converted_fence_len = fence_len;
+                }
+            } else {
+                // Inside a code block — check if this is the closing fence.
+                let is_closing = fence_char == code_block_fence_char
+                    && fence_len >= code_block_fence_len
+                    && trimmed[fence_len..].trim().is_empty();
+
+                if is_closing {
+                    let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
+                        || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+
+                    if needs_conversion {
+                        let target_char = if target_style == CodeFenceStyle::Backtick {
+                            '`'
+                        } else {
+                            '~'
+                        };
+
+                        let prefix = &line[..line.len() - trimmed.len()];
+                        let replacement = format!("{prefix}{}", target_char.to_string().repeat(converted_fence_len));
+
+                        let fence_start = line.len() - trimmed.len();
+                        let fence_end = fence_start + fence_len;
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: format!(
+                                "Code fence style: use {} instead of {}",
+                                if target_style == CodeFenceStyle::Backtick {
+                                    "```"
+                                } else {
+                                    "~~~"
+                                },
+                                if fence_char == '`' { "```" } else { "~~~" }
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                                replacement,
+                            }),
+                        });
                     }
 
                     in_code_block = false;
-                    code_block_fence.clear();
+                    code_block_fence_len = 0;
+                    converted_fence_len = 0;
                 }
-                // If it's a fence inside a code block, skip it
+                // Lines inside the block that are not the closing fence are left alone.
             }
         }
 
@@ -198,70 +273,78 @@ impl Rule for MD048CodeFenceStyle {
             _ => self.config.style,
         };
 
+        let lines: Vec<&str> = content.lines().collect();
         let mut result = String::new();
         let mut in_code_block = false;
-        let mut code_block_fence = String::new();
+        let mut code_block_fence_char = '`';
+        let mut code_block_fence_len = 0usize;
+        let mut converted_fence_len = 0usize;
 
-        for line in content.lines() {
+        for (line_idx, &line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
 
-            // Check for code fence markers
             if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
                 let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
-                let fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
-                let current_fence = fence_char.to_string().repeat(fence_length);
+                let fence_len = trimmed.chars().take_while(|&c| c == fence_char).count();
 
                 if !in_code_block {
-                    // Entering a code block
                     in_code_block = true;
-                    code_block_fence = current_fence.clone();
+                    code_block_fence_char = fence_char;
+                    code_block_fence_len = fence_len;
 
-                    // Fix this opening fence
-                    if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
-                        // Replace all backticks with tildes, preserving the count
+                    let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
+                        || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+
+                    if needs_conversion {
+                        let target_char = if target_style == CodeFenceStyle::Backtick {
+                            '`'
+                        } else {
+                            '~'
+                        };
+
+                        let max_inner =
+                            max_inner_fence_length_of_char(&lines, line_idx, fence_len, fence_char, target_char);
+                        converted_fence_len = fence_len.max(max_inner + 1);
+
                         let prefix = &line[..line.len() - trimmed.len()];
-                        let rest = &trimmed[fence_length..];
+                        let info = &trimmed[fence_len..];
                         result.push_str(prefix);
-                        result.push_str(&"~".repeat(fence_length));
-                        result.push_str(rest);
-                    } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
-                        // Replace all tildes with backticks, preserving the count
-                        let prefix = &line[..line.len() - trimmed.len()];
-                        let rest = &trimmed[fence_length..];
-                        result.push_str(prefix);
-                        result.push_str(&"`".repeat(fence_length));
-                        result.push_str(rest);
+                        result.push_str(&target_char.to_string().repeat(converted_fence_len));
+                        result.push_str(info);
                     } else {
+                        converted_fence_len = fence_len;
                         result.push_str(line);
                     }
-                } else if trimmed.starts_with(&code_block_fence) && trimmed[code_block_fence.len()..].trim().is_empty()
-                {
-                    // Exiting the code block - fix this closing fence too
-                    if trimmed.starts_with("```") && target_style == CodeFenceStyle::Tilde {
-                        // Replace all backticks with tildes, preserving the count
-                        let prefix = &line[..line.len() - trimmed.len()];
-                        let fence_length = trimmed.chars().take_while(|&c| c == '`').count();
-                        let rest = &trimmed[fence_length..];
-                        result.push_str(prefix);
-                        result.push_str(&"~".repeat(fence_length));
-                        result.push_str(rest);
-                    } else if trimmed.starts_with("~~~") && target_style == CodeFenceStyle::Backtick {
-                        // Replace all tildes with backticks, preserving the count
-                        let prefix = &line[..line.len() - trimmed.len()];
-                        let fence_length = trimmed.chars().take_while(|&c| c == '~').count();
-                        let rest = &trimmed[fence_length..];
-                        result.push_str(prefix);
-                        result.push_str(&"`".repeat(fence_length));
-                        result.push_str(rest);
-                    } else {
-                        result.push_str(line);
-                    }
-
-                    in_code_block = false;
-                    code_block_fence.clear();
                 } else {
-                    // Inside a code block - don't fix nested fences
-                    result.push_str(line);
+                    // Inside a code block — check if this is the closing fence.
+                    let is_closing = fence_char == code_block_fence_char
+                        && fence_len >= code_block_fence_len
+                        && trimmed[fence_len..].trim().is_empty();
+
+                    if is_closing {
+                        let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
+                            || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
+
+                        if needs_conversion {
+                            let target_char = if target_style == CodeFenceStyle::Backtick {
+                                '`'
+                            } else {
+                                '~'
+                            };
+                            let prefix = &line[..line.len() - trimmed.len()];
+                            result.push_str(prefix);
+                            result.push_str(&target_char.to_string().repeat(converted_fence_len));
+                        } else {
+                            result.push_str(line);
+                        }
+
+                        in_code_block = false;
+                        code_block_fence_len = 0;
+                        converted_fence_len = 0;
+                    } else {
+                        // Inside block, not the closing fence — preserve as-is.
+                        result.push_str(line);
+                    }
                 }
             } else {
                 result.push_str(line);
@@ -517,5 +600,124 @@ mod tests {
         let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
         let (name, _config) = rule.default_config_section().unwrap();
         assert_eq!(name, "MD048");
+    }
+
+    /// Tilde outer fence containing backtick inner fence: converting to backtick
+    /// style must use a longer fence (4 backticks) to preserve valid nesting.
+    #[test]
+    fn test_tilde_outer_with_backtick_inner_uses_longer_fence() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "~~~text\n```rust\ncode\n```\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The outer fence must be 4 backticks to disambiguate from the inner 3-backtick fences.
+        assert_eq!(fixed, "````text\n```rust\ncode\n```\n````");
+    }
+
+    /// check() warns about the outer tilde fences and the fix replacements use the
+    /// correct (longer) fence length.
+    #[test]
+    fn test_check_tilde_outer_with_backtick_inner_warns_with_correct_replacement() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "~~~text\n```rust\ncode\n```\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Only the outer tilde fences are warned about; inner backtick fences are untouched.
+        assert_eq!(warnings.len(), 2);
+        let open_fix = warnings[0].fix.as_ref().unwrap();
+        let close_fix = warnings[1].fix.as_ref().unwrap();
+        assert_eq!(open_fix.replacement, "````text");
+        assert_eq!(close_fix.replacement, "````");
+    }
+
+    /// When the inner backtick fences use 4 backticks, the outer converted fence
+    /// must use at least 5.
+    #[test]
+    fn test_tilde_outer_with_longer_backtick_inner() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "~~~text\n````rust\ncode\n````\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "`````text\n````rust\ncode\n````\n`````");
+    }
+
+    /// Backtick outer fence containing tilde inner fence: converting to tilde
+    /// style must use a longer tilde fence.
+    #[test]
+    fn test_backtick_outer_with_tilde_inner_uses_longer_fence() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        let content = "```text\n~~~rust\ncode\n~~~\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "~~~~text\n~~~rust\ncode\n~~~\n~~~~");
+    }
+
+    /// The combined MD013+MD048 fix must be idempotent: applying the fix twice
+    /// must produce the same result as applying it once, and must not introduce
+    /// double blank lines (MD012).
+    #[test]
+    fn test_fix_idempotent_no_double_blanks_with_nested_fences() {
+        use crate::fix_coordinator::FixCoordinator;
+        use crate::rules::Rule;
+        use crate::rules::md013_line_length::MD013LineLength;
+
+        // This is the exact pattern that caused double blank lines when MD048 and
+        // MD013 were applied together: a tilde outer fence with an inner backtick
+        // fence inside a list item that is too long.
+        let content = "\
+- **edition**: Rust edition to use by default for the code snippets. Default is `\"2015\"`. \
+Individual code blocks can be controlled with the `edition2015`, `edition2018`, `edition2021` \
+or `edition2024` annotations, such as:
+
+  ~~~text
+  ```rust,edition2015
+  // This only works in 2015.
+  let try = true;
+  ```
+  ~~~
+
+### Build options
+";
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD013LineLength::new(80, false, false, false, true)),
+            Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Backtick)),
+        ];
+
+        let mut first_pass = content.to_string();
+        let coordinator = FixCoordinator::new();
+        coordinator
+            .apply_fixes_iterative(&rules, &[], &mut first_pass, &Default::default(), 10, None)
+            .expect("fix should not fail");
+
+        // No double blank lines after first pass.
+        let lines: Vec<&str> = first_pass.lines().collect();
+        for i in 0..lines.len().saturating_sub(1) {
+            assert!(
+                !(lines[i].is_empty() && lines[i + 1].is_empty()),
+                "Double blank at lines {},{} after first pass:\n{first_pass}",
+                i + 1,
+                i + 2
+            );
+        }
+
+        // Second pass must produce identical output (idempotent).
+        let mut second_pass = first_pass.clone();
+        let rules2: Vec<Box<dyn Rule>> = vec![
+            Box::new(MD013LineLength::new(80, false, false, false, true)),
+            Box::new(MD048CodeFenceStyle::new(CodeFenceStyle::Backtick)),
+        ];
+        let coordinator2 = FixCoordinator::new();
+        coordinator2
+            .apply_fixes_iterative(&rules2, &[], &mut second_pass, &Default::default(), 10, None)
+            .expect("fix should not fail");
+
+        assert_eq!(
+            first_pass, second_pass,
+            "Fix is not idempotent:\nFirst pass:\n{first_pass}\nSecond pass:\n{second_pass}"
+        );
     }
 }
