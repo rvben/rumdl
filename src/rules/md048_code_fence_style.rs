@@ -77,12 +77,24 @@ impl MD048CodeFenceStyle {
 /// For example, converting a `~~~` outer fence that contains ```` ``` ```` inner
 /// fences to backtick style requires using ```` ```` ```` (4 backticks) so that
 /// the inner 3-backtick fences cannot inadvertently close the outer block.
+///
+/// `outer_has_info` controls whether interior fence-like lines with info strings
+/// (e.g. `` ```rust ``) are counted. Per CommonMark, a line with trailing content
+/// after the fence characters can never be a closing fence, so it poses no
+/// ambiguity risk in isolation. However, when the outer fence itself has an info
+/// string the block is a display block intentionally showing inner fence syntax
+/// as examples, and those inner sequences still determine the required outer
+/// length so that the outer closing fence (which has no info string) is not
+/// mistaken for one of them. When the outer fence has no info string, only bare
+/// interior sequences (no info) are counted, since those are the only lines that
+/// could close a code block.
 fn max_inner_fence_length_of_char(
     lines: &[&str],
     opening_line: usize,
     opening_fence_len: usize,
     opening_char: char,
     target_char: char,
+    outer_has_info: bool,
 ) -> usize {
     let mut max_len = 0usize;
 
@@ -98,9 +110,15 @@ fn max_inner_fence_length_of_char(
         }
 
         // Track the longest run of target_char at the start of any interior line.
+        // Only count sequences that could matter for ambiguity: bare sequences
+        // (no info string) are always counted; info-string sequences are counted
+        // only when the outer fence also has an info string (display blocks).
         if trimmed.starts_with(target_char) {
             let len = trimmed.chars().take_while(|&c| c == target_char).count();
-            max_len = max_len.max(len);
+            let has_info = !trimmed[len..].trim().is_empty();
+            if !has_info || outer_has_info {
+                max_len = max_len.max(len);
+            }
         }
     }
 
@@ -131,10 +149,12 @@ impl Rule for MD048CodeFenceStyle {
         let mut in_code_block = false;
         let mut code_block_fence_char = '`';
         let mut code_block_fence_len = 0usize;
-        // The fence length to use when writing the converted closing fence.
-        // May be longer than the original when inner fences of the target style
-        // require disambiguation by length.
+        // The fence length to use when writing the converted/lengthened closing fence.
+        // May be longer than the original when inner fences require disambiguation by length.
         let mut converted_fence_len = 0usize;
+        // True when the opening fence was already the correct style but its length is
+        // ambiguous (interior has same-style fences of equal or greater length).
+        let mut needs_lengthening = false;
 
         for (line_num, &line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -163,12 +183,20 @@ impl Rule for MD048CodeFenceStyle {
 
                     // Compute how many target_char characters the converted fence needs.
                     // Must be strictly greater than any inner fence of the target style.
-                    let max_inner =
-                        max_inner_fence_length_of_char(&lines, line_num, fence_len, fence_char, target_char);
-                    converted_fence_len = fence_len.max(max_inner + 1);
-
                     let prefix = &line[..line.len() - trimmed.len()];
                     let info = &trimmed[fence_len..];
+                    let outer_has_info = !info.trim().is_empty();
+                    let max_inner = max_inner_fence_length_of_char(
+                        &lines,
+                        line_num,
+                        fence_len,
+                        fence_char,
+                        target_char,
+                        outer_has_info,
+                    );
+                    converted_fence_len = fence_len.max(max_inner + 1);
+                    needs_lengthening = false;
+
                     let replacement = format!("{prefix}{}{info}", target_char.to_string().repeat(converted_fence_len));
 
                     let fence_start = line.len() - trimmed.len();
@@ -198,7 +226,55 @@ impl Rule for MD048CodeFenceStyle {
                         }),
                     });
                 } else {
-                    converted_fence_len = fence_len;
+                    // Already the correct style. Check for fence-length ambiguity:
+                    // if the interior contains same-style fences of equal or greater
+                    // length, the outer fence cannot be distinguished from an inner
+                    // closing fence and must be made longer.
+                    let prefix = &line[..line.len() - trimmed.len()];
+                    let info = &trimmed[fence_len..];
+                    let outer_has_info = !info.trim().is_empty();
+                    let max_inner = max_inner_fence_length_of_char(
+                        &lines,
+                        line_num,
+                        fence_len,
+                        fence_char,
+                        fence_char,
+                        outer_has_info,
+                    );
+                    if max_inner >= fence_len {
+                        converted_fence_len = max_inner + 1;
+                        needs_lengthening = true;
+
+                        let replacement =
+                            format!("{prefix}{}{info}", fence_char.to_string().repeat(converted_fence_len));
+
+                        let fence_start = line.len() - trimmed.len();
+                        let fence_end = fence_start + fence_len;
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: format!(
+                                "Code fence length is ambiguous: outer fence ({fence_len} {}) \
+                                 contains interior fence sequences of equal length; \
+                                 use {converted_fence_len}",
+                                if fence_char == '`' { "backticks" } else { "tildes" },
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                                replacement,
+                            }),
+                        });
+                    } else {
+                        converted_fence_len = fence_len;
+                        needs_lengthening = false;
+                    }
                 }
             } else {
                 // Inside a code block — check if this is the closing fence.
@@ -210,11 +286,15 @@ impl Rule for MD048CodeFenceStyle {
                     let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
                         || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
 
-                    if needs_conversion {
-                        let target_char = if target_style == CodeFenceStyle::Backtick {
-                            '`'
+                    if needs_conversion || needs_lengthening {
+                        let target_char = if needs_conversion {
+                            if target_style == CodeFenceStyle::Backtick {
+                                '`'
+                            } else {
+                                '~'
+                            }
                         } else {
-                            '~'
+                            fence_char
                         };
 
                         let prefix = &line[..line.len() - trimmed.len()];
@@ -225,9 +305,8 @@ impl Rule for MD048CodeFenceStyle {
                         let (start_line, start_col, end_line, end_col) =
                             calculate_match_range(line_num + 1, line, fence_start, fence_end - fence_start);
 
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            message: format!(
+                        let message = if needs_conversion {
+                            format!(
                                 "Code fence style: use {} instead of {}",
                                 if target_style == CodeFenceStyle::Backtick {
                                     "```"
@@ -235,7 +314,18 @@ impl Rule for MD048CodeFenceStyle {
                                     "~~~"
                                 },
                                 if fence_char == '`' { "```" } else { "~~~" }
-                            ),
+                            )
+                        } else {
+                            format!(
+                                "Code fence length is ambiguous: closing fence ({fence_len} {}) \
+                                 must match the lengthened outer fence; use {converted_fence_len}",
+                                if fence_char == '`' { "backticks" } else { "tildes" },
+                            )
+                        };
+
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message,
                             line: start_line,
                             column: start_col,
                             end_line,
@@ -251,6 +341,7 @@ impl Rule for MD048CodeFenceStyle {
                     in_code_block = false;
                     code_block_fence_len = 0;
                     converted_fence_len = 0;
+                    needs_lengthening = false;
                 }
                 // Lines inside the block that are not the closing fence are left alone.
             }
@@ -279,6 +370,7 @@ impl Rule for MD048CodeFenceStyle {
         let mut code_block_fence_char = '`';
         let mut code_block_fence_len = 0usize;
         let mut converted_fence_len = 0usize;
+        let mut needs_lengthening = false;
 
         for (line_idx, &line) in lines.iter().enumerate() {
             let trimmed = line.trim_start();
@@ -295,6 +387,10 @@ impl Rule for MD048CodeFenceStyle {
                     let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
                         || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
 
+                    let prefix = &line[..line.len() - trimmed.len()];
+                    let info = &trimmed[fence_len..];
+                    let outer_has_info = !info.trim().is_empty();
+
                     if needs_conversion {
                         let target_char = if target_style == CodeFenceStyle::Backtick {
                             '`'
@@ -302,18 +398,42 @@ impl Rule for MD048CodeFenceStyle {
                             '~'
                         };
 
-                        let max_inner =
-                            max_inner_fence_length_of_char(&lines, line_idx, fence_len, fence_char, target_char);
+                        let max_inner = max_inner_fence_length_of_char(
+                            &lines,
+                            line_idx,
+                            fence_len,
+                            fence_char,
+                            target_char,
+                            outer_has_info,
+                        );
                         converted_fence_len = fence_len.max(max_inner + 1);
+                        needs_lengthening = false;
 
-                        let prefix = &line[..line.len() - trimmed.len()];
-                        let info = &trimmed[fence_len..];
                         result.push_str(prefix);
                         result.push_str(&target_char.to_string().repeat(converted_fence_len));
                         result.push_str(info);
                     } else {
-                        converted_fence_len = fence_len;
-                        result.push_str(line);
+                        // Already the correct style. Check for fence-length ambiguity.
+                        let max_inner = max_inner_fence_length_of_char(
+                            &lines,
+                            line_idx,
+                            fence_len,
+                            fence_char,
+                            fence_char,
+                            outer_has_info,
+                        );
+                        if max_inner >= fence_len {
+                            converted_fence_len = max_inner + 1;
+                            needs_lengthening = true;
+
+                            result.push_str(prefix);
+                            result.push_str(&fence_char.to_string().repeat(converted_fence_len));
+                            result.push_str(info);
+                        } else {
+                            converted_fence_len = fence_len;
+                            needs_lengthening = false;
+                            result.push_str(line);
+                        }
                     }
                 } else {
                     // Inside a code block — check if this is the closing fence.
@@ -325,11 +445,15 @@ impl Rule for MD048CodeFenceStyle {
                         let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
                             || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
 
-                        if needs_conversion {
-                            let target_char = if target_style == CodeFenceStyle::Backtick {
-                                '`'
+                        if needs_conversion || needs_lengthening {
+                            let target_char = if needs_conversion {
+                                if target_style == CodeFenceStyle::Backtick {
+                                    '`'
+                                } else {
+                                    '~'
+                                }
                             } else {
-                                '~'
+                                fence_char
                             };
                             let prefix = &line[..line.len() - trimmed.len()];
                             result.push_str(prefix);
@@ -341,6 +465,7 @@ impl Rule for MD048CodeFenceStyle {
                         in_code_block = false;
                         code_block_fence_len = 0;
                         converted_fence_len = 0;
+                        needs_lengthening = false;
                     } else {
                         // Inside block, not the closing fence — preserve as-is.
                         result.push_str(line);
@@ -654,6 +779,199 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(fixed, "~~~~text\n~~~rust\ncode\n~~~\n~~~~");
+    }
+
+    // -----------------------------------------------------------------------
+    // Option A: fence-length ambiguity detection
+    // -----------------------------------------------------------------------
+
+    /// A backtick block that already uses backtick style but whose outer fence
+    /// length matches an interior backtick sequence must be flagged and lengthened.
+    #[test]
+    fn test_ambiguous_backtick_fence_detected() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Outer fence is 3 backticks; interior has a line starting with 3 backticks.
+        // This is the "retroactive" broken pattern from an old MD048 conversion.
+        let content = "```text\n```rust\ncode\n```\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        // Opening and closing fences should both be flagged for lengthening.
+        assert_eq!(warnings.len(), 2, "expected 2 warnings, got {warnings:?}");
+        assert!(
+            warnings[0].message.contains("ambiguous"),
+            "opening message should mention ambiguity: {}",
+            warnings[0].message
+        );
+        assert!(
+            warnings[1].message.contains("ambiguous"),
+            "closing message should mention ambiguity: {}",
+            warnings[1].message
+        );
+        // Fix should lengthen to 4 backticks.
+        assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, "````text");
+        assert_eq!(warnings[1].fix.as_ref().unwrap().replacement, "````");
+    }
+
+    /// fix() lengthens the outer fence of the already-backtick-style ambiguous block.
+    ///
+    /// The orphaned fourth fence (` ``` `) is the second code block opened by the
+    /// broken conversion and is NOT part of the fixed block — it remains unchanged.
+    /// Option A only fixes the ambiguous outer+close fence pair.
+    #[test]
+    fn test_ambiguous_backtick_fence_fixed() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Retroactive broken-conversion pattern:
+        //   line 0: ```text   ← opens block (3 backticks)
+        //   line 1: ```rust   ← interior content (info string prevents closing)
+        //   line 2: code
+        //   line 3: ```       ← closes block 1 (CommonMark: 3 >= 3, no info)
+        //   line 4: ```       ← orphaned opening of block 2
+        let content = "```text\n```rust\ncode\n```\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Lines 0 and 3 are lengthened; line 4 (orphaned fence) is unchanged.
+        assert_eq!(fixed, "````text\n```rust\ncode\n````\n```");
+    }
+
+    /// Same for tilde style: a tilde outer fence with a same-length tilde interior
+    /// should be flagged and lengthened.
+    #[test]
+    fn test_ambiguous_tilde_fence_fixed() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        let content = "~~~text\n~~~rust\ncode\n~~~\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Lines 0 and 3 lengthened; line 4 (orphaned) unchanged.
+        assert_eq!(fixed, "~~~~text\n~~~rust\ncode\n~~~~\n~~~");
+    }
+
+    /// No warning when the outer fence is already longer than any interior fence.
+    #[test]
+    fn test_no_ambiguity_when_outer_is_longer() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        let content = "````text\n```rust\ncode\n```\n````";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "should have no warnings when outer is already longer"
+        );
+    }
+
+    /// When interior fence is longer than the outer, the outer must be lengthened
+    /// to max_inner + 1, not just outer + 1.
+    ///
+    /// Structure: 3-backtick outer, 5-backtick interior (with info string → not
+    /// a closing fence), 5-backtick closer (IS the closing fence since 5 >= 3),
+    /// then an orphaned 3-backtick second block.
+    #[test]
+    fn test_ambiguity_with_longer_inner_fence() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // line 0: ```text    ← opens block (3 backticks)
+        // line 1: `````rust  ← interior content (5 backticks, info string)
+        // line 2: code
+        // line 3: `````      ← closes block 1 (5 >= 3, no info)
+        // line 4: ```        ← orphaned second block
+        let content = "```text\n`````rust\ncode\n`````\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Must use 6 backticks (max_inner=5, so 5+1=6). Line 4 (orphaned) unchanged.
+        assert_eq!(fixed, "``````text\n`````rust\ncode\n``````\n```");
+    }
+
+    /// Consistent style with ambiguous fence: lengthening fires even when using Consistent.
+    #[test]
+    fn test_ambiguity_detected_with_consistent_style() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        let content = "```text\n```rust\ncode\n```\n```";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].fix.as_ref().unwrap().replacement, "````text");
+        assert_eq!(warnings[1].fix.as_ref().unwrap().replacement, "````");
+    }
+
+    // -----------------------------------------------------------------------
+    // outer_has_info filtering: boundary cases
+    // -----------------------------------------------------------------------
+
+    /// Cross-style conversion where outer has NO info string: interior info-string
+    /// sequences are not counted, only bare sequences are.
+    ///
+    /// Without this filtering, the longer info-string sequence would inflate
+    /// the required length beyond what is actually needed.
+    #[test]
+    fn test_cross_style_no_info_outer_counts_only_bare_interior() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Outer tilde fence (no info). Interior has a 5-backtick info-string sequence
+        // AND a 3-backtick bare sequence. With outer_has_info=false, only the bare
+        // sequence (len=3) is counted → outer becomes 4, not 6.
+        let content = "~~~\n`````rust\ncode\n```\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // 4 backticks (bare seq len=3 → 3+1=4). If info-string seq were counted
+        // instead, this would incorrectly be 6 backticks.
+        assert_eq!(fixed, "````\n`````rust\ncode\n```\n````");
+    }
+
+    /// Cross-style conversion where outer HAS an info string: interior info-string
+    /// sequences ARE counted, ensuring the outer is long enough.
+    #[test]
+    fn test_cross_style_with_info_outer_counts_info_sequences() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Outer tilde fence (info "text"). Interior has only info-string backtick
+        // sequences (no bare close inside). With outer_has_info=true, these ARE
+        // counted → outer becomes 4.
+        let content = "~~~text\n```rust\nexample\n```rust\n~~~";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, "````text\n```rust\nexample\n```rust\n````");
+    }
+
+    /// Same-style block where outer has an info string but interior contains only
+    /// bare sequences SHORTER than the outer fence: no ambiguity, no warning.
+    #[test]
+    fn test_same_style_info_outer_shorter_bare_interior_no_warning() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Outer is 4 backticks with info "text". Interior shows raw fence syntax
+        // (3-backtick bare lines). These are shorter than outer (3 < 4) so they
+        // cannot close the outer block → no ambiguity.
+        let content = "````text\n```\nshowing raw fence\n```\n````";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "shorter bare interior sequences cannot close a 4-backtick outer"
+        );
+    }
+
+    /// Same-style block where outer has NO info string and interior has shorter
+    /// bare sequences: no ambiguity, no warning.
+    #[test]
+    fn test_same_style_no_info_outer_shorter_bare_interior_no_warning() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        // Outer is 4 backticks (no info). Interior has 3-backtick bare sequences.
+        // 3 < 4 → they cannot close the outer block → no ambiguity.
+        let content = "````\n```\nsome code\n```\n````";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            0,
+            "shorter bare interior sequences cannot close a 4-backtick outer (no info)"
+        );
     }
 
     /// The combined MD013+MD048 fix must be idempotent: applying the fix twice
