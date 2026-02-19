@@ -1543,4 +1543,121 @@ $$
             "File extension patterns should not be flagged. Got: {result:?}"
         );
     }
+
+    // ===== IDEMPOTENCY TESTS =====
+    // These test that applying the fix twice produces the same result as applying it once.
+    // Each case corresponds to a pattern that previously exposed non-idempotency in the fix.
+
+    fn apply_fixes(content: &str, warnings: &[rumdl_lib::rule::LintWarning]) -> String {
+        if warnings.is_empty() {
+            return content.to_string();
+        }
+        let mut fixes: Vec<(std::ops::Range<usize>, String)> = warnings
+            .iter()
+            .filter_map(|w| w.fix.as_ref().map(|f| (f.range.clone(), f.replacement.clone())))
+            .collect();
+        fixes.sort_by(|a, b| a.0.start.cmp(&b.0.start));
+        let mut result = String::new();
+        let mut pos = 0usize;
+        for (range, replacement) in fixes {
+            if range.start >= pos {
+                result.push_str(&content[pos..range.start]);
+                result.push_str(&replacement);
+                pos = range.end;
+            }
+        }
+        result.push_str(&content[pos..]);
+        result
+    }
+
+    fn assert_idempotent(content: &str) {
+        let rule = MD030ListMarkerSpace::default();
+        let ctx1 = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let w1 = rule.check(&ctx1).unwrap_or_default();
+        let fixed1 = apply_fixes(content, &w1);
+
+        let ctx2 = LintContext::new(&fixed1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let w2 = rule.check(&ctx2).unwrap_or_default();
+        let fixed2 = apply_fixes(&fixed1, &w2);
+
+        assert_eq!(
+            fixed1, fixed2,
+            "MD030 fix not idempotent for input {:?}\n  fixed1={:?}\n  fixed2={:?}",
+            content, fixed1, fixed2
+        );
+    }
+
+    #[test]
+    fn test_idempotent_list_heading_bold_ordered() {
+        // "- \n# \n**\n2. \n# "
+        assert_idempotent("- \n# \n**\n2. \n# ");
+    }
+
+    #[test]
+    fn test_idempotent_bold_with_unicode_and_code_span() {
+        // "**Σ**0`\n** Σ**\n# "
+        assert_idempotent("**\u{03A3}**0`\n** \u{03A3}**\n# ");
+    }
+
+    #[test]
+    fn test_idempotent_setext_heading_from_thematic_break() {
+        // "***\n---\n# " — *** followed by --- creates a setext heading
+        assert_idempotent("***\n---\n# ");
+    }
+
+    #[test]
+    fn test_idempotent_bold_followed_by_list_items() {
+        // "**\n2. \n- \n- "
+        assert_idempotent("**\n2. \n- \n- ");
+    }
+
+    #[test]
+    fn test_idempotent_bold_ordered_list_with_fences() {
+        // "**\n1. \\\n``\n```\n𑤉\n```\n``\n- !"
+        assert_idempotent("**\n1. \\\n``\n```\n\u{11509}\n```\n``\n- !");
+    }
+
+    #[test]
+    fn test_idempotent_list_blockquote_emphasis() {
+        // "- \n> *\n> !\n- "
+        assert_idempotent("- \n> *\n> !\n- ");
+    }
+
+    #[test]
+    fn test_idempotent_blockquote_with_unicode_space() {
+        // "> 0\u{2000} " — blockquote with en space
+        assert_idempotent("> 0\u{2000} ");
+    }
+
+    #[test]
+    fn test_idempotent_link_with_unicode_quote() {
+        // "[](\u{2000}\"<)"
+        assert_idempotent("[](\"<)");
+    }
+
+    #[test]
+    fn test_idempotent_multiple_headings() {
+        // "# \n### \n### "
+        assert_idempotent("# \n### \n### ");
+    }
+
+    #[test]
+    fn test_idempotent_list_table_bold_table() {
+        // "- $\n| ` |  |\n| --- | --- |\n**0**\n| ` |  |\n| --- | --- |"
+        assert_idempotent("- $\n| ` |  |\n| --- | --- |\n**0**\n| ` |  |\n| --- | --- |");
+    }
+
+    #[test]
+    fn test_idempotent_unicode_bold_content() {
+        // Bold with rare unicode characters
+        assert_idempotent(
+            "**\u{1cf00}\u{1E030}0\u{10CA0}A A\u{00AE}**Aa \n** \u{1cf00}\u{1E030}0\u{10CA0}A A\u{00AE}**",
+        );
+    }
+
+    #[test]
+    fn test_idempotent_code_span_with_unicode() {
+        // Code span with unicode followed by unclosed bold
+        assert_idempotent("`\u{1D737}FM?FZ`\n**\u{023A}8!\u{FFFD}Q\u{11727}<<^ **");
+    }
 }

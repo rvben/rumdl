@@ -4,15 +4,3 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc 24e174e0aa5029e4447421ada4288f56565e79c53e5ab7da5077b110f02940bf # shrinks to content = "- \n# \n**\n2. \n# "
-cc 9e61db7552b4c2dc5113df7668b04ba6835145824d9468ff31706f0d9f0e4e16 # shrinks to content = "`𝼧FM?FZ`\n**Ⱥ8!ￒQ\u{11727}<<^ **"
-cc 9d4336790c7c4c174061b6aecbeb4883b8d2568e4b05d69a05030bce6506c0b6 # shrinks to content = "**\u{1cf00}𞀰0𐊠A A®**Aa \n** \u{1cf00}𞀰0𐊠A A®**"
-cc 50790333581cdfe1bd8dadb337faef05adde980638ee7beaeef52624b3010f5d # shrinks to content = "**Σ**0`\n** Σ**\n# "
-cc 52756b9df937bbfe602720c8e1f78abbae00978c01a7de873958144123b42348 # shrinks to content = "***\n---\n# "
-cc 9c3d60039fbd5883d21104d3e002e19e8ce1d45e8bde4b80be00051859201ca9 # shrinks to content = "**\n2. \n- \n- "
-cc 28562fa831e56d3f4d44c768f59eec9aaf8d60077bb791102e5a16ca2a7c1e25 # shrinks to content = "**\n1. \\\n``\n```\n𑤉\n```\n``\n- !"
-cc cced29478b47cf57d82ecc2937a0a796eca5645d41284aad37edd0a8427f8291 # shrinks to content = "- \n> *\n> !\n- "
-cc a502bbd95bfacb1734f6102972ba1be9547235ffb60f010f572587baf0866571 # shrinks to content = "> 0\u{2000} "
-cc 315c4abb3ee953f78eb2e514678e4a9e84f33bf1645af9413180afda26e88feb # shrinks to content = "[](\u{2000}\"<)"
-cc 0db63a656dee91f43156b6b7be042f08f7060527a5bf1bd5f69936f0f4fa2806 # shrinks to content = "# \n### \n### "
-cc 18a3f3c3349bc74f4b91f4637fafa8b2458280b544c9d3e75610208f1466b643 # shrinks to content = "- $\n| ` |  |\n| --- | --- |\n**0**\n| ` |  |\n| --- | --- |"
