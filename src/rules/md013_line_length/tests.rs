@@ -3431,3 +3431,112 @@ fn test_overindented_continuation_all_list_types() {
         }
     }
 }
+
+#[cfg(test)]
+mod test_task_list_reflow {
+    use super::*;
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+
+    fn make_rule(line_length: usize) -> MD013LineLength {
+        MD013LineLength::from_config_struct(MD013Config {
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            line_length: crate::types::LineLength::from_const(line_length),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn test_task_item_long_url_no_warning() {
+        // Regression test for issue #436: task item with a long URL should not be flagged
+        let rule = make_rule(80);
+        let content = "- [ ] [some article](https://stackoverflow.blog/2020/11/25/how-to-write-an-effective-developer-resume-advice-from-a-hiring-manager/)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Task item with long URL should not trigger MD013 (URL exemption): {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_task_item_checked_long_url_no_warning() {
+        // Checked tasks ([x] and [X]) should also be exempt for long URLs
+        let rule = make_rule(80);
+        for checkbox in ["[x]", "[X]"] {
+            let content = format!(
+                "- {checkbox} [some article](https://stackoverflow.blog/2020/11/25/how-to-write-an-effective-developer-resume-advice-from-a-hiring-manager/)\n"
+            );
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Task item with {checkbox} and long URL should not trigger MD013: {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_task_item_long_text_wraps_correctly() {
+        // Task item with wrappable long text should wrap with correct 6-space continuation
+        let rule = make_rule(80);
+        let content = "- [ ] This task has a really long description that exceeds the line limit and should be wrapped at the boundary\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Long-text task item should trigger MD013");
+        let fix = result[0].fix.as_ref().expect("Should have fix");
+        // Continuation should be indented 6 spaces (matching "- [ ] " prefix)
+        for line in fix.replacement.lines().skip(1) {
+            if !line.is_empty() {
+                assert!(
+                    line.starts_with("      ") && !line.starts_with("       "),
+                    "Continuation should have exactly 6-space indent for '- [ ] ' prefix, got: {:?}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_task_item_fix_does_not_corrupt_checkbox() {
+        // The fix should never produce "[]" from "[ ]"
+        let rule = make_rule(80);
+        let content = "- [ ] This task has a really long description that exceeds the line limit and should be wrapped at the boundary\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        if let Some(warning) = result.first() {
+            if let Some(fix) = &warning.fix {
+                assert!(
+                    !fix.replacement.contains("[]"),
+                    "Fix must not corrupt '[ ]' to '[]': {}",
+                    fix.replacement
+                );
+                assert!(
+                    fix.replacement.starts_with("- [ ] "),
+                    "Fix must preserve task checkbox: {}",
+                    fix.replacement
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_task_item_all_bullet_markers() {
+        // All bullet markers (-, *, +) should handle task checkboxes correctly
+        let rule = make_rule(80);
+        let url = "https://stackoverflow.blog/2020/11/25/how-to-write-an-effective-developer-resume-advice-from-a-hiring-manager/";
+        for bullet in ["-", "*", "+"] {
+            let content = format!("{bullet} [ ] [article]({url})\n");
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "'{bullet} [ ]' task item with long URL should not trigger MD013: {:?}",
+                result
+            );
+        }
+    }
+}

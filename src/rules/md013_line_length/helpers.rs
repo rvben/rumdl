@@ -80,14 +80,23 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
 
     // Handle bullet lists
     // Trim trailing whitespace while preserving hard breaks
-    if let Some(rest) = trimmed.strip_prefix("- ") {
-        return (format!("{indent}- "), trim_preserving_hard_break(rest));
-    }
-    if let Some(rest) = trimmed.strip_prefix("* ") {
-        return (format!("{indent}* "), trim_preserving_hard_break(rest));
-    }
-    if let Some(rest) = trimmed.strip_prefix("+ ") {
-        return (format!("{indent}+ "), trim_preserving_hard_break(rest));
+    for bullet in ["- ", "* ", "+ "] {
+        if let Some(rest) = trimmed.strip_prefix(bullet) {
+            let marker_prefix = &bullet[..bullet.len() - 1]; // "- ", "* ", or "+"
+            // Include GFM task list checkboxes in the non-wrappable marker prefix
+            for checkbox in ["[ ] ", "[x] ", "[X] "] {
+                if let Some(content) = rest.strip_prefix(checkbox) {
+                    return (
+                        format!("{indent}{marker_prefix} {checkbox}"),
+                        trim_preserving_hard_break(content),
+                    );
+                }
+            }
+            return (
+                format!("{indent}{bullet}"),
+                trim_preserving_hard_break(rest),
+            );
+        }
     }
 
     // Handle numbered lists on trimmed content
@@ -199,6 +208,44 @@ mod tests {
         // Invalid: no period
         assert!(!is_numbered_list_item("1 Item"));
         assert!(!is_numbered_list_item("123"));
+    }
+
+    #[test]
+    fn test_extract_list_marker_task_checkboxes() {
+        // Unchecked task item: checkbox becomes part of the marker prefix
+        assert_eq!(
+            extract_list_marker_and_content("- [ ] some content"),
+            ("- [ ] ".to_string(), "some content".to_string())
+        );
+        // Checked task item (lowercase x)
+        assert_eq!(
+            extract_list_marker_and_content("- [x] done item"),
+            ("- [x] ".to_string(), "done item".to_string())
+        );
+        // Checked task item (uppercase X)
+        assert_eq!(
+            extract_list_marker_and_content("- [X] also done"),
+            ("- [X] ".to_string(), "also done".to_string())
+        );
+        // Other bullet markers preserve checkbox
+        assert_eq!(
+            extract_list_marker_and_content("* [ ] star task"),
+            ("* [ ] ".to_string(), "star task".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("+ [ ] plus task"),
+            ("+ [ ] ".to_string(), "plus task".to_string())
+        );
+        // Indented task item
+        assert_eq!(
+            extract_list_marker_and_content("  - [ ] indented task"),
+            ("  - [ ] ".to_string(), "indented task".to_string())
+        );
+        // Regular bullet (no checkbox) is unchanged
+        assert_eq!(
+            extract_list_marker_and_content("- regular item"),
+            ("- ".to_string(), "regular item".to_string())
+        );
     }
 
     #[test]
