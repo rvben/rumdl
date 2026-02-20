@@ -284,6 +284,12 @@ impl MD044ProperNames {
                         let start_pos = cap.start();
                         let end_pos = cap.end();
 
+                        // Skip matches inside HTML tag attributes (handles multi-line tags)
+                        let byte_pos = line_info.byte_offset + start_pos;
+                        if ctx.is_in_html_tag(byte_pos) {
+                            continue;
+                        }
+
                         if !Self::is_at_word_boundary(line, start_pos, true)
                             || !Self::is_at_word_boundary(line, end_pos, false)
                         {
@@ -291,15 +297,11 @@ impl MD044ProperNames {
                         }
 
                         // Skip if in inline code when code_blocks is false
-                        if !self.config.code_blocks {
-                            let byte_pos = line_info.byte_offset + cap.start();
-                            if ctx.is_in_code_block_or_span(byte_pos) {
-                                continue;
-                            }
+                        if !self.config.code_blocks && ctx.is_in_code_block_or_span(byte_pos) {
+                            continue;
                         }
 
                         // Skip if in link URL or reference definition
-                        let byte_pos = line_info.byte_offset + cap.start();
                         if Self::is_in_link(ctx, byte_pos) {
                             continue;
                         }
@@ -391,49 +393,23 @@ impl MD044ProperNames {
         !c.is_alphanumeric()
     }
 
-    // Check if a character is a word boundary using JavaScript `\b` semantics,
-    // where `_` is treated as a word character (part of JS `\w = [a-zA-Z0-9_]`).
-    // Used for matches inside HTML tags to match markdownlint's `_*\b` pattern behavior.
-    fn is_word_boundary_char_js(c: char) -> bool {
-        !c.is_alphanumeric() && c != '_'
-    }
-
-    // Check if the byte position `pos` is inside an HTML tag (`<...>`).
-    fn is_in_html_tag(line: &str, pos: usize) -> bool {
-        let before = &line[..pos.min(line.len())];
-        match (before.rfind('<'), before.rfind('>')) {
-            (Some(open), Some(close)) => open > close,
-            (Some(_), None) => true,
-            _ => false,
-        }
-    }
-
-    // Check if position is at a word boundary using O(1) byte-level lookups
+    // Check if position is at a word boundary using byte-level lookups.
     fn is_at_word_boundary(content: &str, pos: usize, is_start: bool) -> bool {
-        // When inside an HTML tag, use JS word boundary semantics (`_` is a word char)
-        // to avoid false positives in HTML attribute values like `test_image`.
-        let boundary_fn: fn(char) -> bool = if Self::is_in_html_tag(content, pos) {
-            Self::is_word_boundary_char_js
-        } else {
-            Self::is_word_boundary_char
-        };
         if is_start {
             if pos == 0 {
                 return true;
             }
-            // Get the character immediately before `pos`
             match content[..pos].chars().next_back() {
                 None => true,
-                Some(c) => boundary_fn(c),
+                Some(c) => Self::is_word_boundary_char(c),
             }
         } else {
             if pos >= content.len() {
                 return true;
             }
-            // Get the character at `pos`
             match content[pos..].chars().next() {
                 None => true,
-                Some(c) => boundary_fn(c),
+                Some(c) => Self::is_word_boundary_char(c),
             }
         }
     }
@@ -1339,72 +1315,63 @@ Visit [github documentation](https://github.com/docs) for details.
     }
 
     #[test]
-    fn test_html_attribute_underscore_no_false_positive() {
-        // Regression test for issue #443:
-        // Names in HTML attributes should not be flagged when adjacent to underscores.
-        // HTML attribute values treat `_` as a word character (JS `\b` semantics),
-        // so `test` in `test_image` should NOT match.
+    fn test_html_attribute_values_not_flagged() {
+        // Matches inside HTML tag attributes (between `<` and `>`) are not flagged.
+        // Attribute values are not prose — they hold URLs, class names, data values, etc.
         let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
         let content = "# Heading\n\ntest\n\n<img src=\"www.example.test/test_image.png\">\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // Only line 3 (plain "test") and line 5 col 23 (".test/" - no underscore after) should fire
-        // NOT line 5 col 28 ("test_image" - underscore after test)
+        // Nothing on line 5 should be flagged — everything is inside the `<img ...>` tag
         let line5_violations: Vec<_> = result.iter().filter(|w| w.line == 5).collect();
-        assert_eq!(
-            line5_violations.len(),
-            1,
-            "Should flag only 'test' in 'example.test/' not in 'test_image': {line5_violations:?}"
+        assert!(
+            line5_violations.is_empty(),
+            "Should not flag anything inside HTML tag attributes: {line5_violations:?}"
         );
-        assert_eq!(line5_violations[0].column, 23, "Should flag col 23 (example.test)");
 
-        // Verify plain text line is still flagged
+        // Plain text on line 3 is still flagged
         let line3_violations: Vec<_> = result.iter().filter(|w| w.line == 3).collect();
         assert_eq!(line3_violations.len(), 1, "Plain 'test' on line 3 should be flagged");
     }
 
     #[test]
-    fn test_html_attribute_underscore_prefix_no_false_positive() {
-        // Names with underscore prefix in HTML attributes (like data-test_id) should not
-        // be flagged when the name is adjacent to underscores.
-        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
-        let content = "# Heading\n\n<span data-test_id=\"value\">Test content</span>\n";
-        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-
-        // "data-test_id" → "test" preceded by "-" (boundary) but followed by "_" → no flag in HTML
-        // "Test content" → already correct capitalization → no flag
-        assert!(
-            result.is_empty(),
-            "Should not flag 'test' in 'data-test_id' inside HTML or 'Test' that is already correct: {result:?}"
-        );
-    }
-
-    #[test]
-    fn test_html_attribute_name_in_url_still_flagged() {
-        // Names in HTML attribute URLs that are NOT adjacent to underscores should still be flagged.
+    fn test_html_text_content_still_flagged() {
+        // Text between HTML tags (not inside `<...>`) is still checked.
         let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
         let content = "# Heading\n\n<a href=\"https://example.test/page\">test link</a>\n";
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // "example.test" → "test" preceded by "." (boundary) and followed by "/" (boundary) → flagged
-        // "test link" is outside the HTML tag (between tags) → treated as plain text → flagged
+        // "example.test" in the href attribute → not flagged (inside `<...>`)
+        // "test link" in the anchor text → flagged (between `>` and `<`)
         assert_eq!(
             result.len(),
-            2,
-            "Should flag 'test' in href URL and in anchor text: {result:?}"
+            1,
+            "Should flag only 'test' in anchor text, not in href: {result:?}"
         );
-        let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
-        assert!(
-            cols.contains(&26),
-            "Should flag col 26 (example.test in href): {cols:?}"
+        assert_eq!(result[0].column, 37, "Should flag col 37 ('test link' in anchor text)");
+    }
+
+    #[test]
+    fn test_html_attribute_various_not_flagged() {
+        // All attribute types are ignored: src, href, alt, class, data-*, title, etc.
+        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
+        let content = concat!(
+            "# Heading\n\n",
+            "<img src=\"test.png\" alt=\"test image\">\n",
+            "<span class=\"test-class\" data-test=\"value\">test content</span>\n",
         );
-        assert!(
-            cols.contains(&37),
-            "Should flag col 37 (test link in anchor text): {cols:?}"
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only "test content" (between tags on line 4) should be flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag only 'test content' between tags: {result:?}"
         );
+        assert_eq!(result[0].line, 4);
     }
 
     #[test]
