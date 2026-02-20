@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MD013**: GitHub Flavored Markdown alert markers (`> [!NOTE]`, `> [!WARNING]`, etc.)
+  are now preserved as non-wrappable boundaries during blockquote reflow — previously
+  the alert type was merged with the following content line, corrupting the alert block
 - **MD013**: Reflow now wraps blockquote paragraphs (including lazy continuation lines)
   in `fmt`/`check --fix`, with deterministic style preservation and LSP manual reflow
   parity ([#437](https://github.com/rvben/rumdl/issues/437))

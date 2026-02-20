@@ -3420,11 +3420,9 @@ fn test_overindented_continuation_all_list_types() {
                 if !line.is_empty() {
                     let leading_spaces = line.len() - line.trim_start_matches(' ').len();
                     assert_eq!(
-                        leading_spaces,
-                        *expected_indent,
+                        leading_spaces, *expected_indent,
                         "For {description}: continuation should have {expected_indent} spaces, got {leading_spaces} in line {:?}\nFull fix: {}",
-                        line,
-                        fix.replacement
+                        line, fix.replacement
                     );
                 }
             }
@@ -3538,5 +3536,100 @@ mod test_task_list_reflow {
                 result
             );
         }
+    }
+}
+
+mod test_github_alert_reflow {
+    use super::*;
+
+    fn make_rule_reflow(line_length: usize) -> MD013LineLength {
+        let config = MD013Config {
+            line_length: crate::types::LineLength::from_const(line_length),
+            reflow: true,
+            reflow_mode: ReflowMode::Normalize,
+            ..Default::default()
+        };
+        MD013LineLength::from_config_struct(config)
+    }
+
+    #[test]
+    fn test_github_alert_marker_not_merged_with_content() {
+        // [!NOTE] on its own line must never be merged with the following content line
+        let content = "\
+# Heading
+
+> [!NOTE]
+> This is alert content that should stay on its own line and not be merged with the NOTE marker above.
+";
+        let rule = make_rule_reflow(80);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.fix(&ctx).unwrap();
+        assert!(
+            result.contains("> [!NOTE]\n"),
+            "[!NOTE] line must remain on its own line; got:\n{result}"
+        );
+        assert!(
+            !result.contains("[!NOTE] This"),
+            "[!NOTE] must not be merged with content; got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_all_standard_alert_types_preserved() {
+        for alert_type in ["NOTE", "TIP", "WARNING", "CAUTION", "IMPORTANT"] {
+            let content = format!(
+                "# Heading\n\n> [!{alert_type}]\n> Content for the {alert_type} alert that is quite long and tests wrapping behavior.\n"
+            );
+            let rule = make_rule_reflow(80);
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let result = rule.fix(&ctx).unwrap();
+            assert!(
+                result.contains(&format!("> [!{alert_type}]\n")),
+                "[!{alert_type}] must remain on its own line; got:\n{result}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_alert_idempotent() {
+        // Applying the fix twice must produce the same result
+        let content = "\
+# Heading
+
+> [!NOTE]
+> This is a note with content that is long enough to potentially cause issues if the alert marker gets merged with this line.
+
+Regular paragraph after the alert block.
+";
+        let rule = make_rule_reflow(80);
+        let ctx1 = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let first = rule.fix(&ctx1).unwrap();
+
+        let ctx2 = LintContext::new(&first, MarkdownFlavor::Standard, None);
+        let second = rule.fix(&ctx2).unwrap();
+
+        assert_eq!(first, second, "Fix must be idempotent for GitHub alert blocks");
+    }
+
+    #[test]
+    fn test_regular_blockquote_still_reflowed() {
+        // Non-alert blockquotes with long content spanning multiple lines
+        // should still be normalized when in normalize mode
+        let content = "\
+# Heading
+
+> This is a long line in a regular blockquote that
+> continues on the next line and together exceeds eighty characters.
+";
+        let rule = make_rule_reflow(80);
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.fix(&ctx).unwrap();
+        // The two lines get merged and re-wrapped - content is still there
+        assert!(
+            result.contains("> This is a long line"),
+            "Regular blockquote content should be preserved; got:\n{result}"
+        );
+        // Should not contain alert markers
+        assert!(!result.contains("[!"), "No alert markers should appear in result");
     }
 }

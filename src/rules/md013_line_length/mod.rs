@@ -22,8 +22,8 @@ mod helpers;
 pub mod md013_config;
 use crate::utils::is_template_directive_only;
 use helpers::{
-    extract_list_marker_and_content, has_hard_break, is_horizontal_rule, is_list_item, split_into_segments,
-    trim_preserving_hard_break,
+    extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_list_item,
+    split_into_segments, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{LengthMode, ReflowMode};
@@ -528,6 +528,7 @@ impl MD013LineLength {
             || is_template_directive_only(content)
             || is_standalone_attr_list(content)
             || is_snippet_block_delimiter(content)
+            || is_github_alert_marker(trimmed)
     }
 
     fn generate_blockquote_paragraph_fix(

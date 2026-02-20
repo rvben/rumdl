@@ -1353,7 +1353,8 @@ Visit [github documentation](https://github.com/docs) for details.
         // NOT line 5 col 28 ("test_image" - underscore after test)
         let line5_violations: Vec<_> = result.iter().filter(|w| w.line == 5).collect();
         assert_eq!(
-            line5_violations.len(), 1,
+            line5_violations.len(),
+            1,
             "Should flag only 'test' in 'example.test/' not in 'test_image': {:?}",
             line5_violations
         );
@@ -1392,10 +1393,23 @@ Visit [github documentation](https://github.com/docs) for details.
 
         // "example.test" → "test" preceded by "." (boundary) and followed by "/" (boundary) → flagged
         // "test link" is outside the HTML tag (between tags) → treated as plain text → flagged
-        assert_eq!(result.len(), 2, "Should flag 'test' in href URL and in anchor text: {:?}", result);
+        assert_eq!(
+            result.len(),
+            2,
+            "Should flag 'test' in href URL and in anchor text: {:?}",
+            result
+        );
         let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
-        assert!(cols.contains(&26), "Should flag col 26 (example.test in href): {:?}", cols);
-        assert!(cols.contains(&37), "Should flag col 37 (test link in anchor text): {:?}", cols);
+        assert!(
+            cols.contains(&26),
+            "Should flag col 26 (example.test in href): {:?}",
+            cols
+        );
+        assert!(
+            cols.contains(&37),
+            "Should flag col 37 (test link in anchor text): {:?}",
+            cols
+        );
     }
 
     #[test]
@@ -1409,7 +1423,12 @@ Visit [github documentation](https://github.com/docs) for details.
 
         // Both "test_image" (test at start) and "just_test" (test at end) are flagged
         // because in plain text, "_" is a word boundary
-        assert_eq!(result.len(), 2, "Should flag 'test' in both 'test_image' and 'just_test': {:?}", result);
+        assert_eq!(
+            result.len(),
+            2,
+            "Should flag 'test' in both 'test_image' and 'just_test': {:?}",
+            result
+        );
         let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
         assert!(cols.contains(&1), "Should flag col 1 (test_image): {:?}", cols);
         assert!(cols.contains(&29), "Should flag col 29 (just_test): {:?}", cols);

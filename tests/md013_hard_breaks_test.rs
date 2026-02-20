@@ -189,10 +189,7 @@ reflow-mode = "normalize"
     );
 
     // List marker should be preserved
-    assert!(
-        fixed_content.starts_with("1. "),
-        "List marker should be preserved"
-    );
+    assert!(fixed_content.starts_with("1. "), "List marker should be preserved");
 
     // Continuation indent should be normalized to marker_len (3 spaces for "1. ")
     assert!(

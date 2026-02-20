@@ -92,10 +92,7 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
                     );
                 }
             }
-            return (
-                format!("{indent}{bullet}"),
-                trim_preserving_hard_break(rest),
-            );
+            return (format!("{indent}{bullet}"), trim_preserving_hard_break(rest));
         }
     }
 
@@ -177,6 +174,22 @@ pub(crate) fn is_list_item(line: &str) -> bool {
     }
     // Numbered lists
     is_numbered_list_item(line)
+}
+
+/// Returns true if the content looks like a GitHub Flavored Markdown alert marker.
+///
+/// GFM alert markers take the form `[!TYPE]` where TYPE is uppercase ASCII letters,
+/// optionally followed by content on the same line. They appear as the first line of
+/// a blockquote alert block and must not be merged with subsequent content lines.
+///
+/// Standard types: NOTE, TIP, IMPORTANT, WARNING, CAUTION.
+pub(crate) fn is_github_alert_marker(trimmed: &str) -> bool {
+    if !trimmed.starts_with("[!") {
+        return false;
+    }
+    let rest = &trimmed[2..];
+    let end = rest.find(|c: char| !c.is_ascii_uppercase()).unwrap_or(rest.len());
+    end > 0 && rest[end..].starts_with(']')
 }
 
 #[cfg(test)]
@@ -265,5 +278,31 @@ mod tests {
 
         // Year at end of sentence = not a list item
         assert!(!is_list_item("2019."));
+    }
+
+    #[test]
+    fn test_is_github_alert_marker() {
+        // Standard GFM alert types
+        assert!(is_github_alert_marker("[!NOTE]"));
+        assert!(is_github_alert_marker("[!TIP]"));
+        assert!(is_github_alert_marker("[!WARNING]"));
+        assert!(is_github_alert_marker("[!CAUTION]"));
+        assert!(is_github_alert_marker("[!IMPORTANT]"));
+
+        // Alert with trailing content on the same line
+        assert!(is_github_alert_marker("[!NOTE] Some inline content here"));
+        assert!(is_github_alert_marker("[!WARNING] Do not do this"));
+
+        // Custom uppercase type (not standard but structurally valid)
+        assert!(is_github_alert_marker("[!CUSTOM]"));
+
+        // Not an alert marker
+        assert!(!is_github_alert_marker("[!note]")); // lowercase
+        assert!(!is_github_alert_marker("[Note]")); // missing !
+        assert!(!is_github_alert_marker("[!]")); // empty type
+        assert!(!is_github_alert_marker("[!NOTE")); // missing closing bracket
+        assert!(!is_github_alert_marker("NOTE")); // no brackets
+        assert!(!is_github_alert_marker("[link]: url")); // link definition
+        assert!(!is_github_alert_marker("Some text [!NOTE]")); // not at start
     }
 }
