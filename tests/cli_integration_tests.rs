@@ -2718,3 +2718,100 @@ fn test_completions_clean_piping_stdout_only_has_script() {
     // stderr should be empty (no noise for eval usage)
     assert!(stderr.is_empty(), "stderr should be empty for clean eval usage");
 }
+
+#[test]
+fn test_stdin_inline_disable_suppresses_warnings() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Input with trailing spaces that would trigger MD009, but a rumdl-disable
+    // comment disables the rule for the entire document.
+    let input = "# Heading\n\n<!-- rumdl-disable MD009 -->\n\nTrailing spaces   \nMore trailing   \n";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("MD009"),
+        "MD009 should be suppressed by inline disable directive, but got: {stderr}"
+    );
+}
+
+#[test]
+fn test_stdin_inline_disable_next_line_is_scoped() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // disable-next-line suppresses only the immediately following line.
+    // Line 4 is suppressed; line 5 still fires.
+    let input =
+        "# Heading\n\n<!-- rumdl-disable-next-line MD009 -->\nSuppressed trailing   \nUnsuppressed trailing   \n";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let md009_warnings: Vec<&str> = stderr.lines().filter(|l| l.contains("MD009")).collect();
+
+    assert_eq!(
+        md009_warnings.len(),
+        1,
+        "Expected exactly 1 MD009 warning (line 5 only), got {}: {stderr}",
+        md009_warnings.len()
+    );
+    assert!(
+        md009_warnings[0].contains(":5:"),
+        "MD009 warning should be for line 5, but got: {}",
+        md009_warnings[0]
+    );
+}
+
+#[test]
+fn test_stdin_inline_markdownlint_disable_compat() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // rumdl supports markdownlint-disable syntax for compatibility.
+    // Verify it suppresses warnings when linting via stdin.
+    let input = "# Heading\n\n<!-- markdownlint-disable MD009 -->\n\nTrailing spaces   \n";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.arg("check").arg("--stdin").arg("--quiet");
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        !stderr.contains("MD009"),
+        "MD009 should be suppressed by markdownlint-disable directive, but got: {stderr}"
+    );
+}
