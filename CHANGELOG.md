@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--flavor rmd`, and `--flavor rmarkdown` are now accepted (previously rejected by
   the argument parser despite being valid in config files)
   ([#440](https://github.com/rvben/rumdl/issues/440))
+- **stdin**: Inline config directives (`<!-- rumdl-disable-next-line -->`,
+  `<!-- rumdl-disable -->` / `<!-- rumdl-enable -->`, `<!-- markdownlint-disable -->`,
+  etc.) are now respected when reading from stdin (`rumdl check -`); previously
+  all such directives were silently ignored, causing false positives in editor
+  integrations such as `nvim-lint` that pipe content via stdin
+  ([#445](https://github.com/rvben/rumdl/issues/445))
 
 ## [0.1.23] - 2026-02-18
 

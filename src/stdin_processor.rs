@@ -92,7 +92,25 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
         .unwrap_or_else(|| config.markdown_flavor());
     let ctx = LintContext::new(&content, flavor, source_file.clone());
+    let inline_config = ctx.inline_config();
     let mut all_warnings = Vec::new();
+
+    // Apply inline configure-file overrides by merging them into the config and
+    // recreating affected rules — mirrors the file-based path in lib.rs.
+    let inline_overrides = inline_config.get_all_rule_configs();
+    let merged_config: Option<rumdl_config::Config> = if !inline_overrides.is_empty() {
+        Some(config.merge_with_inline_config(inline_config))
+    } else {
+        None
+    };
+    let effective_config = merged_config.as_ref().unwrap_or(config);
+    let mut recreated_rules: std::collections::HashMap<String, Box<dyn rumdl_lib::rule::Rule>> =
+        std::collections::HashMap::new();
+    for rule_name in inline_overrides.keys() {
+        if let Some(recreated) = rumdl_lib::rules::create_rule_by_name(rule_name, effective_config) {
+            recreated_rules.insert(rule_name.clone(), recreated);
+        }
+    }
 
     // Run all enabled rules on the content
     for rule in rules {
@@ -100,9 +118,36 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         if rule.should_skip(&ctx) {
             continue;
         }
-        match rule.check(&ctx) {
-            Ok(warnings) => {
-                all_warnings.extend(warnings);
+
+        // Use recreated rule if inline configure-file overrides exist for this rule
+        let effective_rule: &dyn rumdl_lib::rule::Rule = recreated_rules
+            .get(rule.name())
+            .map(|r| r.as_ref())
+            .unwrap_or(rule.as_ref());
+
+        match effective_rule.check(&ctx) {
+            Ok(rule_warnings) => {
+                // Filter out warnings for rules disabled via inline comments,
+                // and warnings inside kramdown extension blocks.
+                let filtered: Vec<_> = rule_warnings
+                    .into_iter()
+                    .filter(|warning| {
+                        if ctx
+                            .line_info(warning.line)
+                            .is_some_and(|info| info.in_kramdown_extension_block)
+                        {
+                            return false;
+                        }
+                        let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
+                        let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
+                            &rule_name_to_check[..dash_pos]
+                        } else {
+                            rule_name_to_check
+                        };
+                        !inline_config.is_rule_disabled(base_rule_name, warning.line)
+                    })
+                    .collect();
+                all_warnings.extend(filtered);
             }
             Err(e) => {
                 if !args.silent {
@@ -111,7 +156,6 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             }
         }
     }
-
     // Sort warnings by line/column
     all_warnings.sort_by(|a, b| {
         if a.line == b.line {
