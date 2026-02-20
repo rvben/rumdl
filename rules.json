@@ -684,5 +684,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md074/"
+  },
+  {
+    "code": "MD075",
+    "name": "orphaned-table-rows",
+    "aliases": [],
+    "summary": "Orphaned table rows or headerless pipe content",
+    "category": "table",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
+    "url": "https://rumdl.dev/md075/"
   }
 ]
