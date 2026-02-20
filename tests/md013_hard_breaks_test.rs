@@ -152,10 +152,9 @@ fn test_hard_breaks_preserved_with_no_reflow() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
 
-    // Test that MD013 doesn't modify content when hard breaks are present
-    // Even with excessive trailing spaces, MD013 won't normalize them because
-    // that's MD009's job. MD013 only normalizes during reflow to prevent
-    // creating mid-line spaces.
+    // Test that MD013 preserves hard breaks during reflow, but normalizes indentation.
+    // The continuation line has 4-space indent, but the canonical indent for "1. " is 3 spaces.
+    // Reflow normalizes the indent while preserving the hard break marker.
     let content = "1. Line with hard break  \n    Second line\n";
 
     fs::write(&file_path, content).unwrap();
@@ -183,16 +182,23 @@ reflow-mode = "normalize"
 
     let fixed_content = fs::read_to_string(&file_path).unwrap();
 
-    // Content should be unchanged because hard break prevents reflow
-    assert_eq!(
-        fixed_content, content,
-        "Content with hard breaks should not be modified by MD013"
-    );
-
-    // Hard break should still be present
+    // Hard break (two trailing spaces) should be preserved
     assert!(
         fixed_content.contains("  \n") || fixed_content.contains("  \r\n"),
         "Hard break should be preserved"
+    );
+
+    // List marker should be preserved
+    assert!(
+        fixed_content.starts_with("1. "),
+        "List marker should be preserved"
+    );
+
+    // Continuation indent should be normalized to marker_len (3 spaces for "1. ")
+    assert!(
+        fixed_content.contains("\n   Second line"),
+        "Continuation should be indented with 3 spaces (marker_len for '1. '): {}",
+        fixed_content
     );
 }
 

@@ -3315,3 +3315,119 @@ fn test_reflow_no_double_blanks_between_blocks() {
         );
     }
 }
+
+#[test]
+fn test_issue_439_overindented_continuation_normalized() {
+    // Regression test for issue #439:
+    // When a list item has a continuation line with incorrect (over-indented) indentation,
+    // reflow should normalize it to marker_len spaces, not preserve the wrong indent.
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: crate::types::LineLength::from_const(80),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Bullet list: marker "- " (marker_len=2), continuation has 4-space indent (wrong)
+    // Expected: reflow produces 2-space continuation
+    let content = "- Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing\n    elit. Sed quam leo, rhoncus sodales erat sed.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(!result.is_empty(), "Should detect line exceeding 80 chars");
+    let fix = result[0].fix.as_ref().expect("Should have a fix");
+
+    // All continuation lines should use 2-space indent (marker_len for "- ")
+    for line in fix.replacement.lines().skip(1) {
+        if !line.is_empty() {
+            assert!(
+                line.starts_with("  ") && !line.starts_with("   "),
+                "Continuation line should have exactly 2-space indent (marker_len), got: {:?}",
+                line
+            );
+        }
+    }
+
+    // Ordered list: marker "1. " (marker_len=3), continuation has 4-space indent (wrong)
+    // Expected: reflow produces 3-space continuation
+    let content2 = "1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing\n    elit. Sed quam leo, rhoncus sodales erat sed.";
+    let ctx2 = crate::lint_context::LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+    let result2 = rule.check(&ctx2).unwrap();
+
+    assert!(!result2.is_empty(), "Should detect line exceeding 80 chars");
+    let fix2 = result2[0].fix.as_ref().expect("Should have a fix");
+
+    // All continuation lines should use 3-space indent (marker_len for "1. ")
+    for line in fix2.replacement.lines().skip(1) {
+        if !line.is_empty() {
+            assert!(
+                line.starts_with("   ") && !line.starts_with("    "),
+                "Continuation line should have exactly 3-space indent (marker_len), got: {:?}",
+                line
+            );
+        }
+    }
+}
+
+#[test]
+fn test_overindented_continuation_all_list_types() {
+    // Verify that over-indented continuations are normalized for all common list marker types
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: crate::types::LineLength::from_const(80),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Test cases: (content, expected_continuation_indent, description)
+    let cases = [
+        (
+            "- Item text that is long enough to be reflowed when reaching the limit here\n    over-indented continuation",
+            2,
+            "bullet '- '",
+        ),
+        (
+            "* Item text that is long enough to be reflowed when reaching the limit here\n    over-indented continuation",
+            2,
+            "bullet '* '",
+        ),
+        (
+            "+ Item text that is long enough to be reflowed when reaching the limit here\n    over-indented continuation",
+            2,
+            "bullet '+ '",
+        ),
+        (
+            "1. Item text that is long enough to be reflowed when reaching the limit here\n      over-indented continuation",
+            3,
+            "ordered '1. '",
+        ),
+        (
+            "10. Item text that is long enough to be reflowed when reaching the limit here\n       over-indented continuation",
+            4,
+            "ordered '10. '",
+        ),
+    ];
+
+    for (content, expected_indent, description) in &cases {
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        if !result.is_empty() {
+            let fix = result[0].fix.as_ref().expect("Should have a fix");
+            for line in fix.replacement.lines().skip(1) {
+                if !line.is_empty() {
+                    let leading_spaces = line.len() - line.trim_start_matches(' ').len();
+                    assert_eq!(
+                        leading_spaces,
+                        *expected_indent,
+                        "For {description}: continuation should have {expected_indent} spaces, got {leading_spaces} in line {:?}\nFull fix: {}",
+                        line,
+                        fix.replacement
+                    );
+                }
+            }
+        }
+    }
+}

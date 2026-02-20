@@ -989,7 +989,6 @@ impl MD013LineLength {
                     Empty,
                 }
 
-                let mut actual_indent: Option<usize> = None;
                 let mut list_item_lines: Vec<LineType> = vec![LineType::Content(first_content)];
                 i += 1;
 
@@ -1071,11 +1070,6 @@ impl MD013LineLength {
 
                         // Normal continuation: marker_len to marker_len+3
                         if indent <= marker_len + 3 {
-                            // Set actual_indent from first non-code continuation if not set
-                            if actual_indent.is_none() {
-                                actual_indent = Some(indent);
-                            }
-
                             // Extract content (remove indentation and trailing whitespace)
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
@@ -1117,8 +1111,7 @@ impl MD013LineLength {
                     }
                 }
 
-                // Use detected indent or fallback to marker length
-                let indent_size = actual_indent.unwrap_or(marker_len);
+                let indent_size = marker_len;
                 let expected_indent = " ".repeat(indent_size);
 
                 // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, semantic lines, and HTML blocks)
