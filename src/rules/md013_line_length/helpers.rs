@@ -82,7 +82,7 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     // Trim trailing whitespace while preserving hard breaks
     for bullet in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(bullet) {
-            let marker_prefix = &bullet[..bullet.len() - 1]; // "- ", "* ", or "+"
+            let marker_prefix = &bullet[..bullet.len() - 1]; // "-", "*", or "+"
             // Include GFM task list checkboxes in the non-wrappable marker prefix
             for checkbox in ["[ ] ", "[x] ", "[X] "] {
                 if let Some(content) = rest.strip_prefix(checkbox) {
