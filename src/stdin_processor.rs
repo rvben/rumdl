@@ -196,13 +196,32 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             // Re-check the fixed content to see if any issues remain
             // Use same per-file flavor as initial lint
             let fixed_ctx = LintContext::new(&fixed_content, flavor, source_file.clone());
+            let fixed_inline_config = fixed_ctx.inline_config();
             let mut remaining_warnings = Vec::new();
             for rule in rules {
                 if rule.should_skip(&fixed_ctx) {
                     continue;
                 }
-                if let Ok(warnings) = rule.check(&fixed_ctx) {
-                    remaining_warnings.extend(warnings);
+                if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
+                    let filtered: Vec<_> = rule_warnings
+                        .into_iter()
+                        .filter(|warning| {
+                            if fixed_ctx
+                                .line_info(warning.line)
+                                .is_some_and(|info| info.in_kramdown_extension_block)
+                            {
+                                return false;
+                            }
+                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
+                            let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
+                                &rule_name_to_check[..dash_pos]
+                            } else {
+                                rule_name_to_check
+                            };
+                            !fixed_inline_config.is_rule_disabled(base_rule_name, warning.line)
+                        })
+                        .collect();
+                    remaining_warnings.extend(filtered);
                 }
             }
 
