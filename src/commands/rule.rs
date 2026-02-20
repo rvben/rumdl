@@ -1,8 +1,19 @@
 //! Handler for the `rule` command.
 
+use clap::ValueEnum;
+
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
 use rumdl_lib::rule::{FixCapability, Rule, RuleCategory};
+
+#[derive(Clone, Default, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Text,
+    Json,
+    #[value(alias("jsonl"))]
+    JsonLines,
+}
 
 /// Rule metadata for JSON export (matches Ruff's output format)
 #[derive(serde::Serialize)]
@@ -31,7 +42,7 @@ struct RuleInfo {
 /// Handle the rule command: show info about a rule or list all rules.
 pub fn handle_rule(
     rule: Option<String>,
-    output_format: String,
+    output_format: OutputFormat,
     fixable: bool,
     category: Option<String>,
     explain: bool,
@@ -139,8 +150,8 @@ pub fn handle_rule(
     }
 
     // Output based on format
-    match output_format.to_lowercase().as_str() {
-        "json" => {
+    match output_format {
+        OutputFormat::Json => {
             // For single rule query, output the object directly; for all rules, output array
             let json = if rule.is_some() && rule_infos.len() == 1 {
                 serde_json::to_string_pretty(&rule_infos[0])
@@ -155,7 +166,7 @@ pub fn handle_rule(
                 }
             }
         }
-        "json-lines" | "jsonl" => {
+        OutputFormat::JsonLines => {
             // Output one JSON object per line (newline-delimited JSON)
             for info in &rule_infos {
                 match serde_json::to_string(info) {
@@ -167,7 +178,7 @@ pub fn handle_rule(
                 }
             }
         }
-        _ => {
+        OutputFormat::Text => {
             if rule.is_some() {
                 if let Some(info) = rule_infos.first() {
                     println!("{} - {}", info.code, info.summary);

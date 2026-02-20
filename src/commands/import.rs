@@ -4,10 +4,19 @@ use colored::*;
 use std::fs;
 use std::path::Path;
 
+use clap::ValueEnum;
+
 use rumdl_lib::exit_codes::exit;
 
+#[derive(Clone, Default, ValueEnum)]
+pub enum Format {
+    #[default]
+    Toml,
+    Json,
+}
+
 /// Handle the import command: convert markdownlint config to rumdl format.
-pub fn handle_import(file: String, output: Option<String>, format: String, dry_run: bool) {
+pub fn handle_import(file: String, output: Option<String>, format: Format, dry_run: bool) {
     use rumdl_lib::markdownlint_config;
 
     // Load the markdownlint config file
@@ -28,17 +37,9 @@ pub fn handle_import(file: String, output: Option<String>, format: String, dry_r
         .is_some_and(|p| p.ends_with("pyproject.toml") || p == "pyproject.toml");
 
     // Generate the output
-    let output_content = match format.as_str() {
-        "toml" => generate_toml_output(&fragment, is_pyproject),
-        "json" => generate_json_output(&fragment),
-        _ => {
-            eprintln!(
-                "{}: Unsupported format '{}'. Use 'toml' or 'json'.",
-                "Error".red().bold(),
-                format
-            );
-            exit::tool_error();
-        }
+    let output_content = match format {
+        Format::Toml => generate_toml_output(&fragment, is_pyproject),
+        Format::Json => generate_json_output(&fragment),
     };
 
     if dry_run {
@@ -46,10 +47,9 @@ pub fn handle_import(file: String, output: Option<String>, format: String, dry_r
         print!("{output_content}");
     } else {
         // Write to output file
-        let output_path = output.as_deref().unwrap_or(if format == "json" {
-            "rumdl-config.json"
-        } else {
-            ".rumdl.toml"
+        let output_path = output.as_deref().unwrap_or(match format {
+            Format::Json => "rumdl-config.json",
+            Format::Toml => ".rumdl.toml",
         });
 
         if Path::new(output_path).exists() {

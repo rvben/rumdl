@@ -115,22 +115,27 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
 
     // Determine output format with precedence: CLI → env var → config → legacy → default
-    let output_format_str = args
-        .output_format
-        .as_deref()
-        .or(env_output_format.as_deref())
-        .or(config.global.output_format.as_deref())
-        .or_else(|| {
-            // Legacy support: map --output json to --output-format json
-            if args.output == "json" { Some("json") } else { None }
-        })
-        .unwrap_or("text");
+    let output_format = if let Some(fmt) = args.output_format {
+        fmt.into()
+    } else {
+        let output_format_str = env_output_format
+            .as_deref()
+            .or(config.global.output_format.as_deref())
+            .or({
+                // Legacy support: map --output json to --output-format json
+                match args.output {
+                    crate::cli_types::Output::Json => Some("json"),
+                    crate::cli_types::Output::Text => None,
+                }
+            })
+            .unwrap_or("text");
 
-    let output_format = match OutputFormat::from_str(output_format_str) {
-        Ok(fmt) => fmt,
-        Err(e) => {
-            eprintln!("{}: {}", "Error".red().bold(), e);
-            return (true, true, true, 0);
+        match OutputFormat::from_str(output_format_str) {
+            Ok(fmt) => fmt,
+            Err(e) => {
+                eprintln!("{}: {}", "Error".red().bold(), e);
+                return (true, true, true, 0);
+            }
         }
     };
 

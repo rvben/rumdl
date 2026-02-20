@@ -2372,10 +2372,10 @@ pub fn reflow_blockquote_content(
         let pieces: Vec<&str> = segment
             .iter()
             .map(|&line| {
-                if line.ends_with('\\') {
-                    line[..line.len() - 1].trim_end()
-                } else if line.ends_with("  ") {
-                    line[..line.len() - 2].trim_end()
+                if let Some(l) = line.strip_suffix('\\') {
+                    l.trim_end()
+                } else if let Some(l) = line.strip_suffix("  ") {
+                    l.trim_end()
                 } else {
                     line.trim_end()
                 }
