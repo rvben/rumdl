@@ -196,7 +196,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.1.22
+mise use rumdl@0.1.24
 ```
 
 ### Using Nix (macOS/Linux)
