@@ -4,7 +4,6 @@ use colored::*;
 use core::error::Error;
 use std::fs;
 use std::path::Path;
-use std::str::FromStr;
 
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
@@ -16,10 +15,8 @@ use crate::CheckArgs;
 /// ensuring consistency between regular check and watch mode.
 pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &CheckArgs) {
     // Apply --flavor override if provided
-    if let Some(ref flavor_str) = args.flavor
-        && let Ok(flavor) = rumdl_config::MarkdownFlavor::from_str(flavor_str)
-    {
-        sourced.global.flavor = rumdl_config::SourcedValue::new(flavor, rumdl_config::ConfigSource::Cli);
+    if let Some(flavor) = args.flavor {
+        sourced.global.flavor = rumdl_config::SourcedValue::new(flavor.into(), rumdl_config::ConfigSource::Cli);
     }
 
     // Apply --respect-gitignore override if provided

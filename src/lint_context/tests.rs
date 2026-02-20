@@ -207,7 +207,7 @@ fn test_blockquote_spaced_nested_markers_are_detected() {
 "#;
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
-    let bq1 = ctx.lines.get(0).unwrap().blockquote.as_ref().unwrap();
+    let bq1 = ctx.lines.first().unwrap().blockquote.as_ref().unwrap();
     assert_eq!(bq1.nesting_level, 2);
     assert_eq!(bq1.prefix, "> > ");
     assert_eq!(bq1.content, "Nested quote content");

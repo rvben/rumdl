@@ -4272,8 +4272,7 @@ fn test_reflow_paragraph_at_line_blockquote_explicit_target() {
     assert!(!lines.is_empty(), "Expected reflowed output");
     assert!(
         lines.iter().all(|line| line.starts_with("> ")),
-        "Expected explicit quote prefix on all lines: {:?}",
-        lines
+        "Expected explicit quote prefix on all lines: {lines:?}",
     );
 }
 
@@ -4287,8 +4286,7 @@ fn test_reflow_paragraph_at_line_blockquote_lazy_target() {
     assert!(lines[0].starts_with("> "));
     assert!(
         lines.iter().skip(1).any(|line| !line.starts_with('>')),
-        "Expected at least one lazy continuation line: {:?}",
-        lines
+        "Expected at least one lazy continuation line: {lines:?}",
     );
 }
 
@@ -4911,7 +4909,7 @@ fn test_reflow_blockquote_content_hard_break_preserved() {
     };
     let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Explicit, &options);
     assert!(
-        result.last().map_or(false, |l| l.ends_with('\\')),
+        result.last().is_some_and(|l| l.ends_with('\\')),
         "Hard break marker must be on the last output line: {result:?}"
     );
 }

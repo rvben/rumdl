@@ -16,7 +16,7 @@ pub use cli_utils::{apply_cli_overrides, load_config_with_cli_error_handling_wit
 
 mod commands;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use clap_complete::shells::Shell;
 use core::error::Error;
 
@@ -35,9 +35,9 @@ struct Cli {
     #[command(subcommand)]
     command: Commands,
 
-    /// Control colored output: auto, always, never
-    #[arg(long, global = true, default_value = "auto", value_parser = ["auto", "always", "never"], help = "Control colored output: auto, always, never")]
-    color: String,
+    /// Control colored output
+    #[arg(long, global = true, default_value_t, value_enum)]
+    color: Color,
 
     /// Path to configuration file
     #[arg(
@@ -92,9 +92,9 @@ enum Commands {
     Rule {
         /// Rule name or ID (optional, omit to list all rules)
         rule: Option<String>,
-        /// Output format: text, json, or json-lines
-        #[arg(long, short = 'o', value_name = "FORMAT", default_value = "text")]
-        output_format: String,
+        /// Output format
+        #[arg(long, short = 'o', value_name = "FORMAT", default_value_t, value_enum)]
+        output_format: commands::rule::OutputFormat,
         /// Filter to only fixable rules
         #[arg(long, short = 'f')]
         fixable: bool,
@@ -153,9 +153,9 @@ enum Commands {
         /// Output file path (default: .rumdl.toml)
         #[arg(short, long)]
         output: Option<String>,
-        /// Output format: toml or json
-        #[arg(long, default_value = "toml")]
-        format: String,
+        /// Output format
+        #[arg(long, default_value_t, value_enum)]
+        format: commands::import::Format,
         /// Show converted config without writing to file
         #[arg(long)]
         dry_run: bool,
@@ -194,6 +194,14 @@ pub enum ConfigSubcommand {
     File,
 }
 
+#[derive(Clone, Default, ValueEnum)]
+enum Color {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     // Reset SIGPIPE to default behavior on Unix so piping to `head` etc. works correctly.
     // Without this, Rust ignores SIGPIPE and `println!` panics on broken pipe.
@@ -216,11 +224,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cli = Cli::parse();
 
     // Set color override globally based on --color flag
-    match cli.color.as_str() {
-        "always" => colored::control::set_override(true),
-        "never" => colored::control::set_override(false),
-        "auto" => colored::control::unset_override(),
-        _ => colored::control::unset_override(),
+    match cli.color {
+        Color::Always => colored::control::set_override(true),
+        Color::Never => colored::control::set_override(false),
+        Color::Auto => colored::control::unset_override(),
     }
 
     // Catch panics and print a message, exit 1
@@ -231,12 +238,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Commands::Check(mut args) => {
                 args.fix_mode = if args.fix { FixMode::CheckFix } else { FixMode::Check };
-                args.fail_on_mode = match args.fail_on.as_str() {
-                    "error" => FailOn::Error,
-                    "warning" => FailOn::Warning,
-                    "never" => FailOn::Never,
-                    _ => FailOn::Any,
-                };
+                args.fail_on_mode = args.fail_on;
 
                 let config_path = if cli.no_config || cli.isolated {
                     None
@@ -247,12 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Commands::Fmt(mut args) => {
                 args.fix_mode = FixMode::Format;
-                args.fail_on_mode = match args.fail_on.as_str() {
-                    "error" => FailOn::Error,
-                    "warning" => FailOn::Warning,
-                    "never" => FailOn::Never,
-                    _ => FailOn::Any,
-                };
+                args.fail_on_mode = args.fail_on;
 
                 // --check mode enables diff (don't write files) and will exit 1 if changes needed
                 if args.check {

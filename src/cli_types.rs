@@ -1,4 +1,4 @@
-use clap::Args;
+use clap::{Args, ValueEnum};
 
 /// Fix mode determines exit code behavior: Check/CheckFix exit 1 on violations, Format exits 0
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -10,13 +10,17 @@ pub enum FixMode {
 }
 
 /// Fail-on mode determines which severity triggers exit code 1
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum FailOn {
+    /// Exit 1 on any violation (info, warning, or error)
     #[default]
-    Any, // Exit 1 on any violation (info, warning, or error)
-    Warning, // Exit 1 on warning or error severity violations
-    Error,   // Exit 1 only on error-severity violations
-    Never,   // Always exit 0
+    Any,
+    /// Exit 1 on warning or error severity violations
+    Warning,
+    /// Exit 1 only on error-severity violations
+    Error,
+    /// Always exit 0
+    Never,
 }
 
 #[derive(Args, Debug)]
@@ -97,39 +101,26 @@ pub struct CheckArgs {
     pub quiet: bool,
 
     /// Output format: text (default) or json
-    #[arg(long, short = 'o', default_value = "text")]
-    pub output: String,
+    #[arg(long, short = 'o', default_value_t, value_enum)]
+    pub output: Output,
 
-    /// Output format for linting results
-    #[arg(long, value_parser = ["text", "full", "concise", "grouped", "json", "json-lines", "github", "gitlab", "pylint", "azure", "sarif", "junit"],
-          long_help = "Output format for linting results.
-
-Formats:
-  text       One-line-per-warning with file, line, column, rule, and message (default)
-  full       Show source lines with caret underlines highlighting the violation
-  concise    Minimal: file:line:col rule message
-  grouped    Warnings grouped by file with a header per file
-  json       JSON array of all warnings (collected across files)
-  json-lines One JSON object per warning (streaming)
-  github     GitHub Actions annotation format (::warning/::error)
-  gitlab     GitLab Code Quality report (JSON)
-  pylint     Pylint-compatible format
-  azure      Azure Pipelines logging commands
-  sarif      SARIF 2.1.0 for static analysis tools
-  junit      JUnit XML for CI test reporters
-
-Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text",
-          help = "Output format for linting results (default: text)")]
-    pub output_format: Option<String>,
+    /// Output format for linting results (default: text).
+    ///
+    /// Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text
+    #[arg(long, value_enum)]
+    pub output_format: Option<OutputFormat>,
 
     /// Show absolute file paths instead of project-relative paths
     #[arg(long, help = "Show absolute file paths in output instead of relative paths")]
     pub show_full_path: bool,
 
     /// Markdown flavor to use for linting
-    #[arg(long, value_parser = ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll"],
-          help = "Markdown flavor: standard/gfm/commonmark (default), mkdocs, mdx, quarto, obsidian, or kramdown")]
-    pub flavor: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        help = "Markdown flavor: standard/gfm/commonmark (default), mkdocs, mdx, quarto, obsidian, or kramdown"
+    )]
+    pub flavor: Option<Flavor>,
 
     /// Read from stdin instead of files
     #[arg(long, help = "Read from stdin instead of files")]
@@ -174,13 +165,101 @@ Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text",
     pub cache_dir: Option<String>,
 
     /// Control when to exit with code 1: any (default), warning, error, or never
-    #[arg(long, value_parser = ["any", "warning", "error", "never"], default_value = "any",
-          help = "Exit code behavior: 'any' (default) exits 1 on any violation, 'warning' on warning+error, 'error' only on errors, 'never' always exits 0")]
-    pub fail_on: String,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t,
+        help = "Exit code behavior: 'any' (default) exits 1 on any violation, 'warning' on warning+error, 'error' only on errors, 'never' always exits 0"
+    )]
+    pub fail_on: FailOn,
 
     #[arg(skip)]
     pub fix_mode: FixMode,
 
     #[arg(skip)]
     pub fail_on_mode: FailOn,
+}
+
+#[derive(Clone, Debug, Default, ValueEnum)]
+pub enum Output {
+    #[default]
+    Text,
+    Json,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum OutputFormat {
+    /// One-line-per-warning with file, line, column, rule, and message (default)
+    Text,
+    /// Show source lines with caret underlines highlighting the violation
+    Full,
+    /// Minimal: file:line:col rule message
+    Concise,
+    /// Warnings grouped by file with a header per file
+    Grouped,
+    /// JSON array of all warnings (collected across files)
+    Json,
+    /// One JSON object per warning (streaming)
+    JsonLines,
+    /// GitHub Actions annotation format (::warning/::error)
+    #[value(name = "github")]
+    GitHub,
+    /// GitLab Code Quality report (JSON)
+    #[value(name = "gitlab")]
+    GitLab,
+    /// Pylint-compatible format
+    Pylint,
+    /// Azure Pipelines logging commands
+    Azure,
+    /// SARIF 2.1.0 for static analysis tools
+    Sarif,
+    /// JUnit XML for CI test reporters
+    Junit,
+}
+
+impl From<OutputFormat> for rumdl_lib::output::OutputFormat {
+    fn from(format: OutputFormat) -> Self {
+        match format {
+            OutputFormat::Text => Self::Text,
+            OutputFormat::Full => Self::Full,
+            OutputFormat::Concise => Self::Concise,
+            OutputFormat::Grouped => Self::Grouped,
+            OutputFormat::Json => Self::Json,
+            OutputFormat::JsonLines => Self::JsonLines,
+            OutputFormat::GitHub => Self::GitHub,
+            OutputFormat::GitLab => Self::GitLab,
+            OutputFormat::Pylint => Self::Pylint,
+            OutputFormat::Azure => Self::Azure,
+            OutputFormat::Sarif => Self::Sarif,
+            OutputFormat::Junit => Self::Junit,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum Flavor {
+    #[value(aliases(["gfm", "github", "commonmark"]))]
+    Standard,
+    MkDocs,
+    #[allow(clippy::upper_case_acronyms)]
+    MDX,
+    #[value(aliases(["qmd", "rmd", "rmarkdown"]))]
+    Quarto,
+    Obsidian,
+    #[value(alias("jekyll"))]
+    Kramdown,
+}
+
+impl From<Flavor> for rumdl_lib::config::MarkdownFlavor {
+    fn from(flavor: Flavor) -> Self {
+        match flavor {
+            Flavor::Standard => Self::Standard,
+            Flavor::MkDocs => Self::MkDocs,
+            Flavor::MDX => Self::MDX,
+            Flavor::Quarto => Self::Quarto,
+            Flavor::Obsidian => Self::Obsidian,
+            Flavor::Kramdown => Self::Kramdown,
+        }
+    }
 }

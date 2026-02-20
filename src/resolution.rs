@@ -224,10 +224,8 @@ fn discover_with_cache(
 /// When a user passes `--flavor gfm` on the CLI, that should apply to all files
 /// regardless of which subdirectory config they use.
 fn apply_cli_config_overrides(config: &mut rumdl_config::Config, args: &crate::CheckArgs) {
-    if let Some(ref flavor_str) = args.flavor
-        && let Ok(flavor) = flavor_str.parse::<rumdl_config::MarkdownFlavor>()
-    {
-        config.global.flavor = flavor;
+    if let Some(flavor) = args.flavor {
+        config.global.flavor = flavor.into();
     }
 
     if let Some(respect_gitignore) = args.respect_gitignore {
