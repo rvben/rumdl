@@ -391,8 +391,32 @@ impl MD044ProperNames {
         !c.is_alphanumeric()
     }
 
+    // Check if a character is a word boundary using JavaScript `\b` semantics,
+    // where `_` is treated as a word character (part of JS `\w = [a-zA-Z0-9_]`).
+    // Used for matches inside HTML tags to match markdownlint's `_*\b` pattern behavior.
+    fn is_word_boundary_char_js(c: char) -> bool {
+        !c.is_alphanumeric() && c != '_'
+    }
+
+    // Check if the byte position `pos` is inside an HTML tag (`<...>`).
+    fn is_in_html_tag(line: &str, pos: usize) -> bool {
+        let before = &line[..pos.min(line.len())];
+        match (before.rfind('<'), before.rfind('>')) {
+            (Some(open), Some(close)) => open > close,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    }
+
     // Check if position is at a word boundary using O(1) byte-level lookups
     fn is_at_word_boundary(content: &str, pos: usize, is_start: bool) -> bool {
+        // When inside an HTML tag, use JS word boundary semantics (`_` is a word char)
+        // to avoid false positives in HTML attribute values like `test_image`.
+        let boundary_fn: fn(char) -> bool = if Self::is_in_html_tag(content, pos) {
+            Self::is_word_boundary_char_js
+        } else {
+            Self::is_word_boundary_char
+        };
         if is_start {
             if pos == 0 {
                 return true;
@@ -400,7 +424,7 @@ impl MD044ProperNames {
             // Get the character immediately before `pos`
             match content[..pos].chars().next_back() {
                 None => true,
-                Some(c) => Self::is_word_boundary_char(c),
+                Some(c) => boundary_fn(c),
             }
         } else {
             if pos >= content.len() {
@@ -409,7 +433,7 @@ impl MD044ProperNames {
             // Get the character at `pos`
             match content[pos..].chars().next() {
                 None => true,
-                Some(c) => Self::is_word_boundary_char(c),
+                Some(c) => boundary_fn(c),
             }
         }
     }
@@ -1312,5 +1336,82 @@ Visit [github documentation](https://github.com/docs) for details.
             "Only non-URL link text should be flagged, got: {result:?}"
         );
         assert_eq!(result[0].line, 3);
+    }
+
+    #[test]
+    fn test_html_attribute_underscore_no_false_positive() {
+        // Regression test for issue #443:
+        // Names in HTML attributes should not be flagged when adjacent to underscores.
+        // HTML attribute values treat `_` as a word character (JS `\b` semantics),
+        // so `test` in `test_image` should NOT match.
+        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
+        let content = "# Heading\n\ntest\n\n<img src=\"www.example.test/test_image.png\">\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only line 3 (plain "test") and line 5 col 23 (".test/" - no underscore after) should fire
+        // NOT line 5 col 28 ("test_image" - underscore after test)
+        let line5_violations: Vec<_> = result.iter().filter(|w| w.line == 5).collect();
+        assert_eq!(
+            line5_violations.len(), 1,
+            "Should flag only 'test' in 'example.test/' not in 'test_image': {:?}",
+            line5_violations
+        );
+        assert_eq!(line5_violations[0].column, 23, "Should flag col 23 (example.test)");
+
+        // Verify plain text line is still flagged
+        let line3_violations: Vec<_> = result.iter().filter(|w| w.line == 3).collect();
+        assert_eq!(line3_violations.len(), 1, "Plain 'test' on line 3 should be flagged");
+    }
+
+    #[test]
+    fn test_html_attribute_underscore_prefix_no_false_positive() {
+        // Names with underscore prefix in HTML attributes (like data-test_id) should not
+        // be flagged when the name is adjacent to underscores.
+        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
+        let content = "# Heading\n\n<span data-test_id=\"value\">Test content</span>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // "data-test_id" → "test" preceded by "-" (boundary) but followed by "_" → no flag in HTML
+        // "Test content" → already correct capitalization → no flag
+        assert!(
+            result.is_empty(),
+            "Should not flag 'test' in 'data-test_id' inside HTML or 'Test' that is already correct: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_html_attribute_name_in_url_still_flagged() {
+        // Names in HTML attribute URLs that are NOT adjacent to underscores should still be flagged.
+        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
+        let content = "# Heading\n\n<a href=\"https://example.test/page\">test link</a>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // "example.test" → "test" preceded by "." (boundary) and followed by "/" (boundary) → flagged
+        // "test link" is outside the HTML tag (between tags) → treated as plain text → flagged
+        assert_eq!(result.len(), 2, "Should flag 'test' in href URL and in anchor text: {:?}", result);
+        let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
+        assert!(cols.contains(&26), "Should flag col 26 (example.test in href): {:?}", cols);
+        assert!(cols.contains(&37), "Should flag col 37 (test link in anchor text): {:?}", cols);
+    }
+
+    #[test]
+    fn test_plain_text_underscore_boundary_unchanged() {
+        // Plain text (outside HTML tags) still uses original word boundary semantics where
+        // underscore is a boundary character, matching markdownlint's behavior via AST splitting.
+        let rule = MD044ProperNames::new(vec!["Test".to_string()], true);
+        let content = "# Heading\n\ntest_image is here and just_test ends here\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Both "test_image" (test at start) and "just_test" (test at end) are flagged
+        // because in plain text, "_" is a word boundary
+        assert_eq!(result.len(), 2, "Should flag 'test' in both 'test_image' and 'just_test': {:?}", result);
+        let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
+        assert!(cols.contains(&1), "Should flag col 1 (test_image): {:?}", cols);
+        assert!(cols.contains(&29), "Should flag col 29 (just_test): {:?}", cols);
     }
 }
