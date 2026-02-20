@@ -7,10 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.24] - 2026-02-20
+
 ### Fixed
 
-- **MD013**: Reflow now wraps blockquote paragraphs (including lazy continuation lines) in `fmt`/`check --fix`, with deterministic style preservation and LSP manual reflow parity
-  ([#437](https://github.com/rvben/rumdl/issues/437))
+- **MD013**: Reflow now wraps blockquote paragraphs (including lazy continuation lines)
+  in `fmt`/`check --fix`, with deterministic style preservation and LSP manual reflow
+  parity ([#437](https://github.com/rvben/rumdl/issues/437))
+- **MD013**: Italic and bold paragraphs that exceed the configured line length are now
+  reflowed correctly; previously only plain text paragraphs were wrapped
+  ([#441](https://github.com/rvben/rumdl/issues/441))
+- **MD013**: GFM task list checkboxes (`[ ]`, `[x]`, `[X]`) are now preserved as
+  non-wrappable marker prefix during reflow, preventing `- [ ] [long url](...)` from
+  being corrupted to `- []\n  [long url](...)`
+  ([#436](https://github.com/rvben/rumdl/issues/436))
+- **MD013**: List continuation lines are now normalized to the canonical marker-length
+  indent during reflow instead of inheriting any over-indentation from the source
+  ([#439](https://github.com/rvben/rumdl/issues/439))
+- **MD013**: Reflow no longer introduces double blank lines when an HTML block
+  (e.g. `<details>`) captures a trailing blank line — previously this caused MD012
+  violations in large documentation repos
+- **MD030**: Byte offset computation for ordered list markers inside blockquotes was
+  incorrect, causing fixes to insert spaces at the wrong position and be non-idempotent
+- **MD044**: Names configured in `names` are no longer falsely flagged inside HTML
+  attribute values when the name appears adjacent to underscores (e.g. `test_image`)
+  ([#443](https://github.com/rvben/rumdl/issues/443))
+- **MD048**: Fence-length disambiguation when converting between backtick and tilde
+  styles now correctly handles blocks where an interior same-style sequence would
+  otherwise close the outer block early under CommonMark rules; the 0–3 space indent
+  limit is enforced for fence markers per CommonMark §4.5
+- **CLI**: `--flavor gfm`, `--flavor github`, `--flavor commonmark`, `--flavor qmd`,
+  `--flavor rmd`, and `--flavor rmarkdown` are now accepted (previously rejected by
+  the argument parser despite being valid in config files)
+  ([#440](https://github.com/rvben/rumdl/issues/440))
 
 ## [0.1.23] - 2026-02-18
 
