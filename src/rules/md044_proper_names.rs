@@ -1355,8 +1355,7 @@ Visit [github documentation](https://github.com/docs) for details.
         assert_eq!(
             line5_violations.len(),
             1,
-            "Should flag only 'test' in 'example.test/' not in 'test_image': {:?}",
-            line5_violations
+            "Should flag only 'test' in 'example.test/' not in 'test_image': {line5_violations:?}"
         );
         assert_eq!(line5_violations[0].column, 23, "Should flag col 23 (example.test)");
 
@@ -1378,8 +1377,7 @@ Visit [github documentation](https://github.com/docs) for details.
         // "Test content" → already correct capitalization → no flag
         assert!(
             result.is_empty(),
-            "Should not flag 'test' in 'data-test_id' inside HTML or 'Test' that is already correct: {:?}",
-            result
+            "Should not flag 'test' in 'data-test_id' inside HTML or 'Test' that is already correct: {result:?}"
         );
     }
 
@@ -1396,19 +1394,16 @@ Visit [github documentation](https://github.com/docs) for details.
         assert_eq!(
             result.len(),
             2,
-            "Should flag 'test' in href URL and in anchor text: {:?}",
-            result
+            "Should flag 'test' in href URL and in anchor text: {result:?}"
         );
         let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
         assert!(
             cols.contains(&26),
-            "Should flag col 26 (example.test in href): {:?}",
-            cols
+            "Should flag col 26 (example.test in href): {cols:?}"
         );
         assert!(
             cols.contains(&37),
-            "Should flag col 37 (test link in anchor text): {:?}",
-            cols
+            "Should flag col 37 (test link in anchor text): {cols:?}"
         );
     }
 
@@ -1426,11 +1421,10 @@ Visit [github documentation](https://github.com/docs) for details.
         assert_eq!(
             result.len(),
             2,
-            "Should flag 'test' in both 'test_image' and 'just_test': {:?}",
-            result
+            "Should flag 'test' in both 'test_image' and 'just_test': {result:?}"
         );
         let cols: Vec<usize> = result.iter().map(|w| w.column).collect();
-        assert!(cols.contains(&1), "Should flag col 1 (test_image): {:?}", cols);
-        assert!(cols.contains(&29), "Should flag col 29 (just_test): {:?}", cols);
+        assert!(cols.contains(&1), "Should flag col 1 (test_image): {cols:?}");
+        assert!(cols.contains(&29), "Should flag col 29 (just_test): {cols:?}");
     }
 }

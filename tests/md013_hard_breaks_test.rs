@@ -194,8 +194,7 @@ reflow-mode = "normalize"
     // Continuation indent should be normalized to marker_len (3 spaces for "1. ")
     assert!(
         fixed_content.contains("\n   Second line"),
-        "Continuation should be indented with 3 spaces (marker_len for '1. '): {}",
-        fixed_content
+        "Continuation should be indented with 3 spaces (marker_len for '1. '): {fixed_content}"
     );
 }
 

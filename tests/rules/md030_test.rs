@@ -1582,8 +1582,7 @@ $$
 
         assert_eq!(
             fixed1, fixed2,
-            "MD030 fix not idempotent for input {:?}\n  fixed1={:?}\n  fixed2={:?}",
-            content, fixed1, fixed2
+            "MD030 fix not idempotent for input {content:?}\n  fixed1={fixed1:?}\n  fixed2={fixed2:?}"
         );
     }
 

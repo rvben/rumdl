@@ -3343,8 +3343,7 @@ fn test_issue_439_overindented_continuation_normalized() {
         if !line.is_empty() {
             assert!(
                 line.starts_with("  ") && !line.starts_with("   "),
-                "Continuation line should have exactly 2-space indent (marker_len), got: {:?}",
-                line
+                "Continuation line should have exactly 2-space indent (marker_len), got: {line:?}"
             );
         }
     }
@@ -3363,8 +3362,7 @@ fn test_issue_439_overindented_continuation_normalized() {
         if !line.is_empty() {
             assert!(
                 line.starts_with("   ") && !line.starts_with("    "),
-                "Continuation line should have exactly 3-space indent (marker_len), got: {:?}",
-                line
+                "Continuation line should have exactly 3-space indent (marker_len), got: {line:?}"
             );
         }
     }
@@ -3454,8 +3452,7 @@ mod test_task_list_reflow {
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Task item with long URL should not trigger MD013 (URL exemption): {:?}",
-            result
+            "Task item with long URL should not trigger MD013 (URL exemption): {result:?}"
         );
     }
 
@@ -3471,8 +3468,7 @@ mod test_task_list_reflow {
             let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
-                "Task item with {checkbox} and long URL should not trigger MD013: {:?}",
-                result
+                "Task item with {checkbox} and long URL should not trigger MD013: {result:?}"
             );
         }
     }
@@ -3491,8 +3487,7 @@ mod test_task_list_reflow {
             if !line.is_empty() {
                 assert!(
                     line.starts_with("      ") && !line.starts_with("       "),
-                    "Continuation should have exactly 6-space indent for '- [ ] ' prefix, got: {:?}",
-                    line
+                    "Continuation should have exactly 6-space indent for '- [ ] ' prefix, got: {line:?}"
                 );
             }
         }
@@ -3505,19 +3500,19 @@ mod test_task_list_reflow {
         let content = "- [ ] This task has a really long description that exceeds the line limit and should be wrapped at the boundary\n";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        if let Some(warning) = result.first() {
-            if let Some(fix) = &warning.fix {
-                assert!(
-                    !fix.replacement.contains("[]"),
-                    "Fix must not corrupt '[ ]' to '[]': {}",
-                    fix.replacement
-                );
-                assert!(
-                    fix.replacement.starts_with("- [ ] "),
-                    "Fix must preserve task checkbox: {}",
-                    fix.replacement
-                );
-            }
+        if let Some(warning) = result.first()
+            && let Some(fix) = &warning.fix
+        {
+            assert!(
+                !fix.replacement.contains("[]"),
+                "Fix must not corrupt '[ ]' to '[]': {}",
+                fix.replacement
+            );
+            assert!(
+                fix.replacement.starts_with("- [ ] "),
+                "Fix must preserve task checkbox: {}",
+                fix.replacement
+            );
         }
     }
 
@@ -3532,8 +3527,7 @@ mod test_task_list_reflow {
             let result = rule.check(&ctx).unwrap();
             assert!(
                 result.is_empty(),
-                "'{bullet} [ ]' task item with long URL should not trigger MD013: {:?}",
-                result
+                "'{bullet} [ ]' task item with long URL should not trigger MD013: {result:?}"
             );
         }
     }
