@@ -1750,6 +1750,23 @@ fn test_detect_code_fence_language_position_regular_text() {
 }
 
 #[test]
+fn test_detect_code_fence_language_position_non_ascii_language() {
+    // "é" is U+00E9: 2 UTF-8 bytes, 1 UTF-16 code unit.
+    // "```résumé" — fence ends at byte/UTF-16 col 3.
+    // "résumé" = r(1)+é(1)+s(1)+u(1)+m(1)+é(1) = 6 UTF-16 units, 8 UTF-8 bytes.
+    // UTF-16 cursor at 9 (3 + 6); byte offset is 11 (3 + 8).
+    // Old code: &line[3..9] slices into the middle of the second é → panic.
+    // Fixed code: converts UTF-16 9 → byte 11 first.
+    let text = "```résumé";
+    let pos = Position { line: 0, character: 9 }; // UTF-16 cursor at end of "résumé"
+    let result = RumdlLanguageServer::detect_code_fence_language_position(text, pos);
+    assert!(result.is_some(), "should detect fence language with non-ASCII text");
+    let (start_col, current_text) = result.unwrap();
+    assert_eq!(start_col, 3); // fence_end is always ASCII, so col == byte offset
+    assert_eq!(current_text, "résumé");
+}
+
+#[test]
 fn test_detect_code_fence_language_position_inline_code() {
     // Inline code (not a fenced block)
     let text = "Use `code` here.";
@@ -2116,4 +2133,564 @@ async fn test_completion_graceful_when_document_not_found() {
     let result = server.completion(params).await;
     assert!(result.is_ok(), "Completion should not error for missing document");
     assert!(result.unwrap().is_none(), "Should return None for missing document");
+}
+
+// ==================== Link Target Completion Tests ====================
+
+#[test]
+fn test_detect_link_target_file_path_empty() {
+    // Cursor right after `](` — `](` is at columns 9-10, content starts at column 11
+    let text = "See [text](";
+    let pos = Position { line: 0, character: 11 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "");
+    assert_eq!(info.path_start_col, 11); // UTF-16 column right after `(`
+    assert!(info.anchor.is_none());
+}
+
+#[test]
+fn test_detect_link_target_file_path_partial() {
+    // Cursor mid-way through a file path
+    // `](` is at columns 9-10; content_start = 11, so path_start_col = 11
+    let text = "See [text](docs/guide";
+    let pos = Position { line: 0, character: 21 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "docs/guide");
+    assert_eq!(info.path_start_col, 11);
+    assert!(info.anchor.is_none());
+}
+
+#[test]
+fn test_detect_link_target_anchor_empty() {
+    // Cursor right after `#`
+    let text = "See [text](guide.md#";
+    let pos = Position { line: 0, character: 20 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "guide.md");
+    assert!(info.anchor.is_some());
+    let (partial, start_col) = info.anchor.unwrap();
+    assert_eq!(partial, "");
+    assert_eq!(start_col, 20); // after `#`
+}
+
+#[test]
+fn test_detect_link_target_anchor_partial() {
+    // Cursor mid-way through an anchor
+    let text = "See [text](guide.md#install";
+    let pos = Position { line: 0, character: 27 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "guide.md");
+    let (partial, start_col) = info.anchor.unwrap();
+    assert_eq!(partial, "install");
+    assert_eq!(start_col, 20);
+}
+
+#[test]
+fn test_detect_link_target_anchor_same_file() {
+    // Fragment-only link `[text](#anchor` — empty file path
+    let text = "[text](#sec";
+    let pos = Position { line: 0, character: 11 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "");
+    let (partial, _start_col) = info.anchor.unwrap();
+    assert_eq!(partial, "sec");
+}
+
+#[test]
+fn test_detect_link_target_closed_paren_no_completion() {
+    // Cursor AFTER the closing `)` — before_cursor includes `)`, so content
+    // contains `)` and the function returns None.
+    // "See [text](guide.md)" is 21 chars; `)` is at byte 20.
+    // Cursor at 21 → before_cursor = whole string → content = "guide.md)" → None.
+    let text = "See [text](guide.md) more";
+    let pos = Position { line: 0, character: 21 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_none(), "Should not complete after a closed link");
+}
+
+#[test]
+fn test_detect_link_target_no_link_syntax() {
+    // Regular text with no link
+    let text = "Just plain text here";
+    let pos = Position { line: 0, character: 10 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_detect_link_target_code_span_skipped() {
+    // `](` inside a code span — should not trigger completion
+    let text = "Use `[text](path` for links";
+    // cursor is after `path` (position 16), which is inside the code span
+    let pos = Position { line: 0, character: 16 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_none(), "Should not complete inside a code span");
+}
+
+#[test]
+fn test_detect_link_target_image_link() {
+    // Image links `![alt](` should also trigger completion
+    let text = "![image](imgs/";
+    let pos = Position { line: 0, character: 14 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    // `![image](` contains `](` so the backward scan will find it
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "imgs/");
+}
+
+#[test]
+fn test_detect_link_target_multiple_links_on_line() {
+    // Two links on the same line — should detect the second one being typed
+    let text = "[first](a.md) and [second](b.md";
+    let pos = Position { line: 0, character: 31 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "b.md");
+}
+
+#[test]
+fn test_detect_link_target_non_ascii_link_text() {
+    // "é" is U+00E9: 2 UTF-8 bytes, 1 UTF-16 code unit.
+    // "[résumé](" is:  `[` + r(1) + é(1) + s(1) + u(1) + m(1) + é(1) + `]` + `(` = 9 UTF-16 code units
+    // So `](` spans columns 7-8, and content_start is column 9.
+    let text = "[résumé](";
+    let pos = Position { line: 0, character: 9 }; // right after `(`
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some(), "should detect link in non-ASCII context");
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "");
+    // path_start_col must be the UTF-16 column after `(`, which is 9
+    assert_eq!(info.path_start_col, 9);
+    assert!(info.anchor.is_none());
+}
+
+#[test]
+fn test_detect_link_target_non_ascii_with_path() {
+    // "[café](docs/" — "café" = c(1)+a(1)+f(1)+é(1) = 4 UTF-16 code units
+    // "[café](" spans columns 0-6; content_start is column 7
+    // cursor at 12 (7 + len("docs/") = 7+5 = 12)
+    let text = "[café](docs/";
+    let pos = Position { line: 0, character: 12 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "docs/");
+    assert_eq!(info.path_start_col, 7); // UTF-16 column after `(`
+}
+
+#[test]
+fn test_detect_link_target_out_of_bounds_position() {
+    let text = "short";
+    let pos = Position {
+        line: 0,
+        character: 100,
+    };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_detect_link_target_out_of_bounds_line() {
+    let text = "single line";
+    let pos = Position { line: 5, character: 0 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_get_file_completions_returns_workspace_files() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    // Create a few markdown files
+    let current = temp_dir.path().join("current.md");
+    let other = temp_dir.path().join("other.md");
+    let sub_dir = temp_dir.path().join("docs");
+    fs::create_dir(&sub_dir).unwrap();
+    let sub_file = sub_dir.join("guide.md");
+
+    fs::write(&current, "# Current").unwrap();
+    fs::write(&other, "# Other").unwrap();
+    fs::write(&sub_file, "# Guide").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // Populate the workspace index manually
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        let mut fi = FileIndex::default();
+        fi.headings.push(HeadingIndex {
+            text: "Current".to_string(),
+            auto_anchor: "current".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(current.clone(), fi);
+
+        let mut fi2 = FileIndex::default();
+        fi2.headings.push(HeadingIndex {
+            text: "Other".to_string(),
+            auto_anchor: "other".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(other.clone(), fi2);
+
+        let mut fi3 = FileIndex::default();
+        fi3.headings.push(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(sub_file.clone(), fi3);
+    }
+
+    // Get all file completions (empty prefix)
+    let items = server
+        .get_file_completions(&uri, "", 10, Position { line: 0, character: 10 })
+        .await;
+
+    // Should have 2 completions (other.md and docs/guide.md), NOT current.md
+    assert_eq!(items.len(), 2, "Should return 2 files (excluding current)");
+
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"other.md"), "Should include other.md");
+    assert!(labels.contains(&"docs/guide.md"), "Should include docs/guide.md");
+    assert!(!labels.contains(&"current.md"), "Should exclude current.md");
+}
+
+#[tokio::test]
+async fn test_get_file_completions_filters_by_prefix() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("current.md");
+    let docs_dir = temp_dir.path().join("docs");
+    fs::create_dir(&docs_dir).unwrap();
+    let guide = docs_dir.join("guide.md");
+    let ref_doc = docs_dir.join("reference.md");
+
+    fs::write(&current, "").unwrap();
+    fs::write(&guide, "").unwrap();
+    fs::write(&ref_doc, "").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+        index.insert_file(guide.clone(), FileIndex::default());
+        index.insert_file(ref_doc.clone(), FileIndex::default());
+    }
+
+    // Filter by "docs/g" prefix
+    let items = server
+        .get_file_completions(&uri, "docs/g", 10, Position { line: 0, character: 16 })
+        .await;
+
+    assert_eq!(items.len(), 1, "Should return only docs/guide.md");
+    assert_eq!(items[0].label, "docs/guide.md");
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_returns_headings() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("index.md");
+    let target = temp_dir.path().join("guide.md");
+
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "# Installation\n\n## Configuration\n\n## Troubleshooting").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![
+            HeadingIndex {
+                text: "Installation".to_string(),
+                auto_anchor: "installation".to_string(),
+                custom_anchor: None,
+                line: 1,
+            },
+            HeadingIndex {
+                text: "Configuration".to_string(),
+                auto_anchor: "configuration".to_string(),
+                custom_anchor: None,
+                line: 3,
+            },
+            HeadingIndex {
+                text: "Troubleshooting".to_string(),
+                auto_anchor: "troubleshooting".to_string(),
+                custom_anchor: None,
+                line: 5,
+            },
+        ];
+        index.insert_file(target.clone(), fi);
+    }
+
+    // Completions for all anchors in guide.md (empty prefix)
+    let items = server
+        .get_anchor_completions(&uri, "guide.md", "", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert_eq!(items.len(), 3, "Should return all 3 headings");
+
+    // Items should be in document order (sorted by line number)
+    assert_eq!(items[0].insert_text.as_deref(), Some("installation"));
+    assert_eq!(items[1].insert_text.as_deref(), Some("configuration"));
+    assert_eq!(items[2].insert_text.as_deref(), Some("troubleshooting"));
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_filters_by_prefix() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("index.md");
+    let target = temp_dir.path().join("guide.md");
+
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![
+            HeadingIndex {
+                text: "Installation".to_string(),
+                auto_anchor: "installation".to_string(),
+                custom_anchor: None,
+                line: 1,
+            },
+            HeadingIndex {
+                text: "Introduction".to_string(),
+                auto_anchor: "introduction".to_string(),
+                custom_anchor: None,
+                line: 2,
+            },
+            HeadingIndex {
+                text: "Configuration".to_string(),
+                auto_anchor: "configuration".to_string(),
+                custom_anchor: None,
+                line: 3,
+            },
+        ];
+        index.insert_file(target.clone(), fi);
+    }
+
+    let items = server
+        .get_anchor_completions(&uri, "guide.md", "in", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert_eq!(items.len(), 2, "Should return installation and introduction");
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"Installation"));
+    assert!(labels.contains(&"Introduction"));
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_uses_custom_anchor() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("index.md");
+    let target = temp_dir.path().join("guide.md");
+
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![HeadingIndex {
+            text: "Getting Started".to_string(),
+            auto_anchor: "getting-started".to_string(),
+            custom_anchor: Some("start".to_string()),
+            line: 1,
+        }];
+        index.insert_file(target.clone(), fi);
+    }
+
+    let items = server
+        .get_anchor_completions(&uri, "guide.md", "", 10, Position { line: 0, character: 10 })
+        .await;
+
+    assert_eq!(items.len(), 1);
+    // Should use custom_anchor "start", not auto_anchor "getting-started"
+    assert_eq!(items[0].insert_text.as_deref(), Some("start"));
+    assert_eq!(items[0].label, "Getting Started");
+    assert_eq!(items[0].detail.as_deref(), Some("#start"));
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_empty_file_path_uses_current() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("page.md");
+    fs::write(&current, "# Section One\n\n# Section Two").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![
+            HeadingIndex {
+                text: "Section One".to_string(),
+                auto_anchor: "section-one".to_string(),
+                custom_anchor: None,
+                line: 1,
+            },
+            HeadingIndex {
+                text: "Section Two".to_string(),
+                auto_anchor: "section-two".to_string(),
+                custom_anchor: None,
+                line: 3,
+            },
+        ];
+        index.insert_file(current.clone(), fi);
+    }
+
+    // Empty file_path means "anchor in the current file"
+    let items = server
+        .get_anchor_completions(&uri, "", "", 8, Position { line: 0, character: 8 })
+        .await;
+
+    assert_eq!(items.len(), 2);
+    let insert_texts: Vec<&str> = items.iter().map(|i| i.insert_text.as_deref().unwrap_or("")).collect();
+    assert!(insert_texts.contains(&"section-one"));
+    assert!(insert_texts.contains(&"section-two"));
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_unknown_file_returns_empty() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let current = temp_dir.path().join("index.md");
+    std::fs::write(&current, "").unwrap();
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // Don't populate the workspace index — file not found should return empty
+    let items = server
+        .get_anchor_completions(&uri, "nonexistent.md", "", 10, Position { line: 0, character: 10 })
+        .await;
+
+    assert!(items.is_empty(), "Unknown file should return no completions");
+}
+
+#[test]
+fn test_detect_link_target_relative_parent_path() {
+    // Cursor inside a `../` relative path
+    let text = "See [link](../other/file";
+    let pos = Position { line: 0, character: 24 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "../other/file");
+    assert!(info.anchor.is_none());
+}
+
+#[test]
+fn test_detect_link_target_path_and_anchor() {
+    // Full path with anchor: `](../dir/file.md#section`
+    let text = "See [link](../dir/file.md#section";
+    let pos = Position { line: 0, character: 33 };
+    let result = RumdlLanguageServer::detect_link_target_position(text, pos);
+    assert!(result.is_some());
+    let info = result.unwrap();
+    assert_eq!(info.file_path, "../dir/file.md");
+    let (partial, _) = info.anchor.unwrap();
+    assert_eq!(partial, "section");
+}
+
+#[tokio::test]
+async fn test_link_completions_disabled_returns_none() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    let content = "See [text](";
+    fs::write(&test_file, content).unwrap();
+
+    let server = create_test_server();
+
+    // Disable link completions
+    server.config.write().await.enable_link_completions = false;
+
+    let uri = Url::from_file_path(&test_file).unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position { line: 0, character: 11 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = server.completion(params).await.unwrap();
+    assert!(result.is_none(), "Link completions should be suppressed when disabled");
 }

@@ -215,6 +215,7 @@ impl LanguageServer for RumdlLanguageServer {
         if let Some(workspace_folders) = params.workspace_folders {
             for folder in workspace_folders {
                 if let Ok(path) = folder.uri.to_file_path() {
+                    let path = path.canonicalize().unwrap_or(path);
                     log::info!("Workspace root: {}", path.display());
                     roots.push(path);
                 }
@@ -222,6 +223,7 @@ impl LanguageServer for RumdlLanguageServer {
         } else if let Some(root_uri) = params.root_uri
             && let Ok(path) = root_uri.to_file_path()
         {
+            let path = path.canonicalize().unwrap_or(path);
             log::info!("Workspace root: {}", path.display());
             roots.push(path);
         }
@@ -259,7 +261,14 @@ impl LanguageServer for RumdlLanguageServer {
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["`".to_string()]),
+                    trigger_characters: Some(vec![
+                        "`".to_string(),
+                        "(".to_string(),
+                        "#".to_string(),
+                        "/".to_string(),
+                        ".".to_string(),
+                        "-".to_string(),
+                    ]),
                     resolve_provider: Some(false),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                     all_commit_characters: None,
@@ -365,28 +374,67 @@ impl LanguageServer for RumdlLanguageServer {
             return Ok(None);
         };
 
-        // Check if we're at a fenced code block language position
-        let Some((start_col, current_text)) = Self::detect_code_fence_language_position(&text, position) else {
-            return Ok(None);
-        };
-
-        log::debug!(
-            "Code fence completion triggered at {}:{}, current text: '{}'",
-            position.line,
-            position.character,
-            current_text
-        );
-
-        // Get completion items
-        let items = self
-            .get_language_completions(&uri, &current_text, start_col, position)
-            .await;
-
-        if items.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(CompletionResponse::Array(items)))
+        // Code fence language completion (backtick trigger)
+        if let Some((start_col, current_text)) = Self::detect_code_fence_language_position(&text, position) {
+            log::debug!(
+                "Code fence completion triggered at {}:{}, current text: '{}'",
+                position.line,
+                position.character,
+                current_text
+            );
+            let items = self
+                .get_language_completions(&uri, &current_text, start_col, position)
+                .await;
+            if !items.is_empty() {
+                return Ok(Some(CompletionResponse::Array(items)));
+            }
         }
+
+        // Link target completion: file paths and heading anchors
+        if self.config.read().await.enable_link_completions {
+            // For trigger characters that fire on many non-link contexts (`.`, `-`),
+            // skip the full parse when there is no `](` on the current line before
+            // the cursor.  This avoids needless work on list items and contractions.
+            let trigger = params.context.as_ref().and_then(|c| c.trigger_character.as_deref());
+            let skip_link_check = matches!(trigger, Some("." | "-")) && {
+                let line_num = position.line as usize;
+                // Scan the whole line — no byte-slicing at a UTF-16 offset needed.
+                // A line without `](` anywhere cannot contain a link target.
+                !text
+                    .lines()
+                    .nth(line_num)
+                    .map(|line| line.contains("]("))
+                    .unwrap_or(false)
+            };
+
+            if !skip_link_check && let Some(link_info) = Self::detect_link_target_position(&text, position) {
+                let items = if let Some((partial_anchor, anchor_start_col)) = link_info.anchor {
+                    log::debug!(
+                        "Anchor completion triggered at {}:{}, file: '{}', partial: '{}'",
+                        position.line,
+                        position.character,
+                        link_info.file_path,
+                        partial_anchor
+                    );
+                    self.get_anchor_completions(&uri, &link_info.file_path, &partial_anchor, anchor_start_col, position)
+                        .await
+                } else {
+                    log::debug!(
+                        "File path completion triggered at {}:{}, partial: '{}'",
+                        position.line,
+                        position.character,
+                        link_info.file_path
+                    );
+                    self.get_file_completions(&uri, &link_info.file_path, link_info.path_start_col, position)
+                        .await
+                };
+                if !items.is_empty() {
+                    return Ok(Some(CompletionResponse::Array(items)));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {

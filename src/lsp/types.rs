@@ -103,6 +103,9 @@ pub struct RumdlLspConfig {
     /// Rule-specific settings passed from the editor
     /// This allows configuring rules like MD013.lineLength directly from editor settings
     pub settings: Option<LspRuleSettings>,
+    /// Enable file path and heading anchor completions inside markdown link targets
+    /// When true, typing `](` triggers file path suggestions and `#` triggers anchor suggestions
+    pub enable_link_completions: bool,
 }
 
 impl Default for RumdlLspConfig {
@@ -115,6 +118,7 @@ impl Default for RumdlLspConfig {
             disable_rules: None,
             configuration_preference: ConfigurationPreference::default(),
             settings: None,
+            enable_link_completions: true,
         }
     }
 }
@@ -522,6 +526,7 @@ mod tests {
             disable_rules: None,
             configuration_preference: ConfigurationPreference::EditorFirst,
             settings: None,
+            enable_link_completions: true,
         };
 
         // Test serialization (uses camelCase)
