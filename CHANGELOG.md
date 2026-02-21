@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.25] - 2026-02-21
+
+### Fixed
+
+- **MD044**: proper names inside HTML tag attribute values (e.g. `src="..."`, `href="..."`,
+  `title="..."`) are no longer flagged as incorrectly capitalized. Text content between
+  tags continues to be checked as usual ([#443](https://github.com/rvben/rumdl/issues/443))
+
 ## [0.1.24] - 2026-02-20
 
 ### Fixed
