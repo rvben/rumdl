@@ -31,6 +31,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write    # Required for npm OIDC trusted publishing
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -590,11 +591,17 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Upgrade npm for OIDC support
+        if: ${{ inputs.skip_npm != true }}
+        run: |
+          npm install -g npm@latest
+          echo "npm version: $(npm --version)"
+
       - name: Publish WASM to npm
         if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
         run: |
           cd wasm-pkg
-          npm publish --access public
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -620,7 +627,7 @@ jobs:
           for pkg in npm-cli/cli-*/; do
             echo "Publishing $(basename "$pkg")..."
             cd "$pkg"
-            npm publish --access public
+            npm publish --provenance --access public
             cd ../..
           done
 
@@ -630,7 +637,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd npm-cli/rumdl
-          npm publish --access public
+          npm publish --provenance --access public
 
       - name: Test CLI npm publish (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_npm != true }}
