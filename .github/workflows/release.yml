@@ -645,7 +645,8 @@ jobs:
         run: echo "⏭️ Skipping npm publishing as requested"
 
       - name: Notify obsidian-rumdl
-        if: ${{ success() && inputs.dry_run != true && inputs.skip_npm != true }}
+        if: ${{ !cancelled() && inputs.dry_run != true && inputs.skip_npm != true }}
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.OBSIDIAN_DISPATCH_TOKEN }}
         run: |
@@ -723,7 +724,8 @@ jobs:
           echo "DRY RUN: Would update $MAJOR_VERSION tag to point to $TAG_NAME"
 
       - name: Notify rumdl-pre-commit
-        if: ${{ success() && inputs.dry_run != true }}
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.PRECOMMIT_DISPATCH_TOKEN }}
         run: |
@@ -736,7 +738,8 @@ jobs:
             -d "{\"event_type\": \"pypi_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify rumdl-vscode
-        if: ${{ success() && inputs.dry_run != true }}
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.VSCODE_DISPATCH_TOKEN }}
         run: |
@@ -756,7 +759,8 @@ jobs:
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify homebrew-rumdl
-        if: ${{ success() && inputs.dry_run != true }}
+        if: ${{ !cancelled() && inputs.dry_run != true }}
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
         run: |
