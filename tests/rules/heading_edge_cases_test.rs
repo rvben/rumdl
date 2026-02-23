@@ -232,10 +232,13 @@ code
 ### Heading 3";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
+    // When headings are consecutive, the "below" violation on each heading handles the gap.
+    // "above" violations are suppressed for the second heading when the previous content is
+    // also a heading, to prevent overlapping fixes on the same blank lines.
     assert_eq!(
         result.len(),
-        4,
-        "Should require blanks around all headings (after H1, before H2, after H2, before H3)"
+        2,
+        "Should require blanks below H1 and H2 (above violations suppressed for consecutive headings)"
     );
 
     // Test 6: Setext heading spacing
