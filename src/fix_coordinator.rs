@@ -219,7 +219,7 @@ impl FixCoordinator {
             let flavor = file_path
                 .map(|p| config.get_flavor_for_file(p))
                 .unwrap_or_else(|| config.markdown_flavor());
-            let ctx = LintContext::new(content, flavor, None);
+            let ctx = LintContext::new(content, flavor, file_path.map(|p| p.to_path_buf()));
             total_ctx_creations += 1;
 
             let mut any_fix_applied = false;
