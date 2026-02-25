@@ -491,51 +491,51 @@ Result:
 
 1. **MkDocs/mdBook Projects**:
 
-   ```toml
-   [per-file-ignores]
-   "SUMMARY.md" = ["MD025"]  # Table of contents has multiple H1 headings
-   ```
+    ```toml
+    [per-file-ignores]
+    "SUMMARY.md" = ["MD025"]  # Table of contents has multiple H1 headings
+    ```
 
 2. **GitHub Projects with Badges**:
 
-   ```toml
-   [per-file-ignores]
-   "README.md" = ["MD033", "MD041"]  # Allow HTML badges, may not start with heading
-   ```
+    ```toml
+    [per-file-ignores]
+    "README.md" = ["MD033", "MD041"]  # Allow HTML badges, may not start with heading
+    ```
 
 3. **Generated Documentation**:
 
-   ```toml
-   [per-file-ignores]
-   "docs/api/**/*.md" = ["MD013", "MD024", "MD041"]  # Relax rules for generated files
-   ```
+    ```toml
+    [per-file-ignores]
+    "docs/api/**/*.md" = ["MD013", "MD024", "MD041"]  # Relax rules for generated files
+    ```
 
 4. **Mixed Documentation Sources**:
 
-   ```toml
-   [per-file-ignores]
-   "vendor/**/*.md" = ["MD013", "MD033", "MD041"]  # Third-party docs
-   "legacy/**/*.md" = ["MD003", "MD022", "MD032"]  # Old docs with different style
-   ```
+    ```toml
+    [per-file-ignores]
+    "vendor/**/*.md" = ["MD013", "MD033", "MD041"]  # Third-party docs
+    "legacy/**/*.md" = ["MD003", "MD022", "MD032"]  # Old docs with different style
+    ```
 
 5. **Documentation Generators with HTML Links**:
 
-   For documentation generators (mdBook, Jekyll, Hugo) that compile markdown to HTML and place sources in different locations:
+    For documentation generators (mdBook, Jekyll, Hugo) that compile markdown to HTML and place sources in different locations:
 
-   ```toml
-   [per-file-ignores]
-   # mdBook projects - HTML links in book/ point to book/src/*.md sources
-   "book/**/*.md" = ["MD057"]
+    ```toml
+    [per-file-ignores]
+    # mdBook projects - HTML links in book/ point to book/src/*.md sources
+    "book/**/*.md" = ["MD057"]
 
-   # Jekyll projects - HTML links in _posts/ point to generated files
-   "_posts/**/*.md" = ["MD057"]
-   "_docs/**/*.md" = ["MD057"]
+    # Jekyll projects - HTML links in _posts/ point to generated files
+    "_posts/**/*.md" = ["MD057"]
+    "_docs/**/*.md" = ["MD057"]
 
-   # Hugo projects - HTML links in content/ point to generated files
-   "content/**/*.md" = ["MD057"]
-   ```
+    # Hugo projects - HTML links in content/ point to generated files
+    "content/**/*.md" = ["MD057"]
+    ```
 
-   See [MD057 documentation](md057.md#handling-complex-generator-patterns) for more details.
+    See [MD057 documentation](md057.md#handling-complex-generator-patterns) for more details.
 
 ### `exclude`
 
