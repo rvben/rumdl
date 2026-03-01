@@ -3136,3 +3136,299 @@ fn test_md072_key_order_no_type_mismatch_warning() {
         "expected_value_for should return None for nullable key_order, got: {expected:?}",
     );
 }
+
+// ============================================================================
+// Top-level global keys (ruff-style shorthand)
+// ============================================================================
+
+#[test]
+fn test_top_level_line_length() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    let config_content = r#"
+line-length = 120
+
+[MD004]
+style = "dash"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.global.line_length.get(), 120);
+}
+
+#[test]
+fn test_top_level_disable() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    let config_content = r#"
+disable = ["MD013", "MD033"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(config.global.disable.contains(&"MD013".to_string()));
+    assert!(config.global.disable.contains(&"MD033".to_string()));
+}
+
+#[test]
+fn test_top_level_exclude() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    let config_content = r#"
+exclude = ["node_modules", "build/**"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(config.global.exclude.contains(&"node_modules".to_string()));
+    assert!(config.global.exclude.contains(&"build/**".to_string()));
+}
+
+#[test]
+fn test_top_level_respect_gitignore() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    let config_content = r#"
+respect-gitignore = false
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(!config.global.respect_gitignore);
+}
+
+#[test]
+fn test_top_level_snake_case_keys() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // Snake_case variants should also work at top level
+    let config_content = r#"
+line_length = 100
+respect_gitignore = false
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.global.line_length.get(), 100);
+    assert!(!config.global.respect_gitignore);
+}
+
+#[test]
+fn test_global_section_overrides_top_level() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // [global] section should take precedence over top-level shorthand
+    let config_content = r#"
+line-length = 120
+
+[global]
+line-length = 80
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        config.global.line_length.get(),
+        80,
+        "[global] section should override top-level key"
+    );
+}
+
+#[test]
+fn test_top_level_keys_coexist_with_rule_sections() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // Ruff-style: top-level global keys + rule sections
+    let config_content = r#"
+line-length = 88
+disable = []
+exclude = []
+respect-gitignore = true
+
+[MD004]
+style = "dash"
+
+[MD013]
+line_length = 88
+code_blocks = false
+tables = true
+headings = true
+strict = false
+
+[MD029]
+style = "ordered"
+
+[MD035]
+style = "---"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+
+    // Should produce no unknown key validation warnings
+    let rules = rumdl_lib::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&rules);
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry);
+    let unknown_warnings: Vec<_> = warnings.iter().filter(|w| w.message.contains("Unknown")).collect();
+    assert!(
+        unknown_warnings.is_empty(),
+        "Top-level global keys should not produce unknown key warnings, got: {unknown_warnings:?}"
+    );
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert_eq!(config.global.line_length.get(), 88);
+    assert!(config.global.respect_gitignore);
+}
+
+#[test]
+fn test_top_level_global_value_with_rule_table() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // Top-level global value keys coexist with rule table sections.
+    // Note: TOML forbids a bare key and table with the same name (e.g.,
+    // `line-length = 88` and `[line-length]`), so global line-length
+    // and MD013 rule config must use different key names.
+    let config_content = r#"
+line-length = 88
+exclude = ["vendor/**"]
+
+[MD013]
+code-blocks = false
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.global.line_length.get(), 88);
+    assert!(config.global.exclude.contains(&"vendor/**".to_string()));
+    assert!(config.rules.contains_key("MD013"), "MD013 rule config should exist");
+}
+
+#[test]
+fn test_top_level_all_global_keys() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // All 15 keys from GLOBAL_VALUE_KEYS
+    let config_content = r#"
+enable = ["MD001", "MD003"]
+disable = ["MD033"]
+include = ["docs/**"]
+exclude = ["vendor/**"]
+extend-enable = ["MD041"]
+extend-disable = ["MD010"]
+respect-gitignore = false
+force-exclude = true
+line-length = 100
+output-format = "json"
+cache-dir = "/tmp/rumdl-cache"
+cache = false
+fixable = ["MD009"]
+unfixable = ["MD013"]
+flavor = "mkdocs"
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+
+    // No unknown key warnings
+    let rules = rumdl_lib::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&rules);
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry);
+    let unknown_warnings: Vec<_> = warnings.iter().filter(|w| w.message.contains("Unknown")).collect();
+    assert!(
+        unknown_warnings.is_empty(),
+        "All top-level global keys should be recognized, got: {unknown_warnings:?}"
+    );
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert!(config.global.enable.contains(&"MD001".to_string()));
+    assert!(config.global.enable.contains(&"MD003".to_string()));
+    assert!(config.global.disable.contains(&"MD033".to_string()));
+    assert!(config.global.include.contains(&"docs/**".to_string()));
+    assert!(config.global.exclude.contains(&"vendor/**".to_string()));
+    assert!(config.global.extend_enable.contains(&"MD041".to_string()));
+    assert!(config.global.extend_disable.contains(&"MD010".to_string()));
+    assert!(!config.global.respect_gitignore);
+    #[allow(deprecated)]
+    {
+        assert!(config.global.force_exclude);
+    }
+    assert_eq!(config.global.line_length.get(), 100);
+    assert_eq!(config.global.output_format.as_deref(), Some("json"));
+    assert_eq!(config.global.cache_dir.as_deref(), Some("/tmp/rumdl-cache"));
+    assert!(!config.global.cache);
+    assert!(config.global.fixable.contains(&"MD009".to_string()));
+    assert!(config.global.unfixable.contains(&"MD013".to_string()));
+    assert_eq!(config.global.flavor, rumdl_lib::config::MarkdownFlavor::MkDocs);
+}
+
+#[test]
+fn test_unknown_top_level_value_key_produces_warning() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("rumdl.toml");
+
+    // A top-level value key that is NOT a known global key should produce
+    // an unknown key warning (same as any unrecognized rule section).
+    let config_content = r#"
+line-length = 100
+typo-key = true
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+
+    let rules = rumdl_lib::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&rules);
+    let warnings = rumdl_lib::config::validate_config_sourced(&sourced, &registry);
+
+    // line-length should NOT produce a warning
+    let line_length_warnings: Vec<_> = warnings.iter().filter(|w| w.message.contains("line-length")).collect();
+    assert!(
+        line_length_warnings.is_empty(),
+        "Known global key 'line-length' should not produce warnings"
+    );
+
+    // typo-key SHOULD produce an unknown key warning
+    let typo_warnings: Vec<_> = warnings.iter().filter(|w| w.message.contains("typo-key")).collect();
+    assert!(
+        !typo_warnings.is_empty(),
+        "Unknown top-level value key 'typo-key' should produce a warning"
+    );
+
+    // The known global key should still be parsed correctly
+    let config: Config = sourced.into_validated_unchecked().into();
+    assert_eq!(config.global.line_length.get(), 100);
+}

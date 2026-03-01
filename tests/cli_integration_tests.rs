@@ -658,31 +658,31 @@ include=["docs/**/*.md"]
     );
     fs::remove_file(temp_dir.path().join(".rumdl.toml"))?; // Clean up config
 
-    // --- Test Case 17: CLI Include Overrides Config Exclude (Discovery Mode) ---
-    println!("--- Running Test Case 17: CLI Include Overrides Config Exclude ---");
+    // --- Test Case 17: Exclude wins over include in discovery mode ---
+    // This matches the industry-standard model (ruff, eslint, markdownlint-cli):
+    // exclude always takes precedence in discovery mode. To lint an excluded file,
+    // pass it explicitly or use --no-exclude.
+    println!("--- Running Test Case 17: Exclude Wins Over Include in Discovery Mode ---");
     fs::write(
         temp_dir.path().join(".rumdl.toml"),
         r#"
-exclude = ["docs/*"] # Exclude all docs via config
+exclude = ["docs/*"]
 "#,
     )?;
-    let (success17, stdout17, stderr17) = run_cmd(
-        &["check", ".", "--include", "docs/doc1.md", "--verbose"], // ADDED "." path for discovery mode
-    );
+    let (success17, stdout17, stderr17) = run_cmd(&["check", ".", "--include", "docs/doc1.md", "--verbose"]);
     println!("Test Case 17 Stdout:\n{stdout17}");
     println!("Test Case 17 Stderr:{stderr17}\n");
     assert!(success17, "Test Case 17 failed");
     let norm_stdout17 = normalize(&stdout17);
-    // ASSERTION REVERTED: Expect file to be included by CLI override
+    // Exclude takes precedence: docs/doc1.md is excluded despite --include
     assert!(
-        norm_stdout17.contains("Processing file: docs/doc1.md"),
-        "docs/doc1.md should be included by CLI in Test Case 17"
+        !norm_stdout17.contains("Processing file: docs/doc1.md"),
+        "docs/doc1.md should be excluded by config in Test Case 17 (exclude wins over include)"
     );
     assert!(
         !norm_stdout17.contains("Processing file: docs/temp/temp.md"),
-        "docs/temp/temp.md should remain excluded by config in Test Case 17"
+        "docs/temp/temp.md should be excluded by config in Test Case 17"
     );
-    // Other files shouldn't be processed because they aren't included by CLI
     assert!(
         !norm_stdout17.contains("Processing file: README.md"),
         "README.md should NOT be included in Test Case 17"

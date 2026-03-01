@@ -289,9 +289,7 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
             let in_fenced = admonition_fence.process_line(line.trim());
 
             // Check if still in admonition content
-            if line.trim().is_empty()
-                || mkdocs_admonitions::is_admonition_content(line, admonition_indent)
-            {
+            if line.trim().is_empty() || mkdocs_admonitions::is_admonition_content(line, admonition_indent) {
                 lines[i].in_admonition = true;
                 if !in_fenced {
                     lines[i].in_code_block = false;
@@ -317,9 +315,7 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
         } else if in_tab {
             let in_fenced = tab_fence.process_line(line.trim());
 
-            if line.trim().is_empty()
-                || mkdocs_tabs::is_tab_content(line, tab_indent)
-            {
+            if line.trim().is_empty() || mkdocs_tabs::is_tab_content(line, tab_indent) {
                 lines[i].in_content_tab = true;
                 if !in_fenced {
                     lines[i].in_code_block = false;

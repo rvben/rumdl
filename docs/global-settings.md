@@ -7,6 +7,11 @@ This document provides a comprehensive reference for rumdl's global configuratio
 Global settings are configured in the `[global]` section of your configuration file (`.rumdl.toml` or
 `pyproject.toml`). These settings control file selection, rule enablement, and general linting behavior.
 
+> **Tip:** In `.rumdl.toml`, global keys can also be placed at the top level without a `[global]` section
+> header, similar to [ruff.toml](https://docs.astral.sh/ruff/settings/). If both top-level and `[global]`
+> keys exist, the `[global]` section takes precedence. See [Top-level shorthand](#top-level-shorthand) for
+> details.
+
 ## Quick Reference
 
 | Setting                                   | Type       | Default        | Description                               |
@@ -94,6 +99,55 @@ flavor = "standard"
 "README.md" = ["MD033"]
 "SUMMARY.md" = ["MD025"]
 ```
+
+### Top-level shorthand
+
+In `.rumdl.toml`, you can place global keys at the top level without wrapping them in a `[global]` section.
+This is convenient for simple configs and matches the convention used by [ruff.toml](https://docs.astral.sh/ruff/settings/):
+
+```toml
+line-length = 88
+disable = []
+exclude = []
+respect-gitignore = true
+
+[MD004]
+style = "dash"
+
+[MD013]
+line_length = 88
+code_blocks = false
+```
+
+This is equivalent to:
+
+```toml
+[global]
+line-length = 88
+disable = []
+exclude = []
+respect-gitignore = true
+
+[MD004]
+style = "dash"
+
+[MD013]
+line_length = 88
+code_blocks = false
+```
+
+**Precedence:** If the same key appears both at the top level and inside `[global]`, the `[global]` value wins.
+
+**Supported keys:** `enable`, `disable`, `include`, `exclude`, `extend-enable`, `extend-disable`,
+`respect-gitignore`, `force-exclude`, `line-length`, `output-format`, `cache-dir`, `cache`, `fixable`,
+`unfixable`, `flavor`.
+
+**Notes:**
+
+- Table-type settings (`per-file-ignores`, `per-file-flavor`, `code-block-tools`) still require
+  their own section headers. Only scalar and array keys can be placed at the top level.
+- This shorthand is only available in `.rumdl.toml` / `rumdl.toml`. In `pyproject.toml`, use
+  `[tool.rumdl]` as shown in the pyproject.toml example above.
 
 ## Rule Selection Model
 

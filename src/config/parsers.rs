@@ -490,6 +490,283 @@ pub(super) fn parse_pyproject_toml(
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
 }
 
+/// Set of top-level keys that are global config keys (not rule sections).
+/// When these appear at the top level of rumdl.toml (outside `[global]`),
+/// they should be treated as global config rather than rule names.
+/// Known global config keys in their normalized (kebab-case) form.
+/// Keys are always normalized before lookup via `normalize_key()`.
+const GLOBAL_VALUE_KEYS: &[&str] = &[
+    "enable",
+    "disable",
+    "include",
+    "exclude",
+    "extend-enable",
+    "extend-disable",
+    "respect-gitignore",
+    "force-exclude",
+    "line-length",
+    "output-format",
+    "cache-dir",
+    "cache",
+    "fixable",
+    "unfixable",
+    "flavor",
+];
+
+/// Returns true if the given key is a known global config key.
+fn is_global_value_key(key: &str) -> bool {
+    GLOBAL_VALUE_KEYS.contains(&key)
+}
+
+/// Parse a single global config key-value pair and store it in the fragment.
+/// Used by both the `[global]` section handler and the top-level key handler.
+#[allow(clippy::too_many_lines)]
+fn parse_global_key(
+    norm_key: &str,
+    value_item: &toml_edit::Item,
+    fragment: &mut SourcedConfigFragment,
+    source: ConfigSource,
+    file: &Option<String>,
+    display_path: &str,
+    registry: &super::registry::RuleRegistry,
+) -> bool {
+    match norm_key {
+        "enable" | "disable" | "include" | "exclude" | "extend-enable" | "extend-disable" => {
+            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                let values: Vec<String> = formatted_array
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(|s| s.to_string())
+                    .collect();
+
+                let is_rule_list = matches!(norm_key, "enable" | "disable" | "extend-enable" | "extend-disable");
+                let final_values = if is_rule_list {
+                    values
+                        .into_iter()
+                        .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
+                        .collect()
+                } else {
+                    values
+                };
+
+                match norm_key {
+                    "enable" => {
+                        fragment
+                            .global
+                            .enable
+                            .push_override(final_values, source, file.clone(), None);
+                    }
+                    "disable" => fragment
+                        .global
+                        .disable
+                        .push_override(final_values, source, file.clone(), None),
+                    "include" => fragment
+                        .global
+                        .include
+                        .push_override(final_values, source, file.clone(), None),
+                    "exclude" => fragment
+                        .global
+                        .exclude
+                        .push_override(final_values, source, file.clone(), None),
+                    "extend-enable" => {
+                        fragment
+                            .global
+                            .extend_enable
+                            .push_override(final_values, source, file.clone(), None)
+                    }
+                    "extend-disable" => {
+                        fragment
+                            .global
+                            .extend_disable
+                            .push_override(final_values, source, file.clone(), None)
+                    }
+                    _ => unreachable!("Outer match guarantees only these keys"),
+                }
+            } else {
+                log::warn!(
+                    "[WARN] Expected array for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "respect-gitignore" => {
+            if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
+                let val = *formatted_bool.value();
+                fragment
+                    .global
+                    .respect_gitignore
+                    .push_override(val, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "force-exclude" => {
+            if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
+                let val = *formatted_bool.value();
+                fragment
+                    .global
+                    .force_exclude
+                    .push_override(val, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "line-length" => {
+            if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
+                let val = LineLength::new(*formatted_int.value() as usize);
+                fragment
+                    .global
+                    .line_length
+                    .push_override(val, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected integer for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "output-format" => {
+            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                let val = formatted_string.value().clone();
+                if fragment.global.output_format.is_none() {
+                    fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
+                } else {
+                    fragment
+                        .global
+                        .output_format
+                        .as_mut()
+                        .unwrap()
+                        .push_override(val, source, file.clone(), None);
+                }
+            } else {
+                log::warn!(
+                    "[WARN] Expected string for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "cache-dir" => {
+            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                let val = formatted_string.value().clone();
+                if fragment.global.cache_dir.is_none() {
+                    fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
+                } else {
+                    fragment
+                        .global
+                        .cache_dir
+                        .as_mut()
+                        .unwrap()
+                        .push_override(val, source, file.clone(), None);
+                }
+            } else {
+                log::warn!(
+                    "[WARN] Expected string for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "cache" => {
+            if let Some(toml_edit::Value::Boolean(b)) = value_item.as_value() {
+                let val = *b.value();
+                fragment.global.cache.push_override(val, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "fixable" => {
+            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                let values: Vec<String> = formatted_array
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
+                    .collect();
+                fragment
+                    .global
+                    .fixable
+                    .push_override(values, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected array for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "unfixable" => {
+            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
+                let values: Vec<String> = formatted_array
+                    .iter()
+                    .filter_map(|item| item.as_str())
+                    .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
+                    .collect();
+                fragment
+                    .global
+                    .unfixable
+                    .push_override(values, source, file.clone(), None);
+            } else {
+                log::warn!(
+                    "[WARN] Expected array for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        "flavor" => {
+            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
+                let val = formatted_string.value();
+                if let Ok(flavor) = MarkdownFlavor::from_str(val) {
+                    fragment.global.flavor.push_override(flavor, source, file.clone(), None);
+                } else {
+                    log::warn!("[WARN] Unknown markdown flavor '{val}' in {display_path}");
+                }
+            } else {
+                log::warn!(
+                    "[WARN] Expected string for global key '{}' in {}, found {}",
+                    norm_key,
+                    display_path,
+                    value_item.type_name()
+                );
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Parses rumdl.toml / .rumdl.toml content.
 pub(super) fn parse_rumdl_toml(
     content: &str,
@@ -515,257 +792,42 @@ pub(super) fn parse_rumdl_toml(
     // Use the lazily-initialized default registry for alias resolution and schema validation
     let registry = super::registry::default_registry();
 
-    // Handle [global] section
+    // Handle top-level global keys (ruff-style shorthand).
+    // These are parsed BEFORE [global] so that explicit [global] section values
+    // take precedence via push_override.
+    for (key, item) in doc.iter() {
+        if item.is_value() {
+            let norm_key = normalize_key(key);
+            if is_global_value_key(&norm_key) {
+                let handled = parse_global_key(&norm_key, item, &mut fragment, source, &file, &display_path, registry);
+                debug_assert!(
+                    handled,
+                    "Key '{norm_key}' is in GLOBAL_VALUE_KEYS but not handled by parse_global_key"
+                );
+            }
+        }
+    }
+
+    // Handle [global] section (overrides top-level shorthand keys above)
     if let Some(global_item) = doc.get("global")
         && let Some(global_table) = global_item.as_table()
     {
         for (key, value_item) in global_table.iter() {
             let norm_key = normalize_key(key);
-            match norm_key.as_str() {
-                "enable" | "disable" | "include" | "exclude" | "extend-enable" | "extend-disable" => {
-                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                        let values: Vec<String> = formatted_array
-                            .iter()
-                            .filter_map(|item| item.as_str())
-                            .map(|s| s.to_string())
-                            .collect();
-
-                        // Resolve rule name aliases for enable/disable/extend variants
-                        let is_rule_list = matches!(
-                            norm_key.as_str(),
-                            "enable" | "disable" | "extend-enable" | "extend-disable"
-                        );
-                        let final_values = if is_rule_list {
-                            values
-                                .into_iter()
-                                .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                                .collect()
-                        } else {
-                            values
-                        };
-
-                        match norm_key.as_str() {
-                            "enable" => {
-                                fragment
-                                    .global
-                                    .enable
-                                    .push_override(final_values, source, file.clone(), None);
-                            }
-                            "disable" => {
-                                fragment
-                                    .global
-                                    .disable
-                                    .push_override(final_values, source, file.clone(), None)
-                            }
-                            "include" => {
-                                fragment
-                                    .global
-                                    .include
-                                    .push_override(final_values, source, file.clone(), None)
-                            }
-                            "exclude" => {
-                                fragment
-                                    .global
-                                    .exclude
-                                    .push_override(final_values, source, file.clone(), None)
-                            }
-                            "extend-enable" => {
-                                fragment
-                                    .global
-                                    .extend_enable
-                                    .push_override(final_values, source, file.clone(), None)
-                            }
-                            "extend-disable" => {
-                                fragment
-                                    .global
-                                    .extend_disable
-                                    .push_override(final_values, source, file.clone(), None)
-                            }
-                            _ => unreachable!("Outer match guarantees only these keys"),
-                        }
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected array for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "respect_gitignore" | "respect-gitignore" => {
-                    // Handle both cases
-                    if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
-                        let val = *formatted_bool.value();
-                        fragment
-                            .global
-                            .respect_gitignore
-                            .push_override(val, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "force_exclude" | "force-exclude" => {
-                    // Handle both cases
-                    if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
-                        let val = *formatted_bool.value();
-                        fragment
-                            .global
-                            .force_exclude
-                            .push_override(val, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "line_length" | "line-length" => {
-                    // Handle both cases
-                    if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
-                        let val = LineLength::new(*formatted_int.value() as usize);
-                        fragment
-                            .global
-                            .line_length
-                            .push_override(val, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected integer for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "output_format" | "output-format" => {
-                    // Handle both cases
-                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                        let val = formatted_string.value().clone();
-                        if fragment.global.output_format.is_none() {
-                            fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
-                        } else {
-                            fragment.global.output_format.as_mut().unwrap().push_override(
-                                val,
-                                source,
-                                file.clone(),
-                                None,
-                            );
-                        }
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected string for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "cache_dir" | "cache-dir" => {
-                    // Handle both cases
-                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                        let val = formatted_string.value().clone();
-                        if fragment.global.cache_dir.is_none() {
-                            fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
-                        } else {
-                            fragment
-                                .global
-                                .cache_dir
-                                .as_mut()
-                                .unwrap()
-                                .push_override(val, source, file.clone(), None);
-                        }
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected string for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "cache" => {
-                    if let Some(toml_edit::Value::Boolean(b)) = value_item.as_value() {
-                        let val = *b.value();
-                        fragment.global.cache.push_override(val, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "fixable" => {
-                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                        let values: Vec<String> = formatted_array
-                            .iter()
-                            .filter_map(|item| item.as_str())
-                            .map(normalize_key)
-                            .collect();
-                        fragment
-                            .global
-                            .fixable
-                            .push_override(values, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected array for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "unfixable" => {
-                    if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                        let values: Vec<String> = formatted_array
-                            .iter()
-                            .filter_map(|item| item.as_str())
-                            .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
-                            .collect();
-                        fragment
-                            .global
-                            .unfixable
-                            .push_override(values, source, file.clone(), None);
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected array for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                "flavor" => {
-                    if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                        let val = formatted_string.value();
-                        if let Ok(flavor) = MarkdownFlavor::from_str(val) {
-                            fragment.global.flavor.push_override(flavor, source, file.clone(), None);
-                        } else {
-                            log::warn!("[WARN] Unknown markdown flavor '{val}' in {display_path}");
-                        }
-                    } else {
-                        log::warn!(
-                            "[WARN] Expected string for global key '{}' in {}, found {}",
-                            key,
-                            display_path,
-                            value_item.type_name()
-                        );
-                    }
-                }
-                _ => {
-                    // Track unknown global keys for validation
-                    fragment
-                        .unknown_keys
-                        .push(("[global]".to_string(), key.to_string(), Some(path.to_string())));
-                    log::warn!("[WARN] Unknown key in [global] section of {display_path}: {key}");
-                }
+            if !parse_global_key(
+                &norm_key,
+                value_item,
+                &mut fragment,
+                source,
+                &file,
+                &display_path,
+                registry,
+            ) {
+                // Track unknown global keys for validation
+                fragment
+                    .unknown_keys
+                    .push(("[global]".to_string(), key.to_string(), Some(path.to_string())));
+                log::warn!("[WARN] Unknown key in [global] section of {display_path}: {key}");
             }
         }
     }
@@ -851,7 +913,7 @@ pub(super) fn parse_rumdl_toml(
 
     // Rule-specific: all other top-level tables
     for (key, item) in doc.iter() {
-        // Skip known special sections and top-level keys
+        // Skip known special sections and top-level value keys (already handled above)
         if key == "global"
             || key == "per-file-ignores"
             || key == "per-file-flavor"
@@ -859,6 +921,14 @@ pub(super) fn parse_rumdl_toml(
             || key == "extends"
         {
             continue;
+        }
+
+        // Skip top-level value keys that were already parsed as global config
+        if item.is_value() {
+            let norm_key = normalize_key(key);
+            if is_global_value_key(&norm_key) {
+                continue;
+            }
         }
 
         // Resolve rule name (handles both canonical names like "MD004" and aliases like "ul-style")
