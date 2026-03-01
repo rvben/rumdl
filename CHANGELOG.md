@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34] - 2026-03-01
+
+### Added
+
+- **Config**: Support top-level global keys in `rumdl.toml` without requiring a
+  `[global]` section header, matching [ruff.toml](https://docs.astral.sh/ruff/settings/)
+  conventions. Keys like `line-length`, `disable`, `exclude`, and `respect-gitignore`
+  now work at the top level. If both top-level and `[global]` keys exist, `[global]`
+  takes precedence
+
+### Fixed
+
+- **Config**: Resolve rule name aliases in `fixable` config lists (was only resolving
+  aliases for `unfixable`). Users can now write `fixable = ["trailing-spaces"]`
+  instead of needing `fixable = ["MD009"]`
+- **CLI**: Correct include/exclude precedence to match industry standard — `exclude`
+  always wins over `include` in discovery mode, consistent with ruff, eslint, and
+  markdownlint-cli
+
 ## [0.1.33] - 2026-02-28
 
 ### Added
