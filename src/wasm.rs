@@ -165,6 +165,12 @@ pub struct LinterConfig {
     /// Markdown flavor: "standard", "mkdocs", "mdx", "quarto", "obsidian", or "kramdown"
     pub flavor: Option<String>,
 
+    /// Rules allowed to apply fixes (if specified, only these rules are fixed)
+    pub fixable: Option<Vec<String>>,
+
+    /// Rules that should never apply fixes (takes precedence over fixable)
+    pub unfixable: Option<Vec<String>>,
+
     /// Rule-specific configurations
     /// Keys are rule names (e.g., "MD060", "MD013") and values are rule options
     #[serde(flatten)]
@@ -172,56 +178,9 @@ pub struct LinterConfig {
 }
 
 impl LinterConfig {
-    /// Convert to internal Config
+    /// Convert to internal Config (discards any config parse warnings)
     fn to_config(&self) -> Config {
-        let mut config = Config::default();
-
-        // Apply disabled rules
-        if let Some(ref disable) = self.disable {
-            config.global.disable = disable.clone();
-        }
-
-        // Apply enabled rules
-        if let Some(ref enable) = self.enable {
-            config.global.enable = enable.clone();
-        }
-
-        // Apply extend-enable / extend-disable
-        if let Some(ref extend_enable) = self.extend_enable {
-            config.global.extend_enable = extend_enable.clone();
-        }
-        if let Some(ref extend_disable) = self.extend_disable {
-            config.global.extend_disable = extend_disable.clone();
-        }
-
-        // Apply line length
-        if let Some(line_length) = self.line_length {
-            config.global.line_length = LineLength::new(line_length as usize);
-        }
-
-        // Apply flavor
-        config.global.flavor = self.markdown_flavor();
-
-        // Apply rule-specific configurations
-        if let Some(ref rules) = self.rules {
-            for (rule_name, json_value) in rules {
-                // Only process keys that look like rule names (MD###)
-                if !is_rule_name(rule_name) {
-                    continue;
-                }
-
-                // Convert JSON value to RuleConfig
-                let result = json_to_rule_config_with_warnings(json_value);
-                if let Some(rule_config) = result.config {
-                    config.rules.insert(rule_name.to_ascii_uppercase(), rule_config);
-                }
-            }
-        }
-
-        // Per-rule `enabled = true` → extend_enable for opt-in rules
-        config.promote_enabled_to_extend_enable();
-
-        config
+        self.to_config_with_warnings().0
     }
 
     /// Convert to internal Config, collecting any warnings about invalid configuration
@@ -234,9 +193,10 @@ impl LinterConfig {
             config.global.disable = disable.clone();
         }
 
-        // Apply enabled rules
+        // Apply enabled rules (presence of `enable` key means explicit mode)
         if let Some(ref enable) = self.enable {
             config.global.enable = enable.clone();
+            config.global.enable_is_explicit = true;
         }
 
         // Apply extend-enable / extend-disable
@@ -254,6 +214,14 @@ impl LinterConfig {
 
         // Apply flavor
         config.global.flavor = self.markdown_flavor();
+
+        // Apply fixable / unfixable
+        if let Some(ref fixable) = self.fixable {
+            config.global.fixable = fixable.clone();
+        }
+        if let Some(ref unfixable) = self.unfixable {
+            config.global.unfixable = unfixable.clone();
+        }
 
         // Apply rule-specific configurations
         if let Some(ref rules) = self.rules {
@@ -280,16 +248,13 @@ impl LinterConfig {
         (config, warnings)
     }
 
-    /// Parse markdown flavor from config
+    /// Parse markdown flavor from config, delegating to `MarkdownFlavor::from_str`
+    /// to support all aliases (e.g., "qmd"/"rmd" → Quarto, "gfm" → Standard)
     fn markdown_flavor(&self) -> MarkdownFlavor {
-        match self.flavor.as_deref() {
-            Some("mkdocs") => MarkdownFlavor::MkDocs,
-            Some("mdx") => MarkdownFlavor::MDX,
-            Some("quarto") => MarkdownFlavor::Quarto,
-            Some("obsidian") => MarkdownFlavor::Obsidian,
-            Some("kramdown") | Some("jekyll") => MarkdownFlavor::Kramdown,
-            _ => MarkdownFlavor::Standard,
-        }
+        self.flavor
+            .as_deref()
+            .and_then(|s| s.parse::<MarkdownFlavor>().ok())
+            .unwrap_or_default()
     }
 }
 
@@ -419,15 +384,10 @@ impl Linter {
             "enable": self.config.global.enable,
             "extend_enable": self.config.global.extend_enable,
             "extend_disable": self.config.global.extend_disable,
+            "fixable": self.config.global.fixable,
+            "unfixable": self.config.global.unfixable,
             "line_length": self.config.global.line_length.get(),
-            "flavor": match self.flavor {
-                MarkdownFlavor::Standard => "standard",
-                MarkdownFlavor::MkDocs => "mkdocs",
-                MarkdownFlavor::MDX => "mdx",
-                MarkdownFlavor::Quarto => "quarto",
-                MarkdownFlavor::Obsidian => "obsidian",
-                MarkdownFlavor::Kramdown => "kramdown",
-            },
+            "flavor": self.flavor.to_string(),
             "rules": rules_json
         })
         .to_string()
@@ -499,6 +459,7 @@ mod tests {
             enable: None,
             line_length: Some(100),
             flavor: Some("mkdocs".to_string()),
+            ..Default::default()
         };
 
         let internal = config.to_config();
