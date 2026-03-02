@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36] - 2026-03-02
+
+### Added
+
+- **Lint**: Rust doc comment linting — `rumdl check` and `rumdl check --fix`
+  now lint markdown inside `///` and `//!` doc comments in `.rs` files.
+  Rules that don't apply to doc comments (MD041, MD047) are automatically
+  skipped. Column numbers are remapped to the original source positions
+  ([#438](https://github.com/rvben/rumdl/issues/438))
+
+### Fixed
+
+- **WASM**: Enable opt-in rules (like MD060) via per-rule `enabled = true`
+  and `extend-enable` in WASM/Obsidian plugin configuration
+  ([obsidian-rumdl#15](https://github.com/rvben/obsidian-rumdl/issues/15))
+- **WASM**: Add `fixable`/`unfixable` config fields so fix scope restrictions
+  work in WASM builds
+- **WASM**: Set `enable_is_explicit` when `enable` is present, matching CLI
+  behavior where `enable = []` means "no rules"
+- **WASM**: Use canonical `MarkdownFlavor::from_str()` for flavor parsing so
+  all aliases (`qmd`, `rmd`, `gfm`, `commonmark`, etc.) work in WASM
+
 ## [0.1.35] - 2026-03-02
 
 ### Added
