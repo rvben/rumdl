@@ -3,6 +3,7 @@
 //! This module handles file discovery, core linting/fixing, and embedded markdown processing.
 
 mod discovery;
+mod doc_comments;
 mod embedded;
 mod processing;
 

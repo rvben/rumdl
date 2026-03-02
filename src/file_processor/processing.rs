@@ -188,6 +188,12 @@ pub fn process_file_with_formatter(
         let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
         warnings_fixed += embedded_formatted;
 
+        // Format doc comments in Rust files
+        if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+            let doc_formatted = super::doc_comments::format_doc_comment_blocks(&mut content, &filtered_rules, config);
+            warnings_fixed += doc_formatted;
+        }
+
         // Format code blocks using external tools if enabled
         if config.code_block_tools.enabled {
             let processor = rumdl_lib::code_block_tools::CodeBlockToolProcessor::new(
@@ -247,6 +253,12 @@ pub fn process_file_with_formatter(
         // Use filtered_rules to respect per-file-ignores for embedded content
         let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
         warnings_fixed += embedded_formatted;
+
+        // Format doc comments in Rust files
+        if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+            let doc_formatted = super::doc_comments::format_doc_comment_blocks(&mut content, &filtered_rules, config);
+            warnings_fixed += doc_formatted;
+        }
 
         // Format code blocks using external tools if enabled
         if config.code_block_tools.enabled {
@@ -512,6 +524,11 @@ pub fn process_file_with_index(
 
     // Normalize to LF for all internal processing
     content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
+
+    // Route Rust files to doc comment linting instead of regular markdown linting
+    if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
+        return process_rust_file_doc_comments(file_path, &content, rules, config, original_line_ending);
+    }
 
     // Validate inline config comments and warn about unknown rules
     if !silent {
@@ -820,6 +837,53 @@ fn build_non_convergence_warning_lines(
     }
     lines.push("Please report it: https://github.com/rvben/rumdl/issues/new?template=bug_report.yml".to_string());
     lines
+}
+
+/// Process a Rust source file by linting markdown in doc comments.
+///
+/// Returns a `ProcessFileResult` with warnings remapped to their original file
+/// positions. No cross-file analysis is performed for doc comments.
+fn process_rust_file_doc_comments(
+    file_path: &str,
+    content: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    original_line_ending: rumdl_lib::utils::LineEnding,
+) -> ProcessFileResult {
+    // Filter rules based on per-file-ignores configuration
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+    let filtered_rules: Vec<Box<dyn Rule>> = if !ignored_rules_for_file.is_empty() {
+        rules
+            .iter()
+            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+            .map(|r| dyn_clone::clone_box(&**r))
+            .collect()
+    } else {
+        rules.to_vec()
+    };
+
+    let all_warnings = rumdl_lib::doc_comment_lint::check_doc_comment_blocks(content, &filtered_rules, config);
+
+    let total_warnings = all_warnings.len();
+    // Doc comment warnings have fix stripped (fix: None) in check mode, so
+    // determine fixability by checking the rule's fix capability instead.
+    let fixable_warnings = all_warnings
+        .iter()
+        .filter(|w| {
+            w.rule_name
+                .as_ref()
+                .is_some_and(|name| is_rule_cli_fixable(rules, config, name))
+        })
+        .count();
+
+    ProcessFileResult {
+        warnings: all_warnings,
+        content: content.to_string(),
+        total_warnings,
+        fixable_warnings,
+        original_line_ending,
+        file_index: rumdl_lib::workspace_index::FileIndex::new(),
+    }
 }
 
 #[cfg(test)]
