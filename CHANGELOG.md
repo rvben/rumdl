@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] - 2026-03-02
+
+### Added
+
+- **LSP**: Hover preview for markdown links — hovering over a link shows a
+  preview of the destination file or heading section with up to 15 lines of
+  content ([#477](https://github.com/rvben/rumdl/issues/477))
+
+### Fixed
+
+- **MD077**: Flag and fix all continuation lines in multiline loose list
+  paragraphs, not just the first line after the blank
+  ([#474](https://github.com/rvben/rumdl/issues/474))
+  (thanks @jlgrimes in [#475](https://github.com/rvben/rumdl/pull/475))
+- **LSP**: Return incoming cross-file references when find-references is
+  invoked from a target file with cursor not on a heading or link
+  ([#476](https://github.com/rvben/rumdl/issues/476))
+  (thanks @jlgrimes in [#478](https://github.com/rvben/rumdl/pull/478))
+- **CI**: Only dispatch downstream notifications when publish steps succeed
+
 ## [0.1.34] - 2026-03-01
 
 ### Added
