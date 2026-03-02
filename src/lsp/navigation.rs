@@ -604,10 +604,72 @@ impl RumdlLanguageServer {
             return self.find_references_to_target(&target_path, &link.anchor).await;
         }
 
-        // If the cursor is not on a heading or link, treat this as a file-level
-        // reference lookup so users can run "find references" from a target file
-        // opened via go-to-definition and still discover incoming links.
-        self.find_references_to_target(&current_file, "").await
+        // Fallback: find all cross-file references pointing to the current file,
+        // regardless of fragment. This handles the common case where a user opens
+        // a target file and invokes find-references to discover what links to it.
+        self.find_all_references_to_file(&current_file).await
+    }
+
+    /// Find all links across the workspace that point to `target_file`,
+    /// regardless of the fragment/anchor.
+    ///
+    /// This is the fallback for find-references when the cursor is not on a
+    /// heading or a link: it returns every cross-file link whose resolved path
+    /// matches `target_file`.
+    async fn find_all_references_to_file(&self, target_file: &Path) -> Option<Vec<Location>> {
+        let index = self.workspace_index.read().await;
+        let mut locations = Vec::new();
+
+        for (source_path, file_index) in index.files() {
+            let source_dir = source_path.parent().unwrap_or(Path::new(""));
+
+            let matching_links: Vec<_> = file_index
+                .cross_file_links
+                .iter()
+                .filter(|link| {
+                    let resolved_target = normalize_path(source_dir.join(&link.target_path));
+                    resolved_target == *target_file
+                })
+                .collect();
+
+            if matching_links.is_empty() {
+                continue;
+            }
+
+            let source_uri = match Url::from_file_path(source_path) {
+                Ok(uri) => uri,
+                Err(_) => continue,
+            };
+
+            let source_content = tokio::fs::read_to_string(source_path).await.ok();
+            let source_lines: Vec<&str> = source_content
+                .as_deref()
+                .map(|c| c.lines().collect())
+                .unwrap_or_default();
+
+            for link in matching_links {
+                let line = (link.line.saturating_sub(1)) as u32;
+                let byte_col_0indexed = link.column.saturating_sub(1);
+
+                let character = source_lines
+                    .get(line as usize)
+                    .map(|line_text| {
+                        let clamped = byte_col_0indexed.min(line_text.len());
+                        byte_to_utf16_offset(line_text, clamped)
+                    })
+                    .unwrap_or(byte_col_0indexed as u32);
+
+                locations.push(Location {
+                    uri: source_uri.clone(),
+                    range: Range {
+                        start: Position { line, character },
+                        end: Position { line, character },
+                    },
+                });
+            }
+        }
+
+        if locations.is_empty() { None } else { Some(locations) }
     }
 
     /// Resolve a `FullLinkTarget` to a `GotoDefinitionResponse`.

@@ -731,4 +731,74 @@ mod tests {
         let content = "# Heading\n\nSome paragraph.\n\nAnother paragraph.\n";
         assert!(check(content).is_empty());
     }
+
+    // ── Multi-line continuation (additional coverage) ──────────────
+
+    #[test]
+    fn multiline_continuation_all_lines_flagged() {
+        let content = "1. This is a list item.\n\n  This is continuation text and\n  it has multiple lines.\n  This is yet another line.\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 3);
+        assert_eq!(warnings[0].line, 3);
+        assert_eq!(warnings[1].line, 4);
+        assert_eq!(warnings[2].line, 5);
+    }
+
+    #[test]
+    fn multiline_continuation_with_frontmatter_fix() {
+        let content = "---\ntitle: Heading\n---\n\nSome introductory text:\n\n1. This is a list item.\n\n  This is list continuation text and\n  it has multiple lines that aren't indented properly.\n  This is yet another line that isn't indented properly.\n1. This is a list item.\n\n  This is list continuation text and\n  it has multiple lines that aren't indented properly.\n  This is yet another line that isn't indented properly.\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "---\ntitle: Heading\n---\n\nSome introductory text:\n\n1. This is a list item.\n\n   This is list continuation text and\n   it has multiple lines that aren't indented properly.\n   This is yet another line that isn't indented properly.\n1. This is a list item.\n\n   This is list continuation text and\n   it has multiple lines that aren't indented properly.\n   This is yet another line that isn't indented properly.\n"
+        );
+    }
+
+    #[test]
+    fn multiline_continuation_correct_indent_no_warning() {
+        let content = "1. Item\n\n   line one\n   line two\n   line three\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn multiline_continuation_mixed_indent() {
+        let content = "1. Item\n\n   correct\n  wrong\n   correct\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 4);
+    }
+
+    #[test]
+    fn multiline_continuation_unordered() {
+        let content = "- Item\n\n continuation 1\n continuation 2\n continuation 3\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 3);
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "- Item\n\n  continuation 1\n  continuation 2\n  continuation 3\n"
+        );
+    }
+
+    #[test]
+    fn multiline_continuation_two_items_fix() {
+        let content = "1. First\n\n  cont a\n  cont b\n\n2. Second\n\n  cont c\n  cont d\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "1. First\n\n   cont a\n   cont b\n\n2. Second\n\n   cont c\n   cont d\n"
+        );
+    }
+
+    #[test]
+    fn multiline_continuation_separated_by_blank() {
+        let content = "1. Item\n\n  para1 line1\n  para1 line2\n\n  para2 line1\n  para2 line2\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 4);
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "1. Item\n\n   para1 line1\n   para1 line2\n\n   para2 line1\n   para2 line2\n"
+        );
+    }
 }
