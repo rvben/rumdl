@@ -418,6 +418,137 @@ impl RumdlLanguageServer {
         self.resolve_link_target(uri, &link).await
     }
 
+    /// Handle `textDocument/hover` requests.
+    ///
+    /// When the cursor is on a markdown link, shows a preview of the target:
+    /// - External URLs: shows the URL
+    /// - Local files without anchor: shows the file path and first lines
+    /// - Local files with anchor: shows the heading and content below it
+    pub(super) async fn handle_hover(&self, uri: &Url, position: Position) -> Option<Hover> {
+        let text = self.get_document_content(uri).await?;
+
+        let link = detect_full_link_target(&text, position).or_else(|| detect_ref_link_target(&text, position))?;
+
+        // External URLs: show the URL itself
+        if is_external_url(&link.file_path) {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: format!("**External link**\n\n{}", link.file_path),
+                }),
+                range: None,
+            });
+        }
+
+        let current_file = uri.to_file_path().ok()?;
+        let current_dir = current_file.parent()?.to_path_buf();
+
+        let target_path = if link.file_path.is_empty() {
+            current_file.clone()
+        } else {
+            normalize_path(current_dir.join(&link.file_path))
+        };
+
+        // Read target file content
+        let target_uri = Url::from_file_path(&target_path).ok()?;
+        let target_content = self.get_document_content(&target_uri).await?;
+
+        let preview = if !link.anchor.is_empty() {
+            self.build_anchor_preview(&target_path, &link.anchor, &target_content)
+                .await
+        } else {
+            self.build_file_preview(&target_path, &target_content)
+        };
+
+        Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: preview,
+            }),
+            range: None,
+        })
+    }
+
+    /// Build a hover preview for a link targeting a specific heading anchor.
+    ///
+    /// Finds the heading line in the file and extracts up to 15 lines of content
+    /// below it (stopping at the next heading of equal or higher level).
+    async fn build_anchor_preview(&self, file_path: &Path, anchor: &str, content: &str) -> String {
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Look up the heading line from the workspace index
+        let heading_line = self.resolve_heading_line(file_path, anchor).await;
+
+        let Some(heading_line_0indexed) = heading_line else {
+            let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
+            return format!("{}#{}\n\n*Heading not found*", display_path.to_string_lossy(), anchor);
+        };
+
+        let start = heading_line_0indexed as usize;
+        if start >= lines.len() {
+            let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
+            return format!("{}#{}", display_path.to_string_lossy(), anchor);
+        }
+
+        // Determine the heading level of the target heading
+        let heading_level = lines[start].chars().take_while(|&c| c == '#').count();
+
+        // Collect lines: the heading + up to 15 lines of content below it,
+        // stopping at the next heading of equal or higher level.
+        // Track whether we stopped due to reaching the line limit vs section end.
+        let max_lines = 15;
+        let mut preview_lines: Vec<&str> = vec![lines[start]];
+        let mut in_fenced_code_block = false;
+        let mut hit_line_limit = false;
+
+        for (i, line) in lines.iter().skip(start + 1).enumerate() {
+            if i >= max_lines {
+                hit_line_limit = true;
+                break;
+            }
+
+            // Track fenced code blocks to avoid false heading detection
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_fenced_code_block = !in_fenced_code_block;
+            }
+
+            if !in_fenced_code_block {
+                let line_level = trimmed.chars().take_while(|&c| c == '#').count();
+                // ATX heading requires a space after the `#` characters (or be empty)
+                let after_hashes = &trimmed[trimmed.len().min(line_level)..];
+                let is_atx_heading = line_level > 0 && (after_hashes.is_empty() || after_hashes.starts_with(' '));
+                if is_atx_heading && line_level <= heading_level {
+                    break;
+                }
+            }
+
+            preview_lines.push(line);
+        }
+
+        let mut preview = preview_lines.join("\n");
+        if hit_line_limit {
+            preview.push_str("\n\n...");
+        }
+        preview
+    }
+
+    /// Build a hover preview for a link targeting a whole file (no anchor).
+    ///
+    /// Shows the file name and the first 15 lines of content.
+    fn build_file_preview(&self, file_path: &Path, content: &str) -> String {
+        let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
+        let lines: Vec<&str> = content.lines().collect();
+        let max_lines = 15;
+        let preview_lines: Vec<&str> = lines.iter().take(max_lines).copied().collect();
+
+        let mut preview = format!("**{}**\n\n{}", display_path.to_string_lossy(), preview_lines.join("\n"));
+        if lines.len() > max_lines {
+            preview.push_str("\n\n...");
+        }
+        preview
+    }
+
     /// Handle `textDocument/references` requests.
     ///
     /// When the cursor is on a heading, finds all links across the workspace that

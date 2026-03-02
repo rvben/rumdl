@@ -276,6 +276,7 @@ impl LanguageServer for RumdlLanguageServer {
                 }),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -1099,6 +1100,15 @@ impl LanguageServer for RumdlLanguageServer {
         log::debug!("Find references at {uri} {}:{}", position.line, position.character);
 
         Ok(self.handle_references(&uri, position).await)
+    }
+
+    async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        log::debug!("Hover at {uri} {}:{}", position.line, position.character);
+
+        Ok(self.handle_hover(&uri, position).await)
     }
 
     async fn diagnostic(&self, params: DocumentDiagnosticParams) -> JsonRpcResult<DocumentDiagnosticReportResult> {

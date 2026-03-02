@@ -4714,3 +4714,973 @@ async fn test_lint_document_embedded_markdown_md_alias() {
         "Expected embedded markdown diagnostics for `md` alias. All diagnostics: {diagnostics:?}"
     );
 }
+
+// =============================================================================
+// find-references fallback: cursor not on heading or link
+// =============================================================================
+
+/// When cursor is in a target file but not on a heading or link,
+/// find-references should return all cross-file links pointing to that file.
+#[tokio::test]
+async fn test_find_references_fallback_to_file_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback/docs");
+    let target_file = docs_dir.join("file-to-link-to.md");
+    let source_file = docs_dir.join("file-to-link-from.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    // Target file content: cursor on a plain text line (not heading, not link)
+    let content = "---\ntitle: Heading\n---\n\nWe are linking to this file from `file-to-link-from.md`.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Populate workspace index
+    {
+        let mut index = server.workspace_index.write().await;
+
+        // Target file has no headings relevant to the query
+        let target_fi = FileIndex::default();
+        index.insert_file(target_file.clone(), target_fi);
+
+        // Source file links to target file (file-only link, no fragment)
+        let mut source_fi = FileIndex::default();
+        source_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "file-to-link-to.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 22,
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    // Cursor on line 4 (0-indexed), plain text - not on a heading or link
+    let position = Position { line: 4, character: 10 };
+
+    let result = server.handle_references(&target_uri, position).await;
+    assert!(result.is_some(), "Should find references to the file via fallback");
+
+    let locations = result.unwrap();
+    assert_eq!(locations.len(), 1, "Should find 1 reference from source file");
+    assert_eq!(
+        locations[0].uri,
+        Url::from_file_path(&source_file).unwrap(),
+        "Reference should come from the source file"
+    );
+}
+
+/// When cursor is in a file with no incoming references and cursor is not on
+/// a heading or link, find-references should return None.
+#[tokio::test]
+async fn test_find_references_fallback_no_references() {
+    use crate::workspace_index::FileIndex;
+
+    let server = create_test_server();
+
+    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback2/docs/lonely.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "Some text without anything special.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let fi = FileIndex::default();
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+
+    let result = server.handle_references(&uri, position).await;
+    assert!(result.is_none(), "Should return None when no references exist");
+}
+
+/// When multiple files link to the same target, the fallback should return all of them.
+#[tokio::test]
+async fn test_find_references_fallback_multiple_sources() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback3/docs");
+    let target_file = docs_dir.join("target.md");
+    let source_a = docs_dir.join("a.md");
+    let source_b = docs_dir.join("b.md");
+    let source_c = docs_dir.join("c.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "This file is referenced by multiple others.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let target_fi = FileIndex::default();
+        index.insert_file(target_file.clone(), target_fi);
+
+        // Three files link to target.md with various fragments
+        for (source, fragment, line) in [(&source_a, "", 2), (&source_b, "section", 5), (&source_c, "", 10)] {
+            let mut fi = FileIndex::default();
+            fi.cross_file_links.push(CrossFileLinkIndex {
+                target_path: "target.md".to_string(),
+                fragment: fragment.to_string(),
+                line,
+                column: 1,
+            });
+            index.insert_file(source.clone(), fi);
+        }
+    }
+
+    // Cursor not on heading or link
+    let position = Position { line: 0, character: 5 };
+
+    let result = server.handle_references(&target_uri, position).await;
+    assert!(result.is_some(), "Should find references from multiple files");
+
+    let locations = result.unwrap();
+    assert_eq!(
+        locations.len(),
+        3,
+        "Should find all 3 references regardless of fragment"
+    );
+
+    let uris: std::collections::HashSet<_> = locations.iter().map(|l| l.uri.clone()).collect();
+    assert!(uris.contains(&Url::from_file_path(&source_a).unwrap()));
+    assert!(uris.contains(&Url::from_file_path(&source_b).unwrap()));
+    assert!(uris.contains(&Url::from_file_path(&source_c).unwrap()));
+}
+
+/// When cursor is on a heading, heading-specific references take priority over
+/// the file-level fallback (ensuring the heading path still works correctly).
+#[tokio::test]
+async fn test_find_references_heading_takes_priority_over_fallback() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback4/docs");
+    let target_file = docs_dir.join("guide.md");
+    let source_with_anchor = docs_dir.join("a.md");
+    let source_without_anchor = docs_dir.join("b.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "# Installation\n\nHow to install.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        // Source A links to guide.md#installation (matches heading anchor)
+        let mut fi_a = FileIndex::default();
+        fi_a.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "installation".to_string(),
+            line: 3,
+            column: 5,
+        });
+        index.insert_file(source_with_anchor.clone(), fi_a);
+
+        // Source B links to guide.md (no anchor - only visible in file-level fallback)
+        let mut fi_b = FileIndex::default();
+        fi_b.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "".to_string(),
+            line: 7,
+            column: 10,
+        });
+        index.insert_file(source_without_anchor.clone(), fi_b);
+    }
+
+    // Cursor on heading - should only find anchor-specific references
+    let position = Position { line: 0, character: 5 };
+
+    let result = server.handle_references(&target_uri, position).await;
+    assert!(result.is_some(), "Should find heading-specific references");
+
+    let locations = result.unwrap();
+    assert_eq!(
+        locations.len(),
+        1,
+        "Should only find anchor-matching reference, not file-level"
+    );
+    assert_eq!(
+        locations[0].uri,
+        Url::from_file_path(&source_with_anchor).unwrap(),
+        "Should find the anchor-specific reference"
+    );
+}
+
+// =============================================================================
+// Hover preview tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_hover_inline_link_to_file() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test1/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "# Index\n\nSee [the guide](guide.md) for details.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Add target file content to document cache
+    let target_content = "# Guide\n\nThis is the guide.\n\nIt has multiple lines.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Populate workspace index
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    // Cursor on "guide.md" in `](guide.md)`
+    let position = Position { line: 2, character: 20 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover for file link");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("guide.md"), "Should contain filename");
+        assert!(
+            markup.value.contains("This is the guide"),
+            "Should contain file content"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_inline_link_with_anchor() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test2/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "# Index\n\nSee [install](guide.md#installation) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let target_content = "# Guide\n\nIntro text.\n\n## Installation\n\nRun `cargo install rumdl`.\n\nThen configure.\n\n## Usage\n\nRun it.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 5,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Usage".to_string(),
+            auto_anchor: "usage".to_string(),
+            custom_anchor: None,
+            line: 11,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    // Cursor on the link target
+    let position = Position { line: 2, character: 18 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover for anchor link");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(
+            markup.value.contains("## Installation"),
+            "Should contain the heading: got '{}'",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("cargo install rumdl"),
+            "Should contain section content"
+        );
+        // Should NOT contain the next heading's content
+        assert!(
+            !markup.value.contains("## Usage"),
+            "Should stop at next heading of equal level"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_reference_style_link() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test3/docs");
+    let current_file = docs_dir.join("readme.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [the guide][guide] for details.\n\n[guide]: guide.md\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let target_content = "# Guide\n\nWelcome to the guide.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    // Cursor on "the guide" in [the guide][guide]
+    let position = Position { line: 0, character: 8 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover for reference-style link");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("guide.md"), "Should contain filename");
+        assert!(
+            markup.value.contains("Welcome to the guide"),
+            "Should contain file content"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_external_url() {
+    let server = create_test_server();
+
+    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test4/readme.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "Visit [example](https://example.com) for more.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on "https://example.com"
+    let position = Position { line: 0, character: 18 };
+
+    let result = server.handle_hover(&uri, position).await;
+    assert!(result.is_some(), "Should return hover for external URL");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("https://example.com"), "Should show the URL");
+        assert!(markup.value.contains("External link"), "Should indicate it's external");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_plain_text_returns_none() {
+    let server = create_test_server();
+
+    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test5/readme.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "Just some plain text here.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on plain text
+    let position = Position { line: 0, character: 5 };
+
+    let result = server.handle_hover(&uri, position).await;
+    assert!(result.is_none(), "Should return None when cursor is not on a link");
+}
+
+#[tokio::test]
+async fn test_hover_nonexistent_file_returns_none() {
+    let server = create_test_server();
+
+    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test6/readme.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "See [missing](nonexistent.md) file.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on the link target
+    let position = Position { line: 0, character: 18 };
+
+    let result = server.handle_hover(&uri, position).await;
+    assert!(result.is_none(), "Should return None for link to nonexistent file");
+}
+
+#[tokio::test]
+async fn test_hover_same_file_anchor() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test7/readme.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "# Title\n\nSee [below](#configuration) for config.\n\nSome text.\n\n## Configuration\n\nSet `key = value` in config.\n\nMore config details.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Title".to_string(),
+            auto_anchor: "title".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Configuration".to_string(),
+            auto_anchor: "configuration".to_string(),
+            custom_anchor: None,
+            line: 7,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    // Cursor on "#configuration" in `](#configuration)`
+    let position = Position { line: 2, character: 16 };
+
+    let result = server.handle_hover(&uri, position).await;
+    assert!(result.is_some(), "Should return hover for same-file anchor");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("## Configuration"), "Should contain the heading");
+        assert!(markup.value.contains("key = value"), "Should contain section content");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_file_preview_truncates() {
+    use crate::workspace_index::FileIndex;
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test8/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("long.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [long file](long.md) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Create a target file with more than 15 lines
+    let long_content: String = (1..=30).map(|i| format!("Line {i}\n")).collect();
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: long_content.clone(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        index.insert_file(target_file.clone(), FileIndex::default());
+    }
+
+    let position = Position { line: 0, character: 18 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover for long file");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("Line 1"), "Should contain first line");
+        assert!(markup.value.contains("Line 15"), "Should contain line 15");
+        assert!(!markup.value.contains("Line 16"), "Should not contain line 16");
+        assert!(markup.value.contains("..."), "Should indicate truncation");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_anchor_section_end_no_ellipsis() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test9/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [install](guide.md#install) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Target has two sections — "Install" is short, "Usage" follows
+    let target_content = "# Guide\n\n## Install\n\nRun `cargo install`.\n\n## Usage\n\nRun the binary.\n\nMore usage info.\n\nEven more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n\nAnd more.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Install".to_string(),
+            auto_anchor: "install".to_string(),
+            custom_anchor: None,
+            line: 3,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Usage".to_string(),
+            auto_anchor: "usage".to_string(),
+            custom_anchor: None,
+            line: 7,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 18 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover for anchor link");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("## Install"), "Should contain the heading");
+        assert!(markup.value.contains("cargo install"), "Should contain section content");
+        assert!(!markup.value.contains("## Usage"), "Should stop at next heading");
+        assert!(
+            !markup.value.contains("..."),
+            "Should NOT show ellipsis when section ended at heading boundary"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_anchor_preview_skips_code_block_hashes() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test10/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [config](guide.md#configuration) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Target has a code block with `# comment` that looks like a heading
+    let target_content = "## Configuration\n\nExample:\n\n```python\n# This is a Python comment\nconfig = True\n```\n\nMore config info.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Configuration".to_string(),
+            auto_anchor: "configuration".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 18 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(
+            markup.value.contains("# This is a Python comment"),
+            "Should include code block content (not treat # as heading): got '{}'",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("More config info"),
+            "Should include content after code block"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_empty_file() {
+    use crate::workspace_index::FileIndex;
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test11/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("empty.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [empty](empty.md) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Empty target file
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: String::new(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        index.insert_file(target_file.clone(), FileIndex::default());
+    }
+
+    let position = Position { line: 0, character: 15 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover even for empty file");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("empty.md"), "Should show filename");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_anchor_does_not_stop_at_hashtag_word() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test12/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [tags](guide.md#tags) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Target has "#hashtag" words that are NOT headings (no space after #)
+    let target_content = "## Tags\n\nUse #markdown and #linting tags.\n\nThey help organize.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Tags".to_string(),
+            auto_anchor: "tags".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 15 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(
+            markup.value.contains("#markdown"),
+            "Should NOT treat #hashtag as a heading and stop: got '{}'",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("They help organize"),
+            "Should include content after hashtag line"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_anchor_stops_at_indented_heading() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test13/docs");
+    let current_file = docs_dir.join("index.md");
+    let target_file = docs_dir.join("guide.md");
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [intro](guide.md#intro) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // CommonMark allows up to 3 spaces of indentation for ATX headings
+    let target_content = "## Intro\n\nSome intro text.\n\n  ## Next Section\n\nNext content.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Intro".to_string(),
+            auto_anchor: "intro".to_string(),
+            custom_anchor: None,
+            line: 1,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Next Section".to_string(),
+            auto_anchor: "next-section".to_string(),
+            custom_anchor: None,
+            line: 5,
+        });
+        index.insert_file(target_file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 15 };
+
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return hover");
+
+    let hover = result.unwrap();
+    if let HoverContents::Markup(markup) = hover.contents {
+        assert!(markup.value.contains("Some intro text"), "Should contain intro content");
+        assert!(
+            !markup.value.contains("Next Section"),
+            "Should stop at indented heading of same level"
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
