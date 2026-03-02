@@ -3793,6 +3793,62 @@ async fn test_find_references_from_link_position() {
 }
 
 #[tokio::test]
+async fn test_find_references_from_target_file_without_selecting_link() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex};
+
+    let server = create_test_server();
+
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test9b/docs");
+    let source_file = docs_dir.join("file-to-link-from.md");
+    let target_file = docs_dir.join("file-to-link-to.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    // Simulate a target file opened via go-to-definition. Cursor is not on a heading
+    // or link target, but users still expect find-references to discover incoming links.
+    let target_content = "---\ntitle: Heading\n---\n\nTarget file content.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut source_fi = FileIndex::default();
+        source_fi.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "file-to-link-to.md".to_string(),
+            fragment: "".to_string(),
+            line: 5,
+            column: 24,
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    // Cursor at top of target file (typical after go-to-definition opens the file)
+    let position = Position { line: 0, character: 0 };
+
+    let result = server.handle_references(&target_uri, position).await;
+    assert!(
+        result.is_some(),
+        "Should find incoming file-level references even when cursor is not on a link"
+    );
+
+    let locations = result.unwrap();
+    assert_eq!(locations.len(), 1, "Should find one incoming link");
+    assert_eq!(
+        locations[0].uri,
+        Url::from_file_path(&source_file).unwrap(),
+        "Reference should point to the linking source file"
+    );
+    assert_eq!(locations[0].range.start.line, 4);
+}
+
+#[tokio::test]
 async fn test_goto_definition_link_with_title() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
