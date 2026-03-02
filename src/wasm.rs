@@ -153,6 +153,12 @@ pub struct LinterConfig {
     /// Rules to enable (if empty, all rules enabled except disabled)
     pub enable: Option<Vec<String>>,
 
+    /// Additional rules to enable (e.g., opt-in rules like ["MD060", "MD063"])
+    pub extend_enable: Option<Vec<String>>,
+
+    /// Additional rules to disable
+    pub extend_disable: Option<Vec<String>>,
+
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
@@ -180,6 +186,14 @@ impl LinterConfig {
             config.global.enable = enable.clone();
         }
 
+        // Apply extend-enable / extend-disable
+        if let Some(ref extend_enable) = self.extend_enable {
+            config.global.extend_enable = extend_enable.clone();
+        }
+        if let Some(ref extend_disable) = self.extend_disable {
+            config.global.extend_disable = extend_disable.clone();
+        }
+
         // Apply line length
         if let Some(line_length) = self.line_length {
             config.global.line_length = LineLength::new(line_length as usize);
@@ -204,6 +218,9 @@ impl LinterConfig {
             }
         }
 
+        // Per-rule `enabled = true` → extend_enable for opt-in rules
+        config.promote_enabled_to_extend_enable();
+
         config
     }
 
@@ -220,6 +237,14 @@ impl LinterConfig {
         // Apply enabled rules
         if let Some(ref enable) = self.enable {
             config.global.enable = enable.clone();
+        }
+
+        // Apply extend-enable / extend-disable
+        if let Some(ref extend_enable) = self.extend_enable {
+            config.global.extend_enable = extend_enable.clone();
+        }
+        if let Some(ref extend_disable) = self.extend_disable {
+            config.global.extend_disable = extend_disable.clone();
         }
 
         // Apply line length
@@ -248,6 +273,9 @@ impl LinterConfig {
                 }
             }
         }
+
+        // Per-rule `enabled = true` → extend_enable for opt-in rules
+        config.promote_enabled_to_extend_enable();
 
         (config, warnings)
     }
@@ -389,6 +417,8 @@ impl Linter {
         serde_json::json!({
             "disable": self.config.global.disable,
             "enable": self.config.global.enable,
+            "extend_enable": self.config.global.extend_enable,
+            "extend_disable": self.config.global.extend_disable,
             "line_length": self.config.global.line_length.get(),
             "flavor": match self.flavor {
                 MarkdownFlavor::Standard => "standard",
@@ -1320,5 +1350,82 @@ mod tests {
         let result = linter.get_config_warnings();
         let warnings: Vec<String> = serde_json::from_str(&result).unwrap();
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_promote_opt_in_enabled_adds_to_extend_enable() {
+        let mut rules = std::collections::HashMap::new();
+        rules.insert(
+            "MD060".to_string(),
+            serde_json::json!({ "enabled": true, "style": "aligned" }),
+        );
+
+        let config = LinterConfig {
+            rules: Some(rules),
+            ..Default::default()
+        };
+
+        let internal = config.to_config();
+
+        // MD060 should be in extend_enable so filter_rules() includes it
+        assert!(
+            internal.global.extend_enable.contains(&"MD060".to_string()),
+            "MD060 should be promoted to extend_enable when enabled=true"
+        );
+    }
+
+    #[test]
+    fn test_promote_opt_in_enabled_not_added_when_disabled() {
+        let mut rules = std::collections::HashMap::new();
+        rules.insert(
+            "MD060".to_string(),
+            serde_json::json!({ "enabled": false, "style": "aligned" }),
+        );
+
+        let config = LinterConfig {
+            rules: Some(rules),
+            ..Default::default()
+        };
+
+        let internal = config.to_config();
+
+        assert!(
+            !internal.global.extend_enable.contains(&"MD060".to_string()),
+            "MD060 should NOT be promoted when enabled=false"
+        );
+    }
+
+    #[test]
+    fn test_md060_fix_applies_table_alignment() {
+        // Reproduces the exact scenario from obsidian-rumdl issue #15:
+        // MD060 fix should align table columns when enabled via per-rule config
+        let mut rules = std::collections::HashMap::new();
+        rules.insert(
+            "MD060".to_string(),
+            serde_json::json!({ "enabled": true, "style": "aligned" }),
+        );
+
+        let config = LinterConfig {
+            disable: Some(vec!["MD041".to_string()]),
+            rules: Some(rules),
+            flavor: Some("obsidian".to_string()),
+            ..Default::default()
+        };
+
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+            config_warnings: Vec::new(),
+        };
+
+        let content = "|Column 1 |Column 2|\n|:--|--:|\n|Test|Val |\n|New|Val|\n";
+        let fixed = linter.fix(content);
+
+        // The fix should produce aligned table output
+        assert_ne!(fixed, content, "MD060 fix should modify the unaligned table");
+        assert!(
+            fixed.contains("| Column 1 |"),
+            "Fixed table should have padded cells, got: {fixed}"
+        );
     }
 }

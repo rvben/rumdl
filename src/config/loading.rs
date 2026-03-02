@@ -1022,25 +1022,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             enable_is_explicit,
         };
 
-        // Backward compatibility bridge: per-rule `enabled = true` → extend_enable
-        // For opt-in rules (MD060, MD063, MD072, MD073), if the per-rule config
-        // has `enabled = true`, add the rule to extend_enable and emit a warning.
-        let opt_in_with_enabled = ["MD060", "MD063", "MD072", "MD073"];
-        let mut global = global;
-        for rule_name in opt_in_with_enabled {
-            if let Some(rule_cfg) = rules.get(rule_name)
-                && let Some(toml::Value::Boolean(true)) = rule_cfg.values.get("enabled")
-                && !global.extend_enable.contains(&rule_name.to_string())
-            {
-                log::warn!(
-                    "[DEPRECATED] [{rule_name}] enabled = true is deprecated. \
-                     Use `extend-enable = [\"{rule_name}\"]` in [global] instead.",
-                );
-                global.extend_enable.push(rule_name.to_string());
-            }
-        }
-
-        Config {
+        let mut config = Config {
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             per_file_flavor: sourced.per_file_flavor.value,
@@ -1049,6 +1031,11 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             project_root: sourced.project_root,
             per_file_ignores_cache: Arc::new(OnceLock::new()),
             per_file_flavor_cache: Arc::new(OnceLock::new()),
-        }
+        };
+
+        // Backward compatibility: per-rule `enabled = true` → extend_enable
+        config.promote_enabled_to_extend_enable();
+
+        config
     }
 }

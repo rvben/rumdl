@@ -40,32 +40,33 @@ The following rules are **disabled by default** because they enforce opinionated
 
 ### Enabling Opt-in Rules
 
+Use `extend-enable` in the `[global]` section to enable opt-in rules:
+
 **.rumdl.toml:**
 
 ```toml
+[global]
+extend-enable = ["MD060", "MD063", "MD072"]
+
+# Configure enabled rules as needed
 [MD060]
-enabled = true
+style = "aligned"
 
 [MD063]
-enabled = true
-style = "title-case"  # Optional: configure the style
-
-[MD072]
-enabled = true
+style = "title-case"
 ```
 
 **pyproject.toml:**
 
 ```toml
+[tool.rumdl]
+extend-enable = ["MD060", "MD063", "MD072"]
+
 [tool.rumdl.MD060]
-enabled = true
+style = "aligned"
 
 [tool.rumdl.MD063]
-enabled = true
 style = "title-case"
-
-[tool.rumdl.MD072]
-enabled = true
 ```
 
 See each rule's documentation for available configuration options.

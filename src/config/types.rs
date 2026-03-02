@@ -127,6 +127,26 @@ impl Config {
         self.is_mkdocs_flavor()
     }
 
+    /// For rules with `enabled = true` in their per-rule config, add them to
+    /// `extend_enable` so they pass through `filter_rules()`.
+    ///
+    /// This bridges the deprecated `[MD060] enabled = true` syntax to the
+    /// `extend-enable` mechanism. Only affects rules not already in `extend_enable`.
+    /// Promoting non-opt-in rules is harmless since `filter_rules()` only
+    /// consults `extend_enable` for opt-in rules.
+    pub fn promote_enabled_to_extend_enable(&mut self) {
+        let to_promote: Vec<String> = self
+            .rules
+            .iter()
+            .filter(|(name, cfg)| {
+                matches!(cfg.values.get("enabled"), Some(toml::Value::Boolean(true)))
+                    && !self.global.extend_enable.contains(name)
+            })
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.global.extend_enable.extend(to_promote);
+    }
+
     /// Get the severity override for a specific rule, if configured
     pub fn get_rule_severity(&self, rule_name: &str) -> Option<crate::rule::Severity> {
         self.rules.get(rule_name).and_then(|r| r.severity)

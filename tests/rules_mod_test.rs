@@ -1,6 +1,6 @@
-use rumdl_lib::config::{Config, GlobalConfig, RuleRegistry};
+use rumdl_lib::config::{Config, GlobalConfig, RuleConfig, RuleRegistry};
 use rumdl_lib::rules::{all_rules, filter_rules, opt_in_rules};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 #[test]
 fn test_all_rules_returns_all_rules() {
@@ -370,5 +370,176 @@ fn test_all_configurable_rules_expose_config_schema() {
         46,
         "Expected 46 rules with config sections. If you added config to a rule, \
          implement default_config_section(). Rules with config: {rules_with_config:?}"
+    );
+}
+
+#[test]
+fn test_promote_opt_in_enabled_adds_to_extend_enable() {
+    let mut config = Config::default();
+
+    // Simulate what the WASM Linter constructor does when parsing
+    // `[MD060] enabled = true` from a .rumdl.toml config
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    values.insert(
+        "style".to_string(),
+        toml::Value::String("aligned".to_string()),
+    );
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    assert!(
+        !config.global.extend_enable.contains(&"MD060".to_string()),
+        "MD060 should not be in extend_enable before promotion"
+    );
+
+    config.promote_enabled_to_extend_enable();
+
+    assert!(
+        config.global.extend_enable.contains(&"MD060".to_string()),
+        "MD060 should be in extend_enable after promotion"
+    );
+
+    // Verify filter_rules now includes MD060
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(
+        names.contains("MD060"),
+        "MD060 should be included by filter_rules after promotion"
+    );
+}
+
+#[test]
+fn test_promote_opt_in_enabled_skips_when_not_enabled() {
+    let mut config = Config::default();
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(false));
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    config.promote_enabled_to_extend_enable();
+
+    assert!(
+        !config.global.extend_enable.contains(&"MD060".to_string()),
+        "MD060 should NOT be promoted when enabled=false"
+    );
+}
+
+#[test]
+fn test_promote_opt_in_enabled_no_duplicate_when_already_extended() {
+    let mut config = Config::default();
+    config.global.extend_enable.push("MD060".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    config.promote_enabled_to_extend_enable();
+
+    let count = config
+        .global
+        .extend_enable
+        .iter()
+        .filter(|s| *s == "MD060")
+        .count();
+    assert_eq!(count, 1, "MD060 should not be duplicated in extend_enable");
+}
+
+#[test]
+fn test_promote_enabled_harmless_for_non_opt_in_rules() {
+    // promote_enabled_to_extend_enable adds ALL rules with enabled=true,
+    // but filter_rules only consults extend_enable for opt-in rules,
+    // so adding a non-opt-in rule to extend_enable is harmless.
+    let mut config = Config::default();
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    config
+        .rules
+        .insert("MD001".to_string(), RuleConfig { severity: None, values });
+
+    config.promote_enabled_to_extend_enable();
+
+    // MD001 IS added to extend_enable (the method promotes all enabled=true rules)
+    assert!(config.global.extend_enable.contains(&"MD001".to_string()));
+
+    // But filter_rules still includes MD001 regardless (it's not opt-in)
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(names.contains("MD001"), "MD001 should be included (non-opt-in, always active)");
+}
+
+#[test]
+fn test_promote_opt_in_md060_fix_produces_aligned_table() {
+    // End-to-end test: simulates the WASM fix path for obsidian-rumdl issue #15
+    let mut config = Config::default();
+    config.global.disable.push("MD041".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    values.insert(
+        "style".to_string(),
+        toml::Value::String("aligned".to_string()),
+    );
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    config.promote_enabled_to_extend_enable();
+
+    let all = all_rules(&config);
+    let rules = filter_rules(&all, &config.global);
+
+    let content = "|Column 1 |Column 2|\n|:--|--:|\n|Test|Val |\n|New|Val|\n";
+
+    let warnings = rumdl_lib::lint(
+        content,
+        &rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Obsidian,
+        Some(&config),
+    )
+    .unwrap();
+
+    let has_md060 = warnings.iter().any(|w| {
+        w.rule_name
+            .as_ref()
+            .is_some_and(|name| name == "MD060")
+    });
+    assert!(
+        has_md060,
+        "Should detect MD060 warnings for unaligned table"
+    );
+}
+
+#[test]
+fn test_extend_enable_includes_opt_in_rules_in_filter() {
+    // Simulates the recommended `extend-enable = ["MD060"]` config path
+    let mut config = Config::default();
+    config.global.extend_enable.push("MD060".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert(
+        "style".to_string(),
+        toml::Value::String("aligned".to_string()),
+    );
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    let all = all_rules(&config);
+    let rules = filter_rules(&all, &config.global);
+    let names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
+
+    assert!(
+        names.contains("MD060"),
+        "MD060 should be included when in extend_enable"
     );
 }
