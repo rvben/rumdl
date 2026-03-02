@@ -201,13 +201,10 @@ impl Rule for MD077ListContinuationIndent {
                     });
                 }
 
-                // Reset saw_blank after processing non-blank content.
-                // Exception: code fence lines (opener/closer) are structural
-                // delimiters — the closer inherits the blank-line status from
-                // the opener so both get checked.
-                if !line_info.in_code_block {
-                    saw_blank = false;
-                }
+                // Intentionally keep `saw_blank = true` while scanning this
+                // owned item range so that *all* lines in a loose continuation
+                // paragraph are validated/fixed, not just the first line after
+                // the blank.
             }
         }
 
@@ -528,6 +525,13 @@ mod tests {
         let content = "1. First\n\n wrong1\n\n2. Second\n\n wrong2\n";
         let fixed = fix(content);
         assert_eq!(fixed, "1. First\n\n   wrong1\n\n2. Second\n\n   wrong2\n");
+    }
+
+    #[test]
+    fn fix_multiline_loose_continuation_all_lines() {
+        let content = "1. Item\n\n  line one\n  line two\n  line three\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. Item\n\n   line one\n   line two\n   line three\n");
     }
 
     // ── No false positive when content is after sibling item ──────────
