@@ -75,8 +75,7 @@ fn classify_doc_comment_line(line: &str) -> Option<(DocCommentKind, String, Stri
         return None;
     }
 
-    if trimmed.starts_with("///") {
-        let after = &trimmed[3..];
+    if let Some(after) = trimmed.strip_prefix("///") {
         // Determine the prefix: include the conventional space/tab if present
         let prefix = if after.starts_with(' ') || after.starts_with('\t') {
             format!("///{}", &after[..1])
@@ -84,8 +83,7 @@ fn classify_doc_comment_line(line: &str) -> Option<(DocCommentKind, String, Stri
             "///".to_string()
         };
         Some((DocCommentKind::Outer, leading_ws.to_string(), prefix))
-    } else if trimmed.starts_with("//!") {
-        let after = &trimmed[3..];
+    } else if let Some(after) = trimmed.strip_prefix("//!") {
         let prefix = if after.starts_with(' ') || after.starts_with('\t') {
             format!("//!{}", &after[..1])
         } else {
@@ -106,8 +104,8 @@ fn extract_markdown_from_line(trimmed: &str, kind: DocCommentKind) -> &str {
 
     let after_prefix = &trimmed[prefix.len()..];
     // Strip exactly one leading space if present (conventional rustdoc formatting)
-    if after_prefix.starts_with(' ') {
-        &after_prefix[1..]
+    if let Some(stripped) = after_prefix.strip_prefix(' ') {
+        stripped
     } else {
         after_prefix
     }
