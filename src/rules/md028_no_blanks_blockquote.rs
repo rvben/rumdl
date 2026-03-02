@@ -362,9 +362,12 @@ impl Rule for MD028NoBlanksBlockquote {
         let mut has_blockquotes = false;
 
         for (line_idx, line) in lines.iter().enumerate() {
-            // Skip lines in code blocks
-            if line_idx < ctx.lines.len() && ctx.lines[line_idx].in_code_block {
-                continue;
+            // Skip lines in non-markdown content contexts
+            if line_idx < ctx.lines.len() {
+                let li = &ctx.lines[line_idx];
+                if li.in_code_block || li.in_html_comment || li.in_front_matter {
+                    continue;
+                }
             }
 
             if line.trim().is_empty() {
@@ -414,6 +417,14 @@ impl Rule for MD028NoBlanksBlockquote {
         let lines = ctx.raw_lines();
 
         for (line_idx, line) in lines.iter().enumerate() {
+            // Skip lines in non-markdown content contexts
+            if line_idx < ctx.lines.len() {
+                let li = &ctx.lines[line_idx];
+                if li.in_code_block || li.in_html_comment || li.in_front_matter {
+                    result.push(line.to_string());
+                    continue;
+                }
+            }
             // Check if this blank line needs fixing
             if let Some((_, fix_content)) = Self::is_problematic_blank_line(lines, line_idx, ctx.flavor) {
                 result.push(fix_content);
@@ -1155,6 +1166,131 @@ Final text."#;
         assert!(
             result.is_empty(),
             "Should not flag blank after callout even if followed by regular blockquote"
+        );
+    }
+
+    // ==================== HTML Comment Skip Tests ====================
+    // Blockquote-like content inside HTML comments should not be linted.
+
+    #[test]
+    fn test_html_comment_blockquotes_not_flagged() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "## Responses\n\n<!--\n> First response text here.\n> <br>— Person One\n\n> Second response text here.\n> <br>— Person Two\n-->\n\nThe above responses are currently disabled.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag blank lines inside HTML comments, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_html_comment_content() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "<!--\n> First quote\n\n> Second quote\n-->\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix should not modify content inside HTML comments");
+    }
+
+    #[test]
+    fn test_multiline_html_comment_with_blockquotes() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "# Title\n\n<!--\n> Quote A\n> Line 2\n\n> Quote B\n> Line 2\n\n> Quote C\n-->\n\nSome text\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag any blank lines inside HTML comments, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquotes_outside_html_comment_still_flagged() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First quote\n\n> Second quote\n\n<!--\n> Commented quote A\n\n> Commented quote B\n-->\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // The blank line between the first two blockquotes (outside comment) should be flagged
+        // but none inside the HTML comment (lines 7 is the blank between commented quotes)
+        for w in &result {
+            assert!(
+                w.line < 5,
+                "Warning at line {} should not be inside HTML comment",
+                w.line
+            );
+        }
+        assert!(
+            !result.is_empty(),
+            "Should still flag blank line between blockquotes outside HTML comment"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_blockquote_like_content_not_flagged() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "---\n> not a real blockquote\n\n> also not real\n---\n\n# Title\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag content inside frontmatter, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_comment_boundary_does_not_leak_into_adjacent_blockquotes() {
+        // A real blockquote before a comment should not be matched with
+        // a blockquote inside the comment across the <!-- boundary
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> real quote\n\n<!--\n> commented quote\n-->\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not match blockquotes across HTML comment boundaries, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_after_comment_boundary_not_matched() {
+        // A blockquote inside a comment should not be matched with
+        // a blockquote after the comment across the --> boundary
+        let rule = MD028NoBlanksBlockquote;
+        let content = "<!--\n> commented quote\n-->\n\n> real quote\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not match blockquotes across HTML comment boundaries, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_preserves_comment_boundary_content() {
+        // Verify fix doesn't modify content when blockquotes straddle a comment boundary
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> real quote\n\n<!--\n> commented quote A\n\n> commented quote B\n-->\n\n> another real quote\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Fix should not modify content when blockquotes are separated by comment boundaries"
+        );
+    }
+
+    #[test]
+    fn test_inline_html_comment_does_not_suppress_warning() {
+        // Inline HTML comments on a blockquote line should NOT suppress warnings -
+        // only multi-line HTML comment blocks should
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> quote with <!-- inline comment -->\n\n> continuation\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // This should still be flagged since the blockquotes are not inside an HTML comment block
+        assert!(
+            !result.is_empty(),
+            "Should still flag blank lines between blockquotes with inline HTML comments"
         );
     }
 }
