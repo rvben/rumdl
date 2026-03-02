@@ -473,7 +473,10 @@ impl RumdlLanguageServer {
             return self.find_references_to_target(&target_path, &link.anchor).await;
         }
 
-        None
+        // If the cursor is not on a heading or link, treat this as a file-level
+        // reference lookup so users can run "find references" from a target file
+        // opened via go-to-definition and still discover incoming links.
+        self.find_references_to_target(&current_file, "").await
     }
 
     /// Resolve a `FullLinkTarget` to a `GotoDefinitionResponse`.
