@@ -589,6 +589,7 @@ jobs:
           path: artifacts
 
       - name: Publish to PyPI
+        id: publish-pypi
         if: ${{ inputs.dry_run != true && inputs.skip_pypi != true }}
         env:
           TWINE_USERNAME: __token__
@@ -632,6 +633,7 @@ jobs:
           echo "npm version: $(npm --version)"
 
       - name: Publish WASM to npm
+        id: publish-wasm-npm
         if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
         run: |
           cd wasm-pkg
@@ -707,7 +709,7 @@ jobs:
         run: echo "⏭️ Skipping npm publishing as requested"
 
       - name: Notify obsidian-rumdl
-        if: ${{ !cancelled() && inputs.dry_run != true && inputs.skip_npm != true }}
+        if: ${{ steps.publish-wasm-npm.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.OBSIDIAN_DISPATCH_TOKEN }}
@@ -741,6 +743,7 @@ jobs:
           fi
 
       - name: Create Release
+        id: create-release
         if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v2
         with:
@@ -786,7 +789,7 @@ jobs:
           echo "DRY RUN: Would update $MAJOR_VERSION tag to point to $TAG_NAME"
 
       - name: Notify rumdl-pre-commit
-        if: ${{ !cancelled() && inputs.dry_run != true }}
+        if: ${{ steps.publish-pypi.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.PRECOMMIT_DISPATCH_TOKEN }}
@@ -800,7 +803,7 @@ jobs:
             -d "{\"event_type\": \"pypi_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify rumdl-vscode
-        if: ${{ !cancelled() && inputs.dry_run != true }}
+        if: ${{ steps.create-release.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.VSCODE_DISPATCH_TOKEN }}
@@ -821,7 +824,7 @@ jobs:
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify homebrew-rumdl
-        if: ${{ !cancelled() && inputs.dry_run != true }}
+        if: ${{ steps.create-release.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
