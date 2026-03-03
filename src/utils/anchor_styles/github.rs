@@ -134,6 +134,19 @@ fn heading_to_fragment_internal(heading: &str) -> String {
 
     // Step 5: Remove markdown formatting while preserving inner text
     if text.contains('*') || text.contains('_') || text.contains('`') || text.contains('[') {
+        // Extract code span content FIRST and protect it from emphasis processing.
+        // Code spans take precedence over emphasis in Markdown parsing, so
+        // `__init__` should preserve underscores (literal code content),
+        // while __init__ without backticks should strip them (emphasis).
+        let mut code_extracts: Vec<String> = Vec::new();
+        text = CODE_PATTERN
+            .replace_all(&text, |caps: &regex::Captures| {
+                let idx = code_extracts.len();
+                code_extracts.push(caps[1].to_string());
+                format!("\x00CODE{idx}\x00")
+            })
+            .to_string();
+
         // Process emphasis iteratively to handle nesting (e.g., **_text_**)
         // Bounded to 3 iterations to prevent infinite loops on malformed input
         for _ in 0..3 {
@@ -144,7 +157,12 @@ fn heading_to_fragment_internal(heading: &str) -> String {
                 break;
             }
         }
-        text = CODE_PATTERN.replace_all(&text, "$1").to_string();
+
+        // Restore code span content after emphasis processing
+        for (idx, content) in code_extracts.into_iter().enumerate() {
+            text = text.replace(&format!("\x00CODE{idx}\x00"), &content);
+        }
+
         text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
         text = LINK_PATTERN.replace_all(&text, "$1").to_string();
     }
@@ -923,5 +941,30 @@ mod tests {
 
         assert!(duration.as_millis() < 100);
         assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_code_span_preserves_underscores_in_slug() {
+        // Verified against GitHub.com via Gist: code span content is preserved literally
+        assert_eq!(heading_to_fragment("`__hello__`"), "__hello__");
+        assert_eq!(heading_to_fragment("`__init__`"), "__init__");
+        assert_eq!(heading_to_fragment("`_single_`"), "_single_");
+    }
+
+    #[test]
+    fn test_emphasis_underscores_removed_from_slug() {
+        // Verified against GitHub.com via Gist: bare emphasis underscores are stripped
+        assert_eq!(heading_to_fragment("__hello__"), "hello");
+        assert_eq!(heading_to_fragment("_hello_"), "hello");
+    }
+
+    #[test]
+    fn test_mixed_code_and_emphasis_in_heading() {
+        // Verified against GitHub.com via Gist: code spans preserve content,
+        // emphasis outside code spans is stripped
+        assert_eq!(
+            heading_to_fragment("`__init__` method for __MyClass__"),
+            "__init__-method-for-myclass"
+        );
     }
 }

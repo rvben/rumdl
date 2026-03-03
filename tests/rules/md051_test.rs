@@ -2664,3 +2664,66 @@ mod url_encoded_cjk_tests {
         );
     }
 }
+
+mod code_span_slug_tests {
+    use rumdl_lib::config::MarkdownFlavor;
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD051LinkFragments;
+
+    #[test]
+    fn test_code_span_preserves_underscores_in_slug() {
+        // Heading with code span: underscores are literal, not emphasis
+        // GitHub generates anchor "__hello__" (preserving underscores)
+        let content = "## Introduction\n\n### `__hello__`\n\nThe `__hello__` module\n\n## Summary\n\n- This should match: [`__hello__`](#__hello__)\n- This should NOT match: [`hello`](#hello)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        // #__hello__ should match the heading, #hello should NOT match
+        assert_eq!(
+            result.len(),
+            1,
+            "Should have exactly 1 warning for #hello, got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("#hello"),
+            "Should flag #hello as non-existent, got: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_bare_emphasis_underscores_stripped() {
+        // Heading without code span: underscores are emphasis, should be stripped
+        // GitHub generates anchor "hello" (stripping emphasis underscores)
+        let content =
+            "### __hello__\n\n- This should match: [hello](#hello)\n- This should NOT match: [__hello__](#__hello__)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        // #hello should match the heading, #__hello__ should NOT match
+        assert_eq!(
+            result.len(),
+            1,
+            "Should have exactly 1 warning for #__hello__, got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("#__hello__"),
+            "Should flag #__hello__ as non-existent, got: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_mixed_code_and_emphasis() {
+        // Mixed: code span preserves underscores, emphasis strips them
+        let content = "### `__init__` method for __MyClass__\n\n- [correct](#__init__-method-for-myclass)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #__init__-method-for-myclass should match, got: {result:?}"
+        );
+    }
+}
