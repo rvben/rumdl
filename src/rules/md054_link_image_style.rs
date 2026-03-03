@@ -235,6 +235,12 @@ impl Rule for MD054LinkImageStyle {
                 let end = m.end();
                 let link_text = cap.get(1).unwrap().as_str();
 
+                // Skip alert/callout syntax: [!TYPE]
+                // Used by GFM, GitLab, Hugo, Obsidian, and other markdown flavors
+                if link_text.starts_with('!') {
+                    continue;
+                }
+
                 // Filter out task list checkboxes: [ ], [x], or [X]
                 // Task list checkboxes should not be flagged as shortcut links
                 // Task list pattern: list marker (*, -, +) followed by whitespace, then [ ], [x], or [X]
@@ -610,5 +616,81 @@ mod tests {
 
         // Both should be detected as inline (allowed)
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_gfm_alert_not_flagged_as_shortcut() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "> [!NOTE]\n> This is a note.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "GFM alert should not be flagged as shortcut link, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_various_alert_types_not_flagged() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        for alert_type in ["NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION", "note", "info"] {
+            let content = format!("> [!{alert_type}]\n> Content.\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Alert type {alert_type} should not be flagged, got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_shortcut_link_still_flagged_when_disallowed() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "See [reference] for details.\n\n[reference]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Regular shortcut links should still be flagged");
+    }
+
+    #[test]
+    fn test_alert_with_frontmatter_not_flagged() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "---\ntitle: heading\n---\n\n> [!note]\n> Content for the note.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Alert in blockquote with frontmatter should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_alert_without_blockquote_prefix_not_flagged() {
+        // Even without the `> ` prefix, [!TYPE] is alert syntax and should not be
+        // treated as a shortcut reference
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "[!NOTE]\nSome content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "[!NOTE] without blockquote prefix should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_alert_custom_types_not_flagged() {
+        // Obsidian and other flavors support custom callout types
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        for alert_type in ["bug", "example", "quote", "abstract", "todo", "faq"] {
+            let content = format!("> [!{alert_type}]\n> Content.\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Custom alert type {alert_type} should not be flagged, got: {result:?}"
+            );
+        }
     }
 }
