@@ -18,7 +18,7 @@ fn test_md034_crlf_line_endings() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -47,7 +47,7 @@ fn test_md034_multiline_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -73,7 +73,7 @@ fn test_md034_url_and_email_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -102,7 +102,7 @@ fn test_mixed_line_endings() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (may have exit code 1 due to unfixable issues like MD041)
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -128,7 +128,7 @@ fn test_md037_emphasis_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -171,7 +171,7 @@ fn test_md011_reversed_links_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -214,7 +214,7 @@ fn test_md010_hard_tabs_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -238,7 +238,7 @@ fn test_md026_trailing_punctuation_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -265,7 +265,7 @@ fn test_code_span_detection_crlf() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt (should wrap the bare URL but not touch inline code)
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -289,7 +289,7 @@ fn test_md047_crlf_trailing_newline() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt to fix
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
@@ -319,7 +319,7 @@ fn test_md047_lf_trailing_newline() {
     fs::write(&test_file, content).unwrap();
 
     // Run rumdl fmt to fix
-    cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
+    let _ = cargo_bin_cmd!("rumdl").arg("fmt").arg(&test_file).assert();
 
     // Read the result
     let result = fs::read_to_string(&test_file).unwrap();
