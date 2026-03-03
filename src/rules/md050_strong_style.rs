@@ -9,6 +9,57 @@ use crate::utils::skip_context::{is_in_math_context, is_in_mkdocs_markup};
 // Reference definition pattern
 const REF_DEF_REGEX_STR: &str = r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#;
 
+/// Check if a byte position within a line is inside a backtick-delimited code span.
+/// This is a line-level fallback for cases where pulldown-cmark's code span detection
+/// misses spans due to table parsing interference (e.g., pipes inside code spans
+/// in table rows cause pulldown-cmark to misidentify cell boundaries).
+fn is_in_inline_code_on_line(line: &str, byte_pos: usize) -> bool {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'`' {
+            let open_start = i;
+            let mut backtick_count = 0;
+            while i < bytes.len() && bytes[i] == b'`' {
+                backtick_count += 1;
+                i += 1;
+            }
+
+            // Search for matching closing backticks
+            let mut j = i;
+            while j < bytes.len() {
+                if bytes[j] == b'`' {
+                    let mut close_count = 0;
+                    while j < bytes.len() && bytes[j] == b'`' {
+                        close_count += 1;
+                        j += 1;
+                    }
+                    if close_count == backtick_count {
+                        // Found matching pair: code span covers open_start..j
+                        if byte_pos >= open_start && byte_pos < j {
+                            return true;
+                        }
+                        i = j;
+                        break;
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+
+            if j >= bytes.len() {
+                // No matching close found, remaining text is not a code span
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    false
+}
+
 mod md050_config;
 use md050_config::MD050Config;
 
@@ -250,6 +301,7 @@ impl Rule for MD050StrongStyle {
 
                 // Skip if this strong text is inside a code block, code span, link, HTML code content, MkDocs markup, or math block
                 if ctx.is_in_code_block_or_span(match_byte_pos)
+                    || is_in_inline_code_on_line(line, m.start())
                     || self.is_in_link(ctx, match_byte_pos)
                     || self.is_in_html_code_content(ctx, match_byte_pos)
                     || is_in_mkdocs_markup(line, m.start(), ctx.flavor)
