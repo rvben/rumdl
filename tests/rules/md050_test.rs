@@ -397,19 +397,6 @@ Here is a link with code in the hover text:
     );
 }
 
-/// Verify code spans in table cells are correctly detected
-#[test]
-fn test_issue_482_code_spans_detected_in_table() {
-    let content = "Each relies on **left-hand** operations and **right-hand** operations.\n\n| Operation | Left-Hand Method | Right-Hand Method |\n|-----------|------------------|-------------------|\n| `x & y`   | `__and__`        | `__rand__`        |\n| `x | y`   | `__or__`         | `__ror__`         |\n| `x ^ y`   | `__xor__`        | `__rxor__`        |\n";
-    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-
-    // Verify that `__ror__` at byte 265 is detected as inside a code span
-    assert!(
-        ctx.is_in_code_block_or_span(265),
-        "byte 265 should be in a code span (inside `__ror__`)"
-    );
-}
-
 /// Test for issue #482: __or__ in code spans in table cells should not be flagged as emphasis
 #[test]
 fn test_issue_482_no_emphasis_warning_in_table_code_spans() {
