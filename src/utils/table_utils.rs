@@ -508,7 +508,26 @@ impl TableUtils {
         Self::split_table_row_with_flavor(content, flavor).len()
     }
 
-    /// Mask pipes inside inline code blocks with a placeholder character
+    /// Count the number of consecutive backslashes immediately preceding `pos` in `chars`.
+    fn count_preceding_backslashes(chars: &[char], pos: usize) -> usize {
+        let mut count = 0;
+        let mut k = pos;
+        while k > 0 {
+            k -= 1;
+            if chars[k] == '\\' {
+                count += 1;
+            } else {
+                break;
+            }
+        }
+        count
+    }
+
+    /// Mask pipes inside inline code blocks with a placeholder character.
+    ///
+    /// Backticks preceded by an odd number of backslashes are escaped (literal text)
+    /// and do not open or close code spans. An even number of backslashes means the
+    /// backslashes themselves are escaped, so the backtick is a real delimiter.
     pub fn mask_pipes_in_inline_code(text: &str) -> String {
         let mut result = String::new();
         let chars: Vec<char> = text.chars().collect();
@@ -516,6 +535,15 @@ impl TableUtils {
 
         while i < chars.len() {
             if chars[i] == '`' {
+                // A backtick preceded by an odd number of backslashes is escaped
+                let preceding = Self::count_preceding_backslashes(&chars, i);
+                if preceding % 2 != 0 {
+                    // Escaped backtick -- treat as literal text, not a code span opener
+                    result.push(chars[i]);
+                    i += 1;
+                    continue;
+                }
+
                 // Count consecutive backticks at start
                 let start = i;
                 let mut backtick_count = 0;
@@ -530,6 +558,13 @@ impl TableUtils {
 
                 while j < chars.len() {
                     if chars[j] == '`' {
+                        // A closing backtick preceded by an odd number of backslashes is escaped
+                        let close_preceding = Self::count_preceding_backslashes(&chars, j);
+                        if close_preceding % 2 != 0 {
+                            j += 1;
+                            continue;
+                        }
+
                         // Count potential closing backticks
                         let close_start = j;
                         let mut close_count = 0;
@@ -1506,5 +1541,73 @@ But no delimiter row
             tables[0].list_context.is_some(),
             "Should be a list table since delimiter is properly indented"
         );
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_regular_backticks() {
+        // Regular backtick code span: pipe should be masked
+        let result = TableUtils::mask_pipes_in_inline_code("| `code | here` |");
+        assert_eq!(result, "| `code _ here` |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_escaped_backtick_not_code_span() {
+        // Escaped backtick (\`) is literal text, not a code span opener.
+        // The pipe should NOT be masked.
+        let result = TableUtils::mask_pipes_in_inline_code(r"| \`not code | still pipe\` |");
+        assert_eq!(result, r"| \`not code | still pipe\` |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_escaped_backslash_then_backtick() {
+        // Escaped backslash (\\) followed by backtick: the backtick IS a code span opener.
+        // The pipe inside the code span SHOULD be masked.
+        let result = TableUtils::mask_pipes_in_inline_code(r"| \\`real code | masked\\` |");
+        // \\` = escaped backslash + real backtick (code span opener)
+        // The pipe between the backticks should be masked
+        assert_eq!(result, r"| \\`real code _ masked\\` |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_triple_backslash_before_backtick() {
+        // Three backslashes before backtick: odd count means backtick is escaped
+        let result = TableUtils::mask_pipes_in_inline_code(r"| \\\`not code | pipe\\\` |");
+        assert_eq!(result, r"| \\\`not code | pipe\\\` |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_four_backslashes_before_backtick() {
+        // Four backslashes before backtick: even count means backtick is a real delimiter
+        let result = TableUtils::mask_pipes_in_inline_code(r"| \\\\`code | here\\\\` |");
+        assert_eq!(result, r"| \\\\`code _ here\\\\` |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_no_backslash() {
+        // No backslashes at all: standard behavior, pipe inside code span is masked
+        let result = TableUtils::mask_pipes_in_inline_code("before `a | b` after");
+        assert_eq!(result, "before `a _ b` after");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_no_code_span() {
+        // No backticks at all: nothing should be masked
+        let result = TableUtils::mask_pipes_in_inline_code("| col1 | col2 |");
+        assert_eq!(result, "| col1 | col2 |");
+    }
+
+    #[test]
+    fn test_count_preceding_backslashes() {
+        let chars: Vec<char> = r"abc\\\`def".chars().collect();
+        // Position of backtick is at index 6 (a=0, b=1, c=2, \=3, \=4, \=5, `=6)
+        assert_eq!(TableUtils::count_preceding_backslashes(&chars, 6), 3);
+
+        let chars2: Vec<char> = r"abc\\`def".chars().collect();
+        // Position of backtick is at index 5
+        assert_eq!(TableUtils::count_preceding_backslashes(&chars2, 5), 2);
+
+        let chars3: Vec<char> = "`def".chars().collect();
+        // Position of backtick is at index 0 -- no preceding chars
+        assert_eq!(TableUtils::count_preceding_backslashes(&chars3, 0), 0);
     }
 }
