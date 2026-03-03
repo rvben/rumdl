@@ -84,19 +84,9 @@ impl MD056TableColumnCount {
         let has_leading_pipe = trimmed.starts_with('|');
         let has_trailing_pipe = trimmed.ends_with('|');
 
-        // Use flavor-aware cell splitting
-        let cells = Self::split_row_into_cells(trimmed, flavor);
-
-        let mut cell_contents: Vec<&str> = Vec::new();
-        for (i, cell) in cells.iter().enumerate() {
-            // Skip empty leading/trailing parts
-            if (i == 0 && cell.trim().is_empty() && has_leading_pipe)
-                || (i == cells.len() - 1 && cell.trim().is_empty() && has_trailing_pipe)
-            {
-                continue;
-            }
-            cell_contents.push(cell.trim());
-        }
+        // Delegate to shared cell splitting (returns only cell contents, no empty leading/trailing parts)
+        let cells = TableUtils::split_table_row_with_flavor(trimmed, flavor);
+        let mut cell_contents: Vec<&str> = cells.iter().map(|c| c.trim()).collect();
 
         // Adjust cell count to match expected count
         match current_count.cmp(&expected_count) {
@@ -129,35 +119,6 @@ impl MD056TableColumnCount {
         }
 
         Some(result)
-    }
-
-    /// Split a table row into cells, respecting flavor-specific behavior
-    ///
-    /// Pipes inside code spans are treated as content, not cell delimiters.
-    fn split_row_into_cells(row: &str, _flavor: crate::config::MarkdownFlavor) -> Vec<String> {
-        // First, mask escaped pipes
-        let masked = TableUtils::mask_pipes_for_table_parsing(row);
-
-        // Mask pipes inside inline code for all flavors
-        let final_masked = TableUtils::mask_pipes_in_inline_code(&masked);
-
-        // Split by pipes on the masked string, then extract corresponding
-        // original content from the unmasked row
-        let masked_parts: Vec<&str> = final_masked.split('|').collect();
-        let mut cells = Vec::new();
-        let mut pos = 0;
-
-        for masked_part in masked_parts {
-            let cell_len = masked_part.len();
-            if pos + cell_len <= row.len() {
-                cells.push(row[pos..pos + cell_len].to_string());
-            } else {
-                cells.push(masked_part.to_string());
-            }
-            pos += cell_len + 1; // +1 for the pipe delimiter
-        }
-
-        cells
     }
 }
 
