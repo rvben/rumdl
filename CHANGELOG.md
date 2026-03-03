@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-03-04
+
+### Fixed
+
+- **MD013**: Resolve false positive for MkDocs 2-space list continuation
+  indents when using `semantic-line-breaks` reflow mode. Continuation lines
+  at the minimum indent were incorrectly flagged as needing reflow
+  ([#484](https://github.com/rvben/rumdl/issues/484))
+- **MD013**: Detect actual indent of text content for reflow output instead
+  of trimming and re-indenting, which produced incorrect indentation for
+  code blocks and nested structures
+- **MD013**: Use correct indent threshold for code block detection, fixing
+  cases where indented code blocks inside list items were incorrectly
+  treated as text for reflow
+- **MD028**: Make blank-line scanning functions skip-context-aware (HTML
+  comments, frontmatter, code blocks) to prevent false positives on
+  blockquote separators
+- **MD050**: Resolve check/fix divergence for strong emphasis markers inside
+  inline code in table cells
+- **MD050**: Add line-level code span detection fallback for inline code
+  markers in tables
+- **MD051**: Handle escaped backticks correctly in `mask_pipes_in_inline_code`
+  for table cell parsing
+- **MD051**: Preserve underscores in code spans during GitHub anchor
+  generation
+- **MD054**: Skip alert/callout syntax (e.g., `[!NOTE]`) in shortcut link
+  detection to avoid false positives
+- **MD056**: Remove duplicate `split_row_into_cells` function, consolidate
+  table cell parsing
+- **Rules**: Correct CommonMark compliance and close audit gaps across
+  multiple rules
+
+### Changed
+
+- **Dependencies**: Update all dependencies including major bumps:
+  `toml` 0.9 → 1.0, `toml_edit` 0.24 → 0.25, `jsonschema` 0.37 → 0.44.
+  Remove unused `rand` dev-dependency. ~80 crates updated to latest
+  compatible versions
+- **CI**: Update ryl-pre-commit to v0.4.0
+
 ## [0.1.36] - 2026-03-02
 
 ### Added
