@@ -71,7 +71,7 @@ repos:
 
   # YAML linting
   - repo: https://github.com/owenlamont/ryl-pre-commit
-    rev: v0.3.4
+    rev: v0.4.0
     hooks:
       - id: ryl
 
