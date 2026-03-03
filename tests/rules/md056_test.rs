@@ -157,12 +157,11 @@ but isn't actually a table row.
     assert_eq!(result.len(), 0);
 }
 
-/// Test for issue #165: MkDocs flavor should treat pipes inside backticks as content, not delimiters
+/// Pipes inside code spans should be treated as content, not delimiters, for all flavors
 #[test]
-fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
+fn test_pipes_in_code_spans_not_delimiters() {
     let rule = MD056TableColumnCount;
 
-    // This table has pipes inside inline code - in MkDocs flavor they should NOT be cell delimiters
     let content = r#"
 | Python type | Example  |
 | ----------- | -------- |
@@ -170,7 +169,7 @@ fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
 | Dict        | `dict[str, int]` |
 "#;
 
-    // With MkDocs flavor, the table should be valid (2 columns throughout)
+    // MkDocs flavor: pipes in code spans are content
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
@@ -179,14 +178,13 @@ fn test_mkdocs_flavor_pipes_in_code_spans_issue_165() {
         "MkDocs flavor should treat pipes in backticks as content, not delimiters"
     );
 
-    // With Standard/GFM flavor, the same table would have inconsistent columns
-    // because GFM treats pipes inside backticks as delimiters
+    // Standard/GFM flavor: pipes in code spans are also content
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        1,
-        "Standard flavor treats pipes in backticks as delimiters, causing column mismatch"
+        0,
+        "Standard flavor should treat pipes in code spans as content, not delimiters"
     );
 }
 
@@ -247,4 +245,17 @@ fn test_mkdocs_flavor_fix_preserves_inline_code_pipes() {
 
     // The fix should add an empty cell, preserving the inline code
     assert!(result.contains("`a | b`"), "Fix should preserve inline code with pipe");
+}
+
+/// Test for issue #479: pipe in code span should not cause column count mismatch
+#[test]
+fn test_issue_479_pipe_in_code_span_table() {
+    let content = "| Operator | Dunder Method   |\n|----------|-----------------|\n| `&`      | `__and__`       |\n| `|`      | `__or__`        |\n| `^`      | `__xor__`       |\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD056TableColumnCount;
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Pipe in code span should not cause column count mismatch, got: {result:?}"
+    );
 }

@@ -498,8 +498,7 @@ impl TableUtils {
 
     /// Count the number of cells in a table row with flavor-specific behavior
     ///
-    /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters (matches GitHub).
-    /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
+    /// Pipes inside code spans are treated as content, not cell delimiters.
     ///
     /// This function strips blockquote prefixes before counting cells, so it works
     /// correctly for tables inside blockquotes.
@@ -577,81 +576,14 @@ impl TableUtils {
         result
     }
 
-    /// Escape pipes inside inline code blocks with backslash.
-    /// Converts `|` to `\|` inside backtick spans.
-    /// Used by auto-fix to preserve content while making tables valid.
-    pub fn escape_pipes_in_inline_code(text: &str) -> String {
-        let mut result = String::new();
-        let chars: Vec<char> = text.chars().collect();
-        let mut i = 0;
-
-        while i < chars.len() {
-            if chars[i] == '`' {
-                let start = i;
-                let mut backtick_count = 0;
-                while i < chars.len() && chars[i] == '`' {
-                    backtick_count += 1;
-                    i += 1;
-                }
-
-                let mut found_closing = false;
-                let mut j = i;
-
-                while j < chars.len() {
-                    if chars[j] == '`' {
-                        let close_start = j;
-                        let mut close_count = 0;
-                        while j < chars.len() && chars[j] == '`' {
-                            close_count += 1;
-                            j += 1;
-                        }
-
-                        if close_count == backtick_count {
-                            found_closing = true;
-                            result.extend(chars[start..i].iter());
-
-                            for &ch in chars.iter().take(close_start).skip(i) {
-                                if ch == '|' {
-                                    result.push('\\');
-                                    result.push('|');
-                                } else {
-                                    result.push(ch);
-                                }
-                            }
-
-                            result.extend(chars[close_start..j].iter());
-                            i = j;
-                            break;
-                        }
-                    } else {
-                        j += 1;
-                    }
-                }
-
-                if !found_closing {
-                    result.extend(chars[start..i].iter());
-                }
-            } else {
-                result.push(chars[i]);
-                i += 1;
-            }
-        }
-
-        result
-    }
-
     /// Mask escaped pipes for accurate table cell parsing
     ///
     /// In GFM tables, escape handling happens BEFORE cell boundary detection:
     /// - `\|` → escaped pipe → masked (stays as cell content)
     /// - `\\|` → escaped backslash + pipe → NOT masked (pipe is a delimiter)
     ///
-    /// IMPORTANT: Inline code spans do NOT protect pipes in GFM tables!
-    /// The pipe in `` `a | b` `` still acts as a cell delimiter, splitting into
-    /// two cells: `` `a `` and ` b` ``. This matches GitHub's actual rendering.
-    ///
-    /// To include a literal pipe in a table cell (even in code), you must escape it:
-    /// `` `a \| b` `` → single cell containing `a | b` (with code formatting)
+    /// This function only handles escaped pipes. Pipes inside inline code spans
+    /// are handled separately by `mask_pipes_in_inline_code`.
     pub fn mask_pipes_for_table_parsing(text: &str) -> String {
         let mut result = String::new();
         let chars: Vec<char> = text.chars().collect();
@@ -689,9 +621,8 @@ impl TableUtils {
     /// Returns a Vec of cell content strings (not trimmed - preserves original spacing).
     /// This is the foundation for both cell counting and cell content extraction.
     ///
-    /// For Standard/GFM flavor, pipes in inline code ARE cell delimiters (matches GitHub).
-    /// For MkDocs flavor, pipes in inline code are NOT cell delimiters.
-    pub fn split_table_row_with_flavor(row: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+    /// Pipes inside code spans are treated as content, not cell delimiters.
+    pub fn split_table_row_with_flavor(row: &str, _flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         let trimmed = row.trim();
 
         if !trimmed.contains('|') {
@@ -701,12 +632,8 @@ impl TableUtils {
         // First, mask escaped pipes (same for all flavors)
         let masked = Self::mask_pipes_for_table_parsing(trimmed);
 
-        // For MkDocs flavor, also mask pipes inside inline code
-        let final_masked = if flavor == crate::config::MarkdownFlavor::MkDocs {
-            Self::mask_pipes_in_inline_code(&masked)
-        } else {
-            masked
-        };
+        // Mask pipes inside inline code for all flavors
+        let final_masked = Self::mask_pipes_in_inline_code(&masked);
 
         let has_leading = final_masked.starts_with('|');
         let has_trailing = final_masked.ends_with('|');
@@ -1141,9 +1068,8 @@ mod tests {
 
     #[test]
     fn test_count_cells_with_escaped_pipes() {
-        // In GFM tables, escape handling happens BEFORE cell splitting.
-        // Inline code does NOT protect pipes - they still act as cell delimiters.
-        // To include a literal pipe in a table cell, you MUST escape it with \|
+        // Pipes inside code spans are treated as content, not cell delimiters.
+        // To include a literal pipe outside code spans, escape it with \|.
 
         // Basic table structure
         assert_eq!(TableUtils::count_cells("| Challenge | Solution |"), 2);
@@ -1154,23 +1080,22 @@ mod tests {
         assert_eq!(TableUtils::count_cells(r"| Command | echo \| grep |"), 2);
         assert_eq!(TableUtils::count_cells(r"| A | B \| C |"), 2); // B | C is one cell
 
-        // Escaped pipes inside backticks (correct way to include | in code in tables)
+        // Escaped pipes inside backticks
         assert_eq!(TableUtils::count_cells(r"| Command | `echo \| grep` |"), 2);
 
         // Double backslash + pipe: \\| means escaped backslash followed by pipe delimiter
         assert_eq!(TableUtils::count_cells(r"| A | B \\| C |"), 3); // \\| is NOT escaped pipe
-        assert_eq!(TableUtils::count_cells(r"| A | `B \\| C` |"), 3); // Same inside code
+        // Double backslash inside backticks: pipe is still masked by code span
+        assert_eq!(TableUtils::count_cells(r"| A | `B \\| C` |"), 2);
 
-        // IMPORTANT: Bare pipes in inline code DO act as delimiters (GFM behavior)
-        // This matches GitHub's actual rendering where `a | b` splits into two cells
-        assert_eq!(TableUtils::count_cells("| Command | `echo | grep` |"), 3);
-        assert_eq!(TableUtils::count_cells("| `code | one` | `code | two` |"), 4);
-        assert_eq!(TableUtils::count_cells("| `single|pipe` |"), 2);
+        // Pipes inside code spans are content, not delimiters
+        assert_eq!(TableUtils::count_cells("| Command | `echo | grep` |"), 2);
+        assert_eq!(TableUtils::count_cells("| `code | one` | `code | two` |"), 2);
+        assert_eq!(TableUtils::count_cells("| `single|pipe` |"), 1);
 
-        // The regex example from Issue #34 - pipes in regex patterns need escaping
-        // Unescaped: `^([0-1]?\d|2[0-3])` has a bare | which splits cells
-        assert_eq!(TableUtils::count_cells(r"| Hour formats | `^([0-1]?\d|2[0-3])` |"), 3);
-        // Escaped: `^([0-1]?\d\|2[0-3])` keeps the | as part of the regex
+        // Regex example - pipes in code spans are masked
+        assert_eq!(TableUtils::count_cells(r"| Hour formats | `^([0-1]?\d|2[0-3])` |"), 2);
+        // Escaped pipe inside code is also masked (escape is redundant here)
         assert_eq!(TableUtils::count_cells(r"| Hour formats | `^([0-1]?\d\|2[0-3])` |"), 2);
     }
 
@@ -1457,11 +1382,18 @@ But no delimiter row
 
     #[test]
     fn test_split_table_row_with_flavor_standard() {
-        // Standard/GFM flavor: pipes in inline code ARE cell delimiters
+        // Pipes in inline code are NOT cell delimiters for any flavor
         let cells =
             TableUtils::split_table_row_with_flavor("| Type | `x | y` |", crate::config::MarkdownFlavor::Standard);
-        // In GFM, `x | y` splits into separate cells
-        assert_eq!(cells.len(), 3);
+        assert_eq!(
+            cells.len(),
+            2,
+            "Pipes in code spans should not be cell delimiters, got {cells:?}"
+        );
+        assert!(
+            cells[1].contains("`x | y`"),
+            "Inline code with pipe should be single cell"
+        );
     }
 
     // === extract_blockquote_prefix tests ===

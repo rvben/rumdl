@@ -263,8 +263,7 @@ impl MD060TableFormat {
 
     /// Parse a table row into cells, respecting flavor-specific behavior.
     ///
-    /// For MkDocs flavor, pipes inside inline code are NOT cell delimiters.
-    /// For Standard/GFM flavor, all pipes (except escaped) are cell delimiters.
+    /// Pipes inside code spans are treated as content, not cell delimiters.
     fn parse_table_row_with_flavor(line: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
         TableUtils::split_table_row_with_flavor(line, flavor)
     }
@@ -1114,8 +1113,8 @@ mod tests {
 
     #[test]
     fn test_md060_inline_code_with_escaped_pipes() {
-        // In GFM tables, bare pipes in inline code STILL act as cell delimiters.
-        // To include a literal pipe in table content (even in code), escape it with \|
+        // Pipes inside code spans are treated as content, not cell delimiters.
+        // Escaped pipes (\|) are also supported outside code spans.
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         // CORRECT: `[0-9]\|[0-9]` - the \| is escaped, stays as content (2 columns)

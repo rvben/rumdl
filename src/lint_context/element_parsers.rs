@@ -254,8 +254,9 @@ pub(super) fn parse_table_rows(content: &str, lines: &[LineInfo]) -> Vec<TableRo
             continue;
         }
 
-        // Count columns by splitting on pipes
-        let parts: Vec<&str> = line.split('|').collect();
+        // Count columns by splitting on pipes, masking pipes inside code spans
+        let masked = crate::utils::table_utils::TableUtils::mask_pipes_in_inline_code(line);
+        let parts: Vec<&str> = masked.split('|').collect();
         let column_count = if parts.len() > 2 { parts.len() - 2 } else { parts.len() };
 
         // Check if this is a separator row
