@@ -1169,7 +1169,24 @@ impl MD013LineLength {
                     }
                 }
 
-                let indent_size = min_continuation_indent;
+                // Determine the output continuation indent.
+                // Normalize/Default modes canonicalize to min_continuation_indent
+                // (fixing over-indented continuation). Semantic/SentencePerLine
+                // modes preserve the user's actual indent since they only fix
+                // line breaking, not indentation.
+                let indent_size = match config.reflow_mode {
+                    ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => ((list_start + 1)..i)
+                        .find_map(|j| {
+                            let info = &ctx.lines[j];
+                            if !info.is_blank && info.indent >= marker_len {
+                                Some(info.indent)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(min_continuation_indent),
+                    _ => min_continuation_indent,
+                };
                 let expected_indent = " ".repeat(indent_size);
 
                 // Split list_item_lines into blocks (paragraphs, code blocks, nested lists, semantic lines, and HTML blocks)
@@ -2261,24 +2278,8 @@ impl MD013LineLength {
                     // Get the original text to compare
                     let original_text = &ctx.content[byte_range.clone()];
 
-                    // Only generate a warning if the replacement is different from the original.
-                    // For semantic-line-breaks and sentence-per-line modes, also check if only
-                    // indentation differs (not content). This avoids false positives when the
-                    // user's continuation indent differs from min_continuation_indent but the
-                    // content structure is already correct.
-                    let content_differs = if original_text != replacement {
-                        match config.reflow_mode {
-                            ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => {
-                                let orig_trimmed: Vec<&str> = original_text.lines().map(|l| l.trim()).collect();
-                                let repl_trimmed: Vec<&str> = replacement.lines().map(|l| l.trim()).collect();
-                                orig_trimmed != repl_trimmed
-                            }
-                            _ => true,
-                        }
-                    } else {
-                        false
-                    };
-                    if content_differs {
+                    // Only generate a warning if the replacement is different from the original
+                    if original_text != replacement {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
                             ReflowMode::SentencePerLine => {
