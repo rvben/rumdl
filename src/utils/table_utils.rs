@@ -42,8 +42,9 @@ impl TableUtils {
         while i < chars.len() {
             let ch = chars[i];
 
-            if ch == '\\' {
-                // Skip escaped character.
+            if ch == '\\' && !in_code {
+                // Skip escaped character (only outside code spans —
+                // backslashes are literal inside code spans per CommonMark).
                 i += if i + 1 < chars.len() { 2 } else { 1 };
                 continue;
             }
@@ -558,12 +559,10 @@ impl TableUtils {
 
                 while j < chars.len() {
                     if chars[j] == '`' {
-                        // A closing backtick preceded by an odd number of backslashes is escaped
-                        let close_preceding = Self::count_preceding_backslashes(&chars, j);
-                        if close_preceding % 2 != 0 {
-                            j += 1;
-                            continue;
-                        }
+                        // Per CommonMark spec, backslash escapes do NOT work inside code
+                        // spans -- all characters including backslashes are literal. So we
+                        // do NOT check count_preceding_backslashes here (only for the
+                        // opening backtick above).
 
                         // Count potential closing backticks
                         let close_start = j;
@@ -1597,6 +1596,31 @@ But no delimiter row
     }
 
     #[test]
+    fn test_mask_pipes_in_inline_code_backslash_before_closing_backtick() {
+        // Per CommonMark spec, backslash escapes do NOT work inside code spans.
+        // Inside a code span, `\` is a literal character. So `foo\` is a valid
+        // code span containing "foo\", and the closing backtick is NOT escaped.
+        //
+        // Input: | `foo\` | bar |
+        // The code span is `foo\` (backtick opens, backslash is literal, backtick closes).
+        // The pipe after the code span is a real delimiter, producing 2 cells.
+        // The pipe inside the code span should be left alone (there isn't one here).
+        let result = TableUtils::mask_pipes_in_inline_code(r"| `foo\` | bar |");
+        // The backslash before closing backtick is literal inside the code span,
+        // so the code span closes at that backtick. The pipe between cells is NOT masked.
+        assert_eq!(result, r"| `foo\` | bar |");
+    }
+
+    #[test]
+    fn test_mask_pipes_in_inline_code_backslash_literal_with_pipe_inside() {
+        // Code span contains a backslash and a pipe: `a\|b`
+        // The backslash is literal inside the code span (CommonMark spec).
+        // The pipe is inside the code span, so it should be masked.
+        let result = TableUtils::mask_pipes_in_inline_code(r"| `a\|b` | col2 |");
+        assert_eq!(result, r"| `a\_b` | col2 |");
+    }
+
+    #[test]
     fn test_count_preceding_backslashes() {
         let chars: Vec<char> = r"abc\\\`def".chars().collect();
         // Position of backtick is at index 6 (a=0, b=1, c=2, \=3, \=4, \=5, `=6)
@@ -1609,5 +1633,18 @@ But no delimiter row
         let chars3: Vec<char> = "`def".chars().collect();
         // Position of backtick is at index 0 -- no preceding chars
         assert_eq!(TableUtils::count_preceding_backslashes(&chars3, 0), 0);
+    }
+
+    #[test]
+    fn test_has_unescaped_pipe_backslash_literal_in_code_span() {
+        // Per CommonMark: backslashes are literal inside code spans.
+        // `foo\` is a complete code span, so the pipe after it is outside code.
+        assert!(TableUtils::has_unescaped_pipe_outside_inline_code(r"`foo\` | bar"));
+
+        // Escaped backtick outside code span: \` is not a code span opener
+        assert!(TableUtils::has_unescaped_pipe_outside_inline_code(r"\`foo | bar\`"));
+
+        // Pipe inside code span should not count
+        assert!(!TableUtils::has_unescaped_pipe_outside_inline_code(r"`foo | bar`"));
     }
 }

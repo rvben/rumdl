@@ -65,11 +65,11 @@ impl MD028NoBlanksBlockquote {
         (level, whitespace_end)
     }
 
-    /// Check if a line is in a skip context (HTML comment, code block, or frontmatter)
+    /// Check if a line is in a skip context (HTML comment, code block, HTML block, or frontmatter)
     #[inline]
     fn is_in_skip_context(line_infos: &[LineInfo], idx: usize) -> bool {
         if let Some(li) = line_infos.get(idx) {
-            li.in_html_comment || li.in_code_block || li.in_front_matter
+            li.in_html_comment || li.in_code_block || li.in_html_block || li.in_front_matter
         } else {
             false
         }
@@ -415,7 +415,7 @@ impl Rule for MD028NoBlanksBlockquote {
             // Skip lines in non-markdown content contexts
             if line_idx < ctx.lines.len() {
                 let li = &ctx.lines[line_idx];
-                if li.in_code_block || li.in_html_comment || li.in_front_matter {
+                if li.in_code_block || li.in_html_comment || li.in_html_block || li.in_front_matter {
                     continue;
                 }
             }
@@ -471,7 +471,7 @@ impl Rule for MD028NoBlanksBlockquote {
             // Skip lines in non-markdown content contexts
             if line_idx < ctx.lines.len() {
                 let li = &ctx.lines[line_idx];
-                if li.in_code_block || li.in_html_comment || li.in_front_matter {
+                if li.in_code_block || li.in_html_comment || li.in_html_block || li.in_front_matter {
                     result.push(line.to_string());
                     continue;
                 }
@@ -1441,6 +1441,38 @@ Final text."#;
         assert!(
             fixed.contains("<!-- > not a real blockquote"),
             "Fix should not modify comment content"
+        );
+    }
+
+    #[test]
+    fn test_html_block_with_angle_brackets_not_flagged() {
+        // HTML blocks can contain `>` characters (e.g., in nested tags or template syntax)
+        // that look like blockquote markers. These should be skipped.
+        let rule = MD028NoBlanksBlockquote;
+        let content = "<div>\n> not a real blockquote\n\n> also not real\n</div>";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Lines inside HTML blocks should not trigger MD028. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_html_block_does_not_leak_into_adjacent_blockquotes() {
+        // Blockquotes after an HTML block should still be checked
+        let rule = MD028NoBlanksBlockquote;
+        let content =
+            "<details>\n<summary>Click</summary>\n> inside html block\n</details>\n\n> real quote A\n\n> real quote B";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the blank between "real quote A" and "real quote B" should be flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Expected 1 warning for blank between real blockquotes after HTML block. Got: {result:?}"
         );
     }
 }

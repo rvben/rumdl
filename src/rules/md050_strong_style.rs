@@ -181,8 +181,14 @@ impl MD050StrongStyle {
                 .get(line_num.saturating_sub(1))
                 .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
+            // Line-level inline code fallback for cases pulldown-cmark misses
+            let in_inline_code = lines
+                .get(line_num.saturating_sub(1))
+                .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
+
             if !skip_context
                 && !ctx.is_in_code_block_or_span(m.start())
+                && !in_inline_code
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
@@ -207,8 +213,14 @@ impl MD050StrongStyle {
                 .get(line_num.saturating_sub(1))
                 .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
 
+            // Line-level inline code fallback for cases pulldown-cmark misses
+            let in_inline_code = lines
+                .get(line_num.saturating_sub(1))
+                .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
+
             if !skip_context
                 && !ctx.is_in_code_block_or_span(m.start())
+                && !in_inline_code
                 && !self.is_in_link(ctx, m.start())
                 && !self.is_in_html_tag(ctx, m.start())
                 && !self.is_in_html_code_content(ctx, m.start())
@@ -1006,5 +1018,21 @@ This __should be flagged__ text."#;
             fix_result.contains("__test__"),
             "fix() should not modify emphasis inside HTML tags"
         );
+    }
+
+    #[test]
+    fn test_detect_style_ignores_emphasis_in_inline_code_on_table_lines() {
+        // In Consistent mode, detect_style() should not count emphasis markers
+        // inside inline code spans on table cell lines, matching check() and fix().
+        let rule = MD050StrongStyle::new(StrongStyle::Consistent);
+
+        // The only real emphasis is **real** (asterisks). The __code__ inside
+        // backtick code spans should be ignored by detect_style().
+        let content = "| `__code__` | **real** |\n| --- | --- |\n| data | data |";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let style = rule.detect_style(&ctx);
+        // Should detect asterisk as the dominant style (underscore inside code is skipped)
+        assert_eq!(style, Some(StrongStyle::Asterisk));
     }
 }

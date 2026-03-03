@@ -40,7 +40,9 @@ static EMPHASIS_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*{1,3
 // Match emphasis underscores - only when they wrap text, not in snake_case
 // This pattern matches _text_ or __text__ but not test_with_underscores
 static EMPHASIS_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b_{1,2}([^_\s][^_]*?)_{1,2}\b").unwrap());
-static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]{0,500})`").unwrap());
+// Match both single-backtick and double-backtick code spans.
+// Double-backtick spans (``code``) are tried first so they aren't consumed as two single spans.
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"``([^`]{0,500})``|`([^`]{0,500})`").unwrap());
 // Match image and link patterns
 // Using simple approach: match the brackets and parentheses, extract only the bracket content
 static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]*\)").unwrap());
@@ -142,7 +144,9 @@ fn heading_to_fragment_internal(heading: &str) -> String {
         text = CODE_PATTERN
             .replace_all(&text, |caps: &regex::Captures| {
                 let idx = code_extracts.len();
-                code_extracts.push(caps[1].to_string());
+                // Group 1 is the double-backtick match, group 2 is the single-backtick match
+                let content = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
+                code_extracts.push(content.to_string());
                 format!("\x00CODE{idx}\x00")
             })
             .to_string();
@@ -982,6 +986,30 @@ mod tests {
         // Adjacent code spans with no space between them
         assert_eq!(heading_to_fragment("`__a__``__b__`"), "__a____b__");
         assert_eq!(heading_to_fragment("`_x_``_y_`"), "_x__y_");
+    }
+
+    #[test]
+    fn test_double_backtick_code_span_preserves_content() {
+        // Double-backtick code spans should also preserve their content as-is,
+        // just like single-backtick code spans.
+        assert_eq!(heading_to_fragment("``__init__``"), "__init__");
+        assert_eq!(heading_to_fragment("``__hello__``"), "__hello__");
+        assert_eq!(heading_to_fragment("``_single_``"), "_single_");
+    }
+
+    #[test]
+    fn test_double_backtick_code_span_with_surrounding_text() {
+        // Double-backtick code span mixed with regular text and emphasis
+        assert_eq!(
+            heading_to_fragment("``__init__`` method for __MyClass__"),
+            "__init__-method-for-myclass"
+        );
+    }
+
+    #[test]
+    fn test_double_backtick_code_span_containing_single_backtick() {
+        // A key use case for double-backtick spans: they can contain a literal backtick
+        assert_eq!(heading_to_fragment("``code`here``"), "codehere");
     }
 
     #[test]

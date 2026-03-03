@@ -254,8 +254,9 @@ pub(super) fn parse_table_rows(content: &str, lines: &[LineInfo]) -> Vec<TableRo
             continue;
         }
 
-        // Count columns by splitting on pipes, masking pipes inside code spans
-        let masked = crate::utils::table_utils::TableUtils::mask_pipes_in_inline_code(line);
+        // Count columns by splitting on pipes, masking escaped and code-span pipes
+        let escaped = crate::utils::table_utils::TableUtils::mask_pipes_for_table_parsing(line);
+        let masked = crate::utils::table_utils::TableUtils::mask_pipes_in_inline_code(&escaped);
         let parts: Vec<&str> = masked.split('|').collect();
         let column_count = if parts.len() > 2 { parts.len() - 2 } else { parts.len() };
 
