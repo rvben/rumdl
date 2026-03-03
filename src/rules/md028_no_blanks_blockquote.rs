@@ -80,16 +80,17 @@ impl MD028NoBlanksBlockquote {
     /// Lines in skip contexts (HTML comments, code blocks, frontmatter) count as
     /// separating content because they represent non-blockquote material between quotes.
     fn has_content_between(lines: &[&str], line_infos: &[LineInfo], start: usize, end: usize) -> bool {
-        for i in start..end {
+        for (offset, line) in lines[start..end].iter().enumerate() {
+            let idx = start + offset;
             // Non-blank lines in skip contexts (HTML comments, code blocks, frontmatter)
             // are separating content between blockquotes
-            if Self::is_in_skip_context(line_infos, i) {
-                if !lines[i].trim().is_empty() {
+            if Self::is_in_skip_context(line_infos, idx) {
+                if !line.trim().is_empty() {
                     return true;
                 }
                 continue;
             }
-            let trimmed = lines[i].trim();
+            let trimmed = line.trim();
             // If there's any non-blank, non-blockquote content, these are separate quotes
             if !trimmed.is_empty() && !trimmed.starts_with('>') {
                 return true;
