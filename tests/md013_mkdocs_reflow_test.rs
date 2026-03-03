@@ -846,6 +846,7 @@ fn test_mkdocs_2space_continuation_semantic_reflow_needed() {
     let fixed = rule.fix(&ctx).unwrap();
 
     // The fixed output should not have any line exceeding 80 chars
+    // AND continuation lines should preserve 2-space indent
     for (i, line) in fixed.lines().enumerate() {
         assert!(
             line.len() <= 80,
@@ -854,6 +855,14 @@ fn test_mkdocs_2space_continuation_semantic_reflow_needed() {
             line.len(),
             line
         );
+        if i > 0 && !line.is_empty() {
+            assert!(
+                line.starts_with("  ") && !line.starts_with("   "),
+                "Continuation line {} should preserve 2-space indent, got: {:?}",
+                i + 1,
+                line
+            );
+        }
     }
 }
 
@@ -1005,4 +1014,28 @@ fn test_mkdocs_sentence_per_line_2space_continuation_no_warning() {
         warnings.is_empty(),
         "MkDocs 2-space continuation with correct sentence-per-line should not warn, got: {warnings:?}"
     );
+}
+
+#[test]
+fn test_mkdocs_ordered_list_3space_continuation_semantic_breaks() {
+    // Ordered list "1. " has marker_len=3. With MkDocs, min_continuation_indent=4,
+    // but content_continuation_indent=3. A 3-space continuation should be recognized
+    // as part of the list item and produce no false positive.
+    let content = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+   Nullam consectetur tortor eu ipsum fringilla venenatis.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MkDocs ordered list 3-space continuation with correct semantic breaks should not warn, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "Fix should not change already-correct content");
 }

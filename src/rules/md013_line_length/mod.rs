@@ -1126,8 +1126,11 @@ impl MD013LineLength {
                             continue;
                         }
 
-                        // Normal continuation vs indented code block
-                        if indent <= content_continuation_indent + 3 {
+                        // Normal continuation vs indented code block.
+                        // Use min_continuation_indent for the threshold since
+                        // code blocks start 4 spaces beyond the expected content
+                        // level (which is min_continuation_indent for MkDocs).
+                        if indent <= min_continuation_indent + 3 {
                             // Extract content (remove indentation and trailing whitespace)
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
@@ -1156,7 +1159,7 @@ impl MD013LineLength {
                             }
                             i += 1;
                         } else {
-                            // indent >= content_continuation_indent + 4: indented code block
+                            // indent >= min_continuation_indent + 4: indented code block
                             list_item_lines.push(LineType::CodeBlock(
                                 line_info.content(ctx.content)[indent..].to_string(),
                                 indent,
@@ -1175,16 +1178,23 @@ impl MD013LineLength {
                 // modes preserve the user's actual indent since they only fix
                 // line breaking, not indentation.
                 let indent_size = match config.reflow_mode {
-                    ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => ((list_start + 1)..i)
-                        .find_map(|j| {
-                            let info = &ctx.lines[j];
-                            if !info.is_blank && info.indent >= marker_len {
-                                Some(info.indent)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or(min_continuation_indent),
+                    ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => {
+                        // Find indent of the first plain text continuation line,
+                        // skipping the marker line (index 0), nested list items,
+                        // code blocks, and blank lines.
+                        list_item_lines
+                            .iter()
+                            .enumerate()
+                            .skip(1)
+                            .find_map(|(k, lt)| {
+                                if matches!(lt, LineType::Content(_)) {
+                                    Some(ctx.lines[list_start + k].indent)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or(min_continuation_indent)
+                    }
                     _ => min_continuation_indent,
                 };
                 let expected_indent = " ".repeat(indent_size);
