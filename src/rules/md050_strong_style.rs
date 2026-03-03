@@ -393,7 +393,12 @@ impl Rule for MD050StrongStyle {
                 let in_mkdocs_markup = lines
                     .get(line_num.saturating_sub(1))
                     .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
+                // Line-level inline code fallback for cases pulldown-cmark misses
+                let in_inline_code = lines
+                    .get(line_num.saturating_sub(1))
+                    .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
                 !ctx.is_in_code_block_or_span(m.start())
+                    && !in_inline_code
                     && !self.is_in_link(ctx, m.start())
                     && !self.is_in_html_tag(ctx, m.start())
                     && !self.is_in_html_code_content(ctx, m.start())
