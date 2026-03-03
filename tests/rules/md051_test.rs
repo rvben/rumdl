@@ -2726,4 +2726,44 @@ mod code_span_slug_tests {
             "Link #__init__-method-for-myclass should match, got: {result:?}"
         );
     }
+
+    #[test]
+    fn test_multiple_code_spans_in_heading() {
+        // Two code spans in one heading: each preserves its underscore content
+        let content = "## `__a__` and `__b__`\n\n- [link](#__a__-and-__b__)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #__a__-and-__b__ should match heading with two code spans, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_code_spans_wrong_slug() {
+        // Wrong slug that strips underscores should NOT match
+        let content = "## `__a__` and `__b__`\n\n- [link](#a-and-b)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Link #a-and-b should NOT match heading with code spans, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_span_with_parentheses() {
+        // Parentheses are stripped by the character filter, spaces become hyphens
+        let content = "## `__init__(self, name)`\n\n- [link](#__init__self-name)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #__init__self-name should match heading with parens in code span, got: {result:?}"
+        );
+    }
 }

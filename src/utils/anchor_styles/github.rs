@@ -967,4 +967,29 @@ mod tests {
             "__init__-method-for-myclass"
         );
     }
+
+    #[test]
+    fn test_multiple_code_spans_in_heading() {
+        // Multiple code spans each preserve their underscore content independently
+        assert_eq!(heading_to_fragment("`__a__` and `__b__`"), "__a__-and-__b__");
+        assert_eq!(heading_to_fragment("`__init__` and `__del__`"), "__init__-and-__del__");
+        // Three code spans
+        assert_eq!(heading_to_fragment("`__a__` `__b__` `__c__`"), "__a__-__b__-__c__");
+    }
+
+    #[test]
+    fn test_adjacent_code_spans_in_heading() {
+        // Adjacent code spans with no space between them
+        assert_eq!(heading_to_fragment("`__a__``__b__`"), "__a____b__");
+        assert_eq!(heading_to_fragment("`_x_``_y_`"), "_x__y_");
+    }
+
+    #[test]
+    fn test_code_span_with_parentheses() {
+        // Parentheses and commas inside code spans are stripped by the character filter;
+        // spaces become hyphens
+        assert_eq!(heading_to_fragment("`__init__(self, name)`"), "__init__self-name");
+        assert_eq!(heading_to_fragment("`foo(bar)`"), "foobar");
+        assert_eq!(heading_to_fragment("`func(a, b, c)`"), "funca-b-c");
+    }
 }
