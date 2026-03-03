@@ -762,3 +762,247 @@ fn test_mkdocs_list_continuation_paragraph_after_blank_line() {
         }
     }
 }
+
+// ── Issue #484: MkDocs 2-space list continuation with semantic-line-breaks ──
+
+fn create_mkdocs_config_with_semantic_reflow() -> Config {
+    let mut config = Config::default();
+    config.global.flavor = MarkdownFlavor::MkDocs;
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("reflow".to_string(), toml::Value::Boolean(true));
+    rule_config.values.insert(
+        "reflow-mode".to_string(),
+        toml::Value::String("semantic-line-breaks".to_string()),
+    );
+    config.rules.insert("MD013".to_string(), rule_config);
+    config
+}
+
+#[test]
+fn test_mkdocs_2space_continuation_semantic_breaks_no_warning() {
+    // MkDocs flavor with 2-space continuation indent and semantic-line-breaks
+    // mode should NOT produce a false positive when the text already has correct
+    // semantic breaks.
+    let content = "\
+# Test
+
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+  Nullam consectetur tortor eu ipsum fringilla venenatis.
+- Fusce sollicitudin nibh nec magna molestie porta.
+  Quisque scelerisque libero non nisi tristique,
+  ac dignissim lacus sollicitudin.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MkDocs 2-space continuation with correct semantic breaks should not warn, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_2space_continuation_fix_preserves_indent() {
+    // When fix IS applied, the 2-space indentation should not be
+    // changed to 4-space. The output should preserve the user's original indent.
+    let content = "\
+# Test
+
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+  Nullam consectetur tortor eu ipsum fringilla venenatis.
+- Fusce sollicitudin nibh nec magna molestie porta.
+  Quisque scelerisque libero non nisi tristique,
+  ac dignissim lacus sollicitudin.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "Fix should not change already-correct content");
+}
+
+#[test]
+fn test_mkdocs_2space_continuation_semantic_reflow_needed() {
+    // When reflow IS needed (long line), the result should still produce correct output.
+    let content = "\
+- This is a very long first sentence that needs semantic line breaks. This second sentence also needs to be on its own line for proper semantic formatting.
+  Existing continuation with 2-space indent.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(!warnings.is_empty(), "Long line should trigger semantic reflow");
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The fixed output should not have any line exceeding 80 chars
+    for (i, line) in fixed.lines().enumerate() {
+        assert!(
+            line.len() <= 80,
+            "Line {} exceeds 80 chars (len={}): {:?}",
+            i + 1,
+            line.len(),
+            line
+        );
+    }
+}
+
+#[test]
+fn test_mkdocs_4space_continuation_semantic_breaks_still_works() {
+    // Existing 4-space continuation with MkDocs should continue to work.
+    let content = "\
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+    Nullam consectetur tortor eu ipsum fringilla venenatis.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MkDocs 4-space continuation with correct semantic breaks should not warn, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_standard_flavor_2space_continuation_semantic_breaks() {
+    // Standard flavor with 2-space indent should work correctly (regression test).
+    let content = "\
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+  Nullam consectetur tortor eu ipsum fringilla venenatis.
+";
+
+    let mut config = Config::default();
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("reflow".to_string(), toml::Value::Boolean(true));
+    rule_config.values.insert(
+        "reflow-mode".to_string(),
+        toml::Value::String("semantic-line-breaks".to_string()),
+    );
+    config.rules.insert("MD013".to_string(), rule_config);
+
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Standard flavor 2-space continuation with correct semantic breaks should not warn, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_multi_paragraph_list_with_blank_line_still_uses_strict_indent() {
+    // After a blank line, MkDocs strict 4-space check should still apply
+    // for the blank-line continuation detection.
+    let content = "\
+1. First item
+
+    This continuation paragraph after a blank line uses 4-space indent, which is correct for MkDocs. This is a second sentence that should be split.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "Long continuation paragraph should trigger reflow"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Continuation lines should maintain 4-space indent
+    let lines: Vec<&str> = fixed.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
+        if i >= 3 && !line.is_empty() {
+            assert!(
+                line.starts_with("    "),
+                "Continuation line {} should have 4-space indent for MkDocs, got: {:?}",
+                i + 1,
+                line
+            );
+        }
+    }
+}
+
+#[test]
+fn test_mkdocs_2space_idempotent_semantic_reflow() {
+    // After checking, running check again should produce the same result (no warnings)
+    let content = "\
+# Test
+
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+  Nullam consectetur tortor eu ipsum fringilla venenatis.
+- Fusce sollicitudin nibh nec magna molestie porta.
+  Quisque scelerisque libero non nisi tristique,
+  ac dignissim lacus sollicitudin.
+";
+
+    let config = create_mkdocs_config_with_semantic_reflow();
+    let rule = MD013LineLength::from_config(&config);
+
+    // First pass
+    let ctx1 = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let fixed1 = rule.fix(&ctx1).unwrap();
+
+    // Second pass on fixed output
+    let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::MkDocs, None);
+    let warnings = rule.check(&ctx2).unwrap();
+
+    assert!(
+        warnings.is_empty(),
+        "Second pass should produce no warnings. Got {} warnings on:\n{}",
+        warnings.len(),
+        fixed1
+    );
+
+    // Content should be unchanged
+    assert_eq!(fixed1, content, "Content should be unchanged after fix");
+}
+
+#[test]
+fn test_mkdocs_sentence_per_line_2space_continuation_no_warning() {
+    // sentence-per-line mode should also not produce false positives for
+    // MkDocs 2-space continuation with correct sentence breaks.
+    let content = "\
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+  Nullam consectetur tortor eu ipsum fringilla venenatis.
+";
+
+    let mut config = Config::default();
+    config.global.flavor = MarkdownFlavor::MkDocs;
+    let mut rule_config = rumdl_lib::config::RuleConfig::default();
+    rule_config
+        .values
+        .insert("reflow".to_string(), toml::Value::Boolean(true));
+    rule_config.values.insert(
+        "reflow-mode".to_string(),
+        toml::Value::String("sentence-per-line".to_string()),
+    );
+    config.rules.insert("MD013".to_string(), rule_config);
+
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MkDocs 2-space continuation with correct sentence-per-line should not warn, got: {warnings:?}"
+    );
+}

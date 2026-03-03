@@ -1005,11 +1005,15 @@ impl MD013LineLength {
                 let marker_len = marker.len();
 
                 // MkDocs flavor requires at least 4 spaces for list continuation
+                // after a blank line (multi-paragraph list items). For non-blank
+                // continuation (lines directly following the marker line), use
+                // the natural marker width so that 2-space indent is recognized.
                 let min_continuation_indent = if ctx.flavor.requires_strict_list_indent() {
                     marker_len.max(4)
                 } else {
                     marker_len
                 };
+                let content_continuation_indent = marker_len;
 
                 // Track lines and their types (content, code block, fence, nested list)
                 #[derive(Clone)]
@@ -1053,8 +1057,10 @@ impl MD013LineLength {
                     // Use pre-computed indent from ctx
                     let indent = line_info.indent;
 
-                    // Valid continuation must be indented at least min_continuation_indent
-                    if indent >= min_continuation_indent {
+                    // Valid continuation must be indented at least content_continuation_indent.
+                    // For non-blank continuation, use marker_len (e.g. 2 for "- ").
+                    // MkDocs strict 4-space requirement applies only after blank lines.
+                    if indent >= content_continuation_indent {
                         let trimmed = line_info.content(ctx.content).trim();
 
                         // Use pre-computed in_code_block from ctx
@@ -1121,7 +1127,7 @@ impl MD013LineLength {
                         }
 
                         // Normal continuation vs indented code block
-                        if indent <= min_continuation_indent + 3 {
+                        if indent <= content_continuation_indent + 3 {
                             // Extract content (remove indentation and trailing whitespace)
                             // Preserve hard breaks (2 trailing spaces) while removing excessive whitespace
                             // See: https://github.com/rvben/rumdl/issues/76
@@ -1150,7 +1156,7 @@ impl MD013LineLength {
                             }
                             i += 1;
                         } else {
-                            // indent >= min_continuation_indent + 4: indented code block
+                            // indent >= content_continuation_indent + 4: indented code block
                             list_item_lines.push(LineType::CodeBlock(
                                 line_info.content(ctx.content)[indent..].to_string(),
                                 indent,
@@ -2255,8 +2261,24 @@ impl MD013LineLength {
                     // Get the original text to compare
                     let original_text = &ctx.content[byte_range.clone()];
 
-                    // Only generate a warning if the replacement is different from the original
-                    if original_text != replacement {
+                    // Only generate a warning if the replacement is different from the original.
+                    // For semantic-line-breaks and sentence-per-line modes, also check if only
+                    // indentation differs (not content). This avoids false positives when the
+                    // user's continuation indent differs from min_continuation_indent but the
+                    // content structure is already correct.
+                    let content_differs = if original_text != replacement {
+                        match config.reflow_mode {
+                            ReflowMode::SemanticLineBreaks | ReflowMode::SentencePerLine => {
+                                let orig_trimmed: Vec<&str> = original_text.lines().map(|l| l.trim()).collect();
+                                let repl_trimmed: Vec<&str> = replacement.lines().map(|l| l.trim()).collect();
+                                orig_trimmed != repl_trimmed
+                            }
+                            _ => true,
+                        }
+                    } else {
+                        false
+                    };
+                    if content_differs {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
                             ReflowMode::SentencePerLine => {
