@@ -2869,7 +2869,7 @@ fn test_config_include_directory_pattern_does_not_discover_non_lintable_files() 
     fs::create_dir_all(base_path.join("docs")).unwrap();
     fs::write(base_path.join("docs/guide.md"), "# Guide\n\nSome text.\n").unwrap();
     fs::write(base_path.join("docs/script.py"), "print('hello')\n").unwrap();
-    fs::write(base_path.join("docs/image.png"), &[0u8; 8]).unwrap();
+    fs::write(base_path.join("docs/image.png"), [0u8; 8]).unwrap();
 
     // Config with directory pattern (no explicit extension)
     fs::write(base_path.join(".rumdl.toml"), "[global]\ninclude = [\"docs/**\"]\n").unwrap();
