@@ -294,11 +294,26 @@ impl<'a> LintContext<'a> {
         }
 
         // Parse code spans early so we can exclude them from link/image parsing
-        let code_spans = profile_section!(
+        let mut code_spans = profile_section!(
             "Code spans",
             profile,
             element_parsers::build_code_spans_from_ranges(content, &lines, &code_span_ranges)
         );
+
+        // Supplement code spans for MkDocs container content that pulldown-cmark missed.
+        // pulldown-cmark treats 4-space-indented MkDocs content as indented code blocks,
+        // so backtick code spans within admonitions/tabs/markdown HTML are invisible to it.
+        if flavor == MarkdownFlavor::MkDocs {
+            let extra = profile_section!(
+                "MkDocs code spans",
+                profile,
+                element_parsers::scan_mkdocs_container_code_spans(content, &lines, &code_span_ranges,)
+            );
+            if !extra.is_empty() {
+                code_spans.extend(extra);
+                code_spans.sort_by_key(|span| span.byte_offset);
+            }
+        }
 
         // Mark lines that are continuations of multi-line code spans
         // This is needed for parse_list_blocks to correctly handle list items with multi-line code spans

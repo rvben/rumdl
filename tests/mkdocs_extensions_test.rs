@@ -4725,6 +4725,160 @@ mod admonition_content_broader_rules {
     }
 
     #[test]
+    fn test_code_spans_detected_in_content_tab() {
+        // Issue #487: pulldown-cmark misses code spans inside MkDocs content tabs
+        // because it treats 4-space-indented content as indented code blocks
+        let content = "# Test\n\n=== \"Tab 1\"\n\n    Visit `https://example.com` to get started.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect exactly one code span inside content tab"
+        );
+        assert_eq!(code_spans[0].content, "https://example.com");
+    }
+
+    #[test]
+    fn test_code_spans_detected_in_admonition() {
+        let content = "# Test\n\n!!! note\n\n    Visit `https://example.com` for details.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(code_spans.len(), 1, "Should detect code span inside admonition");
+        assert_eq!(code_spans[0].content, "https://example.com");
+    }
+
+    #[test]
+    fn test_multiple_code_spans_in_mkdocs_container() {
+        let content = "# Test\n\n=== \"Tab\"\n\n    Use `foo` and `bar` together with `baz`.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(code_spans.len(), 3, "Should detect all three code spans");
+        assert_eq!(code_spans[0].content, "foo");
+        assert_eq!(code_spans[1].content, "bar");
+        assert_eq!(code_spans[2].content, "baz");
+    }
+
+    #[test]
+    fn test_double_backtick_code_spans_in_mkdocs_container() {
+        let content = "# Test\n\n=== \"Tab\"\n\n    Use ``code with ` backtick`` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(code_spans.len(), 1, "Should detect double-backtick code span");
+        assert_eq!(code_spans[0].content, "code with ` backtick");
+    }
+
+    #[test]
+    fn test_md034_no_warning_for_url_in_code_span_in_content_tab() {
+        // Issue #487: URLs inside backtick code spans within MkDocs content tabs
+        // should NOT be flagged by MD034
+        let content = "# Test\n\n=== \"Tab\"\n\n    1.  Visit `https://example.com` to get started.\n\n        - Set **URL** to `https://example.com/api`\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            md034.is_empty(),
+            "MD034 should not flag URLs inside backtick code spans in content tabs: {md034:?}"
+        );
+    }
+
+    #[test]
+    fn test_md034_fix_preserves_url_in_code_span_in_content_tab() {
+        // Issue #487: fix mode should not modify URLs inside code spans
+        let content = "# Test\n\n=== \"Tab\"\n\n    1.  Visit `https://example.com` to get started.\n\n        - Set **URL** to `https://example.com/api`\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix should not modify URLs in code spans");
+    }
+
+    #[test]
+    fn test_md034_still_flags_bare_url_in_content_tab() {
+        // Bare URLs (not in code spans) inside content tabs should still be flagged
+        let content = "# Test\n\n=== \"Tab 1\"\n\n    Visit https://example.com for details.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            !md034.is_empty(),
+            "MD034 should still flag bare URLs (not in code spans) inside content tabs"
+        );
+    }
+
+    #[test]
+    fn test_md034_no_warning_for_url_in_code_span_in_admonition() {
+        let content = "# Test\n\n!!! note\n\n    Visit `https://example.com` for details.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            md034.is_empty(),
+            "MD034 should not flag URLs inside code spans in admonitions: {md034:?}"
+        );
+    }
+
+    #[test]
+    fn test_unmatched_triple_backtick_doesnt_hide_inner_code_span() {
+        // When triple backticks have no match, single-backtick spans later on
+        // the same line should still be detected
+        let content = "# Test\n\n=== \"Tab\"\n\n    See ``` and `foo` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect `foo` even after unmatched triple backticks"
+        );
+        assert_eq!(code_spans[0].content, "foo");
+    }
+
+    #[test]
+    fn test_escaped_backtick_not_detected_as_code_span() {
+        // Backslash-escaped backticks should not form code spans
+        let content = "# Test\n\n=== \"Tab\"\n\n    This is \\`not code\\` text.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert!(
+            code_spans.is_empty(),
+            "Escaped backticks should not form code spans, got: {code_spans:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_span_with_escaped_backslash_before_backtick() {
+        // Double backslash before backtick means the backslash is escaped,
+        // so the backtick IS a code span opener
+        let content = "# Test\n\n=== \"Tab\"\n\n    See \\\\`code` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Double-escaped backslash should not prevent code span detection"
+        );
+        assert_eq!(code_spans[0].content, "code");
+    }
+
+    #[test]
     fn test_content_tab_lines_not_marked_as_code_block() {
         let content = "# Test\n\n=== \"Tab 1\"\n\n    Content here\n    More content\n\n## Next\n";
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
@@ -4825,6 +4979,201 @@ mod admonition_content_broader_rules {
         assert!(
             code_in_code,
             "Fenced code content in admonition should be in code_blocks byte ranges"
+        );
+    }
+
+    // --- Multi-line code span tests ---
+
+    #[test]
+    fn test_multiline_code_span_in_content_tab() {
+        // A backtick code span that opens on one line and closes on the next
+        let content = "# Test\n\n=== \"Tab\"\n\n    Use `some code\n    spanning lines` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect multi-line code span in content tab, got: {code_spans:?}"
+        );
+        assert!(
+            code_spans[0].content.contains("some code"),
+            "Code span content should contain 'some code': {:?}",
+            code_spans[0].content
+        );
+        assert!(
+            code_spans[0].content.contains("spanning lines"),
+            "Code span content should contain 'spanning lines': {:?}",
+            code_spans[0].content
+        );
+    }
+
+    #[test]
+    fn test_multiline_code_span_in_admonition() {
+        let content = "# Test\n\n!!! note\n\n    Run `command\n    --flag value` to proceed.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect multi-line code span in admonition, got: {code_spans:?}"
+        );
+        assert!(
+            code_spans[0].content.contains("command"),
+            "Code span should contain 'command': {:?}",
+            code_spans[0].content
+        );
+        assert!(
+            code_spans[0].content.contains("--flag value"),
+            "Code span should contain '--flag value': {:?}",
+            code_spans[0].content
+        );
+    }
+
+    #[test]
+    fn test_mixed_single_and_multiline_code_spans_in_container() {
+        // Single-line and multi-line code spans coexist in the same container
+        let content = "# Test\n\n=== \"Tab\"\n\n    Use `single` and `multi\n    line span` together.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            2,
+            "Should detect both single-line and multi-line code spans, got: {code_spans:?}"
+        );
+        assert_eq!(code_spans[0].content, "single");
+        assert!(
+            code_spans[1].content.contains("multi"),
+            "Second span should contain 'multi': {:?}",
+            code_spans[1].content
+        );
+    }
+
+    #[test]
+    fn test_multiline_code_span_with_url_in_container() {
+        // The actual MD034 scenario from issue #487: multi-line code span containing a URL
+        let content = "# Test\n\n=== \"Tab\"\n\n    Visit `https://example.com/\n    api/v2` for the endpoint.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect multi-line code span containing URL, got: {code_spans:?}"
+        );
+        assert!(
+            code_spans[0].content.contains("https://example.com/"),
+            "Code span should contain URL: {:?}",
+            code_spans[0].content
+        );
+
+        // MD034 should NOT flag this URL since it's inside a code span
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            md034.is_empty(),
+            "MD034 should not flag URL inside multi-line code span: {md034:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiline_code_span_three_lines() {
+        // Code span spanning three lines
+        let content = "# Test\n\n=== \"Tab\"\n\n    Run `first\n    second\n    third` now.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect code span spanning three lines, got: {code_spans:?}"
+        );
+        assert!(
+            code_spans[0].content.contains("first"),
+            "Should contain 'first': {:?}",
+            code_spans[0].content
+        );
+        assert!(
+            code_spans[0].content.contains("third"),
+            "Should contain 'third': {:?}",
+            code_spans[0].content
+        );
+    }
+
+    #[test]
+    fn test_md034_no_warning_for_email_in_multiline_code_span() {
+        // Email addresses inside multi-line code spans should not be flagged
+        let content = "# Test\n\n=== \"Tab\"\n\n    Contact `admin\n    @example.com` for help.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect multi-line code span containing email fragment"
+        );
+
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            md034.is_empty(),
+            "MD034 should not flag email inside multi-line code span: {md034:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_span_in_nested_container() {
+        // Admonition inside content tab: content at indent 8 should be dedented correctly
+        let content = "# Test\n\n=== \"Tab\"\n\n    !!! note\n\n        Visit `https://example.com` here.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect code span in nested container (admonition inside content tab)"
+        );
+        assert_eq!(code_spans[0].content, "https://example.com");
+
+        // MD034 should not flag the URL
+        let rule = rumdl_lib::MD034NoBareUrls;
+        let warnings = rule.check(&ctx).unwrap();
+        let md034: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.rule_name.as_deref() == Some("MD034"))
+            .collect();
+        assert!(
+            md034.is_empty(),
+            "MD034 should not flag URL in code span inside nested container: {md034:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiline_code_span_in_nested_container() {
+        // Multi-line code span inside admonition within content tab
+        let content = "# Test\n\n=== \"Tab\"\n\n    !!! note\n\n        Run `command\n        --verbose` now.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+        let code_spans = ctx.code_spans();
+        assert_eq!(
+            code_spans.len(),
+            1,
+            "Should detect multi-line code span in nested container, got: {code_spans:?}"
+        );
+        assert!(
+            code_spans[0].content.contains("command"),
+            "Code span should contain 'command': {:?}",
+            code_spans[0].content
         );
     }
 }

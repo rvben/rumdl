@@ -1,5 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
+use crate::utils::mkdocs_admonitions;
+use crate::utils::mkdocs_tabs;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use pulldown_cmark::{Event, Options, Parser};
 use regex::Regex;
@@ -11,7 +13,11 @@ use super::types::*;
 static BARE_EMAIL_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap());
 
-/// Parse all inline code spans in the content using pulldown-cmark streaming parser
+/// Parse all inline code spans in the content using pulldown-cmark streaming parser.
+///
+/// Note: For MkDocs content, `scan_mkdocs_container_code_spans()` must be called separately
+/// to detect code spans that pulldown-cmark misses inside 4-space-indented containers.
+/// This is done during LintContext construction in mod.rs.
 pub(super) fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpan> {
     // Quick check - if no backticks, no code spans
     if !content.contains('`') {
@@ -29,6 +35,119 @@ pub(super) fn parse_code_spans(content: &str, lines: &[LineInfo]) -> Vec<CodeSpa
     }
 
     build_code_spans_from_ranges(content, lines, &ranges)
+}
+
+/// Scan MkDocs container lines for code spans that pulldown-cmark missed.
+///
+/// pulldown-cmark treats 4-space-indented MkDocs content (admonitions, content tabs,
+/// markdown HTML blocks) as indented code blocks, so it never emits `Event::Code` for
+/// backtick spans within those regions. This function dedents contiguous runs of container
+/// lines and reparses them with pulldown-cmark, which correctly handles both single-line
+/// and multi-line code spans including all CommonMark edge cases.
+pub(super) fn scan_mkdocs_container_code_spans(
+    content: &str,
+    lines: &[LineInfo],
+    existing_ranges: &[(usize, usize)],
+) -> Vec<CodeSpan> {
+    let mut extra_ranges: Vec<(usize, usize)> = Vec::new();
+
+    // Process contiguous runs of MkDocs container lines
+    let mut i = 0;
+    while i < lines.len() {
+        // Find start of a container run
+        if !lines[i].in_mkdocs_container() || lines[i].in_code_block {
+            i += 1;
+            continue;
+        }
+
+        // Collect the contiguous run
+        let run_start = i;
+        while i < lines.len() && lines[i].in_mkdocs_container() && !lines[i].in_code_block {
+            i += 1;
+        }
+        let run_end = i;
+
+        // Quick check: any backticks in this run?
+        let has_backticks = lines[run_start..run_end]
+            .iter()
+            .any(|li| li.content(content).contains('`'));
+        if !has_backticks {
+            continue;
+        }
+
+        // Compute minimum indentation across content lines only.
+        // Container openers (e.g., `=== "Tab"`, `!!! note`) are structural markers
+        // that should be excluded from the min_indent calculation. For nested
+        // containers (admonition inside content tab), including openers would
+        // prevent stripping enough indent from deeply nested content, causing
+        // pulldown-cmark to misinterpret it as indented code blocks.
+        let min_indent = lines[run_start..run_end]
+            .iter()
+            .filter(|li| {
+                if li.is_blank || li.indent == 0 {
+                    return false;
+                }
+                let line_text = li.content(content);
+                // Exclude container openers from min_indent calculation
+                if mkdocs_admonitions::is_admonition_start(line_text) || mkdocs_tabs::is_tab_marker(line_text) {
+                    return false;
+                }
+                true
+            })
+            .map(|li| li.indent)
+            .min()
+            .unwrap_or(0);
+
+        // Build dedented string and line map for offset translation.
+        // Each entry: (byte offset in dedented string, byte offset in original document)
+        let mut dedented = String::new();
+        let mut line_map: Vec<(usize, usize)> = Vec::new();
+
+        for li in &lines[run_start..run_end] {
+            let dedented_line_start = dedented.len();
+            let line_content = li.content(content);
+            let bytes_to_strip = min_indent.min(li.indent);
+            let stripped = &line_content[bytes_to_strip..];
+            let original_start = li.byte_offset + bytes_to_strip;
+            line_map.push((dedented_line_start, original_start));
+            dedented.push_str(stripped);
+            dedented.push('\n');
+        }
+
+        // Parse the dedented string with pulldown-cmark
+        let parser = Parser::new(&dedented).into_offset_iter();
+        for (event, range) in parser {
+            if let Event::Code(_) = event {
+                let orig_start = dedented_to_original(range.start, &line_map);
+                let orig_end = dedented_to_original(range.end, &line_map);
+
+                // Skip ranges already detected by the initial pulldown-cmark pass
+                let overlaps = existing_ranges.iter().any(|&(s, e)| s < orig_end && e > orig_start);
+                if !overlaps {
+                    extra_ranges.push((orig_start, orig_end));
+                }
+            }
+        }
+    }
+
+    if extra_ranges.is_empty() {
+        return Vec::new();
+    }
+
+    extra_ranges.sort_unstable_by_key(|&(start, _)| start);
+    build_code_spans_from_ranges(content, lines, &extra_ranges)
+}
+
+/// Convert a byte offset in the dedented string back to the original document offset.
+///
+/// `line_map` entries are `(dedented_line_start, original_line_start)`.
+fn dedented_to_original(dedented_offset: usize, line_map: &[(usize, usize)]) -> usize {
+    // Find the rightmost entry whose dedented_line_start <= dedented_offset
+    let idx = line_map
+        .partition_point(|&(ds, _)| ds <= dedented_offset)
+        .saturating_sub(1);
+    let (dedented_line_start, original_line_start) = line_map[idx];
+    original_line_start + (dedented_offset - dedented_line_start)
 }
 
 pub(super) fn build_code_spans_from_ranges(

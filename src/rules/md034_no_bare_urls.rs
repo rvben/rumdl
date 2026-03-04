@@ -392,10 +392,10 @@ impl MD034NoBareUrls {
                         continue;
                     }
 
-                    // Check if email is inside a code span
+                    // Check if email is inside a code span (byte offsets handle multi-line spans)
                     let is_in_code_span = code_spans
                         .iter()
-                        .any(|span| span.line == line_number && start >= span.start_col && start < span.end_col);
+                        .any(|span| absolute_pos >= span.byte_offset && absolute_pos < span.byte_end);
 
                     if !is_in_code_span {
                         let email_len = end - start;
@@ -485,14 +485,19 @@ impl Rule for MD034NoBareUrls {
             let mut line_warnings =
                 self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
 
-            // Filter out warnings that are inside code spans
+            // Filter out warnings that are inside code spans (handles multi-line spans via byte offsets)
             line_warnings.retain(|warning| {
-                // Check if the URL is inside a code span
                 !code_spans.iter().any(|span| {
-                    span.line == warning.line &&
-                    warning.column > 0 && // column is 1-indexed
-                    (warning.column - 1) >= span.start_col &&
-                    (warning.column - 1) < span.end_col
+                    if let Some(fix) = &warning.fix {
+                        // Byte-offset check handles both single-line and multi-line code spans
+                        fix.range.start >= span.byte_offset && fix.range.start < span.byte_end
+                    } else {
+                        span.line == warning.line
+                            && span.end_line == warning.line
+                            && warning.column > 0
+                            && (warning.column - 1) >= span.start_col
+                            && (warning.column - 1) < span.end_col
+                    }
                 })
             });
 

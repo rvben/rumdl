@@ -262,11 +262,11 @@ impl MD052ReferenceLinkImages {
         false
     }
 
-    /// Check if a position is inside any code span
-    fn is_in_code_span(line: usize, col: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
+    /// Check if a byte position is inside any code span
+    fn is_in_code_span(byte_pos: usize, code_spans: &[crate::lint_context::CodeSpan]) -> bool {
         code_spans
             .iter()
-            .any(|span| span.line == line && col >= span.start_col && col < span.end_col)
+            .any(|span| byte_pos >= span.byte_offset && byte_pos < span.byte_end)
     }
 
     /// Check if a byte position is within an HTML tag
@@ -340,7 +340,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip links inside code spans
-            if Self::is_in_code_span(link.line, link.start_col, &code_spans) {
+            if Self::is_in_code_span(link.byte_offset, &code_spans) {
                 continue;
             }
 
@@ -447,7 +447,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip images inside code spans
-            if Self::is_in_code_span(image.line, image.start_col, &code_spans) {
+            if Self::is_in_code_span(image.byte_offset, &code_spans) {
                 continue;
             }
 
@@ -709,16 +709,14 @@ impl MD052ReferenceLinkImages {
                         if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
                             let full_match = cap.get(0).unwrap();
                             let col = full_match.start();
+                            let line_start_byte = ctx.line_offsets[line_num];
+                            let byte_pos = line_start_byte + col;
 
                             // Skip if inside code span
                             let code_spans = ctx.code_spans();
-                            if Self::is_in_code_span(line_num + 1, col, &code_spans) {
+                            if Self::is_in_code_span(byte_pos, &code_spans) {
                                 continue;
                             }
-
-                            // Check if this position is within a covered range
-                            let line_start_byte = ctx.line_offsets[line_num];
-                            let byte_pos = line_start_byte + col;
 
                             // Skip if inside Jinja template
                             if ctx.is_in_jinja_range(byte_pos) {
