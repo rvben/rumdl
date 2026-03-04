@@ -325,6 +325,182 @@ fn test_check_inner_doc_comment_linting() {
     assert_eq!(md009_warnings[0].line, 1);
 }
 
+// ─── Rustdoc-specific rule skipping ─────────────────────────────
+
+#[test]
+fn test_check_skips_md025_multiple_h1_headings() {
+    // Rustdoc conventionally uses multiple H1 headings: # Examples, # Errors, # Safety, # Panics
+    let content = "\
+/// # Examples
+///
+/// ```
+/// let x = 1;
+/// ```
+///
+/// # Errors
+///
+/// Returns an error if the input is invalid.
+///
+/// # Panics
+///
+/// Panics if the lock is poisoned.
+pub fn example() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md025_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD025"))
+        .collect();
+    assert!(
+        md025_warnings.is_empty(),
+        "MD025 should be skipped for doc comments (multiple H1s are standard in rustdoc)"
+    );
+}
+
+#[test]
+fn test_check_skips_md033_html_warning_block() {
+    // Rustdoc requires <div class="warning"> for warning blocks
+    let content = "\
+/// # Safety
+///
+/// <div class=\"warning\">
+///
+/// This function is unsafe because it dereferences a raw pointer.
+///
+/// </div>
+pub unsafe fn deref_ptr() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md033_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD033"))
+        .collect();
+    assert!(
+        md033_warnings.is_empty(),
+        "MD033 should be skipped for doc comments (HTML tags are required for rustdoc warning blocks)"
+    );
+}
+
+#[test]
+fn test_check_skips_md040_unlabeled_code_blocks() {
+    // Rustdoc assumes unlabeled code blocks are Rust code
+    let content = "\
+/// # Examples
+///
+/// ```
+/// let x = 42;
+/// assert_eq!(x, 42);
+/// ```
+pub fn example() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md040_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD040"))
+        .collect();
+    assert!(
+        md040_warnings.is_empty(),
+        "MD040 should be skipped for doc comments (rustdoc defaults unlabeled code blocks to Rust)"
+    );
+}
+
+#[test]
+fn test_check_skips_md051_rustdoc_anchors() {
+    // Rustdoc generates anchors like #method.bar, #structfield.name that aren't headings
+    let content = "\
+/// See [`Foo`](#method.bar) for details.
+///
+/// Also check [`field`](#structfield.name).
+pub fn example() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md051_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD051"))
+        .collect();
+    assert!(
+        md051_warnings.is_empty(),
+        "MD051 should be skipped for doc comments (rustdoc anchors aren't document headings)"
+    );
+}
+
+#[test]
+fn test_check_skips_md052_intra_doc_links() {
+    // Intra-doc links like [crate::io] are valid rustdoc syntax, not broken references
+    let content = "\
+/// See [crate::io::Read] for the trait definition.
+///
+/// Also see [super::parent_module].
+pub fn example() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md052_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD052"))
+        .collect();
+    assert!(
+        md052_warnings.is_empty(),
+        "MD052 should be skipped for doc comments (intra-doc links are rustdoc syntax)"
+    );
+}
+
+#[test]
+fn test_check_skips_md054_shortcut_intra_doc_links() {
+    // Shortcut reference links like [crate::module] are the canonical intra-doc link syntax
+    let content = "\
+/// See [crate::io::Read] for details.
+///
+/// Also uses [std::fmt::Display].
+pub fn example() {}
+";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md054_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD054"))
+        .collect();
+    assert!(
+        md054_warnings.is_empty(),
+        "MD054 should be skipped for doc comments (shortcut style is canonical for intra-doc links)"
+    );
+}
+
+#[test]
+fn test_check_non_skipped_rules_still_fire() {
+    // Ensure rules that aren't in SKIPPED_RULES still detect issues
+    // MD009: trailing spaces should still be caught
+    let content = "/// trailing spaces   \npub fn example() {}\n";
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md009_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD009"))
+        .collect();
+    assert!(
+        !md009_warnings.is_empty(),
+        "Non-skipped rules like MD009 should still detect issues in doc comments"
+    );
+}
+
 // ─── Edge cases ─────────────────────────────────────────────────
 
 #[test]

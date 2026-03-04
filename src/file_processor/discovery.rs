@@ -275,12 +275,19 @@ pub fn find_markdown_files(
         walk_builder.add(path);
     }
 
-    // --- Add Markdown File Type Definition ---
-    // Only apply type filtering if --include is NOT provided
-    // When --include is provided, let the include patterns determine which files to process
+    // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
+    let is_discovery_mode = paths.is_empty() || paths == ["."];
+
+    // Track whether config-based include patterns are active in discovery mode
+    let has_config_include = is_discovery_mode && !config.global.include.is_empty();
+
+    // --- Add Lintable File Type Filter ---
+    // CLI --include: no type filter (user controls which files to process)
+    // Config include: expanded filter (markdown + rust, since rumdl can lint both)
+    // Default: markdown-only filter
     if args.include.is_none() {
         let mut types_builder = ignore::types::TypesBuilder::new();
-        types_builder.add_defaults(); // Add standard types
+        types_builder.add_defaults();
         types_builder.add("markdown", "*.md")?;
         types_builder.add("markdown", "*.markdown")?;
         types_builder.add("markdown", "*.mdx")?;
@@ -291,19 +298,16 @@ pub fn find_markdown_files(
         types_builder.add("markdown", "*.qmd")?;
         types_builder.add("markdown", "*.rmd")?;
         types_builder.add("markdown", "*.Rmd")?;
-        types_builder.select("markdown"); // Select ONLY markdown for processing
+        types_builder.select("markdown");
+        if has_config_include {
+            // Config include is active: also allow Rust files for doc comment linting
+            types_builder.add("rustdoc", "*.rs")?;
+            types_builder.select("rustdoc");
+        }
         let types = types_builder.build()?;
         walk_builder.types(types);
     }
     // -----------------------------------------
-
-    // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
-    // Adjusted to handle both legacy and subcommand paths
-    let is_discovery_mode = paths.is_empty() || paths == ["."];
-
-    // Track if --include was explicitly provided via CLI
-    // This is used to decide whether to apply the final extension filter
-    let has_explicit_cli_include = args.include.is_some();
 
     // --- Determine Effective Include/Exclude Patterns ---
 
@@ -579,19 +583,20 @@ pub fn find_markdown_files(
         });
     }
 
-    // --- Final Explicit Markdown Filter ---
-    // Only apply the extension filter if --include was NOT explicitly provided via CLI
-    // When --include is provided, respect the user's explicit intent about which files to check
-    if !has_explicit_cli_include {
-        // Ensure only files with markdown extensions are returned,
-        // regardless of how ignore crate overrides interacted with type filters.
+    // --- Final Lintable File Filter ---
+    // CLI --include: no extension filter (user controls which files to process)
+    // Config include: allow markdown + rust extensions
+    // Default: markdown-only extensions
+    if args.include.is_none() {
         file_paths.retain(|path_str| {
             let path = Path::new(path_str);
             path.extension().is_some_and(|ext| {
-                matches!(
+                let is_markdown = matches!(
                     ext.to_str(),
                     Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd" | "Rmd")
-                )
+                );
+                let is_rust = has_config_include && ext.to_str() == Some("rs");
+                is_markdown || is_rust
             })
         });
     }

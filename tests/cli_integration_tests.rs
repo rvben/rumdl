@@ -2815,3 +2815,161 @@ fn test_stdin_inline_markdownlint_disable_compat() {
         "MD009 should be suppressed by markdownlint-disable directive, but got: {stderr}"
     );
 }
+
+// ─── Config include discovers non-markdown files ────────────────
+
+#[test]
+fn test_config_include_discovers_rs_files() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create a .rs file with doc comments
+    fs::write(
+        base_path.join("lib.rs"),
+        "/// # Example\n///\n/// Clean doc comment.\npub fn example() {}\n",
+    )
+    .unwrap();
+
+    // Create a .md file
+    fs::write(base_path.join("test.md"), "# Test\n\nSome text.\n").unwrap();
+
+    // Create config that includes both .md and .rs files
+    fs::write(
+        base_path.join(".rumdl.toml"),
+        "[global]\ninclude = [\"**/*.md\", \"**/*.rs\"]\n",
+    )
+    .unwrap();
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "--no-cache", ".", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        stdout.contains("Processing file: lib.rs"),
+        "Config include should discover .rs files, stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Processing file: test.md"),
+        "Config include should still discover .md files, stdout: {stdout}"
+    );
+    assert!(stdout.contains("2 file"), "Should process 2 files, stdout: {stdout}");
+}
+
+#[test]
+fn test_config_include_directory_pattern_does_not_discover_non_lintable_files() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create a docs directory with mixed file types
+    fs::create_dir_all(base_path.join("docs")).unwrap();
+    fs::write(base_path.join("docs/guide.md"), "# Guide\n\nSome text.\n").unwrap();
+    fs::write(base_path.join("docs/script.py"), "print('hello')\n").unwrap();
+    fs::write(base_path.join("docs/image.png"), &[0u8; 8]).unwrap();
+
+    // Config with directory pattern (no explicit extension)
+    fs::write(base_path.join(".rumdl.toml"), "[global]\ninclude = [\"docs/**\"]\n").unwrap();
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "--no-cache", ".", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        stdout.contains("Processing file: docs/guide.md") || stdout.contains("1 file"),
+        "Should discover markdown file in docs/, stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("script.py"),
+        "Should NOT discover .py files, stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("image.png"),
+        "Should NOT discover .png files, stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_config_include_with_rs_and_directory_pattern() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create files in a src directory
+    fs::create_dir_all(base_path.join("src")).unwrap();
+    fs::write(
+        base_path.join("src/lib.rs"),
+        "/// # Example\n///\n/// Clean doc.\npub fn example() {}\n",
+    )
+    .unwrap();
+    fs::write(base_path.join("src/notes.md"), "# Notes\n\nSome notes.\n").unwrap();
+    fs::write(base_path.join("src/data.json"), "{}\n").unwrap();
+
+    // Config that includes both .md and .rs explicitly
+    fs::write(
+        base_path.join(".rumdl.toml"),
+        "[global]\ninclude = [\"**/*.md\", \"**/*.rs\"]\n",
+    )
+    .unwrap();
+
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "--no-cache", ".", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(stdout.contains("lib.rs"), "Should discover .rs files, stdout: {stdout}");
+    assert!(
+        stdout.contains("notes.md"),
+        "Should discover .md files, stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("data.json"),
+        "Should NOT discover .json files, stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("2 file"),
+        "Should process exactly 2 files, stdout: {stdout}"
+    );
+}
+
+#[test]
+fn test_default_discovery_does_not_include_rs_files() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Create a .rs file
+    fs::write(base_path.join("lib.rs"), "/// Some doc.\npub fn example() {}\n").unwrap();
+
+    // Create a .md file
+    fs::write(base_path.join("test.md"), "# Test\n\nSome text.\n").unwrap();
+
+    // No config — default behavior should only find .md files
+    let output = Command::new(rumdl_exe)
+        .current_dir(base_path)
+        .args(["check", "--no-cache", ".", "--verbose"])
+        .output()
+        .expect("Failed to execute command");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        !stdout.contains("Processing file: lib.rs"),
+        "Default discovery should NOT include .rs files, stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Processing file: test.md"),
+        "Default discovery should include .md files, stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 file"),
+        "Should process only 1 file, stdout: {stdout}"
+    );
+}
