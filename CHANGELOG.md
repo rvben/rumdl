@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.40] - 2026-03-04
+
+### Fixed
+
+- **MkDocs**: Support multi-line code spans inside MkDocs containers
+  (admonitions, content tabs, markdown HTML) — pulldown-cmark missed these
+  because it treats 4-space-indented container content as indented code blocks.
+  Replaced the per-line backtick scanner with a dedent-and-reparse approach
+  that handles all CommonMark edge cases including nested containers
+  ([#487](https://github.com/rvben/rumdl/issues/487), reported by @stefanvanburen)
+- **MD034**: Fix code span filter to use byte offsets instead of single-line
+  column checks, preventing false positives for URLs and emails inside
+  multi-line code spans
+- **MD052**: Fix code span filter to use byte offsets, preventing false
+  positives for reference links inside multi-line code spans
+
 ## [0.1.39] - 2026-03-04
 
 ### Fixed
