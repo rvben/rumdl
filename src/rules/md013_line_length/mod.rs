@@ -1076,6 +1076,9 @@ impl MD013LineLength {
                         // Check for MkDocs admonition lines inside list items.
                         // The flavor detection marks these with in_admonition, so we
                         // can classify them as admonition header or body content.
+                        // Code fence markers (``` or ~~~) within admonitions must be
+                        // classified as CodeBlock so the block builder preserves them
+                        // verbatim instead of merging them into paragraph text.
                         if line_info.in_admonition {
                             let raw_content = line_info.content(ctx.content);
                             if mkdocs_admonitions::is_admonition_start(raw_content) {
@@ -1083,7 +1086,11 @@ impl MD013LineLength {
                                 list_item_lines.push(LineType::AdmonitionHeader(header_text, indent));
                             } else {
                                 let body_text = raw_content[indent..].trim_end().to_string();
-                                list_item_lines.push(LineType::AdmonitionContent(body_text, indent));
+                                if is_fence_marker(&body_text) {
+                                    list_item_lines.push(LineType::CodeBlock(body_text, indent));
+                                } else {
+                                    list_item_lines.push(LineType::AdmonitionContent(body_text, indent));
+                                }
                             }
                             i += 1;
                             continue;

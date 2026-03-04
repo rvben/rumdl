@@ -4738,6 +4738,221 @@ fn test_reflow_admonition_body_indent_preserved() {
 }
 
 #[test]
+fn test_reflow_admonition_with_code_block_in_list_item() {
+    // Code blocks inside admonitions within list items must be preserved
+    // verbatim. The closing fence must not be merged with subsequent text.
+    // Regression test for https://github.com/rvben/rumdl/issues/485
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(88),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = concat!(
+        "# Test\n",
+        "\n",
+        "- Lorem ipsum dolor sit amet.\n",
+        "\n",
+        "    !!! example\n",
+        "\n",
+        "        ```yaml\n",
+        "        hello: world\n",
+        "        ```\n",
+        "\n",
+        "    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n",
+    );
+
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    let fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(!fixes.is_empty(), "Should have a reflow fix");
+
+    let fix = fixes[0].fix.as_ref().unwrap();
+    let replacement = &fix.replacement;
+
+    // The code block must be preserved intact
+    assert!(
+        replacement.contains("        ```yaml\n        hello: world\n        ```"),
+        "Code block inside admonition must be preserved verbatim; got:\n{replacement}"
+    );
+
+    // The closing fence must NOT be merged with paragraph text
+    assert!(
+        !replacement.contains("``` Lorem"),
+        "Closing fence must not be merged with paragraph text; got:\n{replacement}"
+    );
+
+    // The trailing paragraph must be reflowed
+    assert!(
+        replacement.contains("    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor\n    incididunt ut labore et dolore magna aliqua."),
+        "Trailing paragraph should be reflowed; got:\n{replacement}"
+    );
+}
+
+#[test]
+fn test_reflow_admonition_with_tilde_fence_in_list_item() {
+    // Tilde fences (~~~) inside admonitions must be handled the same as backtick fences.
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(88),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = concat!(
+        "# Test\n",
+        "\n",
+        "- Lorem ipsum dolor sit amet.\n",
+        "\n",
+        "    !!! example\n",
+        "\n",
+        "        ~~~python\n",
+        "        def hello():\n",
+        "            pass\n",
+        "        ~~~\n",
+        "\n",
+        "    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n",
+    );
+
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    let fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(!fixes.is_empty(), "Should have a reflow fix");
+
+    let fix = fixes[0].fix.as_ref().unwrap();
+    let replacement = &fix.replacement;
+
+    // Tilde-fenced code block must be preserved intact
+    assert!(
+        replacement.contains("        ~~~python\n        def hello():\n            pass\n        ~~~"),
+        "Tilde-fenced code block must be preserved; got:\n{replacement}"
+    );
+
+    assert!(
+        !replacement.contains("~~~ Lorem") && !replacement.contains("~~~Lorem"),
+        "Closing tilde fence must not be merged with text; got:\n{replacement}"
+    );
+}
+
+#[test]
+fn test_reflow_admonition_with_multiple_code_blocks_in_list_item() {
+    // Multiple code blocks inside an admonition must all be preserved.
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(88),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = concat!(
+        "# Test\n",
+        "\n",
+        "- Lorem ipsum dolor sit amet.\n",
+        "\n",
+        "    !!! example\n",
+        "\n",
+        "        ```yaml\n",
+        "        hello: world\n",
+        "        ```\n",
+        "\n",
+        "        ```python\n",
+        "        print(\"hello\")\n",
+        "        ```\n",
+        "\n",
+        "    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n",
+    );
+
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    let fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(!fixes.is_empty(), "Should have a reflow fix");
+
+    let fix = fixes[0].fix.as_ref().unwrap();
+    let replacement = &fix.replacement;
+
+    // Both code blocks must be preserved
+    assert!(
+        replacement.contains("```yaml"),
+        "First code block opening fence must be preserved; got:\n{replacement}"
+    );
+    assert!(
+        replacement.contains("```python"),
+        "Second code block opening fence must be preserved; got:\n{replacement}"
+    );
+
+    // No fence markers merged with text
+    assert!(
+        !replacement.contains("``` Lorem") && !replacement.contains("``` print"),
+        "Fence markers must not be merged with other content; got:\n{replacement}"
+    );
+}
+
+#[test]
+fn test_reflow_admonition_code_block_idempotent() {
+    // After fixing, running again should produce no changes.
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(88),
+        paragraphs: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // This is already the correctly-formatted output
+    let content = concat!(
+        "# Test\n",
+        "\n",
+        "- Lorem ipsum dolor sit amet.\n",
+        "\n",
+        "    !!! example\n",
+        "\n",
+        "        ```yaml\n",
+        "        hello: world\n",
+        "        ```\n",
+        "\n",
+        "    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor\n",
+        "    incididunt ut labore et dolore magna aliqua.\n",
+    );
+
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    let fixes: Vec<_> = result.iter().filter(|w| w.fix.is_some()).collect();
+    assert!(
+        fixes.is_empty(),
+        "Already correctly formatted content should not produce fixes; got {} fix(es)",
+        fixes.len()
+    );
+}
+
+#[test]
 fn test_reflow_tab_container_in_list_item() {
     // MkDocs tab containers (=== "Tab Title") inside list items should not
     // cause crashes or data loss. They are treated as regular content since

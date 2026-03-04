@@ -35,6 +35,7 @@ impl FencedCodeTracker {
                     self.fence_marker = Some(fence_char.to_string().repeat(fence_len));
                 }
             }
+            self.in_fenced_code
         } else if let Some(ref marker) = self.fence_marker {
             let fence_char = marker.chars().next().unwrap();
             if trimmed.starts_with(marker.as_str())
@@ -43,11 +44,17 @@ impl FencedCodeTracker {
                     .skip(marker.len())
                     .all(|c| c == fence_char || c.is_whitespace())
             {
+                // The closing fence is still part of the code block for the
+                // current line, so return true. Subsequent lines will see
+                // in_fenced_code = false.
                 self.in_fenced_code = false;
                 self.fence_marker = None;
+                return true;
             }
+            true
+        } else {
+            self.in_fenced_code
         }
-        self.in_fenced_code
     }
 
     /// Reset state when exiting a container.
