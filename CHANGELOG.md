@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38] - 2026-03-04
+
+### Fixed
+
+- **MD013**: Fixed reflow corrupting code blocks inside MkDocs admonitions
+  within list items — closing fences were merged with subsequent paragraph
+  text ([#485](https://github.com/rvben/rumdl/issues/485), reported by @sisp)
+
 ## [0.1.37] - 2026-03-04
 
 ### Fixed
