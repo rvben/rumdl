@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.39] - 2026-03-04
+
+### Fixed
+
+- **Rustdoc**: Skip MD033, MD040, MD051, and MD054 for doc comment blocks to
+  eliminate false positives — HTML warning blocks (`<div class="warning">`),
+  unlabeled code blocks (default to Rust), rustdoc anchors (`#method.bar`),
+  and shortcut intra-doc links (`[crate::module]`) are all valid rustdoc syntax
+  ([#438](https://github.com/rvben/rumdl/issues/438), reported by @sorairolake)
+- **Config**: Fix `include` patterns in `.rumdl.toml` not discovering `.rs`
+  files — config-based include now correctly expands the file type filter to
+  include Rust files alongside markdown
+  ([#438](https://github.com/rvben/rumdl/issues/438), reported by @sorairolake)
+
 ## [0.1.38] - 2026-03-04
 
 ### Fixed
