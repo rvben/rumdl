@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.42] - 2026-03-05
+
+### Fixed
+
+- **MD013**: Disable code block line length checking for Rust doc comments.
+  Code blocks in doc comments contain Rust code formatted by rustfmt
+  (default `max_width = 100`), not prose governed by markdown line limits.
+  Prose lines are still checked
+  ([#486](https://github.com/rvben/rumdl/issues/486), reported by @sorairolake)
+
 ## [0.1.41] - 2026-03-05
 
 ### Fixed
