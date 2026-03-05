@@ -253,10 +253,10 @@ impl Rule for MD007ULIndent {
                 // MkDocs (Python-Markdown) uses 4-space-tab continuation for list items.
                 // Under an ordered list item, Python-Markdown requires at least
                 // marker_column + 4 spaces for continuation content to be recognized.
-                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs {
-                    if let Some(&(parent_marker_col, _, true, _)) = list_stack.get(nesting_level.wrapping_sub(1)) {
-                        expected_indent = expected_indent.max(parent_marker_col + 4);
-                    }
+                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
+                    && let Some(&(parent_marker_col, _, true, _)) = list_stack.get(nesting_level.wrapping_sub(1))
+                {
+                    expected_indent = expected_indent.max(parent_marker_col + 4);
                 }
 
                 // Add current item to stack
@@ -1899,8 +1899,10 @@ items:
     fn test_mkdocs_start_indented_with_ordered_parent() {
         // start_indented mode with MkDocs: the MkDocs adjustment should still apply
         // as a floor on top of the start_indented calculation.
-        let mut config = MD007Config::default();
-        config.start_indented = true;
+        let config = MD007Config {
+            start_indented: true,
+            ..Default::default()
+        };
         let rule = MD007ULIndent::from_config_struct(config);
         let content = "1. text\n\n    - nested item";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
