@@ -4,7 +4,7 @@
 //! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
 
 mod md054_config;
 use md054_config::MD054Config;
@@ -117,7 +117,22 @@ impl Rule for MD054LinkImageStyle {
         }
 
         let mut warnings = Vec::new();
-        let parser = Parser::new(content).into_offset_iter();
+
+        // Enable task lists and footnotes so pulldown-cmark handles them natively
+        // rather than emitting them as broken link references.
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TASKLISTS);
+        options.insert(Options::ENABLE_FOOTNOTES);
+
+        // Resolve broken references so they emit link events with *Unknown link types.
+        // This catches shortcut/collapsed/full references without definitions,
+        // which helps users find incomplete style migrations.
+        let parser = Parser::new_with_broken_link_callback(
+            content,
+            options,
+            Some(|_: BrokenLink<'_>| Some(("".into(), "".into()))),
+        )
+        .into_offset_iter();
 
         // Track link Start/End pairs
         // Each entry: (link_type, dest_url, start_byte_offset)
@@ -154,6 +169,15 @@ impl Rule for MD054LinkImageStyle {
                             LinkType::Shortcut | LinkType::ShortcutUnknown => "shortcut",
                             _ => continue,
                         };
+
+                        // Filter alert/callout syntax [!TYPE]
+                        if matches!(
+                            link_type,
+                            LinkType::ShortcutUnknown | LinkType::CollapsedUnknown | LinkType::ReferenceUnknown
+                        ) && text.starts_with('!')
+                        {
+                            continue;
+                        }
 
                         let (start_line, start_col) = byte_offset_to_line_col(content, start_byte);
 
@@ -621,15 +645,44 @@ mod tests {
     }
 
     #[test]
-    fn test_bracket_text_without_definition_not_flagged() {
-        // [text] without a reference definition is just bracket text, not a link
+    fn test_broken_shortcut_reference_flagged_when_disallowed() {
+        // [text] without a definition looks like a broken/incomplete shortcut reference.
+        // When shortcut style is disallowed, flag it to help users find incomplete migrations.
         let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "Some [noref] text without a definition.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Broken shortcut reference should be flagged when shortcut is disallowed, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'shortcut'"));
+    }
+
+    #[test]
+    fn test_broken_shortcut_reference_not_flagged_when_allowed() {
+        // [text] without a definition should not warn when shortcut style is allowed
+        let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
         let content = "Some [noref] text without a definition.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Bracket text without definition should not be flagged as shortcut, got: {result:?}"
+            "Broken shortcut should not be flagged when shortcut is allowed, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_footnote_syntax_not_flagged_as_shortcut() {
+        // [^ref] should not be flagged as a shortcut reference
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "See [^1] for details.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Footnote syntax should not be flagged as shortcut, got: {result:?}"
         );
     }
 
