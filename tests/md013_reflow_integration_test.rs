@@ -821,3 +821,88 @@ This line has {some random text in braces} that is not an attr list and should b
         "Plain braces should be wrappable (no lines >80 chars), got:\n{result}"
     );
 }
+
+/// Verify that PyMdown block content is not flagged or rewritten by semantic-line-breaks reflow.
+/// Covers all edge cases from GitHub issue #495:
+/// - Block with title and newline-separated content
+/// - Block without title
+/// - No newline between options and content
+/// - No newline between content and closing `///`
+#[test]
+fn test_md013_reflow_skips_pymdown_blocks() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "\
+# Test
+
+/// details | Summary
+    type: warning
+
+Content inside the block.
+
+///
+
+/// details
+    type: warning
+
+Content inside the block.
+
+///
+
+/// details | Summary
+    type: warning
+Content inside the block.
+
+///
+
+/// details | Summary
+    type: warning
+
+Content inside the block.
+///
+";
+
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[global]\nflavor = \"mkdocs\"\nline-length = 80\n\n[MD013]\nreflow = true\nreflow-mode = \"semantic-line-breaks\"\n",
+    )
+    .unwrap();
+
+    // Check — should produce no warnings
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "PyMdown block content should not trigger MD013 reflow.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // Fix — content should be unchanged
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let result = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(
+        result, content,
+        "PyMdown block content should not be modified by reflow fix"
+    );
+}
