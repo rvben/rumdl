@@ -988,3 +988,136 @@ Valid Heading
     let heading_count = ctx.valid_headings().count();
     assert_eq!(heading_count, 1, "Should detect exactly 1 heading in mixed content");
 }
+
+/// Issue #492: GFM table rows followed by --- must not be detected as Setext headings.
+/// pulldown-cmark correctly parses --- after a table as a thematic break (Rule), not
+/// as a Setext heading underline. rumdl's heading detection must match this behavior.
+#[test]
+fn test_table_row_not_setext_heading_body_row() {
+    // Body row followed by --- should NOT be a heading
+    let content = "# Title\n\n| a | b |\n| - | - |\n| c | d |\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(
+        headings.len(),
+        1,
+        "Only the ATX heading should be detected, not the table row"
+    );
+    assert_eq!(headings[0].heading.level, 1);
+
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD003 should not flag table rows as wrong heading style"
+    );
+}
+
+#[test]
+fn test_table_row_not_setext_heading_delimiter_row() {
+    // Delimiter row (header-only table) followed by --- should NOT be a heading
+    let content = "# Title\n\n| a | b |\n| - | - |\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(headings.len(), 1, "Delimiter row + --- should not create a heading");
+}
+
+#[test]
+fn test_table_row_not_setext_heading_cjk_content() {
+    // Original issue #492: CJK table with missing blank line before ---
+    let content = "\
+## 📚 文档
+
+| 资源 | 说明 |
+| ---- | ---- |
+| [用户服务 API 文档](/docs/api-guide.html) | REST API 接口定义及示例 |
+| [开源大模型部署选型分析](/docs/analysis.html) | 大模型部署方案对比分析 |
+---
+
+> 资源持续补充中";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(headings.len(), 1, "Only the ATX heading should be detected");
+    assert_eq!(headings[0].heading.text, "📚 文档");
+
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let result = rule.check(&ctx).unwrap();
+    assert!(result.is_empty(), "MD003 should not fire for table rows");
+}
+
+#[test]
+fn test_table_row_not_setext_heading_equals_underline() {
+    // Table body row followed by === should also NOT be a heading
+    let content = "# Title\n\n| a | b |\n| - | - |\n| c | d |\n===\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(headings.len(), 1, "Table row + === should not create a heading");
+}
+
+#[test]
+fn test_pipe_without_table_context_is_setext_heading() {
+    // A pipe-prefixed paragraph (no table delimiter row above) IS a valid Setext heading.
+    // pulldown-cmark also parses this as a Setext heading.
+    let content = "# ATX heading\n\n| some text\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(
+        headings.len(),
+        2,
+        "| some text followed by --- without table context is a Setext heading"
+    );
+
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "MD003 should flag the Setext heading");
+}
+
+#[test]
+fn test_multi_pipe_without_table_context_is_setext_heading() {
+    // Multiple pipes but no delimiter row above = Setext heading, not table
+    let content = "# ATX heading\n\n| a | b |\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(
+        headings.len(),
+        2,
+        "Pipe line without delimiter row above is a Setext heading"
+    );
+}
+
+#[test]
+fn test_table_in_blockquote_not_setext() {
+    // Table inside blockquote should also not create false Setext headings
+    let content = "# Title\n\n> | a | b |\n> | - | - |\n> | c | d |\n---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    // The blockquoted table row won't trigger because it starts with '>' not '|'
+    // This test ensures the fix doesn't break blockquote handling
+    assert_eq!(headings.len(), 1, "Only ATX heading should be detected");
+}
+
+#[test]
+fn test_large_table_last_row_not_setext() {
+    // Many body rows - the last one followed by --- should not be a heading
+    let content = "# Title\n\n\
+        | col1 | col2 |\n\
+        | ---- | ---- |\n\
+        | r1   | r1   |\n\
+        | r2   | r2   |\n\
+        | r3   | r3   |\n\
+        | r4   | r4   |\n\
+        | r5   | r5   |\n\
+        | r6   | r6   |\n\
+        | r7   | r7   |\n\
+        | r8   | r8   |\n\
+        | r9   | r9   |\n\
+        | r10  | r10  |\n\
+        ---\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let headings: Vec<_> = ctx.valid_headings().collect();
+    assert_eq!(
+        headings.len(),
+        1,
+        "Last row of large table + --- should not be a heading"
+    );
+}

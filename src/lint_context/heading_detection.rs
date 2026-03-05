@@ -1,4 +1,5 @@
 use crate::config::MarkdownFlavor;
+use crate::utils::table_utils::TableUtils;
 use std::sync::LazyLock;
 
 use super::types::*;
@@ -238,6 +239,44 @@ pub(super) fn detect_headings_and_blockquotes(
 
                 if content_line.starts_with('<') {
                     continue;
+                }
+
+                // Skip GFM table rows: a line that is part of a table cannot be
+                // a Setext heading paragraph. A line is part of a table if:
+                // - It starts with | and has a delimiter row above (body row), OR
+                // - It IS a delimiter row with a pipe-containing header above (delimiter row)
+                if content_line.starts_with('|') {
+                    let mut is_in_table = false;
+
+                    // Check if this line itself is a delimiter row with a header above
+                    if TableUtils::is_delimiter_row(content_line)
+                        && i > 0
+                        && content_lines[i - 1].trim().contains('|')
+                        && !lines[i - 1].in_code_block
+                    {
+                        is_in_table = true;
+                    }
+
+                    // Check if there's a delimiter row above (making this a body row)
+                    if !is_in_table {
+                        for j in (0..i).rev() {
+                            let prev = content_lines[j].trim();
+                            if prev.is_empty() || lines[j].in_code_block || lines[j].in_html_block {
+                                break;
+                            }
+                            if TableUtils::is_delimiter_row(prev) {
+                                is_in_table = true;
+                                break;
+                            }
+                            if !prev.contains('|') {
+                                break;
+                            }
+                        }
+                    }
+
+                    if is_in_table {
+                        continue;
+                    }
                 }
 
                 let underline = next_line.trim();
