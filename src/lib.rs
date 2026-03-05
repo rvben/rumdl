@@ -351,10 +351,19 @@ pub fn lint_and_index(
                             rule_name_to_check
                         };
 
-                        !inline_config.is_rule_disabled(
-                            base_rule_name,
-                            warning.line, // Already 1-indexed
-                        )
+                        // Check if the rule is disabled at any line in the warning's range.
+                        // Multi-line warnings (e.g., reflow) report on the first line,
+                        // but inline disable comments may appear later in the range.
+                        // Guard: if end_line < line (e.g., end_line=0), fall back to
+                        // checking only the warning's line to match original behavior.
+                        {
+                            let end = if warning.end_line >= warning.line {
+                                warning.end_line
+                            } else {
+                                warning.line
+                            };
+                            !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
+                        }
                     })
                     .map(|mut warning| {
                         // Apply severity override from config if present

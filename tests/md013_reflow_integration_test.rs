@@ -578,3 +578,171 @@ reflow = true
     let after_second = fs::read_to_string(&file_path).unwrap();
     assert_eq!(after_first, after_second);
 }
+
+/// Issue #493: Inline disable comments inside list items must be respected
+/// even when reflow mode groups the list item as a single paragraph.
+#[test]
+fn test_md013_reflow_respects_inline_disable_in_list() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "\
+# Test
+
+1. Lorem ipsum dolor sit amet.
+
+   <!-- rumdl-capture -->
+   <!-- rumdl-disable MD013 -->
+
+   Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+   <!-- rumdl-restore -->
+";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(&config_path, "[global]\nline-length = 80\n\n[MD013]\nreflow = true\n").unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        !combined.contains("MD013"),
+        "MD013 should be suppressed by inline disable comment, got: {combined}"
+    );
+}
+
+/// Issue #494: MkDocs inline attr lists must not be split across lines during reflow.
+#[test]
+fn test_md013_reflow_preserves_mkdocs_attr_list() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "\
+# Test
+
+**Lorem ipsum dolor sit amet, consectetur adipiscing elit**{ style=\"color: red\" }, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[global]\nflavor = \"mkdocs\"\nline-length = 80\n\n[MD013]\nreflow = true\n",
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    assert!(output.status.success() || output.status.code() == Some(1));
+
+    let result = fs::read_to_string(&file_path).unwrap();
+    assert!(
+        result.contains("{ style=\"color: red\" }"),
+        "Attr list should be kept intact, got:\n{result}"
+    );
+    assert!(
+        !result.contains("{ style=\"color:\n"),
+        "Attr list should NOT be split across lines, got:\n{result}"
+    );
+}
+
+/// Issue #494: Multiple attr lists on same line are all preserved.
+#[test]
+fn test_md013_reflow_preserves_multiple_attr_lists() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "\
+# Test
+
+**Bold**{#my-id .highlight} and **more**{.other style=\"font-size: 2em\"} followed by text that makes this exceed eighty.
+";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[global]\nflavor = \"mkdocs\"\nline-length = 80\n\n[MD013]\nreflow = true\n",
+    )
+    .unwrap();
+
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let result = fs::read_to_string(&file_path).unwrap();
+    assert!(
+        result.contains("{#my-id .highlight}"),
+        "First attr list should be intact, got:\n{result}"
+    );
+    assert!(
+        result.contains("{.other style=\"font-size: 2em\"}"),
+        "Second attr list should be intact, got:\n{result}"
+    );
+}
+
+/// Issue #494: Non-attr-list braces are still treated as regular text.
+#[test]
+fn test_md013_reflow_does_not_treat_plain_braces_as_attr_list() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    let content = "\
+# Test
+
+This line has {some random text in braces} that is not an attr list and should be treated as regular wrappable text here.
+";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[global]\nflavor = \"mkdocs\"\nline-length = 80\n\n[MD013]\nreflow = true\n",
+    )
+    .unwrap();
+
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let result = fs::read_to_string(&file_path).unwrap();
+    // Plain braces should be wrappable — the line should be split
+    let lines: Vec<&str> = result.lines().collect();
+    let long_lines = lines.iter().filter(|l| l.len() > 80).count();
+    assert_eq!(
+        long_lines, 0,
+        "Plain braces should be wrappable (no lines >80 chars), got:\n{result}"
+    );
+}
