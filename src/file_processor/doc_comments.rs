@@ -7,6 +7,7 @@ use rumdl_lib::config as rumdl_config;
 use rumdl_lib::doc_comment_lint::{DocCommentBlock, DocCommentKind, SKIPPED_RULES, extract_doc_comment_blocks};
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::md013_line_length::MD013LineLength;
 
 /// Apply markdown fixes to all doc comment blocks in a Rust source file.
 ///
@@ -37,11 +38,20 @@ pub fn format_doc_comment_blocks(
             continue;
         }
 
-        // Filter out skipped rules
+        // Filter out skipped rules and apply doc-comment config overrides
         let block_rules: Vec<Box<dyn Rule>> = rules
             .iter()
             .filter(|rule| !SKIPPED_RULES.contains(&rule.name()))
-            .map(|r| dyn_clone::clone_box(&**r))
+            .map(|r| {
+                // Disable code block checking for MD013 in doc comments.
+                // Code blocks contain Rust code formatted by rustfmt.
+                if r.name() == "MD013" {
+                    if let Some(md013) = r.as_any().downcast_ref::<MD013LineLength>() {
+                        return Box::new(md013.with_code_blocks_disabled()) as Box<dyn Rule>;
+                    }
+                }
+                dyn_clone::clone_box(&**r)
+            })
             .collect();
 
         // Lint the extracted markdown

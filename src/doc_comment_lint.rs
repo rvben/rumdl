@@ -12,6 +12,7 @@
 use crate::config as rumdl_config;
 use crate::lint_context::LintContext;
 use crate::rule::{LintWarning, Rule};
+use crate::rules::md013_line_length::MD013LineLength;
 
 /// The kind of doc comment: outer (`///`) or inner (`//!`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -236,7 +237,22 @@ pub fn check_doc_comment_blocks(
                 continue;
             }
 
-            if let Ok(rule_warnings) = rule.check(&ctx) {
+            // For MD013 in doc comments, disable code block checking.
+            // Code blocks contain Rust code formatted by rustfmt (max_width = 100),
+            // not prose governed by markdown line length limits.
+            let doc_rule: Box<dyn Rule>;
+            let effective_rule: &dyn Rule = if rule.name() == "MD013" {
+                if let Some(md013) = rule.as_any().downcast_ref::<MD013LineLength>() {
+                    doc_rule = Box::new(md013.with_code_blocks_disabled());
+                    doc_rule.as_ref()
+                } else {
+                    rule.as_ref()
+                }
+            } else {
+                rule.as_ref()
+            };
+
+            if let Ok(rule_warnings) = effective_rule.check(&ctx) {
                 for warning in rule_warnings {
                     // Remap line numbers:
                     // warning.line is 1-indexed within the block markdown

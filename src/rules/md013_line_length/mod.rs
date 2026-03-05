@@ -65,6 +65,14 @@ impl MD013LineLength {
         Self { config }
     }
 
+    /// Return a clone with code block checking disabled.
+    /// Used for doc comment linting where code blocks are Rust code managed by rustfmt.
+    pub fn with_code_blocks_disabled(&self) -> Self {
+        let mut clone = self.clone();
+        clone.config.code_blocks = false;
+        clone
+    }
+
     /// Convert MD013 LengthMode to text_reflow ReflowLengthMode
     fn reflow_length_mode(&self) -> ReflowLengthMode {
         match self.config.length_mode {

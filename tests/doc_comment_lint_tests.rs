@@ -641,3 +641,48 @@ fn test_check_column_with_indentation() {
         md009_warnings[0].column
     );
 }
+
+/// MD013 should not flag long lines inside code blocks in doc comments.
+/// Code blocks contain Rust code formatted by rustfmt, not prose.
+#[test]
+fn test_md013_skips_code_blocks_in_doc_comments() {
+    let content = r#"/// # Examples
+///
+/// ```
+/// let very_long_variable_name_that_exceeds_eighty_characters = some_function_with_a_long_name(argument_one, argument_two);
+/// ```
+fn foo() {}
+"#;
+
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .collect();
+    assert!(
+        md013_warnings.is_empty(),
+        "MD013 should not flag code blocks in doc comments, got: {md013_warnings:?}"
+    );
+}
+
+/// MD013 should still flag long prose lines in doc comments.
+#[test]
+fn test_md013_still_flags_long_prose_in_doc_comments() {
+    let content = "/// This is a very long documentation line that definitely exceeds the default eighty character limit and should be flagged by MD013.\nfn foo() {}\n";
+
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .collect();
+    assert!(
+        !md013_warnings.is_empty(),
+        "MD013 should still flag long prose lines in doc comments"
+    );
+}
