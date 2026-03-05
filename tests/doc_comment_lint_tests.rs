@@ -668,6 +668,25 @@ fn foo() {}
     );
 }
 
+/// MD013 should not flag long lines inside indented code blocks in doc comments.
+#[test]
+fn test_md013_skips_indented_code_blocks_in_doc_comments() {
+    let content = "/// # Examples\n///\n///     let very_long_variable_name_that_exceeds_eighty_characters = some_function_with_a_long_name(argument_one, argument_two);\n///\nfn foo() {}\n";
+
+    let rules = default_rules();
+    let config = Config::default();
+    let warnings = check_doc_comment_blocks(content, &rules, &config);
+
+    let md013_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .collect();
+    assert!(
+        md013_warnings.is_empty(),
+        "MD013 should not flag indented code blocks in doc comments, got: {md013_warnings:?}"
+    );
+}
+
 /// MD013 should still flag long prose lines in doc comments.
 #[test]
 fn test_md013_still_flags_long_prose_in_doc_comments() {
