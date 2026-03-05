@@ -1774,9 +1774,9 @@ items:
 
     #[test]
     fn test_mkdocs_ordered_list_with_4_space_nested_unordered() {
-        // Issue #491: MkDocs (Python-Markdown) requires 4-space continuation
-        // for ordered list items. `1. text` has content at column 3, but
-        // Python-Markdown needs marker_col + 4 = 4 spaces minimum.
+        // MkDocs (Python-Markdown) requires 4-space continuation for ordered
+        // list items. `1. text` has content at column 3, but Python-Markdown
+        // needs marker_col + 4 = 4 spaces minimum.
         let rule = MD007ULIndent::default();
         let content = "1. text\n\n    - nested item";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
@@ -1857,6 +1857,11 @@ items:
             1,
             "2-space indent under ordered list should warn in MkDocs flavor"
         );
+        assert!(
+            result[0].message.contains("Expected 4"),
+            "Warning should expect 4 spaces (MkDocs minimum), got: {}",
+            result[0].message
+        );
     }
 
     #[test]
@@ -1919,6 +1924,21 @@ items:
         assert!(
             result.is_empty(),
             "6-space indent under nested ordered list should be valid in MkDocs, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_blockquoted_ordered_list() {
+        // Blockquoted ordered list in MkDocs: the indent is relative to
+        // the blockquote content, so `> 1. text` with `>     - nested`
+        // has 4 spaces of indent within the blockquote context.
+        let rule = MD007ULIndent::default();
+        let content = "> 1. text\n>\n>     - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "4-space indent under blockquoted ordered list should be valid in MkDocs, got: {result:?}"
         );
     }
 
