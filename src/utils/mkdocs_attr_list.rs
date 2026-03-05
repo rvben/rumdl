@@ -40,7 +40,7 @@ use std::sync::LazyLock;
 /// - Must start with `{` and optional `:` with optional whitespace
 /// - Must contain at least one of: #id, .class, or key="value"
 /// - Must end with `}`
-static ATTR_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+pub static ATTR_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // Pattern requires at least one attribute (id, class, or key=value)
     // to avoid matching plain text in braces like {word}
     Regex::new(r#"\{:?\s*(?:(?:[#.][a-zA-Z_][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_-]*=["'][^"']*["'])\s*)+\}"#).unwrap()

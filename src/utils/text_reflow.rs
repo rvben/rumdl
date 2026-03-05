@@ -5,7 +5,7 @@
 
 use crate::utils::element_cache::ElementCache;
 use crate::utils::is_definition_list_item;
-use crate::utils::mkdocs_attr_list::is_standalone_attr_list;
+use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list};
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
@@ -504,6 +504,8 @@ enum Element {
     HtmlEntity(String),
     /// Hugo/Go template shortcode {{< ... >}} or {{% ... %}}
     HugoShortcode(String),
+    /// MkDocs/kramdown attribute list {#id .class key="value"}
+    AttrList(String),
     /// Inline code `code`
     Code(String),
     /// Bold text **text** or __text__
@@ -557,6 +559,7 @@ impl std::fmt::Display for Element {
             Element::HtmlTag(s) => write!(f, "{s}"),
             Element::HtmlEntity(s) => write!(f, "{s}"),
             Element::HugoShortcode(s) => write!(f, "{s}"),
+            Element::AttrList(s) => write!(f, "{s}"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold { content, underscore } => {
                 if *underscore {
@@ -881,6 +884,7 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         let mut next_special = remaining.len();
         let mut special_type = "";
         let mut pulldown_emphasis: Option<&EmphasisSpan> = None;
+        let mut attr_list_len: usize = 0;
 
         // Check for code spans (not handled by pulldown-cmark in this context)
         if let Some(pos) = remaining.find('`')
@@ -888,6 +892,19 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
         {
             next_special = pos;
             special_type = "code";
+        }
+
+        // Check for MkDocs/kramdown attr lists - {#id .class key="value"}
+        if let Some(pos) = remaining.find('{')
+            && pos < next_special
+        {
+            if let Some(m) = ATTR_LIST_PATTERN.find(&remaining[pos..]) {
+                if m.start() == 0 {
+                    next_special = pos;
+                    special_type = "attr_list";
+                    attr_list_len = m.end();
+                }
+            }
         }
 
         // Check for emphasis using pulldown-cmark's pre-extracted spans
@@ -1171,6 +1188,10 @@ fn parse_markdown_elements(text: &str) -> Vec<Element> {
                         elements.push(Element::Text(remaining.to_string()));
                         break;
                     }
+                }
+                "attr_list" => {
+                    elements.push(Element::AttrList(remaining[..attr_list_len].to_string()));
+                    remaining = &remaining[attr_list_len..];
                 }
                 "pulldown_emphasis" => {
                     // Use pre-extracted emphasis/strikethrough span from pulldown-cmark
