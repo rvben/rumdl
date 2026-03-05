@@ -163,6 +163,7 @@ impl MD013Config {
             semantic_line_breaks: self.reflow_mode == ReflowMode::SemanticLineBreaks,
             abbreviations: self.abbreviations_for_reflow(),
             length_mode,
+            attr_lists: false,
         }
     }
 }

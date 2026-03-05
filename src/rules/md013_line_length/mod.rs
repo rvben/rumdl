@@ -682,6 +682,7 @@ impl MD013LineLength {
             semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
             abbreviations: config.abbreviations_for_reflow(),
             length_mode: self.reflow_length_mode(),
+            attr_lists: ctx.flavor.supports_attr_lists(),
         };
 
         let reflowed_with_style =
@@ -935,6 +936,7 @@ impl MD013LineLength {
                     semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
+                    attr_lists: ctx.flavor.supports_attr_lists(),
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -1912,6 +1914,7 @@ impl MD013LineLength {
                         semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                         abbreviations: config.abbreviations_for_reflow(),
                         length_mode: self.reflow_length_mode(),
+                        attr_lists: ctx.flavor.supports_attr_lists(),
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -2255,6 +2258,7 @@ impl MD013LineLength {
                                         semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                                         abbreviations: config.abbreviations_for_reflow(),
                                         length_mode: self.reflow_length_mode(),
+                                        attr_lists: ctx.flavor.supports_attr_lists(),
                                     };
 
                                     let reflowed =
@@ -2545,6 +2549,7 @@ impl MD013LineLength {
                     semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
+                    attr_lists: ctx.flavor.supports_attr_lists(),
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 

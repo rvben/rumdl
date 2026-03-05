@@ -709,6 +709,81 @@ fn test_md013_reflow_preserves_multiple_attr_lists() {
 
 /// Issue #494: Non-attr-list braces are still treated as regular text.
 #[test]
+fn test_md013_reflow_attr_list_wrappable_in_standard_flavor() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    // Use a long attr list that exceeds 80 chars on its own when attached to text,
+    // forcing the reflow to break INSIDE the braces if treated as plain text.
+    // In MkDocs mode the attr list is atomic; in standard mode it's wrappable.
+    let content = "\
+# Test
+
+**Bold text here**{#section-identifier .primary-highlight .secondary-highlight style=\"background-color: red\"} and more text after it.
+";
+    fs::write(&file_path, content).unwrap();
+
+    // Standard flavor (no MkDocs)
+    let config_path_std = dir.path().join("standard.toml");
+    fs::write(
+        &config_path_std,
+        "[global]\nline-length = 80\n\n[MD013]\nreflow = true\n",
+    )
+    .unwrap();
+
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path_std)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let result_std = fs::read_to_string(&file_path).unwrap();
+
+    // In standard mode, the attr list is plain text and SHOULD be split across lines.
+    // Verify no single line contains both the opening { and closing } of the attr list.
+    let full_attr = "{#section-identifier .primary-highlight .secondary-highlight style=\"background-color: red\"}";
+    let has_intact_attr = result_std.lines().any(|l| l.contains(full_attr));
+    assert!(
+        !has_intact_attr,
+        "In standard flavor, long attr list should be split as regular text, got:\n{result_std}"
+    );
+
+    // Now test MkDocs flavor — same content, attr list must stay intact
+    fs::write(&file_path, content).unwrap();
+    let config_path_mkdocs = dir.path().join("mkdocs.toml");
+    fs::write(
+        &config_path_mkdocs,
+        "[global]\nflavor = \"mkdocs\"\nline-length = 80\n\n[MD013]\nreflow = true\n",
+    )
+    .unwrap();
+
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path_mkdocs)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let result_mkdocs = fs::read_to_string(&file_path).unwrap();
+
+    // In MkDocs mode, the attr list is atomic and must NOT be split.
+    // Verify the full attr list appears on a single line.
+    let has_intact_attr_mkdocs = result_mkdocs.lines().any(|l| l.contains(full_attr));
+    assert!(
+        has_intact_attr_mkdocs,
+        "In MkDocs flavor, attr list must stay intact on one line, got:\n{result_mkdocs}"
+    );
+}
+
+/// Issue #494: Non-attr-list braces are still treated as regular text.
+#[test]
 fn test_md013_reflow_does_not_treat_plain_braces_as_attr_list() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");

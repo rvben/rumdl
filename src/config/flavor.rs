@@ -133,6 +133,11 @@ impl MarkdownFlavor {
         matches!(self, Self::Kramdown)
     }
 
+    /// Check if this flavor supports attribute lists ({#id .class key="value"})
+    pub fn supports_attr_lists(self) -> bool {
+        matches!(self, Self::MkDocs | Self::Kramdown)
+    }
+
     /// Check if this flavor requires strict (≥4-space) list continuation indent.
     ///
     /// Python-Markdown (used by MkDocs) requires 4-space indentation for ordered
