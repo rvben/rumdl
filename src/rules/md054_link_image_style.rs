@@ -4,7 +4,7 @@
 //! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 
 mod md054_config;
 use md054_config::MD054Config;
@@ -119,15 +119,7 @@ impl Rule for MD054LinkImageStyle {
         options.insert(Options::ENABLE_TASKLISTS);
         options.insert(Options::ENABLE_FOOTNOTES);
 
-        // Resolve broken references so they emit link events with *Unknown link types.
-        // This catches shortcut/collapsed/full references without definitions,
-        // which helps users find incomplete style migrations.
-        let parser = Parser::new_with_broken_link_callback(
-            content,
-            options,
-            Some(|_: BrokenLink<'_>| Some(("".into(), "".into()))),
-        )
-        .into_offset_iter();
+        let parser = Parser::new_ext(content, options).into_offset_iter();
 
         // Track link/image Start/End pairs as a stack to handle nesting (e.g. [![alt](img)](href))
         // Each entry: (link_type, dest_url, start_byte_offset, text_collector)
@@ -156,20 +148,11 @@ impl Rule for MD054LinkImageStyle {
                                     "inline"
                                 }
                             }
-                            LinkType::Reference | LinkType::ReferenceUnknown => "full",
-                            LinkType::Collapsed | LinkType::CollapsedUnknown => "collapsed",
-                            LinkType::Shortcut | LinkType::ShortcutUnknown => "shortcut",
+                            LinkType::Reference => "full",
+                            LinkType::Collapsed => "collapsed",
+                            LinkType::Shortcut => "shortcut",
                             _ => continue,
                         };
-
-                        // Filter alert/callout syntax [!TYPE]
-                        if matches!(
-                            link_type,
-                            LinkType::ShortcutUnknown | LinkType::CollapsedUnknown | LinkType::ReferenceUnknown
-                        ) && text.starts_with('!')
-                        {
-                            continue;
-                        }
 
                         let (start_line, start_col) = byte_offset_to_line_col(content, start_byte);
 
@@ -637,32 +620,45 @@ mod tests {
     }
 
     #[test]
-    fn test_broken_shortcut_reference_flagged_when_disallowed() {
-        // [text] without a definition looks like a broken/incomplete shortcut reference.
-        // When shortcut style is disallowed, flag it to help users find incomplete migrations.
+    fn test_bracket_text_without_definition_not_flagged() {
+        // [text] without a matching [text]: url definition is NOT a link.
+        // It should never be flagged regardless of config.
         let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
-        let content = "Some [noref] text without a definition.";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Broken shortcut reference should be flagged when shortcut is disallowed, got: {result:?}"
-        );
-        assert!(result[0].message.contains("'shortcut'"));
-    }
-
-    #[test]
-    fn test_broken_shortcut_reference_not_flagged_when_allowed() {
-        // [text] without a definition should not warn when shortcut style is allowed
-        let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
         let content = "Some [noref] text without a definition.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Broken shortcut should not be flagged when shortcut is allowed, got: {result:?}"
+            "Bracket text without definition should not be flagged as a link, got: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_array_index_notation_not_flagged() {
+        // Common bracket patterns that are not links should never be flagged
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "Access `arr[0]` and use [1] or [optional] in your code.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Array indices and bracket text should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_real_shortcut_reference_still_flagged() {
+        // [text] WITH a matching definition IS a shortcut link and should be flagged
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = "See [example] for details.\n\n[example]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Real shortcut reference with definition should be flagged, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'shortcut'"));
     }
 
     #[test]
