@@ -405,8 +405,6 @@ pub static FRONT_MATTER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^
 
 // MD051 specific patterns
 pub static INLINE_CODE_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"`[^`]+`").unwrap());
-pub static BOLD_ASTERISK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
-pub static BOLD_UNDERSCORE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__(.+?)__").unwrap());
 pub static ITALIC_ASTERISK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+?)\*").unwrap());
 pub static ITALIC_UNDERSCORE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_([^_]+?)_").unwrap());
 pub static LINK_TEXT_FULL_REGEX: LazyLock<FancyRegex> =
@@ -948,8 +946,6 @@ mod tests {
         assert!(FENCED_CODE_BLOCK_END_REGEX.is_match("~~~"));
 
         // Test emphasis patterns
-        assert!(BOLD_ASTERISK_REGEX.is_match("**bold**"));
-        assert!(BOLD_UNDERSCORE_REGEX.is_match("__bold__"));
         assert!(ITALIC_ASTERISK_REGEX.is_match("*italic*"));
         assert!(ITALIC_UNDERSCORE_REGEX.is_match("_italic_"));
 

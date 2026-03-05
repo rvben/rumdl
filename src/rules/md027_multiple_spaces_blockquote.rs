@@ -139,7 +139,11 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         message: format!("Malformed quote: {description}"),
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: ctx.line_index.line_col_to_byte_range(line_num, 1),
+                            range: ctx.line_index.line_col_to_byte_range_with_length(
+                                line_num,
+                                1,
+                                line_info.content(ctx.content).chars().count(),
+                            ),
                             replacement: fixed_line,
                         }),
                     });

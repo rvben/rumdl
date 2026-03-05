@@ -3,11 +3,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
-use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::{is_in_math_context, is_in_mkdocs_markup};
-
-// Reference definition pattern
-const REF_DEF_REGEX_STR: &str = r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#;
 
 /// Check if a byte position within a line is inside a backtick-delimited code span.
 /// This is a line-level fallback for cases where pulldown-cmark's code span detection
@@ -69,8 +65,8 @@ struct StrongSpan {
 }
 
 /// Find all genuine strong emphasis spans using pulldown-cmark's parser.
-/// Unlike regex, pulldown-cmark correctly identifies that sequences like
-/// `_____` or `*****` are NOT strong emphasis.
+/// Correctly identifies that sequences like `_____` or `*****` are NOT
+/// strong emphasis.
 fn find_strong_spans(content: &str) -> Vec<StrongSpan> {
     let parser = Parser::new_ext(content, Options::all());
     let mut spans = Vec::new();
@@ -132,13 +128,9 @@ impl MD050StrongStyle {
             }
         }
 
-        // Check reference definitions [ref]: url "title" using regex pattern
-        if let Ok(re) = get_cached_regex(REF_DEF_REGEX_STR) {
-            for m in re.find_iter(ctx.content) {
-                if m.start() <= byte_pos && byte_pos < m.end() {
-                    return true;
-                }
-            }
+        // Check reference definitions [ref]: url "title"
+        if ctx.is_in_reference_def(byte_pos) {
+            return true;
         }
 
         false
@@ -227,18 +219,22 @@ impl MD050StrongStyle {
             || is_in_math_context(ctx, span_start)
     }
 
+    #[cfg(test)]
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
-        let content = ctx.content;
-        let spans = find_strong_spans(content);
+        let spans = find_strong_spans(ctx.content);
+        self.detect_style_from_spans(ctx, &spans)
+    }
 
+    fn detect_style_from_spans(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        spans: &[StrongSpan],
+    ) -> Option<StrongStyle> {
         let mut asterisk_count = 0;
         let mut underscore_count = 0;
 
-        for span in &spans {
+        for span in spans {
             if self.should_skip_span(ctx, span.range.start) {
-                continue;
-            }
-            if self.is_escaped(content, span.range.start) {
                 continue;
             }
 
@@ -253,9 +249,8 @@ impl MD050StrongStyle {
             (0, 0) => None,
             (_, 0) => Some(StrongStyle::Asterisk),
             (0, _) => Some(StrongStyle::Underscore),
+            // In case of a tie, prefer asterisk (matches CommonMark recommendation)
             (a, u) => {
-                // Use the most prevalent marker as the target style
-                // In case of a tie, prefer asterisk (matches CommonMark recommendation)
                 if a >= u {
                     Some(StrongStyle::Asterisk)
                 } else {
@@ -263,25 +258,6 @@ impl MD050StrongStyle {
                 }
             }
         }
-    }
-
-    fn is_escaped(&self, text: &str, pos: usize) -> bool {
-        if pos == 0 {
-            return false;
-        }
-
-        let mut backslash_count = 0;
-        let mut i = pos;
-        let bytes = text.as_bytes();
-        while i > 0 {
-            i -= 1;
-            // Safe for ASCII backslash
-            if i < bytes.len() && bytes[i] != b'\\' {
-                break;
-            }
-            backslash_count += 1;
-        }
-        backslash_count % 2 == 1
     }
 }
 
@@ -300,12 +276,14 @@ impl Rule for MD050StrongStyle {
 
         let mut warnings = Vec::new();
 
+        let spans = find_strong_spans(content);
+
         let target_style = match self.config.style {
-            StrongStyle::Consistent => self.detect_style(ctx).unwrap_or(StrongStyle::Asterisk),
+            StrongStyle::Consistent => self
+                .detect_style_from_spans(ctx, &spans)
+                .unwrap_or(StrongStyle::Asterisk),
             _ => self.config.style,
         };
-
-        let spans = find_strong_spans(content);
 
         for span in &spans {
             // Only flag spans that use the wrong style
@@ -319,10 +297,6 @@ impl Rule for MD050StrongStyle {
             }
 
             if self.should_skip_span(ctx, span.range.start) {
-                continue;
-            }
-
-            if self.is_escaped(content, span.range.start) {
                 continue;
             }
 
@@ -374,12 +348,14 @@ impl Rule for MD050StrongStyle {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
+        let spans = find_strong_spans(content);
+
         let target_style = match self.config.style {
-            StrongStyle::Consistent => self.detect_style(ctx).unwrap_or(StrongStyle::Asterisk),
+            StrongStyle::Consistent => self
+                .detect_style_from_spans(ctx, &spans)
+                .unwrap_or(StrongStyle::Asterisk),
             _ => self.config.style,
         };
-
-        let spans = find_strong_spans(content);
 
         // Collect spans that need fixing (wrong style and not in a skip context)
         let matches: Vec<std::ops::Range<usize>> = spans
@@ -387,7 +363,6 @@ impl Rule for MD050StrongStyle {
             .filter(|span| span.range.end - span.range.start >= 4)
             .filter(|span| span.style != target_style)
             .filter(|span| !self.should_skip_span(ctx, span.range.start))
-            .filter(|span| !self.is_escaped(content, span.range.start))
             .map(|span| span.range.clone())
             .collect();
 

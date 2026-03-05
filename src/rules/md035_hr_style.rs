@@ -150,7 +150,7 @@ impl Rule for MD035HRStyle {
                         },
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range(i + 1, 1),
+                            range: _line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
                             replacement: expected_style.clone(),
                         }),
                     });

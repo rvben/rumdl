@@ -920,10 +920,7 @@ impl Rule for MD046CodeBlockStyle {
                             end_column: end_col,
                             message: "Use indented code blocks".to_string(),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: ctx.line_index.line_col_to_byte_range(start_line_idx + 1, 1),
-                                replacement: String::new(),
-                            }),
+                            fix: None,
                         });
                     }
                 }
@@ -968,10 +965,7 @@ impl Rule for MD046CodeBlockStyle {
                             end_column: end_col,
                             message: "Use fenced code blocks".to_string(),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: ctx.line_index.line_col_to_byte_range(start_line_idx + 1, 1),
-                                replacement: format!("```\n{}", line.trim_start()),
-                            }),
+                            fix: None,
                         });
                     }
                 }
