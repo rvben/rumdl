@@ -244,11 +244,20 @@ impl Rule for MD007ULIndent {
                     .map(|&(_, _, is_ordered, content_col)| (is_ordered, content_col));
 
                 // Calculate expected indent using per-parent logic
-                let expected_indent = if self.config.start_indented {
+                let mut expected_indent = if self.config.start_indented {
                     self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
                 } else {
                     self.calculate_expected_indent(nesting_level, parent_info)
                 };
+
+                // MkDocs (Python-Markdown) uses 4-space-tab continuation for list items.
+                // Under an ordered list item, Python-Markdown requires at least
+                // marker_column + 4 spaces for continuation content to be recognized.
+                if ctx.flavor == crate::config::MarkdownFlavor::MkDocs {
+                    if let Some(&(parent_marker_col, _, true, _)) = list_stack.get(nesting_level.wrapping_sub(1)) {
+                        expected_indent = expected_indent.max(parent_marker_col + 4);
+                    }
+                }
 
                 // Add current item to stack
                 // Use actual marker position for cleanup logic
@@ -1760,6 +1769,171 @@ items:
         assert!(
             !result.is_empty(),
             "2-space indent should be flagged when indent=4 is configured"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_ordered_list_with_4_space_nested_unordered() {
+        // Issue #491: MkDocs (Python-Markdown) requires 4-space continuation
+        // for ordered list items. `1. text` has content at column 3, but
+        // Python-Markdown needs marker_col + 4 = 4 spaces minimum.
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n    - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "4-space indent under ordered list should be valid in MkDocs flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_ordered_list_with_3_space_nested_unordered() {
+        // Without MkDocs, `1. text` has content at column 3,
+        // so 3-space indent is correct (text-aligned).
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n   - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "3-space indent under ordered list should be valid in Standard flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_ordered_list_with_4_space_warns() {
+        // In Standard flavor, `1. text` expects 3-space indent (text-aligned).
+        // 4 spaces should trigger a warning.
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n    - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "4-space indent under ordered list should warn in Standard flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_multi_digit_ordered_list() {
+        // `10. text` has content at column 4, which already meets
+        // the 4-space minimum (marker_col 0 + 4 = 4). No adjustment needed.
+        let rule = MD007ULIndent::default();
+        let content = "10. text\n\n    - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "4-space indent under `10.` should be valid in MkDocs flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_triple_digit_ordered_list() {
+        // `100. text` has content at column 5, which exceeds
+        // the 4-space minimum (marker_col 0 + 4 = 4). No adjustment needed.
+        let rule = MD007ULIndent::default();
+        let content = "100. text\n\n     - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "5-space indent under `100.` should be valid in MkDocs flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_insufficient_indent_under_ordered() {
+        // In MkDocs, 2-space indent under `1. text` is insufficient.
+        // Expected: marker_col(0) + 4 = 4, got: 2.
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n  - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "2-space indent under ordered list should warn in MkDocs flavor"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_deeper_nesting_under_ordered() {
+        // `1. text` -> `    - sub` (4 spaces) -> `      - subsub` (6 spaces)
+        // The sub-item at 4 spaces is correct for MkDocs.
+        // The sub-sub-item at 6 spaces: parent is unordered at col 4 with content at col 6,
+        // so 6-space indent is text-aligned (correct).
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n    - sub\n      - subsub";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Deeper nesting under ordered list should be valid in MkDocs flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_fix_adjusts_to_4_spaces() {
+        // Verify that auto-fix corrects 3-space indent to 4-space in MkDocs
+        let rule = MD007ULIndent::default();
+        let content = "1. text\n\n   - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "3-space indent should warn in MkDocs");
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "1. text\n\n    - nested item",
+            "Fix should adjust indent to 4 spaces in MkDocs"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_start_indented_with_ordered_parent() {
+        // start_indented mode with MkDocs: the MkDocs adjustment should still apply
+        // as a floor on top of the start_indented calculation.
+        let mut config = MD007Config::default();
+        config.start_indented = true;
+        let rule = MD007ULIndent::from_config_struct(config);
+        let content = "1. text\n\n    - nested item";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "4-space indent under ordered list with start_indented should be valid in MkDocs, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_ordered_at_nonzero_indent() {
+        // Ordered list nested inside an unordered list, with a further unordered child.
+        // `- outer` at col 0, `  1. inner` at col 2, `      - deep` at col 6.
+        // For `deep`: parent is ordered at marker_col=2, so MkDocs minimum = 2+4 = 6.
+        // Text-aligned: content_col of `1. inner` = 5. max(5, 6) = 6.
+        let rule = MD007ULIndent::default();
+        let content = "- outer\n  1. inner\n      - deep";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "6-space indent under nested ordered list should be valid in MkDocs, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_ordered_at_nonzero_indent_insufficient() {
+        // Same structure but with only 5 spaces for `deep`.
+        // MkDocs minimum = marker_col(2) + 4 = 6, but got 5. Should warn.
+        let rule = MD007ULIndent::default();
+        let content = "- outer\n  1. inner\n     - deep";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "5-space indent under nested ordered at col 2 should warn in MkDocs (needs 6)"
         );
     }
 }
