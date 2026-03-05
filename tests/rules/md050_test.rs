@@ -214,25 +214,30 @@ After tags <code>__main__</code> more text __also flagged__"#;
 fn test_md050_self_closing_code_tag() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
 
-    // Test with emphasis on separate lines first
+    // Self-closing <code /> on its own line starts a CommonMark HTML block (type 6).
+    // Content on subsequent lines (until a blank line) is inside the HTML block and
+    // is NOT parsed as markdown emphasis. pulldown-cmark and markdownlint-cli agree.
     let content_separate = r#"# Self-closing code tag
 
 <code />
-__should be flagged__
+__not emphasis because inside HTML block__
 
 <code/>
-__also flagged__"#;
+__also not emphasis__"#;
 
     let ctx =
         rumdl_lib::lint_context::LintContext::new(content_separate, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Self-closing code tags don't create a code context
-    assert_eq!(warnings.len(), 2, "Should detect emphasis on separate lines");
-    assert_eq!(warnings[0].line, 4);
-    assert_eq!(warnings[1].line, 7);
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Content after self-closing <code /> is inside an HTML block, not markdown emphasis"
+    );
 
-    // Now test with emphasis on same line as self-closing tag
+    // When emphasis appears on the same line after self-closing tags,
+    // it IS parsed as markdown (the line isn't a pure HTML block).
+    // Both pulldown-cmark and markdownlint-cli detect emphasis here.
     let content = r#"# Self-closing code tag
 
 <code /> __should be flagged__
@@ -242,11 +247,10 @@ __also flagged__"#;
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // These should also be flagged
     assert_eq!(
         warnings.len(),
         2,
-        "Should detect emphasis on same line as self-closing tag"
+        "Emphasis on same line as self-closing <code /> is valid markdown"
     );
     assert_eq!(warnings[0].line, 3);
     assert_eq!(warnings[1].line, 5);
@@ -291,6 +295,10 @@ Uses <code>__pycache__</code> but __this__ should be fixed."#;
 fn test_md050_complex_html_structure() {
     let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
 
+    // <div>...</div> is an HTML block in CommonMark. Content inside it is NOT
+    // parsed as markdown, so __emphasis__ on line 5 should NOT be flagged.
+    // <span> is inline HTML (not a block element), so __emphasis__ after </span>
+    // on line 8 IS markdown and should be flagged. This matches markdownlint-cli.
     let content = r#"# Complex HTML
 
 <div>
@@ -303,10 +311,9 @@ fn test_md050_complex_html_structure() {
     let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&ctx).unwrap();
 
-    // Should flag lines 5 and 8
-    assert_eq!(warnings.len(), 2);
-    assert_eq!(warnings[0].line, 5);
-    assert_eq!(warnings[1].line, 8);
+    // Only line 8 should be flagged (after </span>), not line 5 (inside <div> HTML block)
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].line, 8);
 }
 
 #[test]
