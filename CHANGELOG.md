@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.41] - 2026-03-05
+
+### Fixed
+
+- **MD013**: Skip PyMdown block content during reflow, preventing false
+  semantic-line-breaks diagnostics on `/// details` blocks and their content
+  ([#495](https://github.com/rvben/rumdl/issues/495), reported by @tahv)
+- **MD013**: Flavor-gate attribute list detection in reflow engine so that
+  `{#id .class}` syntax is only treated as atomic in MkDocs/Kramdown flavors,
+  preventing incorrect wrapping behavior in standard markdown
+  ([#494](https://github.com/rvben/rumdl/issues/494), reported by @sisp)
+- **MD013**: Treat MkDocs attribute lists as atomic units during text reflow
+  so they are never split across lines
+- **MD013**: Check inline config directives across the full line range of a
+  warning, fixing cases where `<!-- rumdl-disable -->` inside indented list
+  items was ignored
+  ([#493](https://github.com/rvben/rumdl/issues/493), reported by @sisp)
+- **MD054**: Remove `BrokenLinkCallback` to fix false positives on bracket
+  text like `[0]`, `[i]`, and `[key]` that are not actual markdown links
+  ([#488](https://github.com/rvben/rumdl/issues/488), reported by @eread)
+- **MD050**: Replace regex with pulldown-cmark parser to fix false positives
+  on sequences of underscores or asterisks that are not emphasis markers
+  ([#489](https://github.com/rvben/rumdl/issues/489), reported by @eread)
+- **LSP**: Fix zero-length fix ranges in MD050 LSP code actions and clean up
+  dead code
+  ([#490](https://github.com/rvben/rumdl/issues/490), reported by @eread)
+- **MD044**: Use proper byte range for LSP fix to replace flagged text instead
+  of prepending to it
+  ([#490](https://github.com/rvben/rumdl/issues/490), reported by @eread)
+- **MD054**: Replace regex with pulldown-cmark to fix false positive on
+  brackets in code spans
+- **MD054**: Fix `should_skip` for autolink-only documents and nested link text
+- **MD007**: Skip GFM table rows during Setext heading detection to prevent
+  false negatives
+- **MD007**: Adjust expected indent for MkDocs ordered list continuation lines
+
 ## [0.1.40] - 2026-03-04
 
 ### Fixed
