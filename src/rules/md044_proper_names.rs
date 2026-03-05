@@ -750,7 +750,7 @@ impl Rule for MD044ProperNames {
                     message: format!("Proper name '{found_name}' should be '{proper_name}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(line, column),
+                        range: line_index.line_col_to_byte_range_with_length(line, column, found_name.len()),
                         replacement: proper_name,
                     }),
                 })
