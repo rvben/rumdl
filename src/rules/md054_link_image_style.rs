@@ -111,11 +111,6 @@ impl Rule for MD054LinkImageStyle {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-
-        if content.is_empty() || (!content.contains('[') && !content.contains('<')) {
-            return Ok(Vec::new());
-        }
-
         let mut warnings = Vec::new();
 
         // Enable task lists and footnotes so pulldown-cmark handles them natively
@@ -134,10 +129,9 @@ impl Rule for MD054LinkImageStyle {
         )
         .into_offset_iter();
 
-        // Track link Start/End pairs
-        // Each entry: (link_type, dest_url, start_byte_offset)
-        let mut link_stack: Vec<(LinkType, String, usize)> = Vec::new();
-        let mut text_collector: Option<String> = None;
+        // Track link/image Start/End pairs as a stack to handle nesting (e.g. [![alt](img)](href))
+        // Each entry: (link_type, dest_url, start_byte_offset, text_collector)
+        let mut link_stack: Vec<(LinkType, String, usize, String)> = Vec::new();
 
         for (event, range) in parser {
             match event {
@@ -147,12 +141,10 @@ impl Rule for MD054LinkImageStyle {
                 | Event::Start(Tag::Image {
                     link_type, dest_url, ..
                 }) => {
-                    text_collector = Some(String::new());
-                    link_stack.push((link_type, dest_url.to_string(), range.start));
+                    link_stack.push((link_type, dest_url.to_string(), range.start, String::new()));
                 }
                 Event::End(TagEnd::Link | TagEnd::Image) => {
-                    if let Some((link_type, dest_url, start_byte)) = link_stack.pop() {
-                        let text = text_collector.take().unwrap_or_default();
+                    if let Some((link_type, dest_url, start_byte, text)) = link_stack.pop() {
                         let end_byte = range.end;
 
                         let style = match link_type {
@@ -206,8 +198,8 @@ impl Rule for MD054LinkImageStyle {
                     }
                 }
                 Event::Text(ref t) | Event::Code(ref t) => {
-                    if let Some(ref mut collector) = text_collector {
-                        collector.push_str(t);
+                    if let Some(entry) = link_stack.last_mut() {
+                        entry.3.push_str(t);
                     }
                 }
                 _ => {}
@@ -229,7 +221,7 @@ impl Rule for MD054LinkImageStyle {
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        ctx.content.is_empty() || !ctx.likely_has_links_or_images()
+        ctx.content.is_empty() || (!ctx.likely_has_links_or_images() && !ctx.likely_has_html())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -703,5 +695,96 @@ mod tests {
             "Should be flagged as 'inline' style, got: {}",
             result[0].message
         );
+    }
+
+    #[test]
+    fn test_autolink_only_document_not_skipped() {
+        // Document with only autolinks (no brackets) must still be checked
+        let rule = MD054LinkImageStyle::new(false, false, false, true, false, false);
+        let content = "Visit <https://example.com> for more info.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            !rule.should_skip(&ctx),
+            "should_skip must return false for autolink-only documents"
+        );
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Autolink should be flagged when disallowed");
+        assert!(result[0].message.contains("'autolink'"));
+    }
+
+    #[test]
+    fn test_nested_image_in_link() {
+        // [![alt](img.png)](https://example.com) — image nested inside a link
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = "[![alt text](img.png)](https://example.com)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Both the inner image (inline) and outer link (inline) should be detected
+        assert!(
+            result.len() >= 2,
+            "Nested image-in-link should detect both elements, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multi_line_link() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = "[long link\ntext](url)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Multi-line inline link should be detected");
+        assert!(result[0].message.contains("'inline'"));
+    }
+
+    #[test]
+    fn test_link_with_title() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = r#"[text](url "title")"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Link with title should be detected as inline");
+        assert!(result[0].message.contains("'inline'"));
+    }
+
+    #[test]
+    fn test_empty_link_text() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = "[](url)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Empty link text should be detected");
+        assert!(result[0].message.contains("'inline'"));
+    }
+
+    #[test]
+    fn test_escaped_brackets_not_detected() {
+        let rule = MD054LinkImageStyle::new(true, true, true, true, false, true);
+        let content = r"\[not a link\] and also \[not this either\]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Escaped brackets should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_links_in_blockquotes() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = "> [link](url) in a blockquote";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Links in blockquotes should be detected");
+        assert!(result[0].message.contains("'inline'"));
+    }
+
+    #[test]
+    fn test_image_detection() {
+        let rule = MD054LinkImageStyle::new(false, false, false, false, false, false);
+        let content = "![alt](img.png)";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Inline image should be detected");
+        assert!(result[0].message.contains("'inline'"));
     }
 }
