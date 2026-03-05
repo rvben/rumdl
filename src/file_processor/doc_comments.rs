@@ -45,10 +45,10 @@ pub fn format_doc_comment_blocks(
             .map(|r| {
                 // Disable code block checking for MD013 in doc comments.
                 // Code blocks contain Rust code formatted by rustfmt.
-                if r.name() == "MD013" {
-                    if let Some(md013) = r.as_any().downcast_ref::<MD013LineLength>() {
-                        return Box::new(md013.with_code_blocks_disabled()) as Box<dyn Rule>;
-                    }
+                if r.name() == "MD013"
+                    && let Some(md013) = r.as_any().downcast_ref::<MD013LineLength>()
+                {
+                    return Box::new(md013.with_code_blocks_disabled()) as Box<dyn Rule>;
                 }
                 dyn_clone::clone_box(&**r)
             })

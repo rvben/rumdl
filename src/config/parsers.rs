@@ -136,15 +136,10 @@ pub(super) fn parse_pyproject_toml(
             if let Some(output_format) = table.get("output-format").or_else(|| table.get("output_format"))
                 && let Ok(value) = String::deserialize(output_format.clone())
             {
-                if fragment.global.output_format.is_none() {
-                    fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
+                if let Some(ref mut sv) = fragment.global.output_format {
+                    sv.push_override(value, source, file.clone(), None);
                 } else {
-                    fragment
-                        .global
-                        .output_format
-                        .as_mut()
-                        .unwrap()
-                        .push_override(value, source, file.clone(), None);
+                    fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
                 }
             }
 
@@ -203,15 +198,10 @@ pub(super) fn parse_pyproject_toml(
             if let Some(cache_dir) = table.get("cache-dir").or_else(|| table.get("cache_dir"))
                 && let Ok(value) = String::deserialize(cache_dir.clone())
             {
-                if fragment.global.cache_dir.is_none() {
-                    fragment.global.cache_dir = Some(SourcedValue::new(value.clone(), source));
+                if let Some(ref mut sv) = fragment.global.cache_dir {
+                    sv.push_override(value, source, file.clone(), None);
                 } else {
-                    fragment
-                        .global
-                        .cache_dir
-                        .as_mut()
-                        .unwrap()
-                        .push_override(value, source, file.clone(), None);
+                    fragment.global.cache_dir = Some(SourcedValue::new(value.clone(), source));
                 }
             }
 
@@ -339,15 +329,10 @@ pub(super) fn parse_pyproject_toml(
                     // Special handling for severity - store in rule_entry.severity
                     if norm_rk == "severity" {
                         if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                            if rule_entry.severity.is_none() {
-                                rule_entry.severity = Some(SourcedValue::new(severity, source));
+                            if let Some(ref mut sv) = rule_entry.severity {
+                                sv.push_override(severity, source, file.clone(), None);
                             } else {
-                                rule_entry.severity.as_mut().unwrap().push_override(
-                                    severity,
-                                    source,
-                                    file.clone(),
-                                    None,
-                                );
+                                rule_entry.severity = Some(SourcedValue::new(severity, source));
                             }
                         }
                         continue; // Skip regular value processing for severity
@@ -385,15 +370,10 @@ pub(super) fn parse_pyproject_toml(
                             // Special handling for severity - store in rule_entry.severity
                             if norm_rk == "severity" {
                                 if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if rule_entry.severity.is_none() {
-                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
+                                    if let Some(ref mut sv) = rule_entry.severity {
+                                        sv.push_override(severity, source, file.clone(), None);
                                     } else {
-                                        rule_entry.severity.as_mut().unwrap().push_override(
-                                            severity,
-                                            source,
-                                            file.clone(),
-                                            None,
-                                        );
+                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
                                     }
                                 }
                                 continue; // Skip regular value processing for severity
@@ -435,15 +415,10 @@ pub(super) fn parse_pyproject_toml(
                             // Special handling for severity - store in rule_entry.severity
                             if norm_rk == "severity" {
                                 if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if rule_entry.severity.is_none() {
-                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
+                                    if let Some(ref mut sv) = rule_entry.severity {
+                                        sv.push_override(severity, source, file.clone(), None);
                                     } else {
-                                        rule_entry.severity.as_mut().unwrap().push_override(
-                                            severity,
-                                            source,
-                                            file.clone(),
-                                            None,
-                                        );
+                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
                                     }
                                 }
                                 continue; // Skip regular value processing for severity
@@ -646,15 +621,10 @@ fn parse_global_key(
         "output-format" => {
             if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
                 let val = formatted_string.value().clone();
-                if fragment.global.output_format.is_none() {
-                    fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
+                if let Some(ref mut sv) = fragment.global.output_format {
+                    sv.push_override(val, source, file.clone(), None);
                 } else {
-                    fragment
-                        .global
-                        .output_format
-                        .as_mut()
-                        .unwrap()
-                        .push_override(val, source, file.clone(), None);
+                    fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
                 }
             } else {
                 log::warn!(
@@ -669,15 +639,10 @@ fn parse_global_key(
         "cache-dir" => {
             if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
                 let val = formatted_string.value().clone();
-                if fragment.global.cache_dir.is_none() {
-                    fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
+                if let Some(ref mut sv) = fragment.global.cache_dir {
+                    sv.push_override(val, source, file.clone(), None);
                 } else {
-                    fragment
-                        .global
-                        .cache_dir
-                        .as_mut()
-                        .unwrap()
-                        .push_override(val, source, file.clone(), None);
+                    fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
                 }
             } else {
                 log::warn!(
@@ -953,15 +918,10 @@ pub(super) fn parse_rumdl_toml(
                         let severity_str = formatted_string.value();
                         match crate::rule::Severity::deserialize(toml::Value::String(severity_str.to_string())) {
                             Ok(severity) => {
-                                if rule_entry.severity.is_none() {
-                                    rule_entry.severity = Some(SourcedValue::new(severity, source));
+                                if let Some(ref mut sv) = rule_entry.severity {
+                                    sv.push_override(severity, source, file.clone(), None);
                                 } else {
-                                    rule_entry.severity.as_mut().unwrap().push_override(
-                                        severity,
-                                        source,
-                                        file.clone(),
-                                        None,
-                                    );
+                                    rule_entry.severity = Some(SourcedValue::new(severity, source));
                                 }
                             }
                             Err(_) => {

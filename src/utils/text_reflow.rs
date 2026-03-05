@@ -919,14 +919,12 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         if attr_lists
             && let Some(pos) = remaining.find('{')
             && pos < next_special
+            && let Some(m) = ATTR_LIST_PATTERN.find(&remaining[pos..])
+            && m.start() == 0
         {
-            if let Some(m) = ATTR_LIST_PATTERN.find(&remaining[pos..]) {
-                if m.start() == 0 {
-                    next_special = pos;
-                    special_type = "attr_list";
-                    attr_list_len = m.end();
-                }
-            }
+            next_special = pos;
+            special_type = "attr_list";
+            attr_list_len = m.end();
         }
 
         // Check for emphasis using pulldown-cmark's pre-extracted spans
