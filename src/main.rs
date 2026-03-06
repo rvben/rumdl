@@ -23,6 +23,7 @@ use core::error::Error;
 use rumdl_lib::exit_codes::exit;
 
 mod cache;
+mod check_runner;
 mod file_processor;
 mod formatter;
 mod resolution;
