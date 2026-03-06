@@ -175,7 +175,26 @@ else
     echo -e "${GREEN}✓${NC}"
 fi
 
-# Check 10: Verify documented rule count matches actual rule count
+# Check 10: Verify CONTRIBUTING.md Rust version matches rust-toolchain.toml
+echo -n "Checking CONTRIBUTING.md Rust version... "
+TOOLCHAIN_VERSION=$(grep '^channel' rust-toolchain.toml | sed 's/.*"\(.*\)".*/\1/')
+CONTRIB_RUST_VERSION=$(grep -oE 'Rust.*[0-9]+\.[0-9]+\.[0-9]+' CONTRIBUTING.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+
+if [[ "$CONTRIB_RUST_VERSION" == "$TOOLCHAIN_VERSION" ]]; then
+    echo -e "${GREEN}✓${NC} ($TOOLCHAIN_VERSION)"
+elif $FIX_MODE; then
+    sed -i '' "s/${CONTRIB_RUST_VERSION}/${TOOLCHAIN_VERSION}/g" CONTRIBUTING.md
+    echo -e "${GREEN}✓${NC} (fixed to $TOOLCHAIN_VERSION)"
+    ((FIXED++))
+else
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: CONTRIBUTING.md Rust version mismatch${NC}"
+    echo "rust-toolchain.toml: $TOOLCHAIN_VERSION"
+    echo "CONTRIBUTING.md: $CONTRIB_RUST_VERSION"
+    ((ERRORS++))
+fi
+
+# Check 11: Verify documented rule count matches actual rule count
 echo -n "Checking rule count in docs... "
 ACTUAL_RULE_COUNT=$(grep -c 'name: "MD[0-9]' src/rules/mod.rs)
 DOCS_MISMATCHES=""
@@ -194,6 +213,18 @@ while read -r DOCS_COUNT; do
     fi
 done < <(grep -oE 'implements [0-9]+ rules' docs/RULES.md | grep -oE '[0-9]+')
 
+# Check README.md
+while read -r DOCS_COUNT; do
+    if [[ "$DOCS_COUNT" != "$ACTUAL_RULE_COUNT" ]]; then
+        DOCS_MISMATCHES="${DOCS_MISMATCHES}README.md says $DOCS_COUNT, "
+    fi
+done < <(grep -oE '[0-9]+ lint(ing)? rules' README.md | grep -oE '[0-9]+')
+while read -r DOCS_COUNT; do
+    if [[ "$DOCS_COUNT" != "$ACTUAL_RULE_COUNT" ]]; then
+        DOCS_MISMATCHES="${DOCS_MISMATCHES}README.md says 'implements $DOCS_COUNT', "
+    fi
+done < <(grep -oE 'implements [0-9]+ lint rules' README.md | grep -oE '[0-9]+')
+
 if [[ -z "$DOCS_MISMATCHES" ]]; then
     echo -e "${GREEN}✓${NC} ($ACTUAL_RULE_COUNT rules)"
 elif $FIX_MODE; then
@@ -201,6 +232,8 @@ elif $FIX_MODE; then
     sed -i '' -E "s/[0-9]+ lint(ing)? rules/$ACTUAL_RULE_COUNT lint rules/g" docs/index.md
     # Fix docs/RULES.md: replace "implements N rules"
     sed -i '' -E "s/implements [0-9]+ rules/implements $ACTUAL_RULE_COUNT rules/g" docs/RULES.md
+    # Fix README.md: replace "N lint rules" and "implements N lint rules"
+    sed -i '' -E "s/[0-9]+ lint(ing)? rules/$ACTUAL_RULE_COUNT lint rules/g" README.md
     echo -e "${GREEN}✓${NC} (fixed to $ACTUAL_RULE_COUNT rules)"
     ((FIXED++))
 else
@@ -211,7 +244,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 11: Verify rules.json is up-to-date
+# Check 12: Verify rules.json is up-to-date
 echo -n "Checking rules.json is up-to-date... "
 if [[ -f "rules.json" ]]; then
     TEMP_RULES=$(mktemp)
@@ -240,7 +273,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 12: Check if schema changed since last release (SchemaStore reminder)
+# Check 13: Check if schema changed since last release (SchemaStore reminder)
 echo -n "Checking if schema changed since last release... "
 LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 if [[ -n "$LAST_TAG" ]]; then
@@ -257,7 +290,7 @@ else
     echo -e "${YELLOW}⚠${NC} (no previous tag found)"
 fi
 
-# Check 13: Verify opt-in rules are documented
+# Check 14: Verify opt-in rules are documented
 echo -n "Checking opt-in rules are documented... "
 # Find rules with enabled: false as default (opt-in rules)
 # Pattern 1: explicit "enabled: false" in Default impl (but not fix_enabled, etc.)
@@ -301,7 +334,7 @@ else
     ((ERRORS++))
 fi
 
-# Check 14: Verify no config validation warnings for rule options
+# Check 15: Verify no config validation warnings for rule options
 echo -n "Checking config validation for rule options... "
 # Create a test config with all configurable rules enabled
 TEMP_CONFIG=$(mktemp)
