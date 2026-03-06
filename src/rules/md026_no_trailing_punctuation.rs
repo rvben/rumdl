@@ -303,6 +303,11 @@ impl Rule for MD026NoTrailingPunctuation {
 
         // Use pre-computed heading information from LintContext
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num + 1) {
+                continue;
+            }
+
             if let Some(heading) = &line_info.heading {
                 // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
                 if !heading.is_valid {

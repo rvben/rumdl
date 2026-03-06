@@ -275,6 +275,8 @@ impl Rule for MD062LinkDestinationWhitespace {
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         if warnings.is_empty() {
             return Ok(ctx.content.to_string());

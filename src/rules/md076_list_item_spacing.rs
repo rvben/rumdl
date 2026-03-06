@@ -338,6 +338,12 @@ impl Rule for MD076ListItemSpacing {
         for (i, line) in lines.iter().enumerate() {
             let line_num = i + 1;
 
+            // Skip modifications for lines where the rule is disabled via inline config
+            if ctx.is_rule_disabled(self.name(), line_num) {
+                result.push((*line).to_string());
+                continue;
+            }
+
             if remove_lines.contains(&line_num) {
                 continue;
             }

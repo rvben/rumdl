@@ -312,6 +312,8 @@ impl Rule for MD042NoEmptyLinks {
 
         // Get all warnings first - only fix links that are actually flagged
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

@@ -981,6 +981,11 @@ impl Rule for MD063HeadingCapitalization {
         let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            // Skip lines where the rule is disabled via inline config
+            if ctx.is_rule_disabled(self.name(), line_num + 1) {
+                continue;
+            }
+
             if let Some(heading) = &line_info.heading {
                 // Check level filter
                 if heading.level < self.config.min_level || heading.level > self.config.max_level {

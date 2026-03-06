@@ -245,6 +245,10 @@ impl Rule for MD056TableColumnCount {
 
             // Fix all rows in the table
             for (i, &line_idx) in all_line_indices.iter().enumerate() {
+                let line_num = line_idx + 1;
+                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                    continue;
+                }
                 let line = lines[line_idx];
                 let row_content = TableUtils::extract_table_row_content(line, table_block, i);
                 if let Some(fixed_line) =

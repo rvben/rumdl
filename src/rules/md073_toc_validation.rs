@@ -663,6 +663,11 @@ impl Rule for MD073TocValidation {
             return Ok(ctx.content.to_string());
         };
 
+        // Skip fix if rule is disabled via inline config at the TOC region
+        if ctx.is_rule_disabled(self.name(), region.start_line) {
+            return Ok(ctx.content.to_string());
+        }
+
         // Build expected TOC from headings
         let expected_entries = self.build_expected_toc(ctx, &region);
 

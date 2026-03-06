@@ -930,6 +930,8 @@ impl Rule for MD057ExistingRelativeLinks {
         }
 
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
         let mut content = ctx.content.to_string();
 
         // Collect fixable warnings (compact-paths) sorted by byte offset descending

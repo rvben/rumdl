@@ -159,6 +159,13 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
+
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result.push(line_info.content(ctx.content).to_string());
+                continue;
+            }
+
             if let Some(blockquote) = &line_info.blockquote {
                 // Fix blockquotes with multiple spaces after the marker
                 // Skip if line is in a list block - extra spaces are list continuation indent

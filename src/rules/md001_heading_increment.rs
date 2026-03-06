@@ -254,7 +254,8 @@ impl Rule for MD001HeadingIncrement {
         };
 
         let mut skip_next = false;
-        for line_info in ctx.lines.iter() {
+        for (i, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = i + 1;
             if skip_next {
                 skip_next = false;
                 continue;
@@ -263,6 +264,21 @@ impl Rule for MD001HeadingIncrement {
             if let Some(heading) = line_info.heading.as_deref() {
                 if !heading.is_valid {
                     fixed_lines.push(line_info.content(ctx.content).to_string());
+                    continue;
+                }
+
+                // If rule is disabled for this line, keep original and skip setext underline
+                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                    fixed_lines.push(line_info.content(ctx.content).to_string());
+                    let is_setext = matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    );
+                    if is_setext {
+                        skip_next = true;
+                    }
+                    // Still update prev_level so subsequent headings are computed correctly
+                    prev_level = Some(heading.level as usize);
                     continue;
                 }
 

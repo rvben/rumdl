@@ -227,6 +227,8 @@ impl Rule for MD049EmphasisStyle {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Get all warnings with their fixes
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         // If no warnings, return original content
         if warnings.is_empty() {

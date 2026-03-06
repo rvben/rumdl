@@ -402,6 +402,11 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), block.line_idx + 1) {
+                continue;
+            }
+
             let line = content.lines().nth(block.line_idx).unwrap_or("");
             let trimmed = line.trim();
             let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();

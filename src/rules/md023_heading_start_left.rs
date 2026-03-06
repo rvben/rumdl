@@ -165,8 +165,26 @@ impl Rule for MD023HeadingStartLeft {
         let mut skip_next = false;
 
         for (i, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = i + 1;
             if skip_next {
                 skip_next = false;
+                continue;
+            }
+
+            // If rule is disabled for this line, keep original
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                fixed_lines.push(line_info.content(ctx.content).to_string());
+                // For setext headings, also skip the underline
+                if let Some(heading) = &line_info.heading
+                    && matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    )
+                    && i + 1 < ctx.lines.len()
+                {
+                    fixed_lines.push(ctx.lines[i + 1].content(ctx.content).to_string());
+                    skip_next = true;
+                }
                 continue;
             }
 

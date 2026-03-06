@@ -1046,7 +1046,11 @@ impl Rule for MD046CodeBlockStyle {
         let mut fenced_fence_type = None;
         let mut in_indented_block = false;
 
+        // Track which code block opening lines are disabled by inline config
+        let mut current_block_disabled = false;
+
         for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
             let trimmed = line.trim_start();
 
             // Handle fenced code blocks
@@ -1055,10 +1059,16 @@ impl Rule for MD046CodeBlockStyle {
                 && Self::has_valid_fence_indent(line)
                 && (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
             {
+                // Check if inline config disables this rule for the opening fence
+                current_block_disabled = ctx.inline_config().is_rule_disabled(self.name(), line_num);
                 in_fenced_block = true;
                 fenced_fence_type = Some(if trimmed.starts_with("```") { "```" } else { "~~~" });
 
-                if target_style == CodeBlockStyle::Indented {
+                if current_block_disabled {
+                    // Inline config disables this rule — preserve original
+                    result.push_str(line);
+                    result.push('\n');
+                } else if target_style == CodeBlockStyle::Indented {
                     // Skip the opening fence
                     in_indented_block = true;
                 } else {
@@ -1073,13 +1083,21 @@ impl Rule for MD046CodeBlockStyle {
                     fenced_fence_type = None;
                     in_indented_block = false;
 
-                    if target_style == CodeBlockStyle::Indented {
+                    if current_block_disabled {
+                        result.push_str(line);
+                        result.push('\n');
+                    } else if target_style == CodeBlockStyle::Indented {
                         // Skip the closing fence
                     } else {
                         // Keep the fenced block
                         result.push_str(line);
                         result.push('\n');
                     }
+                    current_block_disabled = false;
+                } else if current_block_disabled {
+                    // Inline config disables this rule — preserve original
+                    result.push_str(line);
+                    result.push('\n');
                 } else if target_style == CodeBlockStyle::Indented {
                     // Convert content inside fenced block to indented
                     // IMPORTANT: Preserve the original line content (including internal indentation)
@@ -1101,6 +1119,13 @@ impl Rule for MD046CodeBlockStyle {
                 &in_admonition_context,
             ) {
                 // This is an indented code block
+
+                // Respect inline disable comments
+                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                    result.push_str(line);
+                    result.push('\n');
+                    continue;
+                }
 
                 // Check if we need to start a new fenced block
                 let prev_line_is_indented = i > 0

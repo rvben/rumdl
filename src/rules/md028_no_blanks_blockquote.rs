@@ -469,6 +469,12 @@ impl Rule for MD028NoBlanksBlockquote {
         let lines = ctx.raw_lines();
 
         for (line_idx, line) in lines.iter().enumerate() {
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_idx + 1) {
+                result.push(line.to_string());
+                continue;
+            }
+
             // Skip lines in non-markdown content contexts
             if line_idx < ctx.lines.len() {
                 let li = &ctx.lines[line_idx];

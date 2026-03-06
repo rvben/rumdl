@@ -68,6 +68,8 @@ impl Rule for MD071BlankLineAfterFrontmatter {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         if warnings.is_empty() {
             return Ok(content.to_string());

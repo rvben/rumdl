@@ -275,6 +275,8 @@ impl Rule for MD036NoEmphasisAsHeading {
 
         // Get warnings with their inline fixes
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         // If no warnings with fixes, return original content
         if warnings.is_empty() || !warnings.iter().any(|w| w.fix.is_some()) {

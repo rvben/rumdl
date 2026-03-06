@@ -155,7 +155,14 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let mut lines = Vec::new();
 
-        for line_info in ctx.lines.iter() {
+        for (i, line_info) in ctx.lines.iter().enumerate() {
+            let line_num = i + 1;
+            // If rule is disabled for this line, keep original
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                lines.push(line_info.content(ctx.content).to_string());
+                continue;
+            }
+
             let mut fixed = false;
 
             if let Some(heading) = &line_info.heading {

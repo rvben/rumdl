@@ -361,7 +361,14 @@ impl Rule for MD012NoMultipleBlanks {
         // Process ALL lines (don't skip front-matter in fix mode)
         for filtered_line in ctx.filtered_lines() {
             let line = filtered_line.content;
-            let line_idx = filtered_line.line_num - 1; // Convert to 0-based
+            let line_num = filtered_line.line_num;
+            let line_idx = line_num - 1; // Convert to 0-based
+
+            // If rule is disabled for this line, keep original
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result.push(line);
+                continue;
+            }
 
             // Pass through front-matter lines unchanged
             if filtered_line.line_info.in_front_matter {

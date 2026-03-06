@@ -529,7 +529,9 @@ impl Rule for MD034NoBareUrls {
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
         let mut content = ctx.content.to_string();
-        let mut warnings = self.check(ctx)?;
+        let warnings = self.check(ctx)?;
+        let mut warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         // Sort warnings by position to ensure consistent fix application
         warnings.sort_by_key(|w| w.fix.as_ref().map(|f| f.range.start).unwrap_or(0));

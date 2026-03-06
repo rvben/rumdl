@@ -462,6 +462,10 @@ impl Rule for MD055TablePipeStyle {
                 .collect();
 
             for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
+                let line_num = line_idx + 1;
+                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                    continue;
+                }
                 let line = lines[line_idx];
                 let fixed_line = self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
                 result_lines[line_idx] = fixed_line;

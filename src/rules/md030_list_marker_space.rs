@@ -237,6 +237,12 @@ impl Rule for MD030ListMarkerSpace {
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
             // Skip lines in code blocks, front matter, or HTML comments
             if let Some(line_info) = ctx.lines.get(line_idx)
                 && (line_info.in_code_block || line_info.in_front_matter || line_info.in_html_comment)

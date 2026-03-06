@@ -797,6 +797,12 @@ impl Rule for MD044ProperNames {
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                fixed_lines.push(line_info.content(ctx.content).to_string());
+                continue;
+            }
+
             if let Some(line_violations) = violations_by_line.get(&line_num) {
                 // This line has violations, fix them
                 let mut fixed_line = line_info.content(ctx.content).to_string();
@@ -1262,10 +1268,39 @@ Third line with RUST and PYTHON."#;
         let ctx = create_context(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Config comments should be untouched; body text should be fixed
+        // Config comments should be untouched
         assert!(fixed.contains("<!-- rumdl-disable -->"));
         assert!(fixed.contains("<!-- rumdl-enable -->"));
-        assert!(fixed.contains("Some RUMDL text."));
+        // Body text inside disable block should NOT be fixed (rule is disabled)
+        assert!(
+            fixed.contains("Some rumdl text."),
+            "Line inside rumdl-disable block should not be modified by fix()"
+        );
+    }
+
+    #[test]
+    fn test_fix_respects_inline_disable_partial() {
+        let config = MD044Config {
+            names: vec!["RUMDL".to_string()],
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content =
+            "<!-- rumdl-disable MD044 -->\nSome rumdl text.\n<!-- rumdl-enable MD044 -->\n\nSome rumdl text outside.\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Line inside disable block should be preserved
+        assert!(
+            fixed.contains("Some rumdl text.\n<!-- rumdl-enable"),
+            "Line inside disable block should not be modified"
+        );
+        // Line outside disable block should be fixed
+        assert!(
+            fixed.contains("Some RUMDL text outside."),
+            "Line outside disable block should be fixed"
+        );
     }
 
     #[test]

@@ -249,6 +249,11 @@ impl Rule for MD039NoSpaceInLinks {
                 continue;
             }
 
+            // Skip links where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), link.line) {
+                continue;
+            }
+
             // Skip links inside Jinja templates
             if ctx.is_in_jinja_range(link.byte_offset) {
                 continue;
@@ -299,6 +304,11 @@ impl Rule for MD039NoSpaceInLinks {
         for image in &ctx.images {
             // Skip reference images (markdownlint doesn't check these)
             if image.is_reference {
+                continue;
+            }
+
+            // Skip images where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), image.line) {
                 continue;
             }
 

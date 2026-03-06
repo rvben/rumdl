@@ -246,6 +246,14 @@ impl Rule for MD070NestedCodeFence {
 
         let mut i = 0;
         while i < lines.len() {
+            // Skip lines where the rule is disabled via inline config
+            if ctx.is_rule_disabled(self.name(), i + 1) {
+                result.push_str(lines[i]);
+                result.push('\n');
+                i += 1;
+                continue;
+            }
+
             // Skip lines in contexts that shouldn't be processed
             if let Some(line_info) = ctx.lines.get(i)
                 && (line_info.in_front_matter || line_info.in_html_comment || line_info.in_html_block)

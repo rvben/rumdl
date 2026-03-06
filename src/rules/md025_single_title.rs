@@ -338,6 +338,23 @@ impl Rule for MD025SingleTitle {
                 continue;
             }
 
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num + 1) {
+                fixed_lines.push(line_info.content(ctx.content).to_string());
+                // For Setext headings, also preserve the underline
+                if let Some(heading) = &line_info.heading
+                    && matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    )
+                    && line_num + 1 < ctx.lines.len()
+                {
+                    fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
+                    skip_next = true;
+                }
+                continue;
+            }
+
             if let Some(heading) = &line_info.heading {
                 if heading.level as usize == self.config.level.as_usize() && !line_info.in_code_block {
                     if !found_first {

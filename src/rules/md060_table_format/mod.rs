@@ -1003,6 +1003,16 @@ impl Rule for MD060TableFormat {
                 .chain(table_block.content_lines.iter().copied())
                 .collect();
 
+            // Check if any line in this table has the rule disabled via inline config;
+            // if so, skip fixing the entire table to avoid partial formatting
+            let any_disabled = table_line_indices
+                .iter()
+                .any(|&line_idx| ctx.inline_config().is_rule_disabled(self.name(), line_idx + 1));
+
+            if any_disabled {
+                continue;
+            }
+
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
                 result_lines[line_idx] = format_result.lines[i].clone();
             }

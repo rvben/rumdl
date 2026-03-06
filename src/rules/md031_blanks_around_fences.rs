@@ -431,6 +431,12 @@ impl Rule for MD031BlanksAroundFences {
         let mut needs_blank_after: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         for (opening_line, closing_line) in &fenced_blocks {
+            // Skip fences where this rule is disabled by inline config
+            // opening_line and closing_line are 0-indexed; inline config uses 1-indexed
+            if ctx.inline_config().is_rule_disabled(self.name(), *opening_line + 1) {
+                continue;
+            }
+
             // Check if needs blank line before opening fence
             // Skip if right after Quarto div marker (Quarto flavor)
             // Use is_effectively_empty_line to handle blockquote blank lines

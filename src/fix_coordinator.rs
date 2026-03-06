@@ -261,8 +261,17 @@ impl FixCoordinator {
                     continue;
                 }
 
-                // Check if any warnings are fixable
-                let has_fixable = warnings.iter().any(|w| w.fix.is_some());
+                // Filter warnings through inline config to respect disable comments
+                let inline_config = ctx.inline_config();
+                let filtered_warnings =
+                    crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, inline_config, rule.name());
+
+                if filtered_warnings.is_empty() {
+                    continue;
+                }
+
+                // Check if any non-disabled warnings are fixable
+                let has_fixable = filtered_warnings.iter().any(|w| w.fix.is_some());
                 if !has_fixable {
                     continue;
                 }

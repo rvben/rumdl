@@ -997,6 +997,11 @@ impl MD032BlanksAroundLists {
 
         // Phase 1: Identify needed insertions
         for &(start_line, end_line, ref prefix) in &list_blocks {
+            // Skip lists where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled("MD032", start_line) {
+                continue;
+            }
+
             // Skip lists that start inside HTML comments
             if ctx.line_info(start_line).is_some_and(|info| info.in_html_comment) {
                 continue;
@@ -1084,8 +1089,10 @@ impl MD032BlanksAroundLists {
                 result_lines.push(prefix_to_insert.clone());
             }
 
-            // Apply lazy continuation fix if needed
-            if let Some(lazy_info) = lazy_fixes.get(&current_line_num) {
+            // Apply lazy continuation fix if needed (skip if rule is disabled for this line)
+            if let Some(lazy_info) = lazy_fixes.get(&current_line_num)
+                && !ctx.inline_config().is_rule_disabled("MD032", current_line_num)
+            {
                 let fixed_line = Self::apply_lazy_fix_to_line(line, lazy_info);
                 result_lines.push(fixed_line);
             } else {

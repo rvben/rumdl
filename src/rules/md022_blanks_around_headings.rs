@@ -169,6 +169,22 @@ impl MD022BlanksAroundHeadings {
                     continue;
                 }
 
+                // If rule is disabled for this heading line, keep original
+                let line_num = i + 1;
+                if ctx.inline_config().is_rule_disabled("MD022", line_num) {
+                    result.push(line.to_string());
+                    // For Setext headings, also add the underline unchanged
+                    if matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    ) && i + 1 < ctx.lines.len()
+                    {
+                        result.push(ctx.lines[i + 1].content(ctx.content).to_string());
+                        skip_count += 1;
+                    }
+                    continue;
+                }
+
                 // This is a heading line (ATX or Setext content)
                 let is_first_heading = Some(i) == heading_at_start_idx;
                 let heading_level = heading.level as usize;

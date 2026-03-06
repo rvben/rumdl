@@ -163,7 +163,9 @@ impl Rule for MD065BlanksAroundHorizontalRules {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
-        let mut warnings = self.check(ctx)?;
+        let warnings = self.check(ctx)?;
+        let mut warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
         if warnings.is_empty() {
             return Ok(content.to_string());
         }

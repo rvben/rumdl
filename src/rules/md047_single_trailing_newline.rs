@@ -85,6 +85,12 @@ impl Rule for MD047SingleTrailingNewline {
             return Ok(content.to_string());
         }
 
+        // Check if the rule is disabled on the last line via inline config
+        let last_line_num = ctx.lines.len();
+        if ctx.inline_config().is_rule_disabled(self.name(), last_line_num) {
+            return Ok(content.to_string());
+        }
+
         // Content doesn't end with newline, add LF (will be converted at I/O boundary if needed)
         let mut result = String::with_capacity(content.len() + 1);
         result.push_str(content);

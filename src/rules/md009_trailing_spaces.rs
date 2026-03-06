@@ -252,11 +252,28 @@ impl Rule for MD009TrailingSpaces {
         // For simple cases (strict mode), use fast regex approach
         if self.config.strict {
             // In strict mode, remove ALL trailing whitespace everywhere
-            // Use \p{White_Space} to match Unicode whitespace characters too
-            return Ok(get_cached_regex(r"(?m)[\p{White_Space}&&[^\n\r]]+$")
-                .unwrap()
-                .replace_all(content, "")
-                .to_string());
+            // but respect inline config disable comments
+            let lines = ctx.raw_lines();
+            let mut result = String::with_capacity(content.len());
+            for (i, line) in lines.iter().enumerate() {
+                let line_num = i + 1;
+                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                    result.push_str(line);
+                } else {
+                    result.push_str(
+                        &get_cached_regex(r"[\p{White_Space}&&[^\n\r]]+$")
+                            .unwrap()
+                            .replace_all(line, ""),
+                    );
+                }
+                if i < lines.len() - 1 || content.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+            if !content.ends_with('\n') && result.ends_with('\n') {
+                result.pop();
+            }
+            return Ok(result);
         }
 
         // For complex cases, we need line-by-line processing but with optimizations
@@ -265,6 +282,14 @@ impl Rule for MD009TrailingSpaces {
         let mut result = String::with_capacity(content.len()); // Pre-allocate capacity
 
         for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            // If rule is disabled for this line, keep original
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result.push_str(line);
+                result.push('\n');
+                continue;
+            }
+
             let line_is_ascii = line.is_ascii();
             // Fast path: check if line has any trailing spaces (ASCII) or
             // trailing whitespace (Unicode) that we need to handle

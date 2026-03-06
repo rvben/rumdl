@@ -176,6 +176,12 @@ impl Rule for MD035HRStyle {
         };
 
         for (i, line) in lines.iter().enumerate() {
+            // Skip lines where this rule is disabled by inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), i + 1) {
+                result.push(line.to_string());
+                continue;
+            }
+
             // Skip if this line is in frontmatter, code block, or MkDocs markdown HTML div
             if let Some(line_info) = ctx.lines.get(i)
                 && (line_info.in_front_matter || line_info.in_code_block || line_info.in_mkdocs_html_markdown)

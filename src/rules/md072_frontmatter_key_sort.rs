@@ -392,6 +392,11 @@ impl Rule for MD072FrontmatterKeySort {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
+        // Skip fix if rule is disabled via inline config at the frontmatter region (line 2)
+        if ctx.is_rule_disabled(self.name(), 2) {
+            return Ok(content.to_string());
+        }
+
         let fm_type = FrontMatterUtils::detect_front_matter_type(content);
 
         match fm_type {

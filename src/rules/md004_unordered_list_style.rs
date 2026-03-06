@@ -289,6 +289,11 @@ impl Rule for MD004UnorderedListStyle {
                         continue;
                     }
 
+                    // If rule is disabled for this line, skip modification
+                    if ctx.inline_config().is_rule_disabled(self.name(), item_line) {
+                        continue;
+                    }
+
                     let line_idx = item_line - 1;
                     if line_idx >= lines.len() {
                         continue;

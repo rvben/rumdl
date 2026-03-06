@@ -638,6 +638,18 @@ impl Rule for MD041FirstLineHeading {
             return Ok(ctx.content.to_string());
         }
 
+        // Respect inline disable comments
+        let first_content_line = ctx
+            .lines
+            .iter()
+            .enumerate()
+            .find(|(_, li)| !li.in_front_matter && !li.is_blank)
+            .map(|(i, _)| i + 1) // 1-indexed
+            .unwrap_or(1);
+        if ctx.inline_config().is_rule_disabled(self.name(), first_content_line) {
+            return Ok(ctx.content.to_string());
+        }
+
         let Some(plan) = self.analyze_for_fix(ctx) else {
             return Ok(ctx.content.to_string());
         };

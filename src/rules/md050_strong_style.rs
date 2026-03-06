@@ -365,6 +365,10 @@ impl Rule for MD050StrongStyle {
             .filter(|span| span.range.end - span.range.start >= 4)
             .filter(|span| span.style != target_style)
             .filter(|span| !self.should_skip_span(ctx, span.range.start))
+            .filter(|span| {
+                let (line_num, _) = ctx.offset_to_line_col(span.range.start);
+                !ctx.inline_config().is_rule_disabled(self.name(), line_num)
+            })
             .map(|span| span.range.clone())
             .collect();
 

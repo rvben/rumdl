@@ -3,8 +3,36 @@
 //! This module provides shared logic for applying markdown fixes to ensure
 //! that both CLI batch fixes and LSP individual fixes produce identical results.
 
+use crate::inline_config::InlineConfig;
 use crate::rule::{Fix, LintWarning};
 use crate::utils::ensure_consistent_line_endings;
+
+/// Filter warnings by inline config, removing those on disabled lines.
+///
+/// Replicates the same filtering logic used in the check/reporting path
+/// (`src/lib.rs`) so that fix mode respects inline disable comments.
+pub fn filter_warnings_by_inline_config(
+    warnings: Vec<LintWarning>,
+    inline_config: &InlineConfig,
+    rule_name: &str,
+) -> Vec<LintWarning> {
+    let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
+        // Handle sub-rules like "MD029-style" -> "MD029"
+        // But only if the prefix looks like a rule ID (starts with "MD")
+        let prefix = &rule_name[..dash_pos];
+        if prefix.starts_with("MD") { prefix } else { rule_name }
+    } else {
+        rule_name
+    };
+
+    warnings
+        .into_iter()
+        .filter(|w| {
+            let end = if w.end_line >= w.line { w.end_line } else { w.line };
+            !(w.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
+        })
+        .collect()
+}
 
 /// Apply a list of warning fixes to content, simulating how the LSP client would apply them
 /// This is used for testing consistency between CLI and LSP fix methods
@@ -583,5 +611,185 @@ mod tests {
         // Just verify the fix was applied correctly
         assert!(result_windows.starts_with("Line 1 added"));
         assert!(result_windows.contains("Line 2"));
+    }
+
+    fn make_warning(line: usize, end_line: usize, rule_name: &str) -> LintWarning {
+        LintWarning {
+            message: "test".to_string(),
+            line,
+            column: 1,
+            end_line,
+            end_column: 1,
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..1,
+                replacement: "x".to_string(),
+            }),
+            rule_name: Some(rule_name.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_filter_warnings_disable_enable_block() {
+        let content =
+            "# Heading\n\n<!-- rumdl-disable MD013 -->\nlong line\n<!-- rumdl-enable MD013 -->\nanother long line\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(4, 4, "MD013"), // inside disabled block
+            make_warning(6, 6, "MD013"), // outside disabled block
+        ];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 6);
+    }
+
+    #[test]
+    fn test_filter_warnings_disable_line() {
+        let content = "line one <!-- rumdl-disable-line MD009 -->\nline two\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(1, 1, "MD009"), // disabled via disable-line
+            make_warning(2, 2, "MD009"), // not disabled
+        ];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD009");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 2);
+    }
+
+    #[test]
+    fn test_filter_warnings_disable_next_line() {
+        let content = "<!-- rumdl-disable-next-line MD034 -->\nhttp://example.com\nhttp://other.com\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(2, 2, "MD034"), // disabled via disable-next-line
+            make_warning(3, 3, "MD034"), // not disabled
+        ];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD034");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 3);
+    }
+
+    #[test]
+    fn test_filter_warnings_sub_rule_name() {
+        let content = "<!-- rumdl-disable MD029 -->\nline\n<!-- rumdl-enable MD029 -->\nline\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        // Sub-rule name like "MD029-style" should be stripped to "MD029"
+        let warnings = vec![make_warning(2, 2, "MD029"), make_warning(4, 4, "MD029")];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD029-style");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 4);
+    }
+
+    #[test]
+    fn test_filter_warnings_multi_line_warning() {
+        // A warning spanning lines 3-5 where line 4 is disabled
+        let content = "line 1\nline 2\nline 3\n<!-- rumdl-disable-line MD013 -->\nline 5\nline 6\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(3, 5, "MD013"), // spans lines 3-5, line 4 is disabled
+            make_warning(6, 6, "MD013"), // not disabled
+        ];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        // The multi-line warning should be filtered because one of its lines is disabled
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 6);
+    }
+
+    #[test]
+    fn test_filter_warnings_empty_input() {
+        let inline_config = InlineConfig::from_content("");
+        let filtered = filter_warnings_by_inline_config(vec![], &inline_config, "MD013");
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_filter_warnings_none_disabled() {
+        let content = "line 1\nline 2\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![make_warning(1, 1, "MD013"), make_warning(2, 2, "MD013")];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        assert_eq!(filtered.len(), 2);
+    }
+
+    #[test]
+    fn test_filter_warnings_all_disabled() {
+        let content = "<!-- rumdl-disable MD013 -->\nline 1\nline 2\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![make_warning(2, 2, "MD013"), make_warning(3, 3, "MD013")];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_filter_warnings_end_line_zero_fallback() {
+        // When end_line < line (e.g., end_line=0), should fall back to checking only warning.line
+        let content = "<!-- rumdl-disable-line MD013 -->\nline 2\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![make_warning(1, 0, "MD013")]; // end_line=0 < line=1
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        assert!(filtered.is_empty());
+    }
+
+    #[test]
+    fn test_filter_non_md_rule_name_preserves_dash() {
+        // Verify that a non-MD rule name with a dash is NOT split by the helper.
+        // The helper should pass "custom-rule" as-is to InlineConfig, not "custom".
+        let content = "line 1\nline 2\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![make_warning(1, 1, "custom-rule")];
+
+        // With nothing disabled, the warning should pass through
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "custom-rule");
+        assert_eq!(filtered.len(), 1, "Non-MD rule name with dash should not be split");
+    }
+
+    #[test]
+    fn test_filter_md_sub_rule_name_is_split() {
+        // Verify that "MD029-style" is split to "MD029" for inline config lookup
+        let content = "<!-- rumdl-disable MD029 -->\nline\n<!-- rumdl-enable MD029 -->\nline\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(2, 2, "MD029"), // disabled
+            make_warning(4, 4, "MD029"), // not disabled
+        ];
+
+        // Passing "MD029-style" as rule_name should still match "MD029" in inline config
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD029-style");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 4);
+    }
+
+    #[test]
+    fn test_filter_warnings_capture_restore() {
+        let content = "<!-- rumdl-disable MD013 -->\nline 1\n<!-- rumdl-capture -->\n<!-- rumdl-enable MD013 -->\nline 4\n<!-- rumdl-restore -->\nline 6\n";
+        let inline_config = InlineConfig::from_content(content);
+
+        let warnings = vec![
+            make_warning(2, 2, "MD013"), // disabled by initial disable
+            make_warning(5, 5, "MD013"), // re-enabled between capture/restore
+            make_warning(7, 7, "MD013"), // after restore, back to disabled state
+        ];
+
+        let filtered = filter_warnings_by_inline_config(warnings, &inline_config, "MD013");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].line, 5);
     }
 }

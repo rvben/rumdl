@@ -295,10 +295,20 @@ impl Rule for MD018NoMissingSpaceAtx {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+        let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        let warning_lines: std::collections::HashSet<usize> = warnings.iter().map(|w| w.line).collect();
+
         let mut lines = Vec::new();
 
-        for line_info in ctx.lines.iter() {
+        for (idx, line_info) in ctx.lines.iter().enumerate() {
             let mut fixed = false;
+
+            if !warning_lines.contains(&(idx + 1)) {
+                lines.push(line_info.content(ctx.content).to_string());
+                continue;
+            }
 
             if let Some(heading) = &line_info.heading {
                 // Fix ATX headings missing space

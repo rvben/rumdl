@@ -424,6 +424,8 @@ impl Rule for MD029OrderedListPrefix {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         // Use the same logic as check() - just apply the fixes from warnings
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         if warnings.is_empty() {
             // No changes needed

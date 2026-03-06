@@ -401,6 +401,30 @@ impl Rule for MD048CodeFenceStyle {
         let mut needs_lengthening = false;
 
         for (line_idx, &line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            // Skip lines where the rule is disabled via inline config
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result.push_str(line);
+                // Still track code block state for correctness
+                if let Some(marker) = parse_fence_marker(line) {
+                    if !in_code_block {
+                        in_code_block = true;
+                        code_block_fence_char = marker.fence_char;
+                        code_block_fence_len = marker.fence_len;
+                        converted_fence_len = marker.fence_len;
+                        needs_lengthening = false;
+                    } else if is_closing_fence(marker, code_block_fence_char, code_block_fence_len) {
+                        in_code_block = false;
+                        code_block_fence_len = 0;
+                        converted_fence_len = 0;
+                        needs_lengthening = false;
+                    }
+                }
+                result.push('\n');
+                continue;
+            }
+
             if let Some(marker) = parse_fence_marker(line) {
                 let fence_char = marker.fence_char;
                 let fence_len = marker.fence_len;

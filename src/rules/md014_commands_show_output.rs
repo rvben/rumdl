@@ -284,11 +284,19 @@ impl Rule for MD014CommandsShowOutput {
 
         let mut current_lang = String::new();
 
-        for line in content.lines() {
+        let mut block_start_line_num = 0usize;
+
+        for (line_num_0, line) in content.lines().enumerate() {
+            let line_num = line_num_0 + 1;
             if line.trim_start().starts_with("```") {
                 if in_code_block {
                     // End of code block
-                    if self.is_command_without_output(&current_block, &current_lang) {
+                    // Check if any line in the block is disabled
+                    let block_disabled = (0..current_block.len()).any(|j| {
+                        let block_line_num = block_start_line_num + 1 + j;
+                        ctx.inline_config().is_rule_disabled(self.name(), block_line_num)
+                    });
+                    if !block_disabled && self.is_command_without_output(&current_block, &current_lang) {
                         result.push_str(&self.fix_command_block(&current_block));
                         result.push('\n');
                     } else {
@@ -300,6 +308,7 @@ impl Rule for MD014CommandsShowOutput {
                     current_block.clear();
                 } else {
                     current_lang = Self::get_code_block_language(line);
+                    block_start_line_num = line_num;
                 }
                 in_code_block = !in_code_block;
                 result.push_str(line);

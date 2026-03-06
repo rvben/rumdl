@@ -227,6 +227,16 @@ impl Rule for MD010NoHardTabs {
         let fenced_lines = Self::find_fenced_code_block_lines(lines);
 
         for (i, line) in lines.iter().enumerate() {
+            let line_num = i + 1;
+            // If rule is disabled for this line, keep original
+            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
+                result.push_str(line);
+                if i < lines.len() - 1 || content.ends_with('\n') {
+                    result.push('\n');
+                }
+                continue;
+            }
+
             // Preserve fenced code blocks and other non-markdown contexts
             let should_skip = fenced_lines[i]
                 || ctx.line_info(i + 1).is_some_and(|info| {

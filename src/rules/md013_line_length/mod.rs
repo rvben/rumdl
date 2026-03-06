@@ -465,6 +465,8 @@ impl Rule for MD013LineLength {
         // For CLI usage, apply fixes from warnings
         // LSP will use the warning-based fixes directly
         let warnings = self.check(ctx)?;
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         // If there are no fixes, return content unchanged
         if !warnings.iter().any(|w| w.fix.is_some()) {
