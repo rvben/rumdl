@@ -61,6 +61,8 @@ impl Rule for MD069NoDuplicateListMarkers {
             .skip_code_blocks()
             .skip_html_blocks()
             .skip_html_comments()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
             .skip_obsidian_comments()
         {
             let line_num = filtered_line.line_num;

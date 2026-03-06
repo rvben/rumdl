@@ -101,6 +101,8 @@ impl Rule for MD037NoSpaceInEmphasis {
             .skip_front_matter()
             .skip_code_blocks()
             .skip_math_blocks()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
             .skip_obsidian_comments()
         {
             // Skip if the line doesn't contain any emphasis markers

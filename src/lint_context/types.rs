@@ -53,10 +53,6 @@ pub struct LineInfo {
     pub in_jsx_expression: bool,
     /// Whether this line is inside an MDX comment {/* ... */} (MDX only)
     pub in_mdx_comment: bool,
-    /// Whether this line is inside a JSX component (MDX only)
-    pub in_jsx_component: bool,
-    /// Whether this line is inside a JSX fragment (MDX only)
-    pub in_jsx_fragment: bool,
     /// Whether this line is inside an MkDocs admonition block (!!! or ???)
     pub in_admonition: bool,
     /// Whether this line is inside an MkDocs content tab block (===)

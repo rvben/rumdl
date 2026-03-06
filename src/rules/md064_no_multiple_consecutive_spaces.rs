@@ -338,6 +338,8 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
             .skip_html_comments()
             .skip_mkdocstrings()
             .skip_esm_blocks()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
             .skip_pymdown_blocks()
             .skip_obsidian_comments()
         {

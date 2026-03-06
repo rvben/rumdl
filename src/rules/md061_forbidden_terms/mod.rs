@@ -94,6 +94,8 @@ impl Rule for MD061ForbiddenTerms {
             .skip_front_matter()
             .skip_code_blocks()
             .skip_html_comments()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
             .skip_obsidian_comments()
         {
             let content = line.content;

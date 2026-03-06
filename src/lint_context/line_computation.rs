@@ -143,8 +143,6 @@ pub(super) fn compute_basic_line_info(
             is_div_marker,
             in_jsx_expression: false,
             in_mdx_comment: false,
-            in_jsx_component: false,
-            in_jsx_fragment: false,
             in_admonition: false,
             in_content_tab: false,
             in_mkdocs_html_markdown: false,

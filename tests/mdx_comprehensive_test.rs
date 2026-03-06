@@ -263,17 +263,6 @@ More text here.
 }
 
 // ====================================================================
-// JSX Component Detection Tests
-// Note: in_jsx_component is a placeholder field for future implementation.
-// Currently MDX detection focuses on expressions, comments, and ESM blocks.
-// ====================================================================
-
-// ====================================================================
-// JSX Fragment Tests
-// Note: in_jsx_fragment is a placeholder field for future implementation.
-// ====================================================================
-
-// ====================================================================
 // JSX Expression Edge Cases
 // ====================================================================
 
@@ -604,4 +593,212 @@ fn test_mdx_html_entities_in_expressions() {
     let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
 
     assert!(ctx.lines[0].in_jsx_expression, "Expression with HTML entity");
+}
+
+// ====================================================================
+// Rule False-Positive Prevention Tests
+// These verify that rules skip JSX/MDX content appropriately.
+// ====================================================================
+
+use rumdl_lib::config::Config;
+use rumdl_lib::rule::Rule;
+use rumdl_lib::rules::create_rule_by_name;
+
+fn make_rule(name: &str) -> Box<dyn Rule> {
+    let config = Config::default();
+    create_rule_by_name(name, &config).unwrap_or_else(|| panic!("Unknown rule: {name}"))
+}
+
+#[test]
+fn test_mdx_md034_no_bare_url_in_jsx_expression() {
+    // URLs inside JSX expressions should not trigger MD034
+    let content = r#"# Heading
+
+{window.location = "https://example.com"}
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD034");
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD034 should not flag bare URLs inside JSX expressions, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mdx_md034_no_bare_url_in_mdx_comment() {
+    // URLs inside MDX comments should not trigger MD034
+    let content = r#"# Heading
+
+{/* See https://example.com for details */}
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD034");
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD034 should not flag bare URLs inside MDX comments, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mdx_md037_no_emphasis_in_jsx_expression() {
+    // Underscores in JSX expressions should not trigger MD037
+    let content = r#"# Heading
+
+{my_variable + other_value}
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD037");
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD037 should not flag underscores inside JSX expressions, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mdx_md049_no_emphasis_in_jsx_expression() {
+    // Underscores in JSX expressions should not trigger MD049
+    let content = r#"# Heading
+
+*regular emphasis*
+
+{my_variable + other_value}
+
+More *emphasis* text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD049");
+    let result = rule.check(&ctx).unwrap();
+    for warning in &result {
+        assert!(
+            warning.line != 4,
+            "MD049 should not flag underscores inside JSX expressions on line 4"
+        );
+    }
+}
+
+#[test]
+fn test_mdx_md050_no_strong_in_jsx_expression() {
+    // Double asterisks in JSX should not trigger MD050
+    let content = r#"# Heading
+
+**regular bold**
+
+{compute_value ** 2}
+
+More **bold** text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD050");
+    let result = rule.check(&ctx).unwrap();
+    for warning in &result {
+        assert!(
+            warning.line != 4,
+            "MD050 should not flag ** inside JSX expressions on line 4"
+        );
+    }
+}
+
+#[test]
+fn test_mdx_md064_no_multiple_spaces_in_jsx() {
+    // Multiple spaces inside JSX expressions are intentional formatting
+    let content = r#"# Heading
+
+{items.map(item  =>  item.name)}
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD064");
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD064 should not flag multiple spaces inside JSX expressions, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mdx_md011_no_reversed_link_in_jsx() {
+    // Parenthesized content in JSX should not trigger MD011
+    let content = r#"# Heading
+
+{(value)[index]}
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+    let rule = make_rule("MD011");
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD011 should not flag reversed link patterns inside JSX expressions, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mdx_rules_skip_esm_blocks() {
+    // ESM import/export blocks should be skipped by rules checking inline content
+    let content = r#"import { useState } from 'react'
+export const meta = { title: "Test" }
+
+# Heading
+
+Regular text.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+
+    // Verify ESM lines are detected
+    assert!(ctx.lines[0].in_esm_block);
+    assert!(ctx.lines[1].in_esm_block);
+    assert!(!ctx.lines[3].in_esm_block);
+}
+
+#[test]
+fn test_mdx_combined_jsx_and_markdown() {
+    // A realistic MDX file mixing JSX expressions with regular markdown
+    let content = r#"import { Chart } from './Chart'
+
+# Dashboard
+
+The current value is {current_value}.
+
+{/*
+  Note: this section uses the Chart component
+  to display the data visualization
+*/}
+
+<Chart data={data_points.map(p => p.value)} />
+
+| Column 1 | Column 2 |
+|----------|----------|
+| data     | more     |
+
+Regular **markdown** with *emphasis*.
+"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::MDX, None);
+
+    // ESM
+    assert!(ctx.lines[0].in_esm_block, "import is ESM");
+
+    // Expression in paragraph
+    let expr_line = content.lines().position(|l| l.contains("{current_value}")).unwrap();
+    assert!(ctx.lines[expr_line].in_jsx_expression, "inline expression");
+
+    // MDX comment block
+    let comment_start = content.lines().position(|l| l.contains("{/*")).unwrap();
+    assert!(ctx.lines[comment_start].in_mdx_comment, "comment start");
+
+    // Regular markdown should not be in any MDX construct
+    let table_line = content.lines().position(|l| l.contains("Column 1")).unwrap();
+    assert!(!ctx.lines[table_line].in_jsx_expression);
+    assert!(!ctx.lines[table_line].in_mdx_comment);
+    assert!(!ctx.lines[table_line].in_esm_block);
 }

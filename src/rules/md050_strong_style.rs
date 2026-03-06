@@ -3,7 +3,7 @@ use pulldown_cmark::{Event, Options, Parser, Tag};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::strong_style::StrongStyle;
-use crate::utils::skip_context::{is_in_math_context, is_in_mkdocs_markup};
+use crate::utils::skip_context::{is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup};
 
 /// Check if a byte position within a line is inside a backtick-delimited code span.
 /// This is a line-level fallback for cases where pulldown-cmark's code span detection
@@ -217,6 +217,8 @@ impl MD050StrongStyle {
             || self.is_in_html_code_content(ctx, span_start)
             || in_mkdocs_markup
             || is_in_math_context(ctx, span_start)
+            || is_in_jsx_expression(ctx, span_start)
+            || is_in_mdx_comment(ctx, span_start)
     }
 
     #[cfg(test)]
