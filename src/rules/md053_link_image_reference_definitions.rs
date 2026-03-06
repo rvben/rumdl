@@ -253,41 +253,42 @@ impl MD053LinkImageReferenceDefinitions {
                 .push((ref_def.line - 1, ref_def.line - 1)); // Convert to 0-indexed
         }
 
-        // Handle multi-line definitions that might not be fully captured by ctx.reference_defs
+        // Handle multi-line definitions by tracking the last definition seen
         let lines = &ctx.lines;
-        let mut i = 0;
-        while i < lines.len() {
-            let line_info = &lines[i];
-            let line = line_info.content(ctx.content);
+        let mut last_def_line: Option<usize> = None;
+        let mut last_def_id: Option<String> = None;
 
-            // Skip code blocks and front matter using line info
+        for (i, line_info) in lines.iter().enumerate() {
             if line_info.in_code_block || line_info.in_front_matter {
-                i += 1;
+                last_def_line = None;
+                last_def_id = None;
                 continue;
             }
 
-            // Check for multi-line continuation of existing definitions
-            if i > 0 && CONTINUATION_REGEX.is_match(line) {
-                // Find the reference definition this continues
-                let mut def_start = i - 1;
-                while def_start > 0 && !REFERENCE_DEFINITION_REGEX.is_match(lines[def_start].content(ctx.content)) {
-                    def_start -= 1;
-                }
+            let line = line_info.content(ctx.content);
 
-                if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(lines[def_start].content(ctx.content)) {
-                    let ref_id = caps.get(1).unwrap().as_str().trim();
-                    let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
-
-                    // Update the end line for this definition
-                    if let Some(ranges) = definitions.get_mut(&normalized_id)
-                        && let Some(last_range) = ranges.last_mut()
-                        && last_range.0 == def_start
-                    {
-                        last_range.1 = i;
-                    }
+            if let Some(caps) = REFERENCE_DEFINITION_REGEX.captures(line) {
+                // Track this definition for potential continuation
+                let ref_id = caps.get(1).unwrap().as_str().trim();
+                let normalized_id = Self::unescape_reference(ref_id).to_lowercase();
+                last_def_line = Some(i);
+                last_def_id = Some(normalized_id);
+            } else if let Some(def_start) = last_def_line
+                && let Some(ref def_id) = last_def_id
+                && CONTINUATION_REGEX.is_match(line)
+            {
+                // Extend the definition's end line
+                if let Some(ranges) = definitions.get_mut(def_id.as_str())
+                    && let Some(last_range) = ranges.last_mut()
+                    && last_range.0 == def_start
+                {
+                    last_range.1 = i;
                 }
+            } else {
+                // Non-continuation, non-definition line resets tracking
+                last_def_line = None;
+                last_def_id = None;
             }
-            i += 1;
         }
         definitions
     }
@@ -304,7 +305,6 @@ impl MD053LinkImageReferenceDefinitions {
             if link.is_reference
                 && let Some(ref_id) = &link.reference_id
             {
-                // Ensure the link itself is not inside a code block line
                 if !ctx.line_info(link.line).is_some_and(|info| info.in_code_block) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
@@ -316,7 +316,6 @@ impl MD053LinkImageReferenceDefinitions {
             if image.is_reference
                 && let Some(ref_id) = &image.reference_id
             {
-                // Ensure the image itself is not inside a code block line
                 if !ctx.line_info(image.line).is_some_and(|info| info.in_code_block) {
                     usages.insert(Self::unescape_reference(ref_id).to_lowercase());
                 }
@@ -324,11 +323,8 @@ impl MD053LinkImageReferenceDefinitions {
         }
 
         // 3. Add usages from footnote references (e.g., [^1], [^note])
-        // pulldown-cmark returns the id without the ^ prefix, but definitions have it
         for footnote_ref in &ctx.footnote_refs {
-            // Ensure the footnote reference is not inside a code block line
             if !ctx.line_info(footnote_ref.line).is_some_and(|info| info.in_code_block) {
-                // Add ^ prefix to match definition format
                 let ref_id = format!("^{}", footnote_ref.id);
                 usages.insert(ref_id.to_lowercase());
             }
@@ -336,33 +332,50 @@ impl MD053LinkImageReferenceDefinitions {
 
         // 4. Find shortcut references [ref] not already handled by DocumentStructure.links
         //    and ensure they are not within code spans or code blocks.
-        // Cache code spans once before the loop
         let code_spans = ctx.code_spans();
 
+        // Build sorted array of code span byte ranges for binary search
+        let mut span_ranges: Vec<(usize, usize)> = code_spans
+            .iter()
+            .map(|span| (span.byte_offset, span.byte_end))
+            .collect();
+        span_ranges.sort_unstable_by_key(|&(start, _)| start);
+
         for line_info in ctx.lines.iter() {
-            // Skip lines in code blocks or front matter
             if line_info.in_code_block || line_info.in_front_matter {
                 continue;
             }
 
-            // Skip lines that are reference definitions (start with [ref]: at beginning)
-            if REFERENCE_DEFINITION_REGEX.is_match(line_info.content(ctx.content)) {
+            let line_content = line_info.content(ctx.content);
+
+            // Quick check: skip lines without '[' (no possible references)
+            if !line_content.contains('[') {
                 continue;
             }
 
-            // Find potential shortcut references
-            for caps in SHORTCUT_REFERENCE_REGEX
-                .captures_iter(line_info.content(ctx.content))
-                .flatten()
-            {
+            // Skip lines that are reference definitions
+            if REFERENCE_DEFINITION_REGEX.is_match(line_content) {
+                continue;
+            }
+
+            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line_content).flatten() {
                 if let Some(full_match) = caps.get(0)
                     && let Some(ref_id_match) = caps.get(1)
                 {
-                    // Check if the match is within a code span
                     let match_byte_offset = line_info.byte_offset + full_match.start();
-                    let in_code_span = code_spans
-                        .iter()
-                        .any(|span| match_byte_offset >= span.byte_offset && match_byte_offset < span.byte_end);
+
+                    // Binary search for code span containment
+                    let in_code_span = span_ranges
+                        .binary_search_by(|&(start, end)| {
+                            if match_byte_offset < start {
+                                std::cmp::Ordering::Greater
+                            } else if match_byte_offset >= end {
+                                std::cmp::Ordering::Less
+                            } else {
+                                std::cmp::Ordering::Equal
+                            }
+                        })
+                        .is_ok();
 
                     if !in_code_span {
                         let ref_id = ref_id_match.as_str().trim();
@@ -375,11 +388,6 @@ impl MD053LinkImageReferenceDefinitions {
                 }
             }
         }
-
-        // NOTE: The complex recursive loop trying to find references within definitions
-        // has been removed as it's not standard Markdown behavior for finding *usages*.
-        // Usages refer to `[text][ref]`, `![alt][ref]`, `[ref]`, etc., in the main content,
-        // not references potentially embedded within the URL or title of another definition.
 
         usages
     }
@@ -1127,5 +1135,75 @@ mod tests {
             MD053LinkImageReferenceDefinitions::should_skip_pattern("the project root: path/to/dir"),
             "Prose-like descriptions SHOULD be skipped"
         );
+    }
+
+    #[test]
+    fn test_many_code_spans_with_shortcut_references() {
+        // Exercises the binary search path for code span containment.
+        // With many code spans, linear search would be slow; binary search stays O(log n).
+        let rule = MD053LinkImageReferenceDefinitions::new();
+
+        let mut lines = Vec::new();
+        // Generate many code spans interleaved with shortcut references
+        for i in 0..100 {
+            lines.push(format!("Some `code{i}` text and [used_ref] here"));
+        }
+        lines.push(String::new());
+        lines.push("[used_ref]: https://example.com".to_string());
+        lines.push("[unused_ref]: https://unused.com".to_string());
+
+        let content = lines.join("\n");
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // used_ref is referenced 100 times, so only unused_ref should be reported
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("unused_ref"));
+    }
+
+    #[test]
+    fn test_multiline_definition_continuation_tracking() {
+        // Exercises the forward-tracking for multi-line definitions.
+        // Definitions with title on the next line should be treated as a single unit.
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+[ref1]: https://example.com
+   \"Title on next line\"
+
+[ref2]: https://example2.com
+   \"Another title\"
+
+Some text using [ref1] here.
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // ref1 is used, ref2 is not
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("ref2"));
+    }
+
+    #[test]
+    fn test_code_span_at_boundary_does_not_hide_reference() {
+        // A reference immediately after a code span should still be detected
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "`code`[ref]\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // [ref] is outside the code span, so it counts as a usage
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_reference_inside_code_span_not_counted() {
+        // A reference inside a code span should NOT be counted as usage
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "Use `[ref]` in code\n\n[ref]: https://example.com";
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // [ref] is inside a code span, so the definition is unused
+        assert_eq!(result.len(), 1);
     }
 }
