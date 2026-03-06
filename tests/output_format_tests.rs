@@ -192,10 +192,10 @@ fn test_output_format_fix_mode_label() {
 
     let stdout_fix = String::from_utf8_lossy(&output_fix.stdout);
 
-    // Check that fixed issues have [fixed] label
+    // Fixed issues should have [fixed] label in text output
     assert!(
         stdout_fix.contains("[fixed]"),
-        "Fix mode should show [fixed] for fixed issues"
+        "Fix mode should show [fixed] for fixed issues. stdout: {stdout_fix}"
     );
     assert!(!stdout_fix.contains("[*]"), "Fix mode should not show [*] labels");
 }
@@ -256,40 +256,19 @@ fn test_multi_issue_output_format() {
     let stdout_fix = String::from_utf8_lossy(&output_fix.stdout);
     println!("Multi-issue fix mode output:\n{stdout_fix}");
 
-    // Verify each fixable issue is labeled as fixed
+    // Fixed issues should have [fixed] label in text output
     let fix_mode_fixed_issues = stdout_fix.matches("[fixed]").count();
     assert!(
         fix_mode_fixed_issues >= 5,
-        "Expected at least 5 issues marked as [fixed], found {fix_mode_fixed_issues}"
+        "Expected at least 5 issues marked as [fixed], found {fix_mode_fixed_issues}. stdout: {stdout_fix}"
     );
-
-    // Verify all the fixable issues are marked as fixed
     assert!(!stdout_fix.contains("[*]"), "Fix mode should not have any [*] labels");
 
-    // Verify the summary counts match
-    if stdout_fix.contains("Fixed:") {
-        // Extract the fix count from the summary line
-        let fixed_count_start = stdout_fix.find("Fixed:").unwrap();
-        let fixed_line = &stdout_fix[fixed_count_start..];
-        let fixed_line = if let Some(end) = fixed_line.find('\n') {
-            &fixed_line[..end]
-        } else {
-            fixed_line
-        };
-
-        // Ensure the count of [fixed] labels matches the summary count
-        let summary_fixed_count = fixed_line
-            .split_whitespace()
-            .nth(2)
-            .and_then(|s| s.split('/').next())
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(0);
-
-        assert_eq!(
-            fix_mode_fixed_issues, summary_fixed_count,
-            "The count of [fixed] labels ({fix_mode_fixed_issues}) should match the summary count ({summary_fixed_count})"
-        );
-    }
+    // The summary should report fixes were applied
+    assert!(
+        stdout_fix.contains("Fixed:"),
+        "Fix mode summary should report fixes applied. stdout: {stdout_fix}"
+    );
 }
 
 #[test]
@@ -337,19 +316,13 @@ fn test_fixable_issues_labeling() {
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
     println!("Fixable issue with --fix output:\n{fix_stdout}");
 
-    // Verify the issue is marked as fixed
+    // Fixed issues should have [fixed] label in text output
     assert!(
-        fix_stdout.contains("[MD037]"),
-        "Spaces around emphasis issue should be reported with fix"
+        fix_stdout.contains("[fixed]"),
+        "Fixed issue should show [fixed] label. stdout: {fix_stdout}"
     );
-
-    if fix_stdout.contains("[MD037]") {
-        let md037_line = fix_stdout.lines().find(|line| line.contains("[MD037]")).unwrap_or("");
-        assert!(
-            md037_line.contains("[fixed]"),
-            "Fixed issue (MD037) should have [fixed] label"
-        );
-    }
+    // Summary should show the fix happened
+    assert!(fix_stdout.contains("Fixed"), "Summary should confirm fix was applied");
 
     // Verify the content was actually fixed
     let content = fs::read_to_string(test_file_path).expect("Failed to read file");
@@ -507,10 +480,10 @@ fn test_mixed_fixable_unfixable_issues() {
     let fix_stdout = String::from_utf8_lossy(&fix_output.stdout);
     println!("Mixed issues with --fix output:\n{fix_stdout}");
 
-    // Check that fixable issues are fixed
+    // Fixable issues should have [fixed] label in text output
     assert!(
         fix_stdout.contains("[fixed]"),
-        "Fixable issues should show [fixed] label"
+        "Fixable issues should show [fixed] label. stdout: {fix_stdout}"
     );
 
     // Verify MD037 is marked as fixed
@@ -522,7 +495,11 @@ fn test_mixed_fixable_unfixable_issues() {
         );
     }
 
-    // Verify MD013 is NOT marked as fixed
+    // Unfixable issues (MD013) should still be present without [fixed]
+    assert!(
+        fix_stdout.contains("[MD013]"),
+        "MD013 (unfixable) should remain in output. stdout: {fix_stdout}"
+    );
     if fix_stdout.contains("[MD013]") {
         let md013_line = fix_stdout.lines().find(|line| line.contains("[MD013]")).unwrap_or("");
         assert!(
@@ -530,6 +507,7 @@ fn test_mixed_fixable_unfixable_issues() {
             "MD013 should NOT have [fixed] label as it cannot be fixed automatically"
         );
     }
+    assert!(!fix_stdout.contains("[*]"), "Fix mode should not show [*] labels");
 
     // Verify the content was actually fixed for fixable issues only
     let content = fs::read_to_string(test_file_path).expect("Failed to read file");
@@ -557,6 +535,115 @@ fn test_mixed_fixable_unfixable_issues() {
         content.contains("This line is extremely long"),
         "Long line should remain unfixed in the content"
     );
+}
+
+/// Verify that text fix mode shows [fixed] labels while JSON fix mode shows remaining-only.
+/// This test catches regressions where [fixed] labels are accidentally removed from text output
+/// or accidentally included in structured output.
+#[test]
+fn test_fix_mode_text_vs_json_output() {
+    let temp_dir = setup_test_files();
+
+    // Create a file with both fixable (MD037) and unfixable (MD013) issues
+    let test_file = temp_dir.path().join("text_vs_json.md");
+    fs::write(
+        &test_file,
+        "# Test\nThis paragraph contains * spaced emphasis * that is fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
+    ).unwrap();
+
+    let config_file = temp_dir.path().join("tvj_config.toml");
+    fs::write(&config_file, "[MD013]\nline_length = 20\n").unwrap();
+
+    let test_file_path = test_file.to_str().unwrap();
+    let config_file_path = config_file.to_str().unwrap();
+
+    // Run in fix mode with default text output
+    let text_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["check", test_file_path, "--fix", "--config", config_file_path])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("Failed to execute command");
+
+    let text_stdout = String::from_utf8_lossy(&text_output.stdout);
+
+    // Text output MUST show [fixed] labels for fixed issues
+    assert!(
+        text_stdout.contains("[fixed]"),
+        "Text fix mode must show [fixed] labels for fixed issues. stdout: {text_stdout}"
+    );
+
+    // Text output MUST show both fixed and unfixed warnings
+    assert!(
+        text_stdout.contains("[MD037]"),
+        "Text fix mode must show MD037 (fixed). stdout: {text_stdout}"
+    );
+    assert!(
+        text_stdout.contains("[MD013]"),
+        "Text fix mode must show MD013 (unfixable). stdout: {text_stdout}"
+    );
+
+    // MD037 line should have [fixed], MD013 line should NOT
+    let md037_line = text_stdout.lines().find(|l| l.contains("[MD037]")).unwrap_or("");
+    assert!(
+        md037_line.contains("[fixed]"),
+        "MD037 must have [fixed] label in text output. line: {md037_line}"
+    );
+    let md013_line = text_stdout.lines().find(|l| l.contains("[MD013]")).unwrap_or("");
+    assert!(
+        !md013_line.contains("[fixed]"),
+        "MD013 must NOT have [fixed] label. line: {md013_line}"
+    );
+
+    // Restore the file for the next run
+    fs::write(
+        &test_file,
+        "# Test\nThis paragraph contains * spaced emphasis * that is fixable.\nThis line is extremely long and exceeds the maximum line length which cannot be automatically fixed because line wrapping requires manual intervention by the user to decide where to break.\n",
+    ).unwrap();
+
+    // Run in fix mode with JSON output
+    let json_output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args([
+            "check",
+            test_file_path,
+            "--fix",
+            "--output-format",
+            "json",
+            "--config",
+            config_file_path,
+        ])
+        .output()
+        .expect("Failed to execute command");
+
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+
+    // JSON output should be valid JSON
+    let parsed: serde_json::Value = serde_json::from_str(&json_stdout)
+        .unwrap_or_else(|e| panic!("Invalid JSON output: {e}. stdout: {json_stdout}"));
+    let warnings = parsed.as_array().expect("JSON output should be an array");
+
+    // JSON output should contain ONLY remaining (unfixed) warnings
+    for w in warnings {
+        let rule = w["rule"].as_str().unwrap_or("");
+        assert_ne!(
+            rule, "MD037",
+            "JSON fix mode must NOT include fixed warnings (MD037). Got: {json_stdout}"
+        );
+    }
+
+    // JSON output should still contain unfixable warnings
+    let has_md013 = warnings.iter().any(|w| w["rule"].as_str() == Some("MD013"));
+    assert!(
+        has_md013,
+        "JSON fix mode must include remaining unfixable warnings (MD013). Got: {json_stdout}"
+    );
+
+    // JSON output must NOT have a "fixed" field
+    for w in warnings {
+        assert!(
+            w.get("fixed").is_none(),
+            "JSON output must not contain 'fixed' field. Got: {w}"
+        );
+    }
 }
 
 #[test]

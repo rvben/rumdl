@@ -225,16 +225,94 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 }
             }
 
-            // Only show diagnostics to stderr unless silent
-            if !silent && !remaining_warnings.is_empty() {
-                let formatter = output_format.create_formatter();
-                let formatted = formatter.format_warnings_with_content(&remaining_warnings, display_filename, &content);
-                eprintln!("{formatted}");
-                eprintln!(
-                    "\n{} issue(s) fixed, {} issue(s) remaining",
-                    warnings_fixed,
-                    remaining_warnings.len()
-                );
+            // Diagnostics always go to stderr in fix mode (stdout has fixed content)
+            let fix_writer = OutputWriter::new(true, quiet, silent);
+            if !remaining_warnings.is_empty() {
+                match output_format {
+                    // Batch formats: remaining-only warnings
+                    OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
+                        let file_warnings = vec![(display_filename.to_string(), remaining_warnings.clone())];
+                        let output = match output_format {
+                            OutputFormat::Json => {
+                                rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings)
+                            }
+                            OutputFormat::GitLab => {
+                                rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings)
+                            }
+                            OutputFormat::Sarif => {
+                                rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings)
+                            }
+                            OutputFormat::Junit => {
+                                rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0)
+                            }
+                            _ => unreachable!(),
+                        };
+                        fix_writer.writeln(&output).unwrap_or_else(|e| {
+                            eprintln!("Error writing output: {e}");
+                        });
+                    }
+                    // Human-readable text formats: all warnings with [fixed] labels
+                    OutputFormat::Text | OutputFormat::Full => {
+                        let mut output = String::new();
+                        for warning in &all_warnings {
+                            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+                            let was_fixed = warning.fix.is_some()
+                                && !remaining_warnings.iter().any(|w| {
+                                    w.line == warning.line
+                                        && w.column == warning.column
+                                        && w.rule_name == warning.rule_name
+                                        && w.message == warning.message
+                                });
+
+                            let fix_indicator = if was_fixed {
+                                " [fixed]".green().to_string()
+                            } else {
+                                String::new()
+                            };
+
+                            use std::fmt::Write;
+                            writeln!(
+                                output,
+                                "{}:{}:{}: {} {}{}",
+                                display_filename.blue().underline(),
+                                warning.line.to_string().cyan(),
+                                warning.column.to_string().cyan(),
+                                format!("[{rule_name:5}]").yellow(),
+                                warning.message,
+                                fix_indicator
+                            )
+                            .ok();
+                        }
+
+                        if output.ends_with('\n') {
+                            output.pop();
+                        }
+                        fix_writer.writeln(&output).unwrap_or_else(|e| {
+                            eprintln!("Error writing output: {e}");
+                        });
+                    }
+                    // Other streaming formats: use their formatter with remaining-only
+                    _ => {
+                        let formatter = output_format.create_formatter();
+                        let formatted = formatter.format_warnings_with_content(
+                            &remaining_warnings,
+                            display_filename,
+                            &fixed_content,
+                        );
+                        fix_writer.writeln(&formatted).unwrap_or_else(|e| {
+                            eprintln!("Error writing output: {e}");
+                        });
+                    }
+                }
+                if !quiet {
+                    fix_writer
+                        .writeln(&format!(
+                            "\n{} issue(s) fixed, {} issue(s) remaining",
+                            warnings_fixed,
+                            remaining_warnings.len()
+                        ))
+                        .ok();
+                }
             }
 
             if args.fix_mode != crate::FixMode::Format {
@@ -264,14 +342,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     match output_format {
         OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
             let file_warnings = vec![(display_filename.to_string(), all_warnings)];
-            let file_warnings_with_status: Vec<(String, Vec<rumdl_lib::rule::LintWarning>, Vec<bool>)> = file_warnings
-                .iter()
-                .map(|(path, warnings)| (path.clone(), warnings.clone(), vec![]))
-                .collect();
             let output = match output_format {
-                OutputFormat::Json => {
-                    rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings_with_status, false)
-                }
+                OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
                 OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
                 OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
                 OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),

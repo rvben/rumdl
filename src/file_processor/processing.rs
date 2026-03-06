@@ -22,10 +22,9 @@ pub struct FileProcessResult {
     pub issues_found: usize,
     pub issues_fixed: usize,
     pub fixable_issues: usize,
+    /// In fix mode, contains only remaining (unfixed) warnings.
+    /// In check mode, contains all warnings.
     pub warnings: Vec<rumdl_lib::rule::LintWarning>,
-    /// Per-warning fixed status. Empty in check mode; in fix mode, each entry
-    /// corresponds to the warning at the same index in `warnings`.
-    pub fixed_status: Vec<bool>,
     pub file_index: rumdl_lib::workspace_index::FileIndex,
 }
 
@@ -123,7 +122,6 @@ pub fn process_file_with_formatter(
             issues_fixed: 0,
             fixable_issues: 0,
             warnings: Vec::new(),
-            fixed_status: Vec::new(),
             file_index,
         };
     }
@@ -147,7 +145,6 @@ pub fn process_file_with_formatter(
                 issues_fixed: 0,
                 fixable_issues: 0,
                 warnings: Vec::new(),
-                fixed_status: Vec::new(),
                 file_index,
             };
         }
@@ -257,7 +254,6 @@ pub fn process_file_with_formatter(
             issues_fixed: warnings_fixed,
             fixable_issues: fixable_warnings,
             warnings: all_warnings,
-            fixed_status: Vec::new(),
             file_index,
         };
     } else if fix_mode != crate::FixMode::Check {
@@ -337,7 +333,6 @@ pub fn process_file_with_formatter(
                 issues_fixed: warnings_fixed,
                 fixable_issues: 0,
                 warnings: Vec::new(),
-                fixed_status: Vec::new(),
                 file_index,
             };
         }
@@ -381,9 +376,7 @@ pub fn process_file_with_formatter(
         }
 
         // Compute per-warning fixed status by comparing pre-fix warnings
-        // against post-fix remaining warnings. Uses message text as a
-        // disambiguator when multiple warnings from the same rule share
-        // identical line:column positions (e.g. two MD034 bare URLs on one line).
+        // against post-fix remaining warnings
         let fixed_status: Vec<bool> = all_warnings
             .iter()
             .map(|warning| {
@@ -400,49 +393,68 @@ pub fn process_file_with_formatter(
             })
             .collect();
 
-        // In fix mode, show warnings with [fixed] for issues that were fixed
+        // Show fix results in streaming output
         if !silent {
-            let mut output = String::new();
-            for (warning, &was_fixed) in all_warnings.iter().zip(&fixed_status) {
-                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+            use rumdl_lib::output::OutputFormat;
+            match output_format {
+                // Human-readable text formats: show all warnings with [fixed] labels
+                OutputFormat::Text | OutputFormat::Full => {
+                    let mut output = String::new();
+                    for (warning, &was_fixed) in all_warnings.iter().zip(&fixed_status) {
+                        let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
 
-                let fix_indicator = if was_fixed {
-                    " [fixed]".green().to_string()
-                } else {
-                    String::new()
-                };
+                        let fix_indicator = if was_fixed {
+                            " [fixed]".green().to_string()
+                        } else {
+                            String::new()
+                        };
 
-                let line = format!(
-                    "{}:{}:{}: {} {}{}",
-                    display_path.blue().underline(),
-                    warning.line.to_string().cyan(),
-                    warning.column.to_string().cyan(),
-                    format!("[{rule_name:5}]").yellow(),
-                    warning.message,
-                    fix_indicator
-                );
+                        let line = format!(
+                            "{}:{}:{}: {} {}{}",
+                            display_path.blue().underline(),
+                            warning.line.to_string().cyan(),
+                            warning.column.to_string().cyan(),
+                            format!("[{rule_name:5}]").yellow(),
+                            warning.message,
+                            fix_indicator
+                        );
 
-                output.push_str(&line);
-                output.push('\n');
-            }
+                        output.push_str(&line);
+                        output.push('\n');
+                    }
 
-            if !output.is_empty() {
-                output.pop(); // Remove trailing newline
-                output_writer.writeln(&output).unwrap_or_else(|e| {
-                    eprintln!("Error writing output: {e}");
-                });
+                    if !output.is_empty() {
+                        output.pop(); // Remove trailing newline
+                        output_writer.writeln(&output).unwrap_or_else(|e| {
+                            eprintln!("Error writing output: {e}");
+                        });
+                    }
+                }
+                // Batch formats are handled by check_runner (silent=true suppresses this path)
+                OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {}
+                // Other streaming formats: use their formatter with remaining-only warnings
+                _ => {
+                    if !remaining_warnings.is_empty() {
+                        let formatted =
+                            formatter.format_warnings_with_content(&remaining_warnings, &display_path, &content);
+                        if !formatted.is_empty() {
+                            output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                                eprintln!("Error writing output: {e}");
+                            });
+                        }
+                    }
+                }
             }
         }
 
-        // Return false (no issues) if no warnings remain after fixing, true otherwise
-        // This follows Ruff's convention: exit 0 if all violations are fixed
+        // Return remaining warnings for batch format collection
+        // Exit 0 if all violations are fixed (Ruff convention)
         return FileProcessResult {
             has_issues: !remaining_warnings.is_empty(),
             issues_found: total_warnings,
             issues_fixed: warnings_fixed,
             fixable_issues: fixable_warnings,
-            warnings: all_warnings,
-            fixed_status,
+            warnings: remaining_warnings,
             file_index,
         };
     }
@@ -453,7 +465,6 @@ pub fn process_file_with_formatter(
         issues_fixed: warnings_fixed,
         fixable_issues: fixable_warnings,
         warnings: all_warnings,
-        fixed_status: Vec::new(),
         file_index,
     }
 }

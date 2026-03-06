@@ -1649,9 +1649,74 @@ fn test_stdin_formatting_with_remaining_issues() {
     // MD001 and MD003 add blank lines around headings
     // Note: Output will have a trailing newline even if input doesn't
     assert_eq!(stdout, "# Test\n\n## Test\n\n## Test\n");
+    // Stderr should show [fixed] labels for fixed issues in text mode
+    assert!(
+        stderr.contains("[fixed]"),
+        "Stdin text fix mode must show [fixed] labels on stderr. stderr: {stderr}"
+    );
     // Should report remaining issues on stderr
     assert!(stderr.contains("MD024"));
     assert!(stderr.contains("remaining"));
+    // Should exit with error due to remaining issues
+    assert!(!output.status.success());
+}
+
+#[test]
+fn test_stdin_fix_with_json_output_format() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+
+    // Stdin with fixable (MD009 trailing spaces) and unfixable (MD024 duplicate heading) issues
+    let input = "# Test   \n## Test\n# Test";
+    let mut cmd = Command::new(rumdl_exe);
+    cmd.args(["check", "--stdin", "--fix", "--output-format", "json"]);
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn().expect("Failed to spawn command");
+
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("Failed to open stdin");
+    stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
+    drop(stdin);
+
+    let output = child.wait_with_output().expect("Failed to wait for command");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Fixed content on stdout (not JSON — stdout is the fixed document)
+    assert!(!stdout.is_empty(), "Fixed content should appear on stdout");
+    assert!(
+        !stdout.starts_with('['),
+        "Stdout should be fixed markdown, not JSON. Got: {stdout}"
+    );
+
+    // Remaining warnings on stderr should be valid JSON array
+    // Parse just the JSON portion (ignore the summary line)
+    let json_part = stderr
+        .lines()
+        .take_while(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !json_part.is_empty() {
+        let parsed: Result<serde_json::Value, _> = serde_json::from_str(&json_part);
+        assert!(
+            parsed.is_ok(),
+            "Remaining warnings on stderr should be valid JSON. Got: {stderr}"
+        );
+        let arr = parsed.unwrap();
+        assert!(arr.is_array(), "JSON output should be an array");
+        // Only remaining (unfixable) warnings should appear
+        let warnings = arr.as_array().unwrap();
+        for w in warnings {
+            let rule = w["rule"].as_str().unwrap_or("");
+            assert_ne!(
+                rule, "MD009",
+                "Fixed rule MD009 should not appear in remaining JSON output"
+            );
+        }
+    }
+
     // Should exit with error due to remaining issues
     assert!(!output.status.success());
 }
@@ -2209,11 +2274,28 @@ mod issue197_exit_code {
         let fix_stderr = String::from_utf8_lossy(&fix_output.stderr);
         let exit_code = fix_output.status.code().unwrap_or(-1);
 
-        // Verify MD007 was fixed
+        // MD007 should be shown with [fixed] label (it was fixed)
         assert!(
-            fix_stdout.contains("[fixed]"),
-            "MD007 should be fixed. stdout: {fix_stdout}"
+            fix_stdout.contains("MD007"),
+            "MD007 should appear in output. stdout: {fix_stdout}"
         );
+        if let Some(md007_line) = fix_stdout.lines().find(|l| l.contains("MD007")) {
+            assert!(
+                md007_line.contains("[fixed]"),
+                "MD007 should have [fixed] label. line: {md007_line}"
+            );
+        }
+        // MD041 should remain without [fixed] (unfixable)
+        assert!(
+            fix_stdout.contains("MD041"),
+            "MD041 should remain in output (unfixable). stdout: {fix_stdout}"
+        );
+        if let Some(md041_line) = fix_stdout.lines().find(|l| l.contains("MD041")) {
+            assert!(
+                !md041_line.contains("[fixed]"),
+                "MD041 should NOT have [fixed] label. line: {md041_line}"
+            );
+        }
 
         // Verify exit code is 1 because MD041 still remains
         // This proves the implementation re-lints after fixing and catches remaining issues
