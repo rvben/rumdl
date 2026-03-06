@@ -145,16 +145,15 @@ fn test_list_with_standalone_code_block() {
 
 #[test]
 fn test_list_with_indented_code_block_continuation() {
-    // Code blocks indented as list continuation - current behavior creates 2 blocks
-    // This is because 6-space indented code after blank line is treated as standalone
+    // Indented code block (6 spaces = 4 beyond list content indent) is list continuation.
+    // CommonMark treats this as part of Item 1, so the list remains one block.
     let content = "- Item 1\n\n      code line 1\n      code line 2\n\n- Item 2";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
-    // Current implementation treats this as 2 separate blocks
     assert_eq!(
         ctx.list_blocks.len(),
-        2,
-        "Indented code block currently breaks list (existing behavior)"
+        1,
+        "Indented code block within list item should not split the list"
     );
 }
 

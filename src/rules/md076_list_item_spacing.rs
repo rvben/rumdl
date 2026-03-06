@@ -1116,6 +1116,186 @@ mod tests {
         );
     }
 
+    // ── Issue #500: code block inside list item splits list blocks ─────
+
+    #[test]
+    fn code_block_in_second_item_detects_inconsistency() {
+        // A code block inside item 2 must not split the list into separate blocks.
+        // Items 1-2 are tight, items 3-4 are loose → inconsistent.
+        let content = "\
+# Test
+
+- Lorem ipsum dolor sit amet.
+- Lorem ipsum dolor sit amet.
+
+    ```yaml
+    hello: world
+    ```
+
+- Lorem ipsum dolor sit amet.
+
+- Lorem ipsum dolor sit amet.
+";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            !warnings.is_empty(),
+            "Should detect inconsistent spacing when code block is inside a list item"
+        );
+    }
+
+    #[test]
+    fn code_block_in_item_all_tight_no_warnings() {
+        // All non-structural gaps are tight → consistent, no warnings.
+        let content = "\
+- Item 1
+- Item 2
+
+    ```yaml
+    hello: world
+    ```
+
+- Item 3
+- Item 4
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Consistent).is_empty(),
+            "All tight gaps with structural code block should not warn"
+        );
+    }
+
+    #[test]
+    fn code_block_in_item_all_loose_no_warnings() {
+        // All non-structural gaps are loose → consistent, no warnings.
+        let content = "\
+- Item 1
+
+- Item 2
+
+    ```yaml
+    hello: world
+    ```
+
+- Item 3
+
+- Item 4
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Consistent).is_empty(),
+            "All loose gaps with structural code block should not warn"
+        );
+    }
+
+    #[test]
+    fn code_block_in_ordered_list_detects_inconsistency() {
+        let content = "\
+1. First item
+1. Second item
+
+    ```json
+    {\"key\": \"value\"}
+    ```
+
+1. Third item
+
+1. Fourth item
+";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            !warnings.is_empty(),
+            "Ordered list with code block should still detect inconsistency"
+        );
+    }
+
+    #[test]
+    fn code_block_in_item_fix_adds_missing_blanks() {
+        // Items 1-2 are tight, items 3-4 are loose → majority loose → fix adds blank before item 2
+        let content = "\
+- Item 1
+- Item 2
+
+    ```yaml
+    code: here
+    ```
+
+- Item 3
+
+- Item 4
+";
+        let fixed = fix(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            fixed.contains("- Item 1\n\n- Item 2"),
+            "Fix should add blank line between items 1 and 2"
+        );
+    }
+
+    #[test]
+    fn tilde_code_block_in_item_detects_inconsistency() {
+        let content = "\
+- Item 1
+- Item 2
+
+    ~~~
+    code
+    ~~~
+
+- Item 3
+
+- Item 4
+";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            !warnings.is_empty(),
+            "Tilde code block inside item should not prevent inconsistency detection"
+        );
+    }
+
+    #[test]
+    fn multiple_code_blocks_all_tight_no_warnings() {
+        // All non-structural gaps are tight → consistent.
+        let content = "\
+- Item 1
+
+    ```
+    code1
+    ```
+
+- Item 2
+
+    ```
+    code2
+    ```
+
+- Item 3
+- Item 4
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Consistent).is_empty(),
+            "All non-structural gaps are tight, so list is consistent"
+        );
+    }
+
+    #[test]
+    fn code_block_with_mixed_genuine_gaps_warns() {
+        // Items 1-2 structural, 2-3 loose, 3-4 tight → genuine inconsistency
+        let content = "\
+- Item 1
+
+    ```
+    code1
+    ```
+
+- Item 2
+
+- Item 3
+- Item 4
+";
+        let warnings = check(content, ListItemSpacingStyle::Consistent);
+        assert!(
+            !warnings.is_empty(),
+            "Mixed genuine gaps (loose + tight) with structural code block should still warn"
+        );
+    }
+
     // ── Config schema ──────────────────────────────────────────────────
 
     #[test]

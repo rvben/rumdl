@@ -483,7 +483,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                             next_line.in_code_block
                         );
                     }
-                    if !next_line.in_code_block && effective_indent >= adjusted_min_continuation {
+                    if effective_indent >= adjusted_min_continuation {
                         found_continuation = true;
                     }
                     // Check if followed by another list item at the same level
