@@ -40,7 +40,7 @@ repos:
 
       - id: cargo-lock-check
         name: check Cargo.lock is up-to-date
-        entry: sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
+        entry: mise exec -- sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
         language: system
         files: ^Cargo\.(toml|lock)$
         pass_filenames: false
@@ -80,7 +80,7 @@ repos:
     hooks:
       - id: rumdl
         name: rumdl check
-        entry: cargo run --quiet -- check
+        entry: mise exec -- cargo run --quiet -- check
         language: system
         files: \.md$
         exclude: ^(test_tmp|benchmark/test-data|docs/temp|__tests__|CHANGELOG\.md)
@@ -116,7 +116,7 @@ repos:
 
       - id: cargo-lock-check-push
         name: verify Cargo.lock is committed and up-to-date
-        entry: sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
+        entry: mise exec -- sh -c 'cargo metadata --locked --format-version 1 --no-deps >/dev/null'
         language: system
         files: ^Cargo\.(toml|lock)$
         pass_filenames: false
