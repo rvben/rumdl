@@ -15,7 +15,7 @@ Thank you for your interest in contributing to rumdl! This document provides gui
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) 1.89.0 or later
+- [Rust](https://rustup.rs/) 1.94.0 or later
 - [mise](https://mise.jdx.dev/) for development tool management (recommended)
 
 ### Quick Start
