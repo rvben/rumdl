@@ -167,8 +167,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         .flat_map(|(gi, g)| g.files.iter().map(move |f| (gi, f.as_str())))
         .collect();
 
-    // For batch formats, collect (display_path, warnings) tuples
-    let mut batch_file_warnings: Vec<(String, Vec<rumdl_lib::rule::LintWarning>)> = Vec::new();
+    // For batch formats, collect (display_path, warnings, fixed_status) tuples
+    // fixed_status is empty when not in fix mode
+    let mut batch_file_warnings: Vec<(String, Vec<rumdl_lib::rule::LintWarning>, Vec<bool>)> = Vec::new();
 
     let (
         mut has_issues,
@@ -217,7 +218,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut total_fixable_issues = 0;
         let total_files_processed = results.len();
 
-        for (file_path, (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, file_index)) in results
+        for (
+            file_path,
+            (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, fixed_status, file_index),
+        ) in results
         {
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
@@ -253,7 +257,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 } else {
                     crate::file_processor::to_display_path(&file_path, project_root)
                 };
-                batch_file_warnings.push((display_path, warnings.clone()));
+                batch_file_warnings.push((display_path, warnings.clone(), fixed_status));
             }
 
             if args.statistics {
@@ -290,7 +294,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
         for &(gi, file_path) in &file_tasks {
             let group = &config_groups[gi];
-            let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, file_index) =
+            let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, fixed_status, file_index) =
                 crate::file_processor::process_file_with_formatter(
                     file_path,
                     &group.rules,
@@ -347,7 +351,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 } else {
                     crate::file_processor::to_display_path(file_path, project_root)
                 };
-                batch_file_warnings.push((display_path, warnings.clone()));
+                batch_file_warnings.push((display_path, warnings.clone(), fixed_status));
             }
 
             if args.statistics {
@@ -452,11 +456,16 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 };
 
                 if needs_collection {
-                    // Collect cross-file warnings for batch output
-                    if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(p, _)| p == &display_path) {
+                    // Collect cross-file warnings for batch output (cross-file warnings are never fixed)
+                    if let Some((_, warnings, fixed)) =
+                        batch_file_warnings.iter_mut().find(|(p, _, _)| p == &display_path)
+                    {
+                        let extra_count = cross_file_warnings.len();
                         warnings.extend(cross_file_warnings.clone());
+                        fixed.extend(std::iter::repeat(false).take(extra_count));
                     } else {
-                        batch_file_warnings.push((display_path, cross_file_warnings.clone()));
+                        let count = cross_file_warnings.len();
+                        batch_file_warnings.push((display_path, cross_file_warnings.clone(), vec![false; count]));
                     }
                 } else {
                     // Stream cross-file warnings immediately
@@ -493,15 +502,25 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
     // Emit batch output for collection formats
     if needs_collection {
+        let fix_mode_active = args.fix_mode != crate::FixMode::Check;
         let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        // Strip fixed_status for formatters that don't use it
+        let warnings_without_status: Vec<(String, Vec<rumdl_lib::rule::LintWarning>)> = batch_file_warnings
+            .iter()
+            .map(|(path, warnings, _)| (path.clone(), warnings.clone()))
+            .collect();
+
         let output = match output_format {
             OutputFormat::Json => {
-                rumdl_lib::output::formatters::json::format_all_warnings_as_json(&batch_file_warnings)
+                rumdl_lib::output::formatters::json::format_all_warnings_as_json(&batch_file_warnings, fix_mode_active)
             }
-            OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&batch_file_warnings),
-            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&batch_file_warnings),
+            OutputFormat::GitLab => {
+                rumdl_lib::output::formatters::gitlab::format_gitlab_report(&warnings_without_status)
+            }
+            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&warnings_without_status),
             OutputFormat::Junit => {
-                rumdl_lib::output::formatters::junit::format_junit_report(&batch_file_warnings, duration_ms)
+                rumdl_lib::output::formatters::junit::format_junit_report(&warnings_without_status, duration_ms)
             }
             _ => unreachable!("needs_collection check above guarantees only batch formats here"),
         };

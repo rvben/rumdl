@@ -81,6 +81,7 @@ pub fn process_file_with_formatter(
     usize,
     usize,
     Vec<rumdl_lib::rule::LintWarning>,
+    Vec<bool>,
     rumdl_lib::workspace_index::FileIndex,
 ) {
     let formatter = output_format.create_formatter();
@@ -111,7 +112,7 @@ pub fn process_file_with_formatter(
 
     // In check mode with no warnings, return early
     if total_warnings == 0 && fix_mode == crate::FixMode::Check && !diff {
-        return (false, 0, 0, 0, Vec::new(), file_index);
+        return (false, 0, 0, 0, Vec::new(), Vec::new(), file_index);
     }
 
     // In fix mode with no warnings to fix, check if there are embedded markdown blocks to format
@@ -127,7 +128,7 @@ pub fn process_file_with_formatter(
         let has_code_block_tools = config.code_block_tools.enabled;
 
         if !has_embedded && !has_code_block_tools {
-            return (false, 0, 0, 0, Vec::new(), file_index);
+            return (false, 0, 0, 0, Vec::new(), Vec::new(), file_index);
         }
     }
 
@@ -235,6 +236,7 @@ pub fn process_file_with_formatter(
             warnings_fixed,
             fixable_warnings,
             all_warnings,
+            Vec::new(),
             file_index,
         );
     } else if fix_mode != crate::FixMode::Check {
@@ -308,7 +310,7 @@ pub fn process_file_with_formatter(
         // In this case, return success (no issues) without re-linting, since re-lint
         // doesn't apply per-file-ignores or inline config that the original lint did.
         if total_warnings == 0 {
-            return (false, 0, warnings_fixed, 0, Vec::new(), file_index);
+            return (false, 0, warnings_fixed, 0, Vec::new(), Vec::new(), file_index);
         }
 
         // Re-lint the fixed content to see which warnings remain
@@ -349,31 +351,32 @@ pub fn process_file_with_formatter(
             }
         }
 
-        // In fix mode, show warnings with [fixed] for issues that were fixed
-        if !silent {
-            // Create a custom formatter that shows [fixed] instead of [*]
-            let mut output = String::new();
-            for warning in &all_warnings {
+        // Compute per-warning fixed status
+        let fixed_status: Vec<bool> = all_warnings
+            .iter()
+            .map(|warning| {
                 let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-
-                // Check if the rule is CLI-fixable (config + rule capability)
                 let is_fixable = is_rule_cli_fixable(rules, config, rule_name);
-
-                let was_fixed = warning.fix.is_some()
+                warning.fix.is_some()
                     && is_fixable
                     && !remaining_warnings.iter().any(|w| {
                         w.line == warning.line && w.column == warning.column && w.rule_name == warning.rule_name
-                    });
+                    })
+            })
+            .collect();
 
-                // Show [fixed] only for issues that were actually fixed, nothing otherwise
+        // In fix mode, show warnings with [fixed] for issues that were fixed
+        if !silent {
+            let mut output = String::new();
+            for (warning, &was_fixed) in all_warnings.iter().zip(&fixed_status) {
+                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+
                 let fix_indicator = if was_fixed {
                     " [fixed]".green().to_string()
                 } else {
                     String::new()
                 };
 
-                // Format: file:line:column: [rule] message [fixed/*/]
-                // Use colors similar to TextFormatter
                 let line = format!(
                     "{}:{}:{}: {} {}{}",
                     display_path.blue().underline(),
@@ -404,6 +407,7 @@ pub fn process_file_with_formatter(
             warnings_fixed,
             fixable_warnings,
             all_warnings,
+            fixed_status,
             file_index,
         );
     }
@@ -414,6 +418,7 @@ pub fn process_file_with_formatter(
         warnings_fixed,
         fixable_warnings,
         all_warnings,
+        Vec::new(),
         file_index,
     )
 }

@@ -264,8 +264,14 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     match output_format {
         OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
             let file_warnings = vec![(display_filename.to_string(), all_warnings)];
+            let file_warnings_with_status: Vec<(String, Vec<rumdl_lib::rule::LintWarning>, Vec<bool>)> = file_warnings
+                .iter()
+                .map(|(path, warnings)| (path.clone(), warnings.clone(), vec![]))
+                .collect();
             let output = match output_format {
-                OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
+                OutputFormat::Json => {
+                    rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings_with_status, false)
+                }
                 OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
                 OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
                 OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),

@@ -57,13 +57,16 @@ impl OutputFormatter for JsonFormatter {
     }
 }
 
-/// Helper to format all warnings from multiple files as a single JSON document
-pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>)]) -> String {
+/// Helper to format all warnings from multiple files as a single JSON document.
+///
+/// When `fix_mode` is true, each warning includes a `"fixed"` field indicating
+/// whether it was actually fixed in this run.
+pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>, Vec<bool>)], fix_mode: bool) -> String {
     let mut json_warnings = Vec::new();
 
-    for (file_path, warnings) in all_warnings {
-        for warning in warnings {
-            json_warnings.push(json!({
+    for (file_path, warnings, fixed_status) in all_warnings {
+        for (i, warning) in warnings.iter().enumerate() {
+            let mut entry = json!({
                 "file": file_path,
                 "line": warning.line,
                 "column": warning.column,
@@ -80,7 +83,17 @@ pub fn format_all_warnings_as_json(all_warnings: &[(String, Vec<LintWarning>)]) 
                         "replacement": f.replacement
                     })
                 })
-            }));
+            });
+
+            if fix_mode {
+                let was_fixed = fixed_status.get(i).copied().unwrap_or(false);
+                entry
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("fixed".to_string(), json!(was_fixed));
+            }
+
+            json_warnings.push(entry);
         }
     }
 
@@ -267,7 +280,7 @@ mod tests {
     #[test]
     fn test_format_all_warnings_as_json_empty() {
         let all_warnings = vec![];
-        let output = format_all_warnings_as_json(&all_warnings);
+        let output = format_all_warnings_as_json(&all_warnings, false);
         assert_eq!(output, "[]");
     }
 
@@ -284,13 +297,15 @@ mod tests {
             fix: None,
         }];
 
-        let all_warnings = vec![("test.md".to_string(), warnings)];
-        let output = format_all_warnings_as_json(&all_warnings);
+        let all_warnings = vec![("test.md".to_string(), warnings, vec![])];
+        let output = format_all_warnings_as_json(&all_warnings, false);
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
 
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["file"], "test.md");
         assert_eq!(parsed[0]["rule"], "MD001");
+        // No "fixed" field in check mode
+        assert!(parsed[0].get("fixed").is_none());
     }
 
     #[test]
@@ -332,9 +347,12 @@ mod tests {
             }),
         }];
 
-        let all_warnings = vec![("file1.md".to_string(), warnings1), ("file2.md".to_string(), warnings2)];
+        let all_warnings = vec![
+            ("file1.md".to_string(), warnings1, vec![]),
+            ("file2.md".to_string(), warnings2, vec![]),
+        ];
 
-        let output = format_all_warnings_as_json(&all_warnings);
+        let output = format_all_warnings_as_json(&all_warnings, false);
         let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
 
         assert_eq!(parsed.len(), 3);
@@ -345,6 +363,78 @@ mod tests {
         assert_eq!(parsed[2]["file"], "file2.md");
         assert_eq!(parsed[2]["rule"], "MD003");
         assert_eq!(parsed[2]["fixable"], true);
+    }
+
+    #[test]
+    fn test_format_all_warnings_with_fixed_status() {
+        let warnings = vec![
+            LintWarning {
+                line: 5,
+                column: 1,
+                end_line: 5,
+                end_column: 10,
+                rule_name: Some("MD031".to_string()),
+                message: "No blank line after fenced code block".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 33..33,
+                    replacement: "\n".to_string(),
+                }),
+            },
+            LintWarning {
+                line: 8,
+                column: 81,
+                end_line: 8,
+                end_column: 146,
+                rule_name: Some("MD013".to_string()),
+                message: "Line length exceeds 80 characters".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            },
+        ];
+
+        // In fix mode: first warning was fixed, second was not
+        let fixed_status = vec![true, false];
+        let all_warnings = vec![("test.md".to_string(), warnings, fixed_status)];
+
+        let output = format_all_warnings_as_json(&all_warnings, true);
+        let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed.len(), 2);
+        // First warning: fixed
+        assert_eq!(parsed[0]["rule"], "MD031");
+        assert_eq!(parsed[0]["fixed"], true);
+        assert_eq!(parsed[0]["fixable"], true);
+        // Second warning: not fixed
+        assert_eq!(parsed[1]["rule"], "MD013");
+        assert_eq!(parsed[1]["fixed"], false);
+        assert_eq!(parsed[1]["fixable"], false);
+    }
+
+    #[test]
+    fn test_format_all_warnings_check_mode_no_fixed_field() {
+        let warnings = vec![LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 5,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: 0..5,
+                replacement: "fix".to_string(),
+            }),
+        }];
+
+        // In check mode (fix_mode=false): no "fixed" field
+        let all_warnings = vec![("test.md".to_string(), warnings, vec![])];
+        let output = format_all_warnings_as_json(&all_warnings, false);
+        let parsed: Vec<Value> = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["fixable"], true);
+        assert!(parsed[0].get("fixed").is_none());
     }
 
     #[test]
