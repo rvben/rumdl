@@ -2766,4 +2766,82 @@ mod code_span_slug_tests {
             "Link #__init__self-name should match heading with parens in code span, got: {result:?}"
         );
     }
+
+    #[test]
+    fn test_digit_starting_custom_id_on_non_heading() {
+        // Custom anchor IDs starting with a digit on non-heading lines
+        let content = "Third-Party Library { #3rd-party }\n\n:   Some definition.\n\n[link](#3rd-party)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #3rd-party should match non-heading anchor {{ #3rd-party }}, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_digit_starting_custom_id_on_heading() {
+        // Custom anchor IDs starting with a digit on headings (regression test)
+        let content = "# Third-Party Library { #3rd-party }\n\n[link](#3rd-party)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #3rd-party should match heading anchor {{ #3rd-party }}, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_various_digit_starting_ids() {
+        // Multiple digit-starting IDs with different formats
+        let content = "\
+Section One { #1 }\n\
+\n\
+Section Two { #123-foo }\n\
+\n\
+Section Three { #1st-section }\n\
+\n\
+Section Four { #2nd_item }\n\
+\n\
+[one](#1)\n\
+[two](#123-foo)\n\
+[three](#1st-section)\n\
+[four](#2nd_item)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "All digit-starting anchor links should resolve, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_digit_starting_id_with_class() {
+        // Digit-starting ID combined with a class in attr_list syntax
+        let content = "Term { #3rd-party .glossary }\n\n[link](#3rd-party)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Link #3rd-party should match anchor with class, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_digit_starting_id_invalid_link_still_warns() {
+        // A digit-starting anchor exists but the link points elsewhere
+        let content = "Term { #3rd-party }\n\n[link](#nonexistent)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::new();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Link #nonexistent should still be flagged even with digit-starting anchors present, got: {result:?}"
+        );
+    }
 }

@@ -15,7 +15,7 @@ static HTML_ANCHOR_PATTERN: LazyLock<Regex> =
 // Matches {#id} or { #id } with optional spaces, supports multiple anchors
 // Also supports classes and attributes: { #id .class key=value }
 static ATTR_ANCHOR_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\{\s*#([a-zA-Z][a-zA-Z0-9_-]*)[^}]*\}"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"\{\s*#([a-zA-Z0-9_][a-zA-Z0-9_-]*)[^}]*\}"#).unwrap());
 
 // Material for MkDocs setting anchor pattern: <!-- md:setting NAME -->
 // Used in headings to generate anchors for configuration option references

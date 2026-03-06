@@ -43,11 +43,11 @@ use std::sync::LazyLock;
 pub static ATTR_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // Pattern requires at least one attribute (id, class, or key=value)
     // to avoid matching plain text in braces like {word}
-    Regex::new(r#"\{:?\s*(?:(?:[#.][a-zA-Z_][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_-]*=["'][^"']*["'])\s*)+\}"#).unwrap()
+    Regex::new(r#"\{:?\s*(?:(?:#[a-zA-Z0-9_][a-zA-Z0-9_-]*|\.[a-zA-Z_][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_-]*=["'][^"']*["'])\s*)+\}"#).unwrap()
 });
 
 /// Pattern to extract custom ID from attr_list: `#id`
-static CUSTOM_ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#([a-zA-Z_][a-zA-Z0-9_-]*)").unwrap());
+static CUSTOM_ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#([a-zA-Z0-9_][a-zA-Z0-9_-]*)").unwrap());
 
 /// Pattern to extract classes from attr_list: `.class`
 static CLASS_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_-]*)").unwrap());
@@ -630,5 +630,61 @@ No ID here.
         // Examples with styling classes
         assert!(is_mkdocs_anchor_line("[](){ .annotate }"));
         assert!(is_mkdocs_anchor_line("[](){ #note .warning }"));
+    }
+
+    #[test]
+    fn test_attr_list_pattern_digit_starting_ids() {
+        // HTML5 allows IDs starting with digits
+        assert!(contains_attr_list("{#3rd-party}"));
+        assert!(contains_attr_list("{ #3rd-party }"));
+        assert!(contains_attr_list("{#1}"));
+        assert!(contains_attr_list("{#123-foo}"));
+        assert!(contains_attr_list("{#1st-section}"));
+        assert!(contains_attr_list("{#2nd_item}"));
+
+        // Digit-starting ID combined with class
+        assert!(contains_attr_list("{#3rd-party .glossary}"));
+
+        // Kramdown style with colon
+        assert!(contains_attr_list("{: #3rd-party}"));
+    }
+
+    #[test]
+    fn test_custom_id_extraction_digit_starting() {
+        // extract_custom_id should extract IDs starting with digits
+        let attrs = find_attr_lists("{#3rd-party}");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].id, Some("3rd-party".to_string()));
+
+        let attrs = find_attr_lists("{#1}");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].id, Some("1".to_string()));
+
+        let attrs = find_attr_lists("{#123-foo}");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].id, Some("123-foo".to_string()));
+
+        let attrs = find_attr_lists("{#1st-section}");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].id, Some("1st-section".to_string()));
+
+        let attrs = find_attr_lists("{#2nd_item}");
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].id, Some("2nd_item".to_string()));
+    }
+
+    #[test]
+    fn test_class_pattern_still_rejects_digit_starting() {
+        // CSS class names starting with digits are invalid, should not match
+        let attrs = find_attr_lists("{.3invalid}");
+        assert_eq!(attrs.len(), 0, "Digit-starting class names should not be matched");
+    }
+
+    #[test]
+    fn test_mkdocs_anchor_line_digit_starting_id() {
+        // Anchor lines with digit-starting IDs
+        assert!(is_mkdocs_anchor_line("[](){ #3rd-party }"));
+        assert!(is_mkdocs_anchor_line("[](){ #1 }"));
+        assert!(is_mkdocs_anchor_line("[](){ #123-section }"));
     }
 }
