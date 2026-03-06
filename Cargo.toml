@@ -135,3 +135,23 @@ libc = "0.2"
 [[bench]]
 name = "link_parsing_manual"
 harness = false
+
+[[bench]]
+name = "rule_performance"
+harness = false
+
+[[bench]]
+name = "fix_performance"
+harness = false
+
+[[bench]]
+name = "range_performance"
+harness = false
+
+[[bench]]
+name = "range_utils_benchmark"
+harness = false
+
+[[bench]]
+name = "simple_fix_bench"
+harness = false
