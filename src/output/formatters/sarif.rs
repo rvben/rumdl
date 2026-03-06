@@ -71,17 +71,22 @@ impl OutputFormatter for SarifFormatter {
     }
 }
 
-/// Format all warnings as SARIF 2.1.0 report
-pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> String {
+/// Format all warnings as SARIF 2.1.0 report.
+///
+/// When `fix_mode` is true and `fixed_status` is provided per warning,
+/// each result includes `baselineState` set to `"absent"` for fixed
+/// warnings (they no longer exist after the fix) or `"new"` for remaining ones.
+pub fn format_sarif_report_with_status(
+    all_warnings: &[(String, Vec<LintWarning>, Vec<bool>)],
+    fix_mode: bool,
+) -> String {
     let mut results = Vec::new();
     let mut rules = std::collections::HashMap::new();
 
-    // Collect all results and build rule index
-    for (file_path, warnings) in all_warnings {
-        for warning in warnings {
+    for (file_path, warnings, fixed_status) in all_warnings {
+        for (i, warning) in warnings.iter().enumerate() {
             let rule_id = warning.rule_name.as_deref().unwrap_or("unknown");
 
-            // Add rule to index if not already present
             rules.entry(rule_id).or_insert_with(|| {
                 json!({
                     "id": rule_id,
@@ -100,7 +105,7 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
                 crate::rule::Severity::Warning => "warning",
                 crate::rule::Severity::Info => "note",
             };
-            let result = json!({
+            let mut result = json!({
                 "ruleId": rule_id,
                 "level": level,
                 "message": {
@@ -118,6 +123,18 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
                     }
                 }]
             });
+
+            // SARIF 2.1.0 §3.27.24: baselineState indicates whether a result
+            // is new, unchanged, updated, or absent relative to the baseline.
+            // "absent" = existed before but no longer present (i.e., fixed).
+            if fix_mode {
+                let was_fixed = fixed_status.get(i).copied().unwrap_or(false);
+                let baseline_state = if was_fixed { "absent" } else { "new" };
+                result
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("baselineState".to_string(), json!(baseline_state));
+            }
 
             results.push(result);
         }
@@ -141,6 +158,15 @@ pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> Strin
     });
 
     serde_json::to_string_pretty(&sarif_doc).unwrap_or_else(|_| r#"{"version":"2.1.0","runs":[]}"#.to_string())
+}
+
+/// Format all warnings as SARIF 2.1.0 report (check-only mode, no fixed status).
+pub fn format_sarif_report(all_warnings: &[(String, Vec<LintWarning>)]) -> String {
+    let with_status: Vec<(String, Vec<LintWarning>, Vec<bool>)> = all_warnings
+        .iter()
+        .map(|(path, warnings)| (path.clone(), warnings.clone(), vec![]))
+        .collect();
+    format_sarif_report_with_status(&with_status, false)
 }
 
 #[cfg(test)]
@@ -998,5 +1024,79 @@ mod tests {
                 "Severity::{severity:?} should map to SARIF level '{expected_level}'"
             );
         }
+    }
+
+    #[test]
+    fn test_sarif_report_with_fixed_status() {
+        let warnings = vec![(
+            "test.md".to_string(),
+            vec![
+                LintWarning {
+                    line: 5,
+                    column: 1,
+                    end_line: 5,
+                    end_column: 10,
+                    rule_name: Some("MD031".to_string()),
+                    message: "No blank line after fenced code block".to_string(),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: 33..33,
+                        replacement: "\n".to_string(),
+                    }),
+                },
+                LintWarning {
+                    line: 8,
+                    column: 81,
+                    end_line: 8,
+                    end_column: 146,
+                    rule_name: Some("MD013".to_string()),
+                    message: "Line length exceeds 80 characters".to_string(),
+                    severity: Severity::Warning,
+                    fix: None,
+                },
+            ],
+            vec![true, false],
+        )];
+
+        let output = format_sarif_report_with_status(&warnings, true);
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        // Fixed warning: baselineState = "absent"
+        assert_eq!(results[0]["ruleId"], "MD031");
+        assert_eq!(results[0]["baselineState"], "absent");
+        // Remaining warning: baselineState = "new"
+        assert_eq!(results[1]["ruleId"], "MD013");
+        assert_eq!(results[1]["baselineState"], "new");
+    }
+
+    #[test]
+    fn test_sarif_report_check_mode_no_baseline_state() {
+        let warnings = vec![(
+            "test.md".to_string(),
+            vec![LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 5,
+                rule_name: Some("MD001".to_string()),
+                message: "Test".to_string(),
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 0..5,
+                    replacement: "fix".to_string(),
+                }),
+            }],
+            vec![],
+        )];
+
+        let output = format_sarif_report_with_status(&warnings, false);
+        let sarif: Value = serde_json::from_str(&output).unwrap();
+
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+        // No baselineState in check mode
+        assert!(results[0].get("baselineState").is_none());
     }
 }

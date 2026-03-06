@@ -218,11 +218,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut total_fixable_issues = 0;
         let total_files_processed = results.len();
 
-        for (
-            file_path,
-            (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, fixed_status, file_index),
-        ) in results
-        {
+        for (file_path, result) in results {
+            let crate::file_processor::FileProcessResult {
+                has_issues: file_has_issues,
+                issues_found,
+                issues_fixed,
+                fixable_issues,
+                warnings,
+                fixed_status,
+                file_index,
+            } = result;
+
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
             total_issues += issues_found;
@@ -294,23 +300,30 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
         for &(gi, file_path) in &file_tasks {
             let group = &config_groups[gi];
-            let (file_has_issues, issues_found, issues_fixed, fixable_issues, warnings, fixed_status, file_index) =
-                crate::file_processor::process_file_with_formatter(
-                    file_path,
-                    &group.rules,
-                    args.fix_mode,
-                    args.diff,
-                    args.verbose && !args.silent,
-                    quiet,
-                    args.silent,
-                    &output_format,
-                    effective_output_writer,
-                    &group.config,
-                    cache.as_ref().map(Arc::clone),
-                    project_root,
-                    args.show_full_path,
-                    group.cache_hashes.as_deref(),
-                );
+            let crate::file_processor::FileProcessResult {
+                has_issues: file_has_issues,
+                issues_found,
+                issues_fixed,
+                fixable_issues,
+                warnings,
+                fixed_status,
+                file_index,
+            } = crate::file_processor::process_file_with_formatter(
+                file_path,
+                &group.rules,
+                args.fix_mode,
+                args.diff,
+                args.verbose && !args.silent,
+                quiet,
+                args.silent,
+                &output_format,
+                effective_output_writer,
+                &group.config,
+                cache.as_ref().map(Arc::clone),
+                project_root,
+                args.show_full_path,
+                group.cache_hashes.as_deref(),
+            );
 
             if needs_cross_file {
                 let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
@@ -518,7 +531,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             OutputFormat::GitLab => {
                 rumdl_lib::output::formatters::gitlab::format_gitlab_report(&warnings_without_status)
             }
-            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&warnings_without_status),
+            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report_with_status(
+                &batch_file_warnings,
+                fix_mode_active,
+            ),
             OutputFormat::Junit => {
                 rumdl_lib::output::formatters::junit::format_junit_report(&warnings_without_status, duration_ms)
             }
