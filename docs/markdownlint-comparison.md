@@ -39,12 +39,12 @@ rumdl implements 14 additional rules not found in markdownlint:
 | MD067  | Footnote definition order      | Footnotes should appear in order of reference              |
 | MD068  | Empty footnote definitions     | Footnote definitions should not be empty                   |
 | MD069  | No duplicate list markers      | Flags duplicate markers like `- - text` from copy-paste    |
-| MD070  | Nested code fence              | Detects nested fence collisions                            |
+| MD070  | Nested code fence              | Detects nested fence collisions (opt-in)                   |
 | MD071  | Blank line after frontmatter   | Frontmatter should be followed by a blank line             |
 | MD072  | Frontmatter key sort           | Frontmatter keys should be sorted (opt-in)                 |
 | MD073  | TOC validation                 | Table of Contents should match headings (opt-in)           |
 
-**Opt-in rules:** MD060, MD063, MD072, and MD073 are disabled by default. Enable them explicitly in your configuration.
+**Opt-in rules:** MD060, MD063, MD070, MD072, and MD073 are disabled by default. Enable them explicitly in your configuration.
 
 ## Intentional Design Differences
 

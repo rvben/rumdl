@@ -30,13 +30,14 @@ For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Re
 
 The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
 
-| Rule              | Description            | Why opt-in                                               |
-| ----------------- | ---------------------- | -------------------------------------------------------- |
-| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables  |
-| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                 |
-| [MD072](md072.md) | Frontmatter key sort   | Many projects prefer semantic ordering over alphabetical |
-| [MD073](md073.md) | TOC validation         | Requires specific TOC markers in document                |
-| [MD074](md074.md) | MkDocs nav validation  | Requires `flavor = "mkdocs"` to activate                 |
+| Rule              | Description            | Why opt-in                                                    |
+| ----------------- | ---------------------- | ------------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables       |
+| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                      |
+| [MD070](md070.md) | Nested code fence      | Auto-fix modifies document structure, false positives on docs |
+| [MD072](md072.md) | Frontmatter key sort   | Many projects prefer semantic ordering over alphabetical      |
+| [MD073](md073.md) | TOC validation         | Requires specific TOC markers in document                     |
+| [MD074](md074.md) | MkDocs nav validation  | Requires `flavor = "mkdocs"` to activate                      |
 
 ### Enabling Opt-in Rules
 
@@ -215,7 +216,6 @@ Severity affects:
 | [MD040](md040.md) | Fenced code language | Fenced code blocks should have a language specified |
 | [MD046](md046.md) | Code block style     | Code block style                                    |
 | [MD048](md048.md) | Code fence style     | Code fence style                                    |
-| [MD070](md070.md) | Nested code fence    | Nested fence collision detection                    |
 
 ## Link and Image Rules
 
