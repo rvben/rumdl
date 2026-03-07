@@ -149,6 +149,11 @@ impl Rule for MD042NoEmptyLinks {
 
         // Use centralized link parsing from LintContext
         for link in &ctx.links {
+            // Skip links in frontmatter (e.g., YAML `[Symbol.dispose]()`)
+            if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
+                continue;
+            }
+
             // Skip links inside Jinja templates
             if ctx.is_in_jinja_range(link.byte_offset) {
                 continue;
@@ -818,6 +823,35 @@ UnboundLocalError: cannot access local variable 'calls' where it is not associat
         assert!(
             result.is_empty(),
             "Links with inline code should not be flagged as empty. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_not_flagged() {
+        let rule = MD042NoEmptyLinks::new();
+
+        // [Symbol.dispose]() in YAML frontmatter should NOT be flagged
+        let content = "---\ntitle: \"[Symbol.dispose]()\"\n---\n\n# Hello\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag [Symbol.dispose]() inside YAML frontmatter. Got: {result:?}"
+        );
+
+        // Same pattern outside frontmatter SHOULD be flagged
+        let content = "# Hello\n\n[Symbol.dispose]()\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag [Symbol.dispose]() in regular content");
+
+        // Multiple link-like patterns in frontmatter
+        let content = "---\ntags: [\"[foo]()\", \"[bar]()\"]\n---\n\n# Hello\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag link-like patterns inside frontmatter. Got: {result:?}"
         );
     }
 
