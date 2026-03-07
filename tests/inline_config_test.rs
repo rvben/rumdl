@@ -747,7 +747,7 @@ fn test_fix_md009_strict_respects_disable_line() {
 fn test_fix_md034_respects_disable_enable() {
     use rumdl_lib::rules::MD034NoBareUrls;
 
-    let rule = MD034NoBareUrls::default();
+    let rule = MD034NoBareUrls;
 
     let content = "# Test\n\n<!-- rumdl-disable MD034 -->\nVisit http://example.com for info\n<!-- rumdl-enable MD034 -->\n\nVisit http://other.com for info\n";
 
@@ -831,7 +831,7 @@ fn test_fix_global_disable_preserves_all_content() {
 
     let rules_to_test: Vec<Box<dyn Rule>> = vec![
         Box::new(rumdl_lib::rules::MD009TrailingSpaces::new(2, false)),
-        Box::new(rumdl_lib::rules::MD034NoBareUrls::default()),
+        Box::new(rumdl_lib::rules::MD034NoBareUrls),
     ];
 
     for rule in &rules_to_test {
