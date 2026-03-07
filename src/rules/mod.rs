@@ -502,7 +502,7 @@ const RULES: &[RuleEntry] = &[
     RuleEntry {
         name: "MD070",
         ctor: MD070NestedCodeFence::from_config,
-        opt_in: false,
+        opt_in: true,
     },
     RuleEntry {
         name: "MD071",
