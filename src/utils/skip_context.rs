@@ -335,7 +335,7 @@ fn find_case_insensitive(haystack: &[u8], needle: &[u8], from: usize) -> Option<
         if haystack[i..i + needle.len()]
             .iter()
             .zip(needle.iter())
-            .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+            .all(|(h, n)| h.eq_ignore_ascii_case(n))
         {
             return Some(i);
         }

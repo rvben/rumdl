@@ -304,10 +304,9 @@ impl MD053LinkImageReferenceDefinitions {
         for link in &ctx.links {
             if link.is_reference
                 && let Some(ref_id) = &link.reference_id
+                && !ctx.line_info(link.line).is_some_and(|info| info.in_code_block)
             {
-                if !ctx.line_info(link.line).is_some_and(|info| info.in_code_block) {
-                    usages.insert(Self::unescape_reference(ref_id).to_lowercase());
-                }
+                usages.insert(Self::unescape_reference(ref_id).to_lowercase());
             }
         }
 
@@ -315,10 +314,9 @@ impl MD053LinkImageReferenceDefinitions {
         for image in &ctx.images {
             if image.is_reference
                 && let Some(ref_id) = &image.reference_id
+                && !ctx.line_info(image.line).is_some_and(|info| info.in_code_block)
             {
-                if !ctx.line_info(image.line).is_some_and(|info| info.in_code_block) {
-                    usages.insert(Self::unescape_reference(ref_id).to_lowercase());
-                }
+                usages.insert(Self::unescape_reference(ref_id).to_lowercase());
             }
         }
 
@@ -1188,7 +1186,7 @@ Some text using [ref1] here.
         // A reference immediately after a code span should still be detected
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "`code`[ref]\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // [ref] is outside the code span, so it counts as a usage
@@ -1200,7 +1198,7 @@ Some text using [ref1] here.
         // A reference inside a code span should NOT be counted as usage
         let rule = MD053LinkImageReferenceDefinitions::new();
         let content = "Use `[ref]` in code\n\n[ref]: https://example.com";
-        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
         // [ref] is inside a code span, so the definition is unused
