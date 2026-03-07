@@ -277,38 +277,70 @@ pub fn is_in_pymdown_markup(line: &str, position: usize, flavor: MarkdownFlavor)
 /// Handles `<code>`, `<pre>`, `<samp>`, `<kbd>`, and `<var>` tags (case-insensitive).
 /// These are inline elements whose content should not be interpreted as markdown emphasis.
 pub fn is_in_inline_html_code(line: &str, position: usize) -> bool {
-    let line_lower = line.to_lowercase();
     // Tags whose content should not be parsed as markdown
     const TAGS: &[&str] = &["code", "pre", "samp", "kbd", "var"];
 
+    let bytes = line.as_bytes();
+
     for tag in TAGS {
-        let open = format!("<{tag}");
-        let close = format!("</{tag}>");
+        let open_bytes = format!("<{tag}").into_bytes();
+        let close_pattern = format!("</{tag}>").into_bytes();
 
         let mut search_from = 0;
-        while let Some(open_start) = line_lower[search_from..].find(&open) {
-            let open_abs = search_from + open_start;
-            // Find the end of the opening tag (the `>` after `<code` or `<code ...`)
-            let after_tag = open_abs + open.len();
-            let Some(tag_close) = line_lower[after_tag..].find('>') else {
+        while search_from + open_bytes.len() <= bytes.len() {
+            // Find opening tag (case-insensitive byte search)
+            let Some(open_abs) = find_case_insensitive(bytes, &open_bytes, search_from) else {
+                break;
+            };
+
+            let after_tag = open_abs + open_bytes.len();
+
+            // Verify the character after the tag name is '>' or whitespace (not a longer tag name)
+            if after_tag < bytes.len() {
+                let next = bytes[after_tag];
+                if next != b'>' && next != b' ' && next != b'\t' {
+                    search_from = after_tag;
+                    continue;
+                }
+            }
+
+            // Find the end of the opening tag
+            let Some(tag_close) = bytes[after_tag..].iter().position(|&b| b == b'>') else {
                 break;
             };
             let content_start = after_tag + tag_close + 1;
 
-            // Find the closing tag
-            let Some(close_start) = line_lower[content_start..].find(&close) else {
+            // Find the closing tag (case-insensitive)
+            let Some(close_start) = find_case_insensitive(bytes, &close_pattern, content_start) else {
                 break;
             };
-            let content_end = content_start + close_start;
+            let content_end = close_start;
 
             if position >= content_start && position < content_end {
                 return true;
             }
 
-            search_from = content_end + close.len();
+            search_from = close_start + close_pattern.len();
         }
     }
     false
+}
+
+/// Case-insensitive byte search within a slice, starting at `from`.
+fn find_case_insensitive(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
+    if needle.is_empty() || from + needle.len() > haystack.len() {
+        return None;
+    }
+    for i in from..=haystack.len() - needle.len() {
+        if haystack[i..i + needle.len()]
+            .iter()
+            .zip(needle.iter())
+            .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+        {
+            return Some(i);
+        }
+    }
+    None
 }
 
 /// Check if a byte position is within flavor-specific markup
@@ -641,5 +673,16 @@ More content"#;
         // Unclosed tag should not match
         let line = "<code>a * b without closing";
         assert!(!is_in_inline_html_code(line, 6));
+    }
+
+    #[test]
+    fn test_inline_html_code_no_substring_match() {
+        // <variable> should NOT be treated as <var>
+        let line = "<variable>a * b</variable>";
+        assert!(!is_in_inline_html_code(line, 11));
+
+        // <keyboard> should NOT be treated as <kbd>
+        let line2 = "<keyboard>x * y</keyboard>";
+        assert!(!is_in_inline_html_code(line2, 11));
     }
 }
