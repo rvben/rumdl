@@ -1,4 +1,4 @@
-//! Go-to-definition and find-references for markdown links
+//! Go-to-definition, find-references, and rename for markdown links
 //!
 //! Provides navigation features for the LSP server:
 //!
@@ -7,13 +7,17 @@
 //!
 //! - **Find references** -- from a heading, find all links pointing to it across
 //!   the workspace.
+//!
+//! - **Rename** -- rename a heading and update all links that reference it.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
 use super::completion::{byte_to_utf16_offset, normalize_path, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
+use crate::utils::anchor_styles::AnchorStyle;
 use crate::workspace_index::PROTOCOL_DOMAIN_REGEX;
 
 /// Full link target extracted from a markdown link `[text](file_path#anchor)`.
@@ -781,6 +785,527 @@ impl RumdlLanguageServer {
 
         if locations.is_empty() { None } else { Some(locations) }
     }
+
+    // =========================================================================
+    // Rename support
+    // =========================================================================
+
+    /// Handle `textDocument/prepareRename` requests.
+    ///
+    /// Validates that the cursor is on a heading and returns the renameable
+    /// text range (excluding `#` markers, leading whitespace, and custom anchors).
+    pub(super) async fn handle_prepare_rename(&self, uri: &Url, position: Position) -> Option<PrepareRenameResponse> {
+        let text = self.get_document_content(uri).await?;
+        let current_file = uri.to_file_path().ok()?;
+
+        let heading_line_1indexed = (position.line as usize) + 1;
+
+        let heading_info = {
+            let index = self.workspace_index.read().await;
+            index.get_file(&current_file).and_then(|file_index| {
+                file_index
+                    .headings
+                    .iter()
+                    .find(|h| h.line == heading_line_1indexed)
+                    .cloned()
+            })
+        }?;
+
+        let lines: Vec<&str> = text.lines().collect();
+        let line_text = lines.get(position.line as usize)?;
+
+        let (text_start, text_end) = if heading_info.is_setext {
+            // Setext heading: the entire line is the heading text
+            let trimmed_start = line_text.len() - line_text.trim_start().len();
+            let trimmed_end = line_text.trim_end().len();
+            (trimmed_start, trimmed_end)
+        } else {
+            let start = find_heading_text_start(line_text)?;
+            let end = find_heading_text_end(line_text, start);
+            (start, end)
+        };
+
+        if text_start >= text_end {
+            return None;
+        }
+
+        let start_char = byte_to_utf16_offset(line_text, text_start);
+        let end_char = byte_to_utf16_offset(line_text, text_end);
+
+        Some(PrepareRenameResponse::Range(Range {
+            start: Position {
+                line: position.line,
+                character: start_char,
+            },
+            end: Position {
+                line: position.line,
+                character: end_char,
+            },
+        }))
+    }
+
+    /// Handle `textDocument/rename` requests.
+    ///
+    /// When a heading is renamed, generates a `WorkspaceEdit` that:
+    /// 1. Replaces the heading text in the source file
+    /// 2. Updates all cross-file links referencing the old anchor
+    /// 3. Updates all same-file fragment links referencing the old anchor
+    ///
+    /// If the heading has a custom anchor (`{#id}`), only the heading text is
+    /// changed — links reference the custom ID which remains unchanged.
+    pub(super) async fn handle_rename(&self, uri: &Url, position: Position, new_name: &str) -> Option<WorkspaceEdit> {
+        // Reject empty or whitespace-only names
+        if new_name.trim().is_empty() {
+            return None;
+        }
+
+        let text = self.get_document_content(uri).await?;
+        let current_file = uri.to_file_path().ok()?;
+
+        let heading_line_1indexed = (position.line as usize) + 1;
+
+        let heading_info = {
+            let index = self.workspace_index.read().await;
+            index.get_file(&current_file).and_then(|file_index| {
+                file_index
+                    .headings
+                    .iter()
+                    .find(|h| h.line == heading_line_1indexed)
+                    .cloned()
+            })
+        }?;
+
+        let has_custom_anchor = heading_info.custom_anchor.is_some();
+        let old_anchor = heading_info
+            .custom_anchor
+            .as_deref()
+            .unwrap_or(&heading_info.auto_anchor);
+
+        let lines: Vec<&str> = text.lines().collect();
+        let line_text = lines.get(position.line as usize)?;
+
+        let (text_start, text_end) = if heading_info.is_setext {
+            let trimmed_start = line_text.len() - line_text.trim_start().len();
+            let trimmed_end = line_text.trim_end().len();
+            (trimmed_start, trimmed_end)
+        } else {
+            let start = find_heading_text_start(line_text)?;
+            let end = find_heading_text_end(line_text, start);
+            (start, end)
+        };
+
+        let start_char = byte_to_utf16_offset(line_text, text_start);
+        let end_char = byte_to_utf16_offset(line_text, text_end);
+
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        // Edit 1: Replace heading text
+        changes.entry(uri.clone()).or_default().push(TextEdit {
+            range: Range {
+                start: Position {
+                    line: position.line,
+                    character: start_char,
+                },
+                end: Position {
+                    line: position.line,
+                    character: end_char,
+                },
+            },
+            new_text: new_name.to_string(),
+        });
+
+        // If heading has a custom anchor, links reference the custom ID.
+        // Renaming the heading text doesn't change the anchor, so no link updates needed.
+        if has_custom_anchor {
+            return Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            });
+        }
+
+        let new_anchor = AnchorStyle::GitHub.generate_fragment(new_name);
+
+        // Check for anchor collision with existing headings in the same file
+        {
+            let index = self.workspace_index.read().await;
+            if let Some(file_index) = index.get_file(&current_file) {
+                let collision = file_index.headings.iter().any(|h| {
+                    h.line != heading_line_1indexed
+                        && (h.auto_anchor.eq_ignore_ascii_case(&new_anchor)
+                            || h.custom_anchor
+                                .as_deref()
+                                .is_some_and(|ca| ca.eq_ignore_ascii_case(&new_anchor)))
+                });
+                if collision {
+                    log::warn!("Rename refused: anchor '{new_anchor}' would collide with existing heading");
+                    return None;
+                }
+            }
+        }
+
+        // Collect cross-file link data while holding the lock, then release it
+        let cross_file_matches = self.collect_cross_file_link_matches(&current_file, old_anchor).await;
+
+        // Process cross-file matches (file I/O without holding the lock)
+        for (source_path, matching_links) in &cross_file_matches {
+            // Skip the current file — same-file links are handled separately
+            if *source_path == current_file {
+                continue;
+            }
+
+            let source_uri = match Url::from_file_path(source_path) {
+                Ok(uri) => uri,
+                Err(_) => continue,
+            };
+
+            // Try editor buffer first, fall back to disk
+            let source_content = if let Some(content) = self.get_document_content(&source_uri).await {
+                content
+            } else {
+                match tokio::fs::read_to_string(source_path).await {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                }
+            };
+
+            let source_lines: Vec<&str> = source_content.lines().collect();
+
+            // Group links by line to avoid duplicate edits when multiple links
+            // on the same line reference the same anchor
+            let mut seen_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
+            for link in matching_links {
+                let line_idx = link.line.saturating_sub(1);
+                if !seen_lines.insert(line_idx) {
+                    continue; // already processed this line
+                }
+                let Some(line_content) = source_lines.get(line_idx) else {
+                    continue;
+                };
+
+                let edits = find_all_anchor_edits_in_link(line_content, line_idx as u32, old_anchor, &new_anchor);
+                changes.entry(source_uri.clone()).or_default().extend(edits);
+            }
+        }
+
+        // Same-file fragment links (#anchor)
+        collect_same_file_anchor_edits(uri, &text, old_anchor, &new_anchor, &mut changes);
+
+        // Same-file reference definitions ([ref]: #anchor)
+        collect_same_file_ref_def_edits(uri, &text, old_anchor, &new_anchor, &mut changes);
+
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+    }
+
+    /// Collect cross-file link matches from the workspace index.
+    ///
+    /// Returns the data needed to compute edits without holding the lock
+    /// during file I/O.
+    async fn collect_cross_file_link_matches(
+        &self,
+        target_path: &Path,
+        old_anchor: &str,
+    ) -> Vec<(PathBuf, Vec<crate::workspace_index::CrossFileLinkIndex>)> {
+        let index = self.workspace_index.read().await;
+        let mut result = Vec::new();
+
+        for (source_path, file_index) in index.files() {
+            let source_dir = source_path.parent().unwrap_or(Path::new(""));
+
+            let matching: Vec<_> = file_index
+                .cross_file_links
+                .iter()
+                .filter(|link| {
+                    let resolved = normalize_path(source_dir.join(&link.target_path));
+                    resolved == *target_path && link.fragment.eq_ignore_ascii_case(old_anchor)
+                })
+                .cloned()
+                .collect();
+
+            if !matching.is_empty() {
+                result.push((source_path.to_path_buf(), matching));
+            }
+        }
+
+        result
+    }
+}
+
+/// Find the byte offset where ATX heading text starts (after `#` markers and space).
+fn find_heading_text_start(line: &str) -> Option<usize> {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('#') {
+        return None;
+    }
+    let leading_ws = line.len() - trimmed.len();
+    let hash_count = trimmed.bytes().take_while(|&b| b == b'#').count();
+    if hash_count > 6 {
+        return None;
+    }
+    let after_hashes = leading_ws + hash_count;
+    // ATX headings require a space after #
+    if line.as_bytes().get(after_hashes) == Some(&b' ') {
+        Some(after_hashes + 1)
+    } else if after_hashes == line.len() {
+        // Empty heading: just "##"
+        Some(after_hashes)
+    } else {
+        None
+    }
+}
+
+/// Find the byte offset where ATX heading text ends.
+///
+/// Handles:
+/// - Custom anchor syntax `{#id}` at end of heading
+/// - Closing ATX markers (`## Heading ##`)
+fn find_heading_text_end(line: &str, text_start: usize) -> usize {
+    let text_portion = &line[text_start..];
+
+    // Check for custom anchor syntax {#id} at end
+    if let Some(brace_pos) = text_portion.rfind("{#") {
+        // Verify the brace pair is at the end (after trimming)
+        if let Some(close_pos) = text_portion[brace_pos..].find('}') {
+            let after_brace = text_portion[brace_pos + close_pos + 1..].trim();
+            if after_brace.is_empty() {
+                let before_brace = text_portion[..brace_pos].trim_end();
+                return text_start + before_brace.len();
+            }
+        }
+    }
+
+    // Check for closing ATX markers (trailing ###)
+    let trimmed_end = text_portion.trim_end();
+    if let Some(last_non_hash_pos) = trimmed_end.rfind(|c: char| c != '#') {
+        let after_last = &trimmed_end[last_non_hash_pos..];
+        // The character at last_non_hash_pos must be a space for this to be a closing sequence
+        let last_char = trimmed_end[last_non_hash_pos..].chars().next().unwrap();
+        if last_char == ' ' && after_last.len() > 1 {
+            // Closing ATX: trim the space and trailing hashes
+            return text_start + last_non_hash_pos;
+        }
+    }
+
+    text_start + trimmed_end.len()
+}
+
+/// Find ALL `#anchor` occurrences inside links on a given line and create TextEdits.
+///
+/// Searches specifically within the URL portion of links (after `](` or after `]: `)
+/// to avoid matching `#` in link display text. Returns all matches, not just the first.
+fn find_all_anchor_edits_in_link(line: &str, line_num: u32, old_anchor: &str, new_anchor: &str) -> Vec<TextEdit> {
+    let target = format!("#{old_anchor}");
+    let target_lower = target.to_lowercase();
+    let mut edits = Vec::new();
+
+    // Search for the anchor in the URL portion of links
+    // Look for ](url#anchor) patterns
+    let mut search_start = 0;
+    while search_start < line.len() {
+        // Find the next `](` which starts a link URL
+        if let Some(paren_start) = line[search_start..].find("](") {
+            let url_start = search_start + paren_start + 2;
+            // Find the closing `)`
+            if let Some(paren_end) = line[url_start..].find(')') {
+                let url_portion = &line[url_start..url_start + paren_end];
+                if let Some(hash_pos) = url_portion.to_lowercase().find(&target_lower) {
+                    let anchor_start = url_start + hash_pos + 1; // after #
+                    let anchor_end = anchor_start + old_anchor.len();
+
+                    let start_char = byte_to_utf16_offset(line, anchor_start);
+                    let end_char = byte_to_utf16_offset(line, anchor_end);
+
+                    edits.push(TextEdit {
+                        range: Range {
+                            start: Position {
+                                line: line_num,
+                                character: start_char,
+                            },
+                            end: Position {
+                                line: line_num,
+                                character: end_char,
+                            },
+                        },
+                        new_text: new_anchor.to_string(),
+                    });
+                }
+                search_start = url_start + paren_end + 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Also check reference definitions: [ref]: file.md#anchor
+    if let Some(colon_pos) = line.find("]: ") {
+        let def_target = &line[colon_pos + 3..];
+        if let Some(hash_pos) = def_target.to_lowercase().find(&target_lower) {
+            let anchor_start = colon_pos + 3 + hash_pos + 1; // after #
+            let anchor_end = anchor_start + old_anchor.len();
+            if anchor_end <= line.len() {
+                let start_char = byte_to_utf16_offset(line, anchor_start);
+                let end_char = byte_to_utf16_offset(line, anchor_end);
+
+                edits.push(TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: line_num,
+                            character: start_char,
+                        },
+                        end: Position {
+                            line: line_num,
+                            character: end_char,
+                        },
+                    },
+                    new_text: new_anchor.to_string(),
+                });
+            }
+        }
+    }
+
+    edits
+}
+
+/// Collect text edits for same-file fragment-only links (`[text](#anchor)`).
+///
+/// Uses pulldown-cmark to parse links, then searches within the URL portion
+/// for the fragment to replace.
+fn collect_same_file_anchor_edits(
+    uri: &Url,
+    content: &str,
+    old_anchor: &str,
+    new_anchor: &str,
+    changes: &mut HashMap<Url, Vec<TextEdit>>,
+) {
+    use pulldown_cmark::{Event, Options, Parser, Tag};
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let parser = Parser::new_ext(content, options).into_offset_iter();
+
+    for (event, range) in parser {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event
+            && let Some(frag) = dest_url.strip_prefix('#')
+            && frag.eq_ignore_ascii_case(old_anchor)
+        {
+            // Find the `#fragment` in the raw source within the link range
+            let link_source = &content[range.start..range.end];
+            if let Some(anchor_byte_in_source) = find_fragment_in_link_source(link_source, old_anchor) {
+                let anchor_start_byte = range.start + anchor_byte_in_source;
+                let anchor_end_byte = anchor_start_byte + old_anchor.len();
+
+                let line_idx = content[..anchor_start_byte].matches('\n').count();
+                let line_start = content[..anchor_start_byte].rfind('\n').map_or(0, |p| p + 1);
+                let line_end = content[line_start..]
+                    .find('\n')
+                    .map_or(content.len(), |p| line_start + p);
+                let line_text = &content[line_start..line_end];
+
+                let start_char = byte_to_utf16_offset(line_text, anchor_start_byte - line_start);
+                let end_char = byte_to_utf16_offset(line_text, anchor_end_byte - line_start);
+
+                changes.entry(uri.clone()).or_default().push(TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: line_idx as u32,
+                            character: start_char,
+                        },
+                        end: Position {
+                            line: line_idx as u32,
+                            character: end_char,
+                        },
+                    },
+                    new_text: new_anchor.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Find the anchor text position within a link's raw source.
+///
+/// For inline links like `[text](#anchor)`, searches after `(#`.
+/// For reference definitions resolved by pulldown-cmark, the raw source
+/// includes the `[text]` portion, so we search for `#anchor` within `(...)`.
+/// Falls back to finding `#anchor` after any `(` or `]: ` pattern.
+fn find_fragment_in_link_source(source: &str, anchor: &str) -> Option<usize> {
+    let target = format!("#{anchor}");
+    let target_lower = target.to_lowercase();
+
+    // Try inline link: find `(#anchor` within `(...)`
+    if let Some(paren_pos) = source.find('(') {
+        let after_paren = &source[paren_pos + 1..];
+        if let Some(hash_pos) = after_paren.to_lowercase().find(&target_lower) {
+            // Return position of anchor text (after #)
+            return Some(paren_pos + 1 + hash_pos + 1);
+        }
+    }
+
+    // Fallback: search anywhere in the source (for edge cases)
+    if let Some(pos) = source.to_lowercase().find(&target_lower) {
+        return Some(pos + 1); // after #
+    }
+
+    None
+}
+
+/// Collect text edits for same-file reference definitions that point to fragments.
+///
+/// Handles lines like `[ref]: #anchor` where the anchor needs updating.
+fn collect_same_file_ref_def_edits(
+    uri: &Url,
+    content: &str,
+    old_anchor: &str,
+    new_anchor: &str,
+    changes: &mut HashMap<Url, Vec<TextEdit>>,
+) {
+    let target = format!("#{old_anchor}");
+    let target_lower = target.to_lowercase();
+
+    for (line_idx, line) in content.lines().enumerate() {
+        // Match reference definition pattern: [ref]: #anchor
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with('[') {
+            continue;
+        }
+        if let Some(colon_pos) = trimmed.find("]: ") {
+            let def_target = trimmed[colon_pos + 3..].trim();
+            // Only fragment-only definitions
+            if let Some(frag) = def_target.strip_prefix('#') {
+                // Strip any trailing title
+                let frag = frag.split_whitespace().next().unwrap_or(frag);
+                if frag.eq_ignore_ascii_case(old_anchor) {
+                    // Find the position in the original line
+                    if let Some(hash_pos) = line.to_lowercase().find(&target_lower) {
+                        let anchor_start = hash_pos + 1;
+                        let anchor_end = anchor_start + old_anchor.len();
+
+                        let start_char = byte_to_utf16_offset(line, anchor_start);
+                        let end_char = byte_to_utf16_offset(line, anchor_end);
+
+                        changes.entry(uri.clone()).or_default().push(TextEdit {
+                            range: Range {
+                                start: Position {
+                                    line: line_idx as u32,
+                                    character: start_char,
+                                },
+                                end: Position {
+                                    line: line_idx as u32,
+                                    character: end_char,
+                                },
+                            },
+                            new_text: new_anchor.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1314,5 +1839,243 @@ mod tests {
         let link = result.unwrap();
         // The target is an external URL — is_external_url should catch this at the handler level
         assert!(is_external_url(&link.file_path));
+    }
+
+    // =========================================================================
+    // Heading text range helpers (for rename)
+    // =========================================================================
+
+    #[test]
+    fn test_find_heading_text_start_atx() {
+        assert_eq!(find_heading_text_start("# Heading"), Some(2));
+        assert_eq!(find_heading_text_start("## Heading"), Some(3));
+        assert_eq!(find_heading_text_start("### Heading"), Some(4));
+    }
+
+    #[test]
+    fn test_find_heading_text_start_no_space() {
+        // Invalid ATX heading (no space after #)
+        assert_eq!(find_heading_text_start("#NoSpace"), None);
+    }
+
+    #[test]
+    fn test_find_heading_text_start_not_heading() {
+        assert_eq!(find_heading_text_start("Just text"), None);
+        assert_eq!(find_heading_text_start(""), None);
+    }
+
+    #[test]
+    fn test_find_heading_text_start_leading_whitespace() {
+        assert_eq!(find_heading_text_start("  ## Heading"), Some(5));
+    }
+
+    #[test]
+    fn test_find_heading_text_start_empty_heading() {
+        assert_eq!(find_heading_text_start("##"), Some(2));
+    }
+
+    #[test]
+    fn test_find_heading_text_end_simple() {
+        let line = "## Hello World";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "Hello World");
+    }
+
+    #[test]
+    fn test_find_heading_text_end_with_custom_anchor() {
+        let line = "## Guide {#install}";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "Guide");
+    }
+
+    #[test]
+    fn test_find_heading_text_end_with_closing_atx() {
+        let line = "## Hello ##";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "Hello");
+    }
+
+    #[test]
+    fn test_find_heading_text_end_with_trailing_spaces() {
+        let line = "## Hello   ";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "Hello");
+    }
+
+    #[test]
+    fn test_find_heading_text_end_unicode() {
+        let line = "## 日本語";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "日本語");
+    }
+
+    #[test]
+    fn test_find_heading_text_end_unicode_with_closing() {
+        let line = "## 日本語 ##";
+        let start = find_heading_text_start(line).unwrap();
+        let end = find_heading_text_end(line, start);
+        assert_eq!(&line[start..end], "日本語");
+    }
+
+    // =========================================================================
+    // Anchor edit in link helpers (for rename)
+    // =========================================================================
+
+    #[test]
+    fn test_find_all_anchor_edits_in_link_inline() {
+        let line = "See [link](guide.md#getting-started) here.";
+        let edits = find_all_anchor_edits_in_link(line, 0, "getting-started", "quick-start");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "quick-start");
+        let start = edits[0].range.start.character as usize;
+        let end = edits[0].range.end.character as usize;
+        assert_eq!(&line[start..end], "getting-started");
+    }
+
+    #[test]
+    fn test_find_all_anchor_edits_in_link_ignores_display_text() {
+        // The `#getting-started` appears in the display text too
+        let line = "See [#getting-started info](guide.md#getting-started) here.";
+        let edits = find_all_anchor_edits_in_link(line, 0, "getting-started", "quick-start");
+        assert_eq!(edits.len(), 1);
+        // Should match the URL portion, not the display text
+        let start = edits[0].range.start.character as usize;
+        let end = edits[0].range.end.character as usize;
+        assert_eq!(&line[start..end], "getting-started");
+        assert!(start > 30, "Should match in the URL, not the display text");
+    }
+
+    #[test]
+    fn test_find_all_anchor_edits_in_link_ref_definition() {
+        let line = "[guide]: guide.md#getting-started";
+        let edits = find_all_anchor_edits_in_link(line, 5, "getting-started", "quick-start");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "quick-start");
+        assert_eq!(edits[0].range.start.line, 5);
+    }
+
+    #[test]
+    fn test_find_all_anchor_edits_in_link_no_match() {
+        let line = "See [link](guide.md#other-section) here.";
+        let edits = find_all_anchor_edits_in_link(line, 0, "getting-started", "quick-start");
+        assert!(edits.is_empty());
+    }
+
+    #[test]
+    fn test_find_all_anchor_edits_in_link_multiple_on_same_line() {
+        let line = "See [a](guide.md#heading) and [b](guide.md#heading) here.";
+        let edits = find_all_anchor_edits_in_link(line, 0, "heading", "new-heading");
+        assert_eq!(edits.len(), 2, "Should find both anchors on the same line");
+        // Edits should target different positions
+        assert_ne!(edits[0].range.start.character, edits[1].range.start.character,);
+    }
+
+    // =========================================================================
+    // Same-file anchor edits (for rename)
+    // =========================================================================
+
+    #[test]
+    fn test_collect_same_file_anchor_edits_inline() {
+        let content = "# Getting Started\n\nSee [below](#getting-started) for details.\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_anchor_edits(&uri, content, "getting-started", "quick-start", &mut changes);
+
+        let edits = changes.get(&uri).expect("Should have edits for the URI");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "quick-start");
+    }
+
+    #[test]
+    fn test_collect_same_file_anchor_edits_multiple() {
+        let content = "# Heading\n\n[a](#heading) and [b](#heading).\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_anchor_edits(&uri, content, "heading", "new-heading", &mut changes);
+
+        let edits = changes.get(&uri).expect("Should have edits");
+        assert_eq!(edits.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_same_file_anchor_edits_no_match() {
+        let content = "# Heading\n\n[a](#other) here.\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_anchor_edits(&uri, content, "heading", "new-heading", &mut changes);
+
+        assert!(changes.is_empty());
+    }
+
+    // =========================================================================
+    // Same-file reference definition edits (for rename)
+    // =========================================================================
+
+    #[test]
+    fn test_collect_same_file_ref_def_edits_basic() {
+        let content = "# Heading\n\n[ref]: #heading\n\nSee [ref] for info.\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_ref_def_edits(&uri, content, "heading", "new-heading", &mut changes);
+
+        let edits = changes.get(&uri).expect("Should have edits");
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "new-heading");
+    }
+
+    #[test]
+    fn test_collect_same_file_ref_def_edits_no_match() {
+        let content = "[ref]: #other\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_ref_def_edits(&uri, content, "heading", "new-heading", &mut changes);
+
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_collect_same_file_ref_def_edits_not_fragment_only() {
+        // Reference definitions pointing to files shouldn't be caught here
+        let content = "[ref]: guide.md#heading\n";
+        let uri = Url::parse("file:///test.md").unwrap();
+        let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+
+        collect_same_file_ref_def_edits(&uri, content, "heading", "new-heading", &mut changes);
+
+        // This targets same-file fragment-only defs, so file.md#heading is not matched
+        assert!(changes.is_empty());
+    }
+
+    // =========================================================================
+    // find_fragment_in_link_source (for rename)
+    // =========================================================================
+
+    #[test]
+    fn test_find_fragment_in_link_source_inline() {
+        let source = "[text](#getting-started)";
+        let pos = find_fragment_in_link_source(source, "getting-started");
+        assert!(pos.is_some());
+        let pos = pos.unwrap();
+        assert_eq!(&source[pos..pos + "getting-started".len()], "getting-started");
+    }
+
+    #[test]
+    fn test_find_fragment_in_link_source_with_hash_in_text() {
+        // Display text contains #, but anchor is in URL
+        let source = "[C# Guide](#c-guide)";
+        let pos = find_fragment_in_link_source(source, "c-guide");
+        assert!(pos.is_some());
+        let pos = pos.unwrap();
+        assert_eq!(&source[pos..pos + "c-guide".len()], "c-guide");
     }
 }

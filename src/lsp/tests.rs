@@ -2384,6 +2384,7 @@ async fn test_get_file_completions_returns_workspace_files() {
             auto_anchor: "current".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(current.clone(), fi);
 
@@ -2393,6 +2394,7 @@ async fn test_get_file_completions_returns_workspace_files() {
             auto_anchor: "other".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(other.clone(), fi2);
 
@@ -2402,6 +2404,7 @@ async fn test_get_file_completions_returns_workspace_files() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(sub_file.clone(), fi3);
     }
@@ -2485,18 +2488,21 @@ async fn test_get_anchor_completions_returns_headings() {
                 auto_anchor: "installation".to_string(),
                 custom_anchor: None,
                 line: 1,
+                is_setext: false,
             },
             HeadingIndex {
                 text: "Configuration".to_string(),
                 auto_anchor: "configuration".to_string(),
                 custom_anchor: None,
                 line: 3,
+                is_setext: false,
             },
             HeadingIndex {
                 text: "Troubleshooting".to_string(),
                 auto_anchor: "troubleshooting".to_string(),
                 custom_anchor: None,
                 line: 5,
+                is_setext: false,
             },
         ];
         index.insert_file(target.clone(), fi);
@@ -2543,18 +2549,21 @@ async fn test_get_anchor_completions_filters_by_prefix() {
                 auto_anchor: "installation".to_string(),
                 custom_anchor: None,
                 line: 1,
+                is_setext: false,
             },
             HeadingIndex {
                 text: "Introduction".to_string(),
                 auto_anchor: "introduction".to_string(),
                 custom_anchor: None,
                 line: 2,
+                is_setext: false,
             },
             HeadingIndex {
                 text: "Configuration".to_string(),
                 auto_anchor: "configuration".to_string(),
                 custom_anchor: None,
                 line: 3,
+                is_setext: false,
             },
         ];
         index.insert_file(target.clone(), fi);
@@ -2597,6 +2606,7 @@ async fn test_get_anchor_completions_uses_custom_anchor() {
             auto_anchor: "getting-started".to_string(),
             custom_anchor: Some("start".to_string()),
             line: 1,
+            is_setext: false,
         }];
         index.insert_file(target.clone(), fi);
     }
@@ -2636,12 +2646,14 @@ async fn test_get_anchor_completions_empty_file_path_uses_current() {
                 auto_anchor: "section-one".to_string(),
                 custom_anchor: None,
                 line: 1,
+                is_setext: false,
             },
             HeadingIndex {
                 text: "Section Two".to_string(),
                 auto_anchor: "section-two".to_string(),
                 custom_anchor: None,
                 line: 3,
+                is_setext: false,
             },
         ];
         index.insert_file(current.clone(), fi);
@@ -3316,6 +3328,7 @@ async fn test_goto_definition_file_path_only() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3373,18 +3386,21 @@ async fn test_goto_definition_file_with_anchor() {
             auto_anchor: "getting-started".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Installation".to_string(),
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 10,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Configuration".to_string(),
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 25,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3438,12 +3454,14 @@ async fn test_goto_definition_same_file_anchor() {
             auto_anchor: "title".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Configuration".to_string(),
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 5,
+            is_setext: false,
         });
         index.insert_file(file.clone(), fi);
     }
@@ -3523,6 +3541,7 @@ async fn test_find_references_heading_with_incoming_links() {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), target_fi);
 
@@ -3608,6 +3627,7 @@ async fn test_find_references_heading_no_incoming_links() {
             auto_anchor: "lonely-heading".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(file.clone(), fi);
     }
@@ -3650,6 +3670,7 @@ async fn test_goto_definition_with_custom_anchor() {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 15,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3702,6 +3723,7 @@ async fn test_goto_definition_anchor_not_found_falls_back_to_line_zero() {
             auto_anchor: "introduction".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3754,6 +3776,7 @@ async fn test_find_references_from_link_position() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), target_fi);
 
@@ -3879,6 +3902,7 @@ async fn test_goto_definition_link_with_title() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3933,6 +3957,7 @@ async fn test_goto_definition_angle_bracket_link() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -3982,6 +4007,7 @@ async fn test_find_references_includes_same_file_fragment_links() {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(file.clone(), fi);
     }
@@ -4084,6 +4110,7 @@ async fn test_goto_definition_reference_link() {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -4136,6 +4163,7 @@ async fn test_goto_definition_collapsed_reference() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -4187,6 +4215,7 @@ async fn test_goto_definition_reference_definition_line() {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -4908,6 +4937,7 @@ async fn test_find_references_heading_takes_priority_over_fallback() {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), target_fi);
 
@@ -4998,6 +5028,7 @@ async fn test_hover_inline_link_to_file() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5061,18 +5092,21 @@ async fn test_hover_inline_link_with_anchor() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Installation".to_string(),
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 5,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Usage".to_string(),
             auto_anchor: "usage".to_string(),
             custom_anchor: None,
             line: 11,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5145,6 +5179,7 @@ async fn test_hover_reference_style_link() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5274,12 +5309,14 @@ async fn test_hover_same_file_anchor() {
             auto_anchor: "title".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Configuration".to_string(),
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 7,
+            is_setext: false,
         });
         index.insert_file(file.clone(), fi);
     }
@@ -5396,18 +5433,21 @@ async fn test_hover_anchor_section_end_no_ellipsis() {
             auto_anchor: "guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Install".to_string(),
             auto_anchor: "install".to_string(),
             custom_anchor: None,
             line: 3,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Usage".to_string(),
             auto_anchor: "usage".to_string(),
             custom_anchor: None,
             line: 7,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5473,6 +5513,7 @@ async fn test_hover_anchor_preview_skips_code_block_hashes() {
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5591,6 +5632,7 @@ async fn test_hover_anchor_does_not_stop_at_hashtag_word() {
             auto_anchor: "tags".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5658,12 +5700,14 @@ async fn test_hover_anchor_stops_at_indented_heading() {
             auto_anchor: "intro".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         fi.add_heading(HeadingIndex {
             text: "Next Section".to_string(),
             auto_anchor: "next-section".to_string(),
             custom_anchor: None,
             line: 5,
+            is_setext: false,
         });
         index.insert_file(target_file.clone(), fi);
     }
@@ -5683,4 +5727,558 @@ async fn test_hover_anchor_stops_at_indented_heading() {
     } else {
         panic!("Expected Markup hover contents");
     }
+}
+
+// =========================================================================
+// Rename support tests
+// =========================================================================
+
+#[tokio::test]
+async fn test_prepare_rename_atx_heading() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test1/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Installation Guide\n\nSome content.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Installation Guide".to_string(),
+            auto_anchor: "installation-guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_prepare_rename(&uri, position).await;
+    assert!(result.is_some(), "Should allow renaming ATX heading");
+
+    if let Some(PrepareRenameResponse::Range(range)) = result {
+        // Should cover "Installation Guide" (after "## ")
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 3); // after "## "
+        assert_eq!(range.end.character, 21); // end of "Installation Guide"
+    } else {
+        panic!("Expected Range response");
+    }
+}
+
+#[tokio::test]
+async fn test_prepare_rename_setext_heading() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test2/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "Installation Guide\n==================\n\nContent.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Installation Guide".to_string(),
+            auto_anchor: "installation-guide".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: true,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_prepare_rename(&uri, position).await;
+    assert!(result.is_some(), "Should allow renaming Setext heading");
+
+    if let Some(PrepareRenameResponse::Range(range)) = result {
+        assert_eq!(range.start.line, 0);
+        assert_eq!(range.start.character, 0);
+        assert_eq!(range.end.character, 18); // "Installation Guide"
+    } else {
+        panic!("Expected Range response");
+    }
+}
+
+#[tokio::test]
+async fn test_prepare_rename_not_heading() {
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test3/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "Just some text here.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_prepare_rename(&uri, position).await;
+    assert!(result.is_none(), "Should not allow renaming non-heading text");
+}
+
+#[tokio::test]
+async fn test_rename_heading_updates_same_file_links() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test4/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content =
+        "## Getting Started\n\nSee [below](#getting-started) for details.\n\nMore [info](#getting-started).\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Getting Started".to_string(),
+            auto_anchor: "getting-started".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&uri, position, "Quick Start").await;
+    assert!(result.is_some(), "Should produce a workspace edit");
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+    let edits = changes.get(&uri).expect("Should have edits for the document");
+
+    // 1 heading rename + 2 link anchor updates
+    assert_eq!(edits.len(), 3, "Should have 3 edits: heading + 2 link anchors");
+
+    // Verify heading edit
+    let heading_edit = edits.iter().find(|e| e.range.start.line == 0).unwrap();
+    assert_eq!(heading_edit.new_text, "Quick Start");
+
+    // Verify link anchor edits
+    let link_edits: Vec<_> = edits.iter().filter(|e| e.new_text == "quick-start").collect();
+    assert_eq!(link_edits.len(), 2, "Should update both link anchors");
+}
+
+#[tokio::test]
+async fn test_rename_heading_with_custom_anchor_only_changes_text() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test5/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Guide {#install}\n\nSee [link](#install) for details.\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Guide".to_string(),
+            auto_anchor: "guide".to_string(),
+            custom_anchor: Some("install".to_string()),
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&uri, position, "Tutorial").await;
+    assert!(result.is_some(), "Should produce a workspace edit");
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+    let edits = changes.get(&uri).expect("Should have edits");
+
+    // Only the heading text should change, not the link anchors
+    assert_eq!(edits.len(), 1, "Should only have 1 edit: heading text change");
+    assert_eq!(edits[0].new_text, "Tutorial");
+}
+
+#[tokio::test]
+async fn test_rename_heading_updates_cross_file_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-rename-test6/docs");
+    let target_file = docs_dir.join("guide.md");
+    let source_file = docs_dir.join("index.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    let source_uri = Url::from_file_path(&source_file).unwrap();
+
+    let target_content = "## API Reference\n\nAPI docs here.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let source_content = "See [api](guide.md#api-reference) for details.\n";
+    server.documents.write().await.insert(
+        source_uri.clone(),
+        DocumentEntry {
+            content: source_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "API Reference".to_string(),
+            auto_anchor: "api-reference".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        let mut source_fi = FileIndex::default();
+        source_fi.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "api-reference".to_string(),
+            line: 1,
+            column: 11, // byte column of "guide.md" in the link
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&target_uri, position, "REST API").await;
+    assert!(result.is_some(), "Should produce workspace edit");
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+
+    // Target file: heading text change
+    let target_edits = changes.get(&target_uri).expect("Should have target edits");
+    assert!(
+        target_edits.iter().any(|e| e.new_text == "REST API"),
+        "Should rename the heading text"
+    );
+
+    // Source file: anchor update
+    let source_edits = changes.get(&source_uri).expect("Should have source edits");
+    assert!(
+        source_edits.iter().any(|e| e.new_text == "rest-api"),
+        "Should update the cross-file link anchor"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_refuses_empty_name() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test7/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Heading\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Heading".to_string(),
+            auto_anchor: "heading".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&uri, position, "").await;
+    assert!(result.is_none(), "Should refuse empty rename");
+
+    let result = server.handle_rename(&uri, position, "   ").await;
+    assert!(result.is_none(), "Should refuse whitespace-only rename");
+}
+
+#[tokio::test]
+async fn test_rename_refuses_anchor_collision() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test8/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Foo\n\n## Bar\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Foo".to_string(),
+            auto_anchor: "foo".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        fi.add_heading(HeadingIndex {
+            text: "Bar".to_string(),
+            auto_anchor: "bar".to_string(),
+            custom_anchor: None,
+            line: 3,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    // Try to rename "Foo" to "Bar" — should be refused due to collision
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&uri, position, "Bar").await;
+    assert!(result.is_none(), "Should refuse rename that causes anchor collision");
+}
+
+#[tokio::test]
+async fn test_rename_heading_with_closing_atx() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test9/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Hello ##\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Hello".to_string(),
+            auto_anchor: "hello".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_prepare_rename(&uri, position).await;
+    assert!(result.is_some());
+
+    if let Some(PrepareRenameResponse::Range(range)) = result {
+        // Should cover just "Hello", not the trailing "##"
+        assert_eq!(range.start.character, 3);
+        assert_eq!(range.end.character, 8); // "Hello" is 5 chars, starts at 3
+    } else {
+        panic!("Expected Range response");
+    }
+}
+
+#[tokio::test]
+async fn test_rename_updates_same_file_ref_definitions() {
+    use crate::workspace_index::{FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test10/doc.md");
+    let uri = Url::from_file_path(&file).unwrap();
+
+    let content = "## Getting Started\n\nSee [ref] for info.\n\n[ref]: #getting-started\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+        let mut fi = FileIndex::default();
+        fi.add_heading(HeadingIndex {
+            text: "Getting Started".to_string(),
+            auto_anchor: "getting-started".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(file.clone(), fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&uri, position, "Quick Start").await;
+    assert!(result.is_some());
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+    let edits = changes.get(&uri).expect("Should have edits");
+
+    // Should have: heading text change + ref definition anchor update
+    // The [ref] usage text doesn't change — it references by label, not by anchor.
+    // Only the definition line `[ref]: #getting-started` needs its anchor updated.
+    let heading_edits: Vec<_> = edits.iter().filter(|e| e.new_text == "Quick Start").collect();
+    assert_eq!(heading_edits.len(), 1, "Should have 1 heading text edit");
+
+    let anchor_edits: Vec<_> = edits.iter().filter(|e| e.new_text == "quick-start").collect();
+    assert_eq!(
+        anchor_edits.len(),
+        1,
+        "Should update the reference definition anchor. Got {} edits",
+        anchor_edits.len()
+    );
+}
+
+#[tokio::test]
+async fn test_rename_cross_file_multiple_links_same_line() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+
+    let server = create_test_server();
+    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-rename-test11/docs");
+    let target_file = docs_dir.join("guide.md");
+    let source_file = docs_dir.join("index.md");
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    let source_uri = Url::from_file_path(&source_file).unwrap();
+
+    let target_content = "## Getting Started\n\nContent here.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Two links to the same heading on the same line
+    let source_content = "See [a](guide.md#getting-started) and [b](guide.md#getting-started) here.\n";
+    server.documents.write().await.insert(
+        source_uri.clone(),
+        DocumentEntry {
+            content: source_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "Getting Started".to_string(),
+            auto_anchor: "getting-started".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        let mut source_fi = FileIndex::default();
+        // Two cross-file links on the same line
+        source_fi.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "getting-started".to_string(),
+            line: 1,
+            column: 9,
+        });
+        source_fi.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "getting-started".to_string(),
+            line: 1,
+            column: 43,
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_rename(&target_uri, position, "Quick Start").await;
+    assert!(result.is_some());
+
+    let edit = result.unwrap();
+    let changes = edit.changes.unwrap();
+
+    // Source file should have 2 anchor edits (one per link), not 1 or duplicates
+    let source_edits = changes.get(&source_uri).expect("Should have source edits");
+    let anchor_edits: Vec<_> = source_edits.iter().filter(|e| e.new_text == "quick-start").collect();
+    assert_eq!(
+        anchor_edits.len(),
+        2,
+        "Should update both cross-file link anchors on the same line"
+    );
+
+    // The two edits should have different character positions
+    assert_ne!(
+        anchor_edits[0].range.start.character, anchor_edits[1].range.start.character,
+        "Edits should target different positions on the line"
+    );
 }

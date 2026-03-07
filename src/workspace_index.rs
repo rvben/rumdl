@@ -307,6 +307,9 @@ pub struct HeadingIndex {
     pub custom_anchor: Option<String>,
     /// Line number (1-indexed)
     pub line: usize,
+    /// Whether this is a Setext-style heading (underlined with = or -)
+    #[serde(default)]
+    pub is_setext: bool,
 }
 
 /// Information about a reference link for cross-file analysis
@@ -862,6 +865,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
 
         index.insert_file(PathBuf::from("docs/install.md"), file_index);
@@ -883,6 +887,7 @@ mod tests {
             auto_anchor: "getting-started".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/guide.md"), file1);
 
@@ -893,6 +898,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 1,
+            is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/install.md"), file2);
 
@@ -920,6 +926,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/en/guide.md"), file1);
 
@@ -930,6 +937,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: None,
             line: 5,
+            is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/fr/guide.md"), file2);
 
@@ -940,6 +948,7 @@ mod tests {
             auto_anchor: "installation".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            is_setext: false,
         });
         index.insert_file(PathBuf::from("docs/de/guide.md"), file3);
 
@@ -1177,6 +1186,7 @@ mod tests {
             auto_anchor: "test-heading".to_string(),
             custom_anchor: Some("test".to_string()),
             line: 1,
+            is_setext: false,
         });
         file1.add_cross_file_link(CrossFileLinkIndex {
             target_path: "./other.md".to_string(),
@@ -1192,6 +1202,7 @@ mod tests {
             auto_anchor: "another-heading".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
         index.update_file(Path::new("docs/other.md"), file2);
 
@@ -1345,6 +1356,7 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: None,
             line: 1,
+            is_setext: false,
         });
 
         // Should find by auto-generated anchor
@@ -1366,6 +1378,7 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 1,
+            is_setext: false,
         });
 
         // Should find by auto-generated anchor
@@ -1387,12 +1400,14 @@ mod tests {
             auto_anchor: "installation-guide".to_string(),
             custom_anchor: Some("install".to_string()),
             line: 10,
+            is_setext: false,
         });
         file_index.add_heading(HeadingIndex {
             text: "Configuration".to_string(),
             auto_anchor: "configuration".to_string(),
             custom_anchor: None,
             line: 20,
+            is_setext: false,
         });
 
         // Get by auto anchor
@@ -1428,6 +1443,7 @@ mod tests {
                 auto_anchor: format!("heading-{i}"),
                 custom_anchor: Some(format!("h{i}")),
                 line: i + 1,
+                is_setext: false,
             });
         }
 

@@ -174,12 +174,18 @@ impl IndexWorker {
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
                 let auto_anchor = AnchorStyle::GitHub.generate_fragment(&heading.text);
+                let is_setext = matches!(
+                    heading.style,
+                    crate::lint_context::types::HeadingStyle::Setext1
+                        | crate::lint_context::types::HeadingStyle::Setext2
+                );
 
                 file_index.add_heading(HeadingIndex {
                     text: heading.text.clone(),
                     auto_anchor,
                     custom_anchor: heading.custom_id.clone(),
                     line: line_num + 1, // 1-indexed
+                    is_setext,
                 });
             }
         }

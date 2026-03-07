@@ -277,6 +277,10 @@ impl LanguageServer for RumdlLanguageServer {
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported: Some(true),
@@ -1109,6 +1113,25 @@ impl LanguageServer for RumdlLanguageServer {
         log::debug!("Hover at {uri} {}:{}", position.line, position.character);
 
         Ok(self.handle_hover(&uri, position).await)
+    }
+
+    async fn prepare_rename(&self, params: TextDocumentPositionParams) -> JsonRpcResult<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let position = params.position;
+
+        log::debug!("Prepare rename at {uri} {}:{}", position.line, position.character);
+
+        Ok(self.handle_prepare_rename(&uri, position).await)
+    }
+
+    async fn rename(&self, params: RenameParams) -> JsonRpcResult<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let new_name = params.new_name;
+
+        log::debug!("Rename at {uri} {}:{} → {new_name}", position.line, position.character);
+
+        Ok(self.handle_rename(&uri, position, &new_name).await)
     }
 
     async fn diagnostic(&self, params: DocumentDiagnosticParams) -> JsonRpcResult<DocumentDiagnosticReportResult> {
