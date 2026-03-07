@@ -101,6 +101,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             .skip_front_matter()
             .skip_code_blocks()
             .skip_math_blocks()
+            .skip_html_blocks()
             .skip_jsx_expressions()
             .skip_mdx_comments()
             .skip_obsidian_comments()
@@ -604,6 +605,44 @@ This has * real spaced emphasis * that should be flagged."#;
             result2.is_empty(),
             "Should not flag asterisks inside multi-line code spans. Got: {result2:?}"
         );
+    }
+
+    #[test]
+    fn test_html_block_asterisks_not_flagged() {
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Asterisks used as multiplication inside HTML <code> tags within an HTML table
+        let content = r#"<table>
+<tr><td>Format</td><td>Size</td></tr>
+<tr><td>BC1</td><td><code>floor((width + 3) / 4) * floor((height + 3) / 4) * 8</code></td></tr>
+<tr><td>BC2</td><td><code>floor((width + 3) / 4) * floor((height + 3) / 4) * 16</code></td></tr>
+</table>"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag asterisks inside HTML blocks. Got: {result:?}"
+        );
+
+        // Standalone HTML block with emphasis-like patterns
+        let content2 = "<div>\n<p>Value is * something * here</p>\n</div>";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Should not flag emphasis-like patterns inside HTML div blocks. Got: {result2:?}"
+        );
+
+        // Regular markdown with spaced emphasis should still be flagged
+        let content3 = "Regular * spaced emphasis * text\n\n<div>* not emphasis *</div>";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert_eq!(
+            result3.len(),
+            1,
+            "Should flag spaced emphasis in regular markdown but not inside HTML blocks. Got: {result3:?}"
+        );
+        assert_eq!(result3[0].line, 1, "Warning should be on line 1 (regular markdown)");
     }
 
     #[test]

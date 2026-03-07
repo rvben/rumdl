@@ -260,11 +260,24 @@ fn test_emphasis_near_html() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty());
 
-    // Invalid emphasis near HTML
+    // Emphasis inside an HTML block should NOT be flagged (HTML blocks are skipped)
     let content = "<div>* Emphasis *</div> and ** Strong ** <span>text</span>";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // Both emphasis spans have spacing issues
+    assert!(
+        result.is_empty(),
+        "Emphasis inside HTML blocks should not be flagged. Got: {result:?}"
+    );
+
+    // Emphasis in regular markdown (not in an HTML block) should still be flagged
+    let content = "Here is * Emphasis * and ** Strong ** text";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        2,
+        "Both emphasis spans in regular markdown should be flagged"
+    );
 }
 
 #[test]
