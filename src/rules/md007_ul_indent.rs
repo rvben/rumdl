@@ -77,12 +77,11 @@ impl MD007ULIndent {
 
         // "Do What I Mean": if indent is explicitly set (but style is not), use fixed style
         // This is the expected behavior when users configure `indent = 4` - they want 4-space increments
-        // BUT: bullets under ordered lists still need text-aligned because ordered markers have variable width
         if self.config.indent_explicit {
             match parent_info {
                 Some((true, parent_content_col)) => {
-                    // Parent is ordered: even with explicit indent, use text-aligned
-                    // Ordered markers have variable width ("1." vs "10." vs "100.")
+                    // Parent is ordered: return text-aligned as primary expected value.
+                    // The caller also accepts the fixed indent as an alternative.
                     return parent_content_col;
                 }
                 _ => {
@@ -250,6 +249,16 @@ impl Rule for MD007ULIndent {
                     self.calculate_expected_indent(nesting_level, parent_info)
                 };
 
+                // When indent is explicitly set and parent is ordered, also accept
+                // the fixed indent value (nesting_level * indent). This lets users
+                // choose either text-aligned or their configured indent under ordered lists.
+                let also_acceptable =
+                    if self.config.indent_explicit && parent_info.is_some_and(|(is_ordered, _)| is_ordered) {
+                        Some(nesting_level * self.config.indent.get() as usize)
+                    } else {
+                        None
+                    };
+
                 // MkDocs (Python-Markdown) uses 4-space-tab continuation for list items.
                 // Under an ordered list item, Python-Markdown requires at least
                 // marker_column + 4 spaces for continuation content to be recognized.
@@ -272,7 +281,13 @@ impl Rule for MD007ULIndent {
                     continue;
                 }
 
-                if visual_marker_column != expected_indent {
+                if visual_marker_column != expected_indent
+                    && also_acceptable.map_or(true, |alt| visual_marker_column != alt)
+                {
+                    // Use the fixed indent as the suggested value when the alternative was available
+                    if let Some(alt) = also_acceptable {
+                        expected_indent = alt;
+                    }
                     // Generate fix for this list item
                     let fix = {
                         let correct_indent = " ".repeat(expected_indent);
@@ -1643,9 +1658,9 @@ items:
 
     #[test]
     fn test_indent_explicit_with_ordered_parent() {
-        // When indent is explicitly set BUT the parent is ordered,
-        // bullets must still use text-aligned because ordered markers have variable width.
-        // This is the critical edge case that caused the regression.
+        // When indent is explicitly set, both text-aligned and fixed indent are accepted
+        // under ordered parents, since the user wants their configured indent but
+        // text-aligned is also valid for ordered list children.
         let config = MD007Config {
             indent: crate::types::IndentSize::from_const(4),
             start_indented: false,
@@ -1656,23 +1671,31 @@ items:
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
-        // Ordered list with bullet child - bullet MUST align with ordered text (3 spaces)
-        // NOT use fixed indent (4 spaces) even though indent=4 is set
-        let content = "1. Ordered\n   * Bullet aligned with ordered text";
+        // 4-space indent under "1. " should pass (matches configured indent)
+        let content = "1. Ordered\n    * Bullet with 4-space indent";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Bullet under ordered must use text-aligned (3 spaces) even with indent=4: {result:?}"
+            "4-space indent under ordered should pass with indent=4: {result:?}"
         );
 
-        // Fixed indent (4 spaces) under ordered list should be WRONG
-        let wrong_content = "1. Ordered\n    * Bullet with 4-space fixed indent";
+        // 3-space indent under "1. " should also pass (text-aligned with "1. ")
+        let content_3 = "1. Ordered\n   * Bullet with 3-space indent";
+        let ctx = LintContext::new(content_3, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "3-space indent under ordered should pass (text-aligned): {result:?}"
+        );
+
+        // 2-space indent under "1. " should be wrong (neither text-aligned nor fixed)
+        let wrong_content = "1. Ordered\n  * Bullet with 2-space indent";
         let ctx = LintContext::new(wrong_content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
-            "4-space indent under ordered list should be flagged"
+            "2-space indent under ordered list should be flagged when indent=4: {result:?}"
         );
     }
 
@@ -1695,16 +1718,28 @@ items:
         // Level 0: bullet (col 0)
         // Level 1: bullet (col 4 - fixed, parent is bullet)
         // Level 2: ordered (col 8 - not checked by MD007)
-        // Level 3: bullet (col 11 - text-aligned with "1. " = 3 chars from col 8)
-        let content = r#"* Level 0
+        // Level 3: bullet - text-aligned=11 (3 chars for "1. " from col 8), fixed=12
+        // Both 11 (text-aligned) and 12 (fixed) should be accepted
+        let content_text_aligned = r#"* Level 0
     * Level 1 (4-space indent from bullet parent)
         1. Level 2 ordered
            * Level 3 bullet (text-aligned under ordered)"#;
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let ctx = LintContext::new(content_text_aligned, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Mixed nesting should handle each parent type correctly: {result:?}"
+            "Text-aligned nesting under ordered should pass: {result:?}"
+        );
+
+        let content_fixed = r#"* Level 0
+    * Level 1 (4-space indent from bullet parent)
+        1. Level 2 ordered
+            * Level 3 bullet (fixed indent under ordered)"#;
+        let ctx = LintContext::new(content_fixed, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Fixed indent nesting under ordered should also pass: {result:?}"
         );
     }
 
@@ -1722,7 +1757,7 @@ items:
         };
         let rule = MD007ULIndent::from_config_struct(config);
 
-        // "10. " = 4 chars, so bullet should be at column 4
+        // "10. " = 4 chars, text-aligned = 4, fixed = 4
         let content = "10. Double digit\n    * Bullet at col 4";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -1731,13 +1766,22 @@ items:
             "Bullet under '10.' should align at column 4: {result:?}"
         );
 
-        // Single digit "1. " = 3 chars, bullet at column 3
-        let content_single = "1. Single digit\n   * Bullet at col 3";
-        let ctx = LintContext::new(content_single, crate::config::MarkdownFlavor::Standard, None);
+        // Single digit "1. " = 3 chars, text-aligned = 3, fixed = 4
+        // Both should be accepted under ordered parent with explicit indent
+        let content_3 = "1. Single digit\n   * Bullet at col 3";
+        let ctx = LintContext::new(content_3, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "Bullet under '1.' should align at column 3: {result:?}"
+            "Bullet under '1.' with 3-space indent should pass (text-aligned): {result:?}"
+        );
+
+        let content_4 = "1. Single digit\n    * Bullet at col 4";
+        let ctx = LintContext::new(content_4, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Bullet under '1.' with 4-space indent should pass (fixed): {result:?}"
         );
     }
 
@@ -1958,6 +2002,107 @@ items:
             result.len(),
             1,
             "5-space indent under nested ordered at col 2 should warn in MkDocs (needs 6)"
+        );
+    }
+
+    #[test]
+    fn test_issue_504_indent4_ordered_parent() {
+        // Reproduction case from issue #504:
+        // With indent=4, nested unordered items under ordered parent
+        // should accept 4-space indentation
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        let content = r#"# Things
+
++ An unordered list
+    + An item with 4 spaces, ok.
+
+1. A numbered list
+    + A sublist with 4 spaces, not ok
+        + A sub item with 4 spaces, ok
+    + Why is rumdl expecting 3 spaces for a 4 space indent?
+2. Item 2
+3. Item 3"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Issue #504: indent=4 with ordered parent should accept 4-space indent: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_indent2_explicit_with_ordered_parent() {
+        // When indent=2 is explicit and parent is "1. " (text-aligned=3),
+        // both 2 (fixed) and 3 (text-aligned) should be accepted
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(2),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // 3-space indent should pass (text-aligned with "1. ")
+        let content = "1. Ordered\n   * Bullet at 3 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "indent=2 under '1.' should accept text-aligned (3 spaces): {result:?}"
+        );
+
+        // 2-space indent should also pass (matches configured fixed indent)
+        let content_2 = "1. Ordered\n  * Bullet at 2 spaces";
+        let ctx = LintContext::new(content_2, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "indent=2 under '1.' should accept fixed indent (2 spaces): {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_indent4_explicit_with_wide_ordered_parent() {
+        // When indent=4 and parent is "100. " (text-aligned=5),
+        // both 4-space and 5-space indent should be accepted.
+        // The list parser may recognize 4-space as valid nesting under "100."
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(2),
+            style: md007_config::IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        // 5-space indent should pass
+        let content = "100. Wide ordered\n     * Bullet at 5 spaces";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "indent=4 under '100.' should accept 5-space indent: {result:?}"
+        );
+
+        // 4-space indent should also pass (matches configured indent)
+        let content_4 = "100. Wide ordered\n    * Bullet at 4 spaces";
+        let ctx = LintContext::new(content_4, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "indent=4 under '100.' should accept 4-space indent: {result:?}"
         );
     }
 }
