@@ -631,7 +631,8 @@ pub fn process_file_with_index(
 
             // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
             let flavor = config.get_flavor_for_file(Path::new(file_path));
-            let file_index = rumdl_lib::build_file_index_only(&content, rules, flavor);
+            let file_index =
+                rumdl_lib::build_file_index_only(&content, rules, flavor, Some(std::path::PathBuf::from(file_path)));
 
             let total_warnings = cached_warnings.len();
             return ProcessFileResult {

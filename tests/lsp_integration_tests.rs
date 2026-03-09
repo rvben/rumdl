@@ -44,6 +44,7 @@ Here's some `inline code` and a [link](https://example.com).
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -76,6 +77,7 @@ async fn test_multiple_file_scenarios() {
             &rules,
             false,
             rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
             None,
         )
         .unwrap();
@@ -134,6 +136,7 @@ async fn test_error_recovery() {
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     );
 
     // Should not panic or fail catastrophically
@@ -166,6 +169,7 @@ async fn test_performance_with_large_document() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -200,6 +204,7 @@ async fn test_rapid_editing_simulation() {
             &rules,
             false,
             rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
             None,
         )
         .unwrap();
@@ -254,6 +259,7 @@ async fn test_workspace_scenarios() {
             &rules,
             false,
             rumdl_lib::config::MarkdownFlavor::Standard,
+            None,
             None,
         )
         .unwrap();
@@ -316,6 +322,7 @@ async fn test_per_file_ignores_in_lsp_linting_path() {
         &readme_rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         Some(&config),
     )
     .unwrap();
@@ -343,6 +350,7 @@ async fn test_per_file_ignores_in_lsp_linting_path() {
         &other_rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         Some(&config),
     )
     .unwrap();
@@ -381,6 +389,7 @@ async fn test_diagnostic_conversion_completeness() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();

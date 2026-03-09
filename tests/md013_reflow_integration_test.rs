@@ -316,7 +316,7 @@ More text.
     let all_rules = rules::all_rules(&config);
     let md013_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD013").collect();
 
-    let result = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let result = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should have no warnings since content is already properly formatted
     // The snippet delimiters should be recognized and preserved

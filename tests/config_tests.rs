@@ -184,6 +184,7 @@ style = "asterisk"
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .expect("Linting should succeed");
 
@@ -311,6 +312,7 @@ style = "dash"
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
     let warnings_long = rumdl_lib::lint(
@@ -318,6 +320,7 @@ style = "dash"
         &rules_md013,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();

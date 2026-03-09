@@ -2959,6 +2959,7 @@ reflow-mode = "semantic-line-breaks"
         &filtered_rules,
         false,
         crate::config::MarkdownFlavor::Standard,
+        None,
         Some(&cli_config),
     )
     .expect("CLI lint should succeed");
@@ -3042,6 +3043,7 @@ reflow-mode = "semantic-line-breaks"
         &filtered_rules,
         false,
         crate::config::MarkdownFlavor::Standard,
+        None,
         Some(&resolved_config),
     )
     .expect("Lint should succeed");
@@ -3144,6 +3146,7 @@ style = "fixed"
         &filtered_rules,
         false,
         crate::config::MarkdownFlavor::Standard,
+        None,
         Some(&resolved_config),
     )
     .expect("Lint should succeed");

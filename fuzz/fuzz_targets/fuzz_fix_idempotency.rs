@@ -22,7 +22,7 @@ fuzz_target!(|data: &[u8]| {
     let rules = all_rules(&config);
 
     // Lint the content
-    let Ok(warnings) = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::Standard, Some(&config)) else {
+    let Ok(warnings) = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::Standard, None, Some(&config)) else {
         return;
     };
 
@@ -42,7 +42,7 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // Re-lint the fixed content
-    let Ok(warnings2) = rumdl_lib::lint(&fixed1, &rules, false, MarkdownFlavor::Standard, Some(&config)) else {
+    let Ok(warnings2) = rumdl_lib::lint(&fixed1, &rules, false, MarkdownFlavor::Standard, None, Some(&config)) else {
         return;
     };
 

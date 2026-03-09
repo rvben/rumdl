@@ -134,7 +134,14 @@ impl RumdlLanguageServer {
         }
 
         // Run rumdl linting with the configured flavor
-        let mut all_warnings = match crate::lint(text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
+        let mut all_warnings = match crate::lint(
+            text,
+            &filtered_rules,
+            false,
+            flavor,
+            file_path.clone(),
+            Some(&rumdl_config),
+        ) {
             Ok(warnings) => warnings,
             Err(e) => {
                 log::error!("Failed to lint document {uri}: {e}");
@@ -277,7 +284,14 @@ impl RumdlLanguageServer {
         let mut rules_with_warnings = std::collections::HashSet::new();
         let mut fixed_text = text.to_string();
 
-        match lint(&fixed_text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
+        match lint(
+            &fixed_text,
+            &filtered_rules,
+            false,
+            flavor,
+            file_path.clone(),
+            Some(&rumdl_config),
+        ) {
             Ok(warnings) => {
                 for warning in warnings {
                     if let Some(rule_name) = &warning.rule_name {
@@ -305,7 +319,7 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor, None);
+            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor, file_path.clone());
             match rule.fix(&ctx) {
                 Ok(new_text) => {
                     if new_text != fixed_text {
@@ -440,7 +454,14 @@ impl RumdlLanguageServer {
             md013_config.line_length = rumdl_config.global.line_length;
         }
 
-        match crate::lint(text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
+        match crate::lint(
+            text,
+            &filtered_rules,
+            false,
+            flavor,
+            file_path.clone(),
+            Some(&rumdl_config),
+        ) {
             Ok(warnings) => {
                 let mut actions = Vec::new();
 

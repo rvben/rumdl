@@ -19,7 +19,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -51,7 +51,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -82,7 +82,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -114,7 +114,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -141,7 +141,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Mixed lists should be treated as separate lists
     assert_eq!(
@@ -170,7 +170,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -199,7 +199,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -221,7 +221,7 @@ fn test_md032_list_without_blank_before() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -243,7 +243,7 @@ Text directly after"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -273,7 +273,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -304,7 +304,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -331,7 +331,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Empty list items can cause issues with line-by-line parsing
     // The parser may see the second item as a new list
@@ -363,7 +363,7 @@ Text"#;
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // HTML blocks with proper spacing don't cause MD032 warnings
     // The blank lines around the HTML block satisfy MD032 requirements
@@ -403,7 +403,7 @@ Text after.
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 5 "Naughty lazy continuation" has indent 3 but nested item has content_column 6
     // So indent 3 < 6 means it's a lazy continuation - we should get a lazy continuation warning
@@ -442,7 +442,7 @@ Text after.
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 5 has proper indent (6 >= content_column 6), so no MD032 warning
     assert!(
@@ -470,7 +470,7 @@ fn test_md032_issue_295_exact_case() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 3 "Naughty lazy continuation" has indent 3, nested item has content_column 6
     // Line 4 "Proper continuation" has indent 5, also < content_column 6
@@ -510,7 +510,7 @@ Text after.
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 6 has indent 6, but level 3 item has content_column ~9
     // Should detect lazy continuation on line 6
@@ -543,7 +543,7 @@ fn test_md032_indent_exactly_at_content_column() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 5 (Exactly 6 spaces) should be valid - no warning on line 4
     assert!(
@@ -573,7 +573,7 @@ fn test_md032_indent_one_less_than_content_column() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 5 has indent 5, content_column is 6, so it's lazy
     assert!(
@@ -613,7 +613,7 @@ Get Pattle from F-droid for Android by adding this repo:
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Lines 2 and 5 are properly indented continuation lines within the blockquote
     // (they have 2 spaces after ">", matching the "* " marker width)
@@ -654,7 +654,7 @@ fn test_md032_blockquote_multi_item_list_with_continuations() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     assert_eq!(
         warnings.len(),
@@ -685,7 +685,7 @@ fn test_md032_blockquote_ordered_list_with_code_block() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // The code block is NOT part of the list item (not indented), so list ends at line 3
     // Expect warning on line 3: "List should be followed by blank line"
@@ -723,7 +723,7 @@ Text.
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Line 5 has indent 4, but nested item content_column is 7
     // Should detect lazy continuation on line 5
@@ -758,7 +758,7 @@ fn test_md032_lazy_continuation_fix_simple_unordered() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should have a warning for the lazy continuation line
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
@@ -799,7 +799,7 @@ fn test_md032_lazy_continuation_fix_simple_ordered() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(lazy_warning.is_some(), "Should detect lazy continuation");
@@ -835,7 +835,7 @@ fn test_md032_lazy_continuation_fix_multiple_lines() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should have warnings for lazy continuation lines within the block
     let lazy_warnings: Vec<_> = warnings
@@ -873,7 +873,7 @@ fn test_md032_lazy_continuation_fix_blockquote() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -911,7 +911,7 @@ fn test_md032_lazy_continuation_fix_blockquote_existing_indent() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
         lazy_warning.is_some(),
@@ -944,7 +944,7 @@ fn test_md032_lazy_continuation_fix_blockquote_with_tab() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
         lazy_warning.is_some(),
@@ -977,7 +977,7 @@ fn test_md032_lazy_continuation_fix_blockquote_with_tab_and_space() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
         lazy_warning.is_some(),
@@ -1011,7 +1011,7 @@ fn test_md032_lazy_continuation_fix_idempotent() {
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
     // Get warnings and apply fix
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(lazy_warning.is_some());
 
@@ -1025,7 +1025,7 @@ fn test_md032_lazy_continuation_fix_idempotent() {
     let all_rules2 = rules::all_rules(&config2);
     let md032_rules2: Vec<_> = all_rules2.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings_after = rumdl_lib::lint(&fixed, &md032_rules2, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings_after = rumdl_lib::lint(&fixed, &md032_rules2, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // No lazy continuation warnings should remain
     let lazy_warnings_after: Vec<_> = warnings_after
@@ -1062,7 +1062,7 @@ fn test_md032_lazy_continuation_fix_wide_ordered_marker() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -1101,7 +1101,7 @@ fn test_md032_lazy_continuation_fix_very_wide_marker() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(lazy_warning.is_some(), "Should detect lazy continuation");
@@ -1132,7 +1132,7 @@ fn test_md032_lazy_continuation_fix_ordered_in_blockquote() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -1170,7 +1170,7 @@ fn test_md032_lazy_continuation_fix_wide_marker_in_blockquote() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -1210,7 +1210,7 @@ fn test_md032_lazy_continuation_fix_nested_list() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -1248,7 +1248,7 @@ fn test_md032_lazy_continuation_fix_deeply_nested_blockquote() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warning = warnings.iter().find(|w| w.message.contains("Lazy continuation"));
     assert!(
@@ -1289,7 +1289,7 @@ fn test_md032_lazy_continuation_fix_multiple_via_apply_warning_fixes() {
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
     // Get warnings first
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should have multiple lazy continuation warnings
     let lazy_warnings: Vec<_> = warnings
@@ -1318,7 +1318,7 @@ fn test_md032_lazy_continuation_fix_multiple_via_apply_warning_fixes() {
     let md032_rules2: Vec<_> = all_rules2.into_iter().filter(|r| r.name() == "MD032").collect();
 
     // Verify all lazy continuations are fixed
-    let warnings_after = rumdl_lib::lint(&fixed, &md032_rules2, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings_after = rumdl_lib::lint(&fixed, &md032_rules2, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_after = warnings_after
         .iter()
@@ -1358,7 +1358,7 @@ fn test_md032_lazy_continuation_fix_with_tabs() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Tab expands to 4 spaces visually, which is >= 2 (content_column for "- ")
     // So this might not be detected as lazy continuation
@@ -1394,7 +1394,7 @@ fn test_md032_lazy_continuation_fix_multiple_lines_exact_count() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warnings: Vec<_> = warnings
         .iter()
@@ -1463,7 +1463,7 @@ fn test_lazy_continuation_with_strikethrough() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warnings: Vec<_> = warnings
         .iter()
@@ -1500,7 +1500,7 @@ fn test_lazy_continuation_with_subscript() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warnings: Vec<_> = warnings
         .iter()
@@ -1534,7 +1534,7 @@ fn test_lazy_continuation_with_superscript() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let lazy_warnings: Vec<_> = warnings
         .iter()
@@ -1577,7 +1577,7 @@ fn test_lazy_continuation_with_mixed_inline_formatting() {
         let all_rules = rules::all_rules(&config);
         let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-        let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+        let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
         let lazy_warnings: Vec<_> = warnings
             .iter()
@@ -1619,7 +1619,7 @@ fn test_md032_parent_continuation_after_nested_list_not_flagged() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let md032_warnings: Vec<_> = warnings
         .iter()
@@ -1644,7 +1644,7 @@ fn test_md032_ordered_parent_continuation_after_nested_not_flagged() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let md032_warnings: Vec<_> = warnings
         .iter()
@@ -1669,7 +1669,7 @@ fn test_md032_multiple_parent_continuations_after_nested() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let md032_warnings: Vec<_> = warnings
         .iter()
@@ -1694,7 +1694,7 @@ fn test_md032_deeply_nested_continuation_at_parent_level() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let md032_warnings: Vec<_> = warnings
         .iter()
@@ -1719,7 +1719,7 @@ fn test_md032_mixed_ordered_parent_unordered_nested_continuation() {
     let all_rules = rules::all_rules(&config);
     let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
 
-    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     let md032_warnings: Vec<_> = warnings
         .iter()

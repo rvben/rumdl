@@ -496,6 +496,7 @@ fn test_promote_opt_in_md060_fix_produces_aligned_table() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Obsidian,
+        None,
         Some(&config),
     )
     .unwrap();

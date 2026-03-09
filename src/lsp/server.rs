@@ -1021,7 +1021,14 @@ impl LanguageServer for RumdlLanguageServer {
 
             // Phase 1: Apply lint rule fixes
             let mut result = text.clone();
-            match crate::lint(&text, &filtered_rules, false, flavor, Some(&rumdl_config)) {
+            match crate::lint(
+                &text,
+                &filtered_rules,
+                false,
+                flavor,
+                file_path.clone(),
+                Some(&rumdl_config),
+            ) {
                 Ok(warnings) => {
                     log::debug!(
                         "Found {} warnings, {} with fixes",

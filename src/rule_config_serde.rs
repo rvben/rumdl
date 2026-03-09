@@ -1125,6 +1125,7 @@ mod tests {
             &filtered,
             false,
             crate::config::MarkdownFlavor::Standard,
+            None,
             Some(&config),
         );
 
@@ -1160,6 +1161,7 @@ mod tests {
             &filtered,
             false,
             crate::config::MarkdownFlavor::Standard,
+            None,
             Some(&config),
         );
 
@@ -1196,6 +1198,7 @@ mod tests {
             &filtered,
             false,
             crate::config::MarkdownFlavor::Standard,
+            None,
             Some(&config),
         );
 
@@ -1238,6 +1241,7 @@ mod tests {
             &filtered,
             false,
             crate::config::MarkdownFlavor::Standard,
+            None,
             Some(&config),
         );
 

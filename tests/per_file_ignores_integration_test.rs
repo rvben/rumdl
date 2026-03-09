@@ -62,6 +62,7 @@ fn test_per_file_ignores_integration_actual_linting() {
         false,
         config.markdown_flavor(),
         None,
+        None,
     )
     .unwrap();
     let docs_warnings = rumdl_lib::lint(
@@ -72,6 +73,7 @@ fn test_per_file_ignores_integration_actual_linting() {
             .collect::<Vec<_>>(),
         false,
         config.markdown_flavor(),
+        None,
         None,
     )
     .unwrap();

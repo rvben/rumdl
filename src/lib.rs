@@ -188,10 +188,10 @@ pub fn lint(
     rules: &[Box<dyn Rule>],
     verbose: bool,
     flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
     config: Option<&crate::config::Config>,
 ) -> LintResult {
-    // Use lint_and_index but discard the FileIndex for backward compatibility
-    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor, None, config);
+    let (result, _file_index) = lint_and_index(content, rules, verbose, flavor, source_file, config);
     result
 }
 
@@ -206,6 +206,7 @@ pub fn build_file_index_only(
     content: &str,
     rules: &[Box<dyn Rule>],
     flavor: crate::config::MarkdownFlavor,
+    source_file: Option<std::path::PathBuf>,
 ) -> crate::workspace_index::FileIndex {
     // Compute content hash for change detection
     let content_hash = compute_content_hash(content);
@@ -217,7 +218,7 @@ pub fn build_file_index_only(
     }
 
     // Parse LintContext once with the provided flavor
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, None);
+    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
 
     // Only call contribute_to_index for cross-file rules (no rule checking!)
     for rule in rules {
@@ -627,7 +628,7 @@ mod tests {
     fn test_lint_empty_content() {
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
-        let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard, None);
+        let result = lint("", &rules, false, crate::config::MarkdownFlavor::Standard, None, None);
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
     }
@@ -637,7 +638,14 @@ mod tests {
         let content = "## Level 2\n#### Level 4"; // Skips level 3
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
+        let result = lint(
+            content,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        );
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(!warnings.is_empty());
@@ -650,7 +658,14 @@ mod tests {
         let content = "<!-- rumdl-disable MD001 -->\n## Level 2\n#### Level 4";
         let rules: Vec<Box<dyn Rule>> = vec![Box::new(MD001HeadingIncrement::default())];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
+        let result = lint(
+            content,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        );
         assert!(result.is_ok());
         let warnings = result.unwrap();
         assert!(warnings.is_empty()); // Should be disabled by inline comment
@@ -665,7 +680,14 @@ mod tests {
             // A list-related rule would be skipped
         ];
 
-        let result = lint(content, &rules, false, crate::config::MarkdownFlavor::Standard, None);
+        let result = lint(
+            content,
+            &rules,
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        );
         assert!(result.is_ok());
     }
 

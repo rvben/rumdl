@@ -2663,3 +2663,174 @@ fn test_compact_paths_image_fix_byte_range_targets_url_only() {
         "Fix range should cover the URL './img.png', not '{replaced_text}'"
     );
 }
+
+/// Regression test for rumdl-vscode#109: MD057 must receive source_file
+/// via the lint() API to resolve relative links correctly.
+///
+/// When source_file is None (as it was before the fix), MD057 silently
+/// returns no warnings because it can't determine the base directory.
+/// When source_file is provided, MD057 resolves links relative to the
+/// file's parent directory.
+#[test]
+fn test_lint_api_passes_source_file_to_md057() {
+    let temp_dir = tempdir().unwrap();
+    let base = temp_dir.path();
+
+    // Create directory structure:
+    //   base/docs/guide.md  (the file being linted)
+    //   base/docs/intro.md  (exists - valid link target)
+    //   (base/docs/missing.md does NOT exist)
+    let docs_dir = base.join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+
+    let guide_path = docs_dir.join("guide.md");
+    let content = "# Guide\n\n[Intro](intro.md)\n[Missing](missing.md)\n";
+    std::fs::write(&guide_path, content).unwrap();
+
+    let intro_path = docs_dir.join("intro.md");
+    std::fs::write(&intro_path, "# Intro\n").unwrap();
+
+    // Configure only MD057
+    let mut config = rumdl_lib::config::Config::default();
+    config.global.enable = vec!["MD057".to_string()];
+
+    let rules = rumdl_lib::rules::all_rules(&config);
+    let filtered = rumdl_lib::rules::filter_rules(&rules, &config.global);
+
+    // With source_file=None, MD057 cannot resolve relative links and returns nothing
+    let warnings_without_path = rumdl_lib::lint(
+        content,
+        &filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+        Some(&config),
+    )
+    .unwrap();
+
+    let md057_without: Vec<_> = warnings_without_path
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD057"))
+        .collect();
+    assert!(
+        md057_without.is_empty(),
+        "MD057 should produce no warnings when source_file is None (cannot resolve paths), \
+         but got {}: {:?}",
+        md057_without.len(),
+        md057_without.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+
+    // With source_file=Some(path), MD057 resolves links relative to the file's directory
+    let warnings_with_path = rumdl_lib::lint(
+        content,
+        &filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(guide_path.clone()),
+        Some(&config),
+    )
+    .unwrap();
+
+    let md057_with: Vec<_> = warnings_with_path
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD057"))
+        .collect();
+    assert_eq!(
+        md057_with.len(),
+        1,
+        "MD057 should report 1 warning for missing.md when source_file is provided, got {}: {:?}",
+        md057_with.len(),
+        md057_with.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        md057_with[0].message.contains("missing.md"),
+        "Warning should mention 'missing.md', got: {}",
+        md057_with[0].message
+    );
+}
+
+/// Regression test for rumdl-vscode#109: compact-paths detection requires source_file.
+///
+/// The original bug: CLI reported "link can be simplified" but VS Code extension
+/// reported "link does not exist" because it wasn't passing the file path.
+#[test]
+fn test_lint_api_compact_paths_with_source_file() {
+    let temp_dir = tempdir().unwrap();
+    let base = temp_dir.path();
+
+    // Create directory structure:
+    //   base/docs/guide.md       (the file being linted)
+    //   base/docs/reference.md   (exists)
+    let docs_dir = base.join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+
+    let guide_path = docs_dir.join("guide.md");
+    // Link "../docs/reference.md" from within docs/ is redundant - can be simplified to "reference.md"
+    let content = "# Guide\n\n[Reference](../docs/reference.md)\n";
+    std::fs::write(&guide_path, content).unwrap();
+
+    let reference_path = docs_dir.join("reference.md");
+    std::fs::write(&reference_path, "# Reference\n").unwrap();
+
+    // Configure MD057 with compact-paths enabled
+    let mut config = rumdl_lib::config::Config::default();
+    config.global.enable = vec!["MD057".to_string()];
+    let json = serde_json::json!({ "compact-paths": true });
+    if let Some(rule_config) = rumdl_lib::rule_config_serde::json_to_rule_config(&json) {
+        config.rules.insert("MD057".to_string(), rule_config);
+    }
+
+    let rules = rumdl_lib::rules::all_rules(&config);
+    let filtered = rumdl_lib::rules::filter_rules(&rules, &config.global);
+
+    // Without source_file: no warnings (MD057 can't resolve)
+    let warnings_without = rumdl_lib::lint(
+        content,
+        &filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+        Some(&config),
+    )
+    .unwrap();
+    let md057_without: Vec<_> = warnings_without
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD057"))
+        .collect();
+    assert!(
+        md057_without.is_empty(),
+        "MD057 should produce no warnings without source_file"
+    );
+
+    // With source_file: should detect the compact-paths opportunity
+    let warnings_with = rumdl_lib::lint(
+        content,
+        &filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(guide_path.clone()),
+        Some(&config),
+    )
+    .unwrap();
+    let md057_with: Vec<_> = warnings_with
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD057"))
+        .collect();
+    assert_eq!(
+        md057_with.len(),
+        1,
+        "MD057 should report 1 compact-paths warning, got {}: {:?}",
+        md057_with.len(),
+        md057_with.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+    assert!(
+        md057_with[0].message.contains("simplified"),
+        "Warning should mention simplification, got: {}",
+        md057_with[0].message
+    );
+    assert!(
+        md057_with[0].message.contains("reference.md"),
+        "Warning should mention the simplified path, got: {}",
+        md057_with[0].message
+    );
+}

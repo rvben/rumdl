@@ -110,6 +110,7 @@ This is a line that exceeds the default 80 characters but is less than the confi
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .expect("Linting should succeed");
 
@@ -172,6 +173,7 @@ fn test_config_priority() {
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .expect("Linting should succeed");
 
@@ -204,6 +206,7 @@ fn test_config_priority() {
         &configured_rules_2,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .expect("Linting should succeed");
@@ -250,6 +253,7 @@ fn test_partial_rule_config() {
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .expect("Linting should succeed");
 
@@ -283,6 +287,7 @@ fn test_partial_rule_config() {
         &configured_rules_2,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .expect("Linting should succeed");
@@ -338,6 +343,7 @@ This line exceeds 20 characters.
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .expect("Linting should succeed");
 
@@ -383,6 +389,7 @@ line_length = 20 # Set a low limit to trigger it
         &configured_rules_2,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .expect("Linting should succeed");
@@ -459,6 +466,7 @@ This line > 10.
         &configured_rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .expect("Linting should succeed");

@@ -52,7 +52,14 @@ impl FileParallelProcessor {
             return Ok(files
                 .iter()
                 .map(|(path, content)| {
-                    let result = crate::lint(content, rules, false, crate::config::MarkdownFlavor::Standard, None);
+                    let result = crate::lint(
+                        content,
+                        rules,
+                        false,
+                        crate::config::MarkdownFlavor::Standard,
+                        Some(std::path::PathBuf::from(path)),
+                        None,
+                    );
                     (path.clone(), result)
                 })
                 .collect());
@@ -70,7 +77,14 @@ impl FileParallelProcessor {
             .par_iter()
             .map(|(path, content)| {
                 let start = Instant::now();
-                let result = crate::lint(content, rules, false, crate::config::MarkdownFlavor::Standard, None);
+                let result = crate::lint(
+                    content,
+                    rules,
+                    false,
+                    crate::config::MarkdownFlavor::Standard,
+                    Some(std::path::PathBuf::from(path)),
+                    None,
+                );
                 let duration = start.elapsed();
 
                 if duration.as_millis() > 1000 {

@@ -20,6 +20,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -62,6 +63,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -96,6 +98,7 @@ This line has trailing spaces and should now trigger MD009  "#;
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -153,6 +156,7 @@ This is a very long line that definitely exceeds the default limit of eighty cha
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -192,6 +196,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -228,6 +233,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -259,6 +265,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -296,6 +303,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -326,6 +334,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -381,6 +390,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -412,6 +422,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -447,6 +458,7 @@ Trailing spaces here
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -470,6 +482,7 @@ Trailing spaces here  "#;
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -511,6 +524,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -536,6 +550,7 @@ This is a very long line that exceeds 80 characters and would normally trigger M
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -565,6 +580,7 @@ This is a very long line that exceeds 80 characters but file-wide disable takes 
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -598,6 +614,7 @@ This is an extremely long line that exceeds even 120 characters and should trigg
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -635,6 +652,7 @@ This is a very long line that exceeds 80 characters but is under 120 characters 
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -664,6 +682,7 @@ This is a very long line that exceeds 80 characters and even exceeds 120 charact
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -690,6 +709,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 bec
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -723,6 +743,7 @@ This is an extremely long line that exceeds even 200 characters and would normal
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -753,6 +774,7 @@ This is a very long line that exceeds 80 characters and should trigger MD013 wit
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();

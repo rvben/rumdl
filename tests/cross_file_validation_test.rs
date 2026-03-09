@@ -561,7 +561,7 @@ Link to [locale](#mkdocs-locale) again.
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None).unwrap();
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None, None).unwrap();
 
     // Filter to MD051 only
     let md051_warnings: Vec<_> = warnings
@@ -589,7 +589,7 @@ Content here.
 "#;
 
     let rules = rumdl_lib::rules::all_rules(&Config::default());
-    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None).unwrap();
+    let warnings = rumdl_lib::lint(content, &rules, false, MarkdownFlavor::default(), None, None).unwrap();
 
     let md051_warnings: Vec<_> = warnings
         .iter()

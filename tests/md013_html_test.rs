@@ -20,7 +20,7 @@ More text after that should also be processed and flagged for line length violat
     let all_rules = rules::all_rules(&config);
     let md013_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD013").collect();
 
-    let warnings = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should find warnings on lines 3, 7, and 9 (all long lines)
     assert!(
@@ -69,7 +69,7 @@ This line comes after the style tag and has a very long length that exceeds eigh
     let all_rules = rules::all_rules(&config);
     let md013_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD013").collect();
 
-    let warnings = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None).unwrap();
+    let warnings = rumdl_lib::lint(content, &md013_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
     // Should find warning on line 5 (after style tag)
     assert!(

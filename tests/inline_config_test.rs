@@ -23,6 +23,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -52,6 +53,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -83,6 +85,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -120,6 +123,7 @@ This is another very long line that exceeds 80 characters and should not trigger
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -172,6 +176,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -212,6 +217,7 @@ Trailing spaces should now trigger MD009
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -265,6 +271,7 @@ This is a very long line that exceeds 80 characters but is disabled by the previ
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -336,6 +343,7 @@ This is another very long line that exceeds 80 characters and should not trigger
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -375,6 +383,7 @@ fn test_md009_simple() {
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -409,6 +418,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -447,6 +457,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
         None,
+        None,
     )
     .unwrap();
 
@@ -472,6 +483,7 @@ fn test_inline_config_with_mixed_alias_and_rule_id() {
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();
@@ -523,6 +535,7 @@ This is another very long line that exceeds 80 characters and should trigger MD0
         &rules,
         false,
         rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
         None,
     )
     .unwrap();

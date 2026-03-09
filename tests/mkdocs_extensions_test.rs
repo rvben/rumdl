@@ -28,13 +28,13 @@ fn create_mkdocs_config() -> Config {
 fn lint_mkdocs(content: &str) -> Vec<rumdl_lib::rule::LintWarning> {
     let config = create_mkdocs_config();
     let rules = filter_rules(&all_rules(&config), &config.global);
-    lint(content, &rules, false, MarkdownFlavor::MkDocs, None).unwrap()
+    lint(content, &rules, false, MarkdownFlavor::MkDocs, None, None).unwrap()
 }
 
 fn lint_standard(content: &str) -> Vec<rumdl_lib::rule::LintWarning> {
     let config = Config::default();
     let rules = filter_rules(&all_rules(&config), &config.global);
-    lint(content, &rules, false, MarkdownFlavor::Standard, None).unwrap()
+    lint(content, &rules, false, MarkdownFlavor::Standard, None, None).unwrap()
 }
 
 // =============================================================================
@@ -4265,7 +4265,7 @@ $E = mc^2$\n\n\
 
         let config = create_mkdocs_config();
         let rules = filter_rules(&all_rules(&config), &config.global);
-        let warnings = lint(content, &rules, false, MarkdownFlavor::MkDocs, None).unwrap();
+        let warnings = lint(content, &rules, false, MarkdownFlavor::MkDocs, None, None).unwrap();
 
         // Verify the test document triggers the expected rules
         let md009_count = warnings
@@ -4302,7 +4302,7 @@ $E = mc^2$\n\n\
         assert!(!fixed_content.contains("   \n"), "Trailing spaces should be removed");
 
         // Re-lint the fixed content - rules that were fixed should produce zero warnings
-        let re_warnings = lint(&fixed_content, &rules, false, MarkdownFlavor::MkDocs, None).unwrap();
+        let re_warnings = lint(&fixed_content, &rules, false, MarkdownFlavor::MkDocs, None, None).unwrap();
 
         // MD009 (trailing spaces) and MD012 (multiple blanks) should be fully resolved
         let trailing_space_warnings: Vec<_> = re_warnings
