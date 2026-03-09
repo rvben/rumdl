@@ -359,6 +359,7 @@ impl Rule for MD013LineLength {
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
+                    || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_pymdown_block)
                 {
@@ -376,6 +377,7 @@ impl Rule for MD013LineLength {
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_expression)
+                        || ctx.line_info(line_number).is_some_and(|info| info.in_jsx_block)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
                         || ctx
                             .line_info(line_number)
@@ -542,6 +544,7 @@ impl MD013LineLength {
                     || info.in_html_comment
                     || info.in_esm_block
                     || info.in_jsx_expression
+                    || info.in_jsx_block
                     || info.in_mdx_comment
                     || info.in_mkdocstrings
                     || info.in_pymdown_block
@@ -814,6 +817,7 @@ impl MD013LineLength {
                     || info.in_html_comment
                     || info.in_esm_block
                     || info.in_jsx_expression
+                    || info.in_jsx_block
                     || info.in_mdx_comment
                     || info.in_mkdocstrings
                     || info.in_pymdown_block
@@ -2416,6 +2420,7 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_html_comment)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_esm_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_expression)
+                    || ctx.line_info(next_line_num).is_some_and(|info| info.in_jsx_block)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_mdx_comment)
                     || ctx
                         .line_info(next_line_num)

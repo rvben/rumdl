@@ -101,6 +101,8 @@ pub struct LineFilterConfig {
     /// Unlike `skip_quarto_divs` which skips ALL content inside divs,
     /// this only skips the marker lines themselves (structural delimiters)
     pub skip_div_markers: bool,
+    /// Skip lines inside JSX component blocks (MDX only, e.g. `<Tabs>...</Tabs>`)
+    pub skip_jsx_blocks: bool,
 }
 
 impl LineFilterConfig {
@@ -303,6 +305,16 @@ impl LineFilterConfig {
         self
     }
 
+    /// Skip lines inside JSX component blocks (MDX only)
+    ///
+    /// JSX blocks like `<Tabs>...</Tabs>` contain content that pulldown-cmark
+    /// may misparse. Use this to skip entire JSX component regions.
+    #[must_use]
+    pub fn skip_jsx_blocks(mut self) -> Self {
+        self.skip_jsx_blocks = true;
+        self
+    }
+
     /// Check if a line should be filtered out based on this configuration
     fn should_filter(&self, line_info: &LineInfo) -> bool {
         // Kramdown extension blocks are always filtered unconditionally.
@@ -325,6 +337,7 @@ impl LineFilterConfig {
             || (self.skip_obsidian_comments && line_info.in_obsidian_comment)
             || (self.skip_pymdown_blocks && line_info.in_pymdown_block)
             || (self.skip_div_markers && line_info.is_div_marker)
+            || (self.skip_jsx_blocks && line_info.in_jsx_block)
     }
 }
 

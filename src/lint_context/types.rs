@@ -69,6 +69,8 @@ pub struct LineInfo {
     pub in_kramdown_extension_block: bool,
     /// Whether this line is a kramdown block IAL ({:.class #id}) or ALD ({:ref: .class})
     pub is_kramdown_block_ial: bool,
+    /// Whether this line is inside a JSX component block (MDX only, e.g. `<Tabs>...</Tabs>`)
+    pub in_jsx_block: bool,
 }
 
 impl LineInfo {

@@ -187,6 +187,13 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_esm_blocks(content, &mut lines, flavor)
         );
 
+        // Detect JSX component blocks in MDX files (e.g. <Tabs>...</Tabs>)
+        profile_section!(
+            "JSX block detection",
+            profile,
+            flavor_detection::detect_jsx_blocks(content, &mut lines, flavor)
+        );
+
         // Detect JSX expressions and MDX comments in MDX files
         let (jsx_expression_ranges, mdx_comment_ranges) = profile_section!(
             "JSX/MDX detection",
@@ -216,6 +223,39 @@ impl<'a> LintContext<'a> {
                 let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
 
                 // Walk lines in this range, collecting sub-ranges where in_code_block is true
+                let mut sub_start: Option<usize> = None;
+                for (i, &offset) in line_offsets[start_line..end_line]
+                    .iter()
+                    .enumerate()
+                    .map(|(j, o)| (j + start_line, o))
+                {
+                    let is_real_code = lines.get(i).is_some_and(|info| info.in_code_block);
+                    if is_real_code && sub_start.is_none() {
+                        let byte_start = if i == start_line { start } else { offset };
+                        sub_start = Some(byte_start);
+                    } else if !is_real_code && sub_start.is_some() {
+                        new_code_blocks.push((sub_start.unwrap(), offset));
+                        sub_start = None;
+                    }
+                }
+                if let Some(s) = sub_start {
+                    new_code_blocks.push((s, end));
+                }
+            }
+            code_blocks = new_code_blocks;
+        }
+
+        // Filter code_blocks for MDX JSX blocks (same pattern as MkDocs above).
+        // detect_jsx_blocks already corrected LineInfo.in_code_block for indented content
+        // inside JSX component blocks, but code_blocks byte ranges need updating too.
+        if flavor.supports_jsx() {
+            let mut new_code_blocks = Vec::with_capacity(code_blocks.len());
+            for &(start, end) in &code_blocks {
+                let start_line = line_offsets
+                    .partition_point(|&offset| offset <= start)
+                    .saturating_sub(1);
+                let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
+
                 let mut sub_start: Option<usize> = None;
                 for (i, &offset) in line_offsets[start_line..end_line]
                     .iter()

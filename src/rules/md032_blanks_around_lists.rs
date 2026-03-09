@@ -642,10 +642,13 @@ impl MD032BlanksAroundLists {
             }
 
             // Skip if in code block, front matter, or HTML comment
-            if ctx
-                .line_info(line_num)
-                .is_some_and(|info| info.in_code_block || info.in_front_matter || info.in_html_comment)
-            {
+            if ctx.line_info(line_num).is_some_and(|info| {
+                info.in_code_block
+                    || info.in_front_matter
+                    || info.in_html_comment
+                    || info.in_html_block
+                    || info.in_jsx_block
+            }) {
                 continue;
             }
 

@@ -151,6 +151,7 @@ pub(super) fn compute_basic_line_info(
             in_pymdown_block,
             in_kramdown_extension_block: false,
             is_kramdown_block_ial: false,
+            in_jsx_block: false,
         });
     }
 

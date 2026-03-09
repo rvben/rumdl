@@ -138,6 +138,191 @@ pub(super) fn detect_esm_blocks(content: &str, lines: &mut [LineInfo], flavor: M
     }
 }
 
+/// Detect JSX component blocks in MDX files.
+///
+/// JSX components use uppercase-first naming (React convention) to distinguish from HTML.
+/// Lines between matched opening and closing JSX component tags are marked with `in_jsx_block`.
+/// Also clears false `in_code_block` flags for indented content inside JSX blocks
+/// (pulldown-cmark misclassifies 4-space indented content as indented code blocks).
+pub(super) fn detect_jsx_blocks(content: &str, lines: &mut [LineInfo], flavor: MarkdownFlavor) {
+    if !flavor.supports_jsx() {
+        return;
+    }
+
+    let mut tag_stack: Vec<(String, usize)> = Vec::new();
+
+    for i in 0..lines.len() {
+        if lines[i].in_front_matter || lines[i].in_html_comment {
+            continue;
+        }
+
+        let line_content = lines[i].content(content);
+        let trimmed = line_content.trim();
+
+        // Skip lines in code blocks that don't contain '<' — they can't have JSX tags
+        if lines[i].in_code_block && !trimmed.contains('<') {
+            continue;
+        }
+
+        for tag in scan_jsx_tags(trimmed) {
+            if tag.is_self_closing {
+                lines[i].in_jsx_block = true;
+                continue;
+            }
+
+            if tag.is_closing {
+                // Find the matching opening tag (innermost match)
+                if let Some(pos) = tag_stack.iter().rposition(|(name, _)| name == tag.name) {
+                    let (_tag_name, start_idx) = tag_stack.remove(pos);
+                    for j in start_idx..=i {
+                        lines[j].in_jsx_block = true;
+                    }
+                }
+            } else {
+                // Check if the closing tag is on the same line (after the opening tag)
+                let after_tag = &trimmed[tag.end_offset..];
+                if has_closing_tag(after_tag, tag.name) {
+                    lines[i].in_jsx_block = true;
+                } else {
+                    tag_stack.push((tag.name.to_owned(), i));
+                }
+            }
+        }
+    }
+
+    // Clear false in_code_block for indented content inside JSX blocks.
+    // Preserve real fenced code blocks by tracking fence markers.
+    let mut fenced_code = FencedCodeTracker::new();
+    for line in lines.iter_mut() {
+        if line.in_jsx_block {
+            let trimmed = line.content(content).trim();
+            let in_fenced = fenced_code.process_line(trimmed);
+            if !in_fenced {
+                line.in_code_block = false;
+            }
+        } else {
+            fenced_code.reset();
+        }
+    }
+}
+
+/// A JSX tag found during line scanning.
+struct JsxTag<'a> {
+    name: &'a str,
+    is_closing: bool,
+    is_self_closing: bool,
+    /// Byte offset in the line where the tag ends (after `>`)
+    end_offset: usize,
+}
+
+/// Scan a line for all JSX component tags (uppercase-first names).
+/// Handles multiple tags per line and skips quoted attribute strings.
+fn scan_jsx_tags(line: &str) -> Vec<JsxTag<'_>> {
+    let mut tags = Vec::new();
+    let bytes = line.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        if bytes[pos] != b'<' {
+            pos += 1;
+            continue;
+        }
+
+        let rest = &line[pos..];
+        let after_bracket = &rest[1..];
+        let is_closing = after_bracket.starts_with('/');
+        let tag_start_str = if is_closing { &after_bracket[1..] } else { after_bracket };
+
+        // JSX components must start with an uppercase ASCII letter
+        match tag_start_str.as_bytes().first() {
+            Some(&c) if c.is_ascii_uppercase() => {}
+            _ => {
+                pos += 1;
+                continue;
+            }
+        }
+
+        // Read the component name (alphanumeric, dot, underscore)
+        let name_len = tag_start_str
+            .bytes()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == b'.' || *c == b'_')
+            .count();
+        if name_len == 0 {
+            pos += 1;
+            continue;
+        }
+        let name = &tag_start_str[..name_len];
+
+        // Scan forward to find '>', skipping quoted strings
+        let scan_start = pos + 1 + (if is_closing { 1 } else { 0 }) + name_len;
+        let mut j = scan_start;
+        let mut in_string = false;
+        let mut string_char = b'"';
+        let mut found_end = false;
+        let mut is_self_closing = false;
+
+        while j < bytes.len() {
+            let c = bytes[j];
+            if in_string {
+                if c == string_char && (j == 0 || bytes[j - 1] != b'\\') {
+                    in_string = false;
+                }
+            } else if c == b'"' || c == b'\'' {
+                in_string = true;
+                string_char = c;
+            } else if c == b'>' {
+                is_self_closing = !is_closing && j > 0 && bytes[j - 1] == b'/';
+                found_end = true;
+                j += 1;
+                break;
+            }
+            j += 1;
+        }
+
+        if !found_end {
+            // Tag extends beyond the line (multi-line attributes)
+            tags.push(JsxTag {
+                name,
+                is_closing,
+                is_self_closing: false,
+                end_offset: line.len(),
+            });
+            break;
+        }
+
+        tags.push(JsxTag {
+            name,
+            is_closing,
+            is_self_closing,
+            end_offset: j,
+        });
+        pos = j;
+    }
+
+    tags
+}
+
+/// Check if a closing tag `</name>` exists in haystack, using byte-level comparison.
+fn has_closing_tag(haystack: &str, tag_name: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    let pattern_len = 2 + tag_name.len() + 1; // </name>
+    if bytes.len() < pattern_len {
+        return false;
+    }
+    let mut i = 0;
+    while i + pattern_len <= bytes.len() {
+        if bytes[i] == b'<'
+            && bytes[i + 1] == b'/'
+            && haystack[i + 2..].starts_with(tag_name)
+            && bytes[i + 2 + tag_name.len()] == b'>'
+        {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Detect JSX expressions {expression} and MDX comments {/* comment */} in MDX files
 /// Returns (jsx_expression_ranges, mdx_comment_ranges)
 pub(super) fn detect_jsx_and_mdx_comments(
