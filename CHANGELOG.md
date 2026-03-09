@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.44] - 2026-03-09
+
+### Fixed
+
+- **MD007**: Accept both text-aligned and fixed indent under ordered parents,
+  resolving false positives with 4-space indentation config
+  ([#504](https://github.com/rvben/rumdl/issues/504))
+- **MD007**: Use accepted indent for stored content column, fixing inconsistent
+  indent detection in nested lists
+- **MD013/MD032/MD046**: Suppress false positives inside JSX component blocks
+  (thanks @anaxite)
+- **MD032**: Recognize parent-level continuation after nested list items,
+  preventing false positive when a list continuation follows a nested item
+  ([#507](https://github.com/rvben/rumdl/issues/507))
+- **LSP**: Skip documentation URLs for code-block-tool warnings, avoiding
+  invalid links like `https://rumdl.dev/jq/`
+  ([#505](https://github.com/rvben/rumdl/issues/505))
+- **LSP**: Plumb `source_file` through `lint()` for path-dependent rules
+- **Code block tools**: Include all output lines in generic fallback
+  diagnostics, providing full context from tools like `tombi`
+  ([#506](https://github.com/rvben/rumdl/issues/506))
+
+### Changed
+
+- **Code block tools**: Classify `jq` as both linter and formatter
+
 ## [0.1.43] - 2026-03-07
 
 ### Added
