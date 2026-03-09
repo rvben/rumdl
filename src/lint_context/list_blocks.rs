@@ -467,10 +467,18 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                         } else {
                             next_line.indent
                         };
+                    // Use the minimum indent needed for any ancestor list item's continuation,
+                    // not just the most deeply nested. A blank line followed by text indented
+                    // at the parent level is a valid list continuation paragraph.
+                    let root_continuation_indent = if block.is_ordered {
+                        block.nesting_level + block.max_marker_width
+                    } else {
+                        block.nesting_level * 2 + 2
+                    };
                     let adjusted_min_continuation = if block_bq_level_for_indent > 0 {
                         if block.is_ordered { last_marker_width } else { 2 }
                     } else {
-                        min_continuation_indent
+                        min_continuation_indent.min(root_continuation_indent)
                     };
                     if debug_list {
                         eprintln!(

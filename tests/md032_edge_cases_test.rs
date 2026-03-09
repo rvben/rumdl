@@ -1607,3 +1607,130 @@ fn test_lazy_continuation_with_mixed_inline_formatting() {
         );
     }
 }
+
+/// Issue #507: Parent-level continuation after nested list items should not trigger MD032
+#[test]
+fn test_md032_parent_continuation_after_nested_list_not_flagged() {
+    // A blank line followed by text indented at the parent list level is a valid
+    // continuation paragraph for the parent list item, not a blanks-around-lists violation.
+    let content = "- list item\n\n  - nested item\n\n  continuation of top-level list item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    let md032_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+        .collect();
+    assert!(
+        md032_warnings.is_empty(),
+        "Parent-level continuation after nested list should not trigger MD032. Found: {:?}",
+        md032_warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #507: Ordered list with nested items and parent continuation
+#[test]
+fn test_md032_ordered_parent_continuation_after_nested_not_flagged() {
+    let content = "1. Parent item\n\n   - Nested item\n\n   Continuation of parent ordered item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    let md032_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+        .collect();
+    assert!(
+        md032_warnings.is_empty(),
+        "Parent-level continuation after nested list in ordered list should not trigger MD032. Found: {:?}",
+        md032_warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #507: Multiple continuation paragraphs at parent level
+#[test]
+fn test_md032_multiple_parent_continuations_after_nested() {
+    let content = "- list item\n\n  - nested item\n\n  first continuation\n\n  second continuation\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    let md032_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+        .collect();
+    assert!(
+        md032_warnings.is_empty(),
+        "Multiple parent-level continuations should not trigger MD032. Found: {:?}",
+        md032_warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #507: Deeply nested list with continuation at various ancestor levels
+#[test]
+fn test_md032_deeply_nested_continuation_at_parent_level() {
+    let content = "- level 1\n\n  - level 2\n\n    - level 3\n\n  continuation at level 1\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    let md032_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+        .collect();
+    assert!(
+        md032_warnings.is_empty(),
+        "Continuation at ancestor level in deeply nested list should not trigger MD032. Found: {:?}",
+        md032_warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #507: Mixed ordered parent with unordered nested child
+#[test]
+fn test_md032_mixed_ordered_parent_unordered_nested_continuation() {
+    let content = "1. Parent item\n\n   - Nested unordered\n\n   Continuation of parent ordered item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None).unwrap();
+
+    let md032_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD032"))
+        .collect();
+    assert!(
+        md032_warnings.is_empty(),
+        "Mixed ordered/unordered parent continuation should not trigger MD032. Found: {:?}",
+        md032_warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
