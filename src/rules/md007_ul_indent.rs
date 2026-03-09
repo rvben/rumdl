@@ -272,7 +272,13 @@ impl Rule for MD007ULIndent {
                 // Use actual marker position for cleanup logic
                 // For text-aligned children, store the EXPECTED content position after fix
                 // (not the actual position) to prevent error cascade
-                let expected_content_visual_col = expected_indent + 2; // where content SHOULD be after fix
+                // When accepted via also_acceptable, use that indent for content col
+                let accepted_indent = if also_acceptable.is_some_and(|alt| visual_marker_column == alt) {
+                    visual_marker_column
+                } else {
+                    expected_indent
+                };
+                let expected_content_visual_col = accepted_indent + 2;
                 list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
 
                 // Skip first level check if start_indented is false
