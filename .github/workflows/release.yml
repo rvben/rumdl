@@ -722,6 +722,20 @@ jobs:
             https://api.github.com/repos/rvben/obsidian-rumdl/dispatches \
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
+      - name: Notify rumdl-chrome-extension
+        if: ${{ steps.publish-wasm-npm.outcome == 'success' && inputs.dry_run != true }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.CHROME_EXT_DISPATCH_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          curl --fail -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/rvben/rumdl-chrome-extension/dispatches \
+            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
+
       - name: Extract release notes
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
