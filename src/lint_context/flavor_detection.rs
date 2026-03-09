@@ -174,8 +174,8 @@ pub(super) fn detect_jsx_blocks(content: &str, lines: &mut [LineInfo], flavor: M
                 // Find the matching opening tag (innermost match)
                 if let Some(pos) = tag_stack.iter().rposition(|(name, _)| name == tag.name) {
                     let (_tag_name, start_idx) = tag_stack.remove(pos);
-                    for j in start_idx..=i {
-                        lines[j].in_jsx_block = true;
+                    for line in &mut lines[start_idx..=i] {
+                        line.in_jsx_block = true;
                     }
                 }
             } else {

@@ -11,6 +11,14 @@ use toml;
 mod md046_config;
 use md046_config::MD046Config;
 
+/// Pre-computed context arrays for indented code block detection
+struct IndentContext<'a> {
+    in_list_context: &'a [bool],
+    in_tab_context: &'a [bool],
+    in_admonition_context: &'a [bool],
+    in_jsx_context: &'a [bool],
+}
+
 /// Rule MD046: Code block style
 ///
 /// See [docs/md046.md](../../docs/md046.md) for full documentation, configuration, and examples.
@@ -235,10 +243,7 @@ impl MD046CodeBlockStyle {
         lines: &[&str],
         i: usize,
         is_mkdocs: bool,
-        in_list_context: &[bool],
-        in_tab_context: &[bool],
-        in_admonition_context: &[bool],
-        in_jsx_context: &[bool],
+        ctx: &IndentContext,
     ) -> bool {
         if i >= lines.len() {
             return false;
@@ -253,23 +258,23 @@ impl MD046CodeBlockStyle {
         }
 
         // Check if this is part of a list structure (pre-computed)
-        if in_list_context[i] {
+        if ctx.in_list_context[i] {
             return false;
         }
 
         // Skip if this is MkDocs tab content (pre-computed)
-        if is_mkdocs && in_tab_context[i] {
+        if is_mkdocs && ctx.in_tab_context[i] {
             return false;
         }
 
         // Skip if this is MkDocs admonition content (pre-computed)
         // Admonitions are supported in MkDocs and other extended Markdown processors
-        if is_mkdocs && in_admonition_context[i] {
+        if is_mkdocs && ctx.in_admonition_context[i] {
             return false;
         }
 
         // Skip if inside a JSX component block
-        if in_jsx_context.get(i).copied().unwrap_or(false) {
+        if ctx.in_jsx_context.get(i).copied().unwrap_or(false) {
             return false;
         }
 
@@ -278,9 +283,9 @@ impl MD046CodeBlockStyle {
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
             && ElementCache::calculate_indentation_width_default(lines[i - 1]) >= 4
-            && !in_list_context[i - 1]
-            && !(is_mkdocs && in_tab_context[i - 1])
-            && !(is_mkdocs && in_admonition_context[i - 1]);
+            && !ctx.in_list_context[i - 1]
+            && !(is_mkdocs && ctx.in_tab_context[i - 1])
+            && !(is_mkdocs && ctx.in_admonition_context[i - 1]);
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -411,19 +416,18 @@ impl MD046CodeBlockStyle {
         let mut is_misplaced = vec![false; lines.len()];
         let mut contains_fences = vec![false; lines.len()];
 
+        let ictx = IndentContext {
+            in_list_context,
+            in_tab_context,
+            in_admonition_context,
+            in_jsx_context,
+        };
+
         // Find contiguous indented blocks and categorize them
         let mut i = 0;
         while i < lines.len() {
             // Find the start of an indented block
-            if !self.is_indented_code_block_with_context(
-                lines,
-                i,
-                is_mkdocs,
-                in_list_context,
-                in_tab_context,
-                in_admonition_context,
-                in_jsx_context,
-            ) {
+            if !self.is_indented_code_block_with_context(lines, i, is_mkdocs, &ictx) {
                 i += 1;
                 continue;
             }
@@ -433,15 +437,7 @@ impl MD046CodeBlockStyle {
             let mut block_end = i;
 
             while block_end < lines.len()
-                && self.is_indented_code_block_with_context(
-                    lines,
-                    block_end,
-                    is_mkdocs,
-                    in_list_context,
-                    in_tab_context,
-                    in_admonition_context,
-                    in_jsx_context,
-                )
+                && self.is_indented_code_block_with_context(lines, block_end, is_mkdocs, &ictx)
             {
                 block_end += 1;
             }
@@ -761,6 +757,13 @@ impl MD046CodeBlockStyle {
             vec![false; lines.len()]
         };
 
+        let ictx = IndentContext {
+            in_list_context: &in_list_context,
+            in_tab_context: &in_tab_context,
+            in_admonition_context: &in_admonition_context,
+            in_jsx_context,
+        };
+
         // Count all code block occurrences (prevalence-based approach)
         let mut in_fenced = false;
         let mut prev_was_indented = false;
@@ -775,17 +778,7 @@ impl MD046CodeBlockStyle {
                     // Closing fence
                     in_fenced = false;
                 }
-            } else if !in_fenced
-                && self.is_indented_code_block_with_context(
-                    &lines,
-                    i,
-                    is_mkdocs,
-                    &in_list_context,
-                    &in_tab_context,
-                    &in_admonition_context,
-                    in_jsx_context,
-                )
-            {
+            } else if !in_fenced && self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &ictx) {
                 // Count each continuous indented block once
                 if !prev_was_indented {
                     indented_count += 1;
@@ -1069,6 +1062,13 @@ impl Rule for MD046CodeBlockStyle {
             &in_jsx_context,
         );
 
+        let ictx = IndentContext {
+            in_list_context: &in_list_context,
+            in_tab_context: &in_tab_context,
+            in_admonition_context: &in_admonition_context,
+            in_jsx_context: &in_jsx_context,
+        };
+
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
         let mut fenced_fence_type = None;
@@ -1138,15 +1138,7 @@ impl Rule for MD046CodeBlockStyle {
                     result.push_str(line);
                     result.push('\n');
                 }
-            } else if self.is_indented_code_block_with_context(
-                lines,
-                i,
-                is_mkdocs,
-                &in_list_context,
-                &in_tab_context,
-                &in_admonition_context,
-                &in_jsx_context,
-            ) {
+            } else if self.is_indented_code_block_with_context(lines, i, is_mkdocs, &ictx) {
                 // This is an indented code block
 
                 // Respect inline disable comments
@@ -1157,16 +1149,8 @@ impl Rule for MD046CodeBlockStyle {
                 }
 
                 // Check if we need to start a new fenced block
-                let prev_line_is_indented = i > 0
-                    && self.is_indented_code_block_with_context(
-                        lines,
-                        i - 1,
-                        is_mkdocs,
-                        &in_list_context,
-                        &in_tab_context,
-                        &in_admonition_context,
-                        &in_jsx_context,
-                    );
+                let prev_line_is_indented =
+                    i > 0 && self.is_indented_code_block_with_context(lines, i - 1, is_mkdocs, &ictx);
 
                 if target_style == CodeBlockStyle::Fenced {
                     let trimmed_content = line.trim_start();
@@ -1195,16 +1179,8 @@ impl Rule for MD046CodeBlockStyle {
                     }
 
                     // Check if this is the end of the indented block
-                    let next_line_is_indented = i < lines.len() - 1
-                        && self.is_indented_code_block_with_context(
-                            lines,
-                            i + 1,
-                            is_mkdocs,
-                            &in_list_context,
-                            &in_tab_context,
-                            &in_admonition_context,
-                            &in_jsx_context,
-                        );
+                    let next_line_is_indented =
+                        i < lines.len() - 1 && self.is_indented_code_block_with_context(lines, i + 1, is_mkdocs, &ictx);
                     // Don't close if this is an unsafe block (kept as-is)
                     if !next_line_is_indented
                         && in_indented_block
