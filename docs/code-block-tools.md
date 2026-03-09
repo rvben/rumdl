@@ -59,7 +59,7 @@ Configure tools per language:
 python = { lint = ["ruff:check"], format = ["ruff:format"] }
 javascript = { format = ["prettier"] }
 shell = { lint = ["shellcheck"], format = ["shfmt"], on-error = "skip" }
-json = { format = ["jq"] }
+json = { lint = ["jq"], format = ["jq"] }
 ```
 
 Each language can have:
@@ -125,7 +125,7 @@ rumdl includes definitions for common tools:
 | `taplo`           | TOML       | Format | `taplo format -`                       |
 | `tombi`           | TOML       | Both   | `tombi format -` / `tombi lint -`      |
 | `yamlfmt`         | YAML       | Format | `yamlfmt -`                            |
-| `jq`              | JSON       | Format | `jq .`                                 |
+| `jq`              | JSON       | Both   | `jq .`                                 |
 | `sql-formatter`   | SQL        | Format | `sql-formatter`                        |
 | `pg_format`       | SQL        | Format | `pg_format`                            |
 | `nixfmt`          | Nix        | Format | `nixfmt`                               |
@@ -290,7 +290,7 @@ python = { lint = ["ruff:check"], format = ["ruff:format"] }
 javascript = { lint = ["eslint"], format = ["prettier"] }
 typescript = { lint = ["eslint"], format = ["prettier"] }
 shell = { lint = ["shellcheck"], format = ["shfmt"] }
-json = { format = ["jq"] }
+json = { lint = ["jq"], format = ["jq"] }
 yaml = { format = ["yamlfmt"] }
 ```
 

@@ -280,7 +280,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // JSON - jq (format)
+    // JSON - jq (format/lint)
     m.insert(
         "jq",
         ToolDefinition {
