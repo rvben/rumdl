@@ -287,9 +287,7 @@ impl Rule for MD007ULIndent {
                     continue;
                 }
 
-                if visual_marker_column != expected_indent
-                    && also_acceptable.map_or(true, |alt| visual_marker_column != alt)
-                {
+                if visual_marker_column != expected_indent && also_acceptable != Some(visual_marker_column) {
                     // Use the fixed indent as the suggested value when the alternative was available
                     if let Some(alt) = also_acceptable {
                         expected_indent = alt;
