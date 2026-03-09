@@ -142,12 +142,19 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
         crate::rule::Severity::Info => DiagnosticSeverity::INFORMATION,
     };
 
-    // Create clickable link to rule documentation
+    // Only generate documentation URLs for rumdl rule names (MD001, MD007, etc.),
+    // not for external tool names (jq, tombi, shellcheck, etc.)
     let code_description = warning.rule_name.as_ref().and_then(|rule_name| {
-        // Create a link to the rule documentation on rumdl.dev
-        Url::parse(&format!("https://rumdl.dev/{}/", rule_name.to_lowercase()))
-            .ok()
-            .map(|href| CodeDescription { href })
+        let is_rumdl_rule = rule_name.len() > 2
+            && rule_name[..2].eq_ignore_ascii_case("MD")
+            && rule_name[2..].chars().all(|c| c.is_ascii_digit());
+        if is_rumdl_rule {
+            Url::parse(&format!("https://rumdl.dev/{}/", rule_name.to_lowercase()))
+                .ok()
+                .map(|href| CodeDescription { href })
+        } else {
+            None
+        }
     });
 
     Diagnostic {
@@ -843,6 +850,30 @@ mod tests {
 
         let url = diagnostic.code_description.unwrap().href;
         assert_eq!(url.as_str(), "https://rumdl.dev/md013/");
+    }
+
+    #[test]
+    fn test_no_url_for_code_block_tool_warnings() {
+        // Warnings from code-block-tools use the tool name (e.g., "jq") as rule_name.
+        // These should NOT produce documentation URLs since they aren't rumdl rules.
+        for tool_name in &["jq", "tombi", "shellcheck", "prettier", "code-block-tools"] {
+            let warning = LintWarning {
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 10,
+                rule_name: Some(tool_name.to_string()),
+                message: "some tool warning".to_string(),
+                severity: Severity::Warning,
+                fix: None,
+            };
+
+            let diagnostic = warning_to_diagnostic(&warning);
+            assert!(
+                diagnostic.code_description.is_none(),
+                "Expected no URL for tool name '{tool_name}', but got one",
+            );
+        }
     }
 
     #[test]
