@@ -817,25 +817,40 @@ impl<'a> CodeBlockToolProcessor<'a> {
             }
         }
 
-        // If no diagnostics parsed but tool failed, create a generic one
+        // If no diagnostics parsed but tool failed, create one diagnostic per output line
         if diagnostics.is_empty() && !output.success {
-            let message = if !output.stderr.is_empty() {
-                output.stderr.lines().next().unwrap_or("Tool failed").to_string()
+            let raw_output = if !output.stderr.is_empty() {
+                &output.stderr
             } else if !output.stdout.is_empty() {
-                output.stdout.lines().next().unwrap_or("Tool failed").to_string()
+                &output.stdout
             } else {
-                let exit_code = output.exit_code;
-                format!("Tool exited with code {exit_code}")
+                ""
             };
 
-            diagnostics.push(CodeBlockDiagnostic {
-                file_line: code_block_start_line,
-                column: None,
-                message,
-                severity: DiagnosticSeverity::Error,
-                tool: tool_id.to_string(),
-                code_block_start: code_block_start_line,
-            });
+            let lines: Vec<&str> = raw_output.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+
+            if lines.is_empty() {
+                let exit_code = output.exit_code;
+                diagnostics.push(CodeBlockDiagnostic {
+                    file_line: code_block_start_line,
+                    column: None,
+                    message: format!("Tool exited with code {exit_code}"),
+                    severity: DiagnosticSeverity::Error,
+                    tool: tool_id.to_string(),
+                    code_block_start: code_block_start_line,
+                });
+            } else {
+                for line_text in lines {
+                    diagnostics.push(CodeBlockDiagnostic {
+                        file_line: code_block_start_line,
+                        column: None,
+                        message: line_text.to_string(),
+                        severity: DiagnosticSeverity::Error,
+                        tool: tool_id.to_string(),
+                        code_block_start: code_block_start_line,
+                    });
+                }
+            }
         }
 
         diagnostics
@@ -2008,6 +2023,101 @@ console.log('hi');
             diagnostics[0].message.contains("javascript"),
             "Error should be about javascript, got: {}",
             diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn test_generic_fallback_includes_all_stderr_lines() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Use output that won't be parsed by any structured format parser
+        let output = ToolOutput {
+            stdout: String::new(),
+            stderr: "Parse error at position 42\nUnexpected token '::'\n3 errors found".to_string(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tombi", 5);
+        assert_eq!(diags.len(), 3, "Expected one diagnostic per non-empty stderr line");
+        assert_eq!(diags[0].message, "Parse error at position 42");
+        assert_eq!(diags[1].message, "Unexpected token '::'");
+        assert_eq!(diags[2].message, "3 errors found");
+        assert!(diags.iter().all(|d| d.tool == "tombi"));
+        assert!(diags.iter().all(|d| d.file_line == 5));
+    }
+
+    #[test]
+    fn test_generic_fallback_includes_all_stdout_lines_when_stderr_empty() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "Line 1 error\nLine 2 detail\nLine 3 summary".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "some-tool", 10);
+        assert_eq!(diags.len(), 3);
+        assert_eq!(diags[0].message, "Line 1 error");
+        assert_eq!(diags[1].message, "Line 2 detail");
+        assert_eq!(diags[2].message, "Line 3 summary");
+    }
+
+    #[test]
+    fn test_generic_fallback_skips_blank_lines() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: String::new(),
+            stderr: "error: bad input\n\n  \n\ndetail: see above\n".to_string(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 1);
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].message, "error: bad input");
+        assert_eq!(diags[1].message, "detail: see above");
+    }
+
+    #[test]
+    fn test_generic_fallback_exit_code_when_no_output() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 42,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 1);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "Tool exited with code 42");
+    }
+
+    #[test]
+    fn test_generic_fallback_not_triggered_on_success() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "some informational output".to_string(),
+            stderr: String::new(),
+            exit_code: 0,
+            success: true,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 1);
+        assert!(
+            diags.is_empty(),
+            "Successful tool runs should produce no fallback diagnostics"
         );
     }
 }
