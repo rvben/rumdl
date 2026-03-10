@@ -306,21 +306,10 @@ function main() {
         );
       }
       if (result.error.code === "EACCES") {
-        // Try fixing permissions and retrying once
-        try {
-          fs.chmodSync(binaryPath, 0o755);
-          debug("Fixed permissions after EACCES, retrying...");
-          const retry = spawnSync(binaryPath, process.argv.slice(2), {
-            stdio: "inherit",
-            shell: false,
-          });
-          process.exit(retry.status ?? 1);
-        } catch {
-          throw new Error(
-            `Permission denied: ${binaryPath}\n` +
-              `Try: chmod +x "${binaryPath}"`
-          );
-        }
+        throw new Error(
+          `Permission denied: ${binaryPath}\n` +
+            `Try: chmod +x "${binaryPath}"`
+        );
       }
       throw result.error;
     }

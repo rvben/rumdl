@@ -613,9 +613,13 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             } else {
                 // Check for lazy continuation
                 let min_required_indent = if block.is_ordered {
-                    current_indent_level + last_marker_width
+                    let deep = current_indent_level + last_marker_width;
+                    let root = block.nesting_level + block.max_marker_width;
+                    deep.min(root)
                 } else {
-                    current_indent_level + 2
+                    let deep = current_indent_level + 2;
+                    let root = block.nesting_level * 2 + 2;
+                    deep.min(root)
                 };
 
                 let line_content = line_info.content(content).trim();

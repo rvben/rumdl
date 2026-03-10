@@ -3217,4 +3217,71 @@ More text.
         let warnings = lint_quarto(content);
         assert!(warnings.is_empty(), "Nested divs with list should work: {warnings:?}");
     }
+
+    #[test]
+    fn test_issue512_complex_nested_list_with_continuation() {
+        // Three-level nested list with continuation paragraphs at parent indent levels.
+        // The continuation paragraphs are part of the same list, so no MD032 warning expected.
+        let content = "\
+- First level of indentation.
+  - Second level of indentation.
+    - Third level of indentation.
+    - Third level of indentation.
+
+    Second level list continuation.
+
+  First level list continuation.
+- First level of indentation.
+";
+        let warnings = lint(content);
+        assert!(
+            warnings.is_empty(),
+            "Nested list with parent-level continuation should produce no warnings. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue512_continuation_at_root_level() {
+        // Nested list where continuation returns to indent 0 (lazy continuation).
+        // The unindented "Root level lazy continuation." breaks the list, so the next
+        // list item needs a blank line before it. markdownlint-cli also warns here.
+        let content = "\
+- First level.
+  - Second level.
+
+  First level continuation.
+
+Root level lazy continuation.
+- Another first level item.
+";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Should warn on line 7 (new list after break). Got: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 7);
+    }
+
+    #[test]
+    fn test_issue512_three_level_nesting_continuation_at_each_level() {
+        // Each nesting level has a continuation paragraph
+        let content = "\
+- Level 1 item.
+  - Level 2 item.
+    - Level 3 item.
+
+    Level 3 continuation.
+
+  Level 2 continuation.
+
+  Level 1 continuation (indented under marker).
+- Another level 1 item.
+";
+        let warnings = lint(content);
+        assert!(
+            warnings.is_empty(),
+            "Continuation at each nesting level should produce no warnings. Got: {warnings:?}"
+        );
+    }
 }
