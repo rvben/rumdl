@@ -26,6 +26,15 @@
 //! - Input size limits (prevents DoS)
 //! - Performance bounds on consecutive patterns
 
+use regex::Regex;
+use std::sync::LazyLock;
+
+// HTML/JSX tag stripping - strip entire HTML tags from heading text before anchor generation
+static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
+
+// Code span pattern for extracting content from backtick-delimited spans
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+([^`]*?)`+").unwrap());
+
 /// Generate pure kramdown style anchor fragment from heading text
 ///
 /// This implementation matches pure kramdown's exact behavior (without GFM input),
@@ -109,6 +118,23 @@ pub fn heading_to_fragment(heading: &str) -> String {
     let normalized = normalize_and_filter_unicode(text);
     if normalized.is_empty() {
         return "section".to_string();
+    }
+
+    // Step 1.5: Extract code span content to protect from HTML tag stripping,
+    // then strip HTML/JSX tags, then restore code span content
+    let mut code_extracts: Vec<String> = Vec::new();
+    let normalized = CODE_PATTERN
+        .replace_all(&normalized, |caps: &regex::Captures| {
+            let idx = code_extracts.len();
+            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            code_extracts.push(content.to_string());
+            format!("\x00CODE{idx}\x00")
+        })
+        .to_string();
+    let normalized = HTML_TAG_PATTERN.replace_all(&normalized, "").to_string();
+    let mut normalized = normalized;
+    for (idx, content) in code_extracts.into_iter().enumerate() {
+        normalized = normalized.replace(&format!("\x00CODE{idx}\x00"), &content);
     }
 
     // Step 2: Character filtering - more aggressive than Jekyll
@@ -404,6 +430,14 @@ mod tests {
         assert_eq!(heading_to_fragment("test>more"), "testmore"); // Standalone > removed
         assert_eq!(heading_to_fragment("a->b->c"), "a-b-c"); // Multiple arrows
         assert_eq!(heading_to_fragment("cmd-->output"), "cmd--output"); // Long arrows transformed
+    }
+
+    #[test]
+    fn test_kramdown_html_jsx_tag_stripping() {
+        // HTML/JSX tags should be stripped from headings for anchor generation
+        assert_eq!(heading_to_fragment("retentionPolicy<Component />"), "retentionpolicy");
+        assert_eq!(heading_to_fragment("Test <span>extra</span>"), "test-extra");
+        assert_eq!(heading_to_fragment("Generic<T>"), "generic");
     }
 
     #[test]

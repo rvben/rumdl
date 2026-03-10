@@ -22,6 +22,10 @@ use super::common::{
     is_safe_unicode_letter,
 };
 
+// HTML/JSX tag stripping - strip entire HTML tags from heading text before anchor generation
+// Requires first char after < to be a letter or / (to avoid matching arrow patterns like <->)
+static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
+
 // Improved markdown removal patterns with better nested handling
 // Match emphasis patterns - asterisks and underscores
 // Process multiple times to handle nested patterns
@@ -92,12 +96,28 @@ pub fn heading_to_fragment(heading: &str) -> String {
         } // No more changes
     }
 
-    // Process code spans
-    text = CODE_PATTERN.replace_all(&text, "$1").to_string();
+    // Extract code span content into placeholders to protect from HTML tag stripping
+    let mut code_extracts: Vec<String> = Vec::new();
+    text = CODE_PATTERN
+        .replace_all(&text, |caps: &regex::Captures| {
+            let idx = code_extracts.len();
+            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            code_extracts.push(content.to_string());
+            format!("\x00CODE{idx}\x00")
+        })
+        .to_string();
 
     // Process images first, then links
     text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
     text = LINK_PATTERN.replace_all(&text, "$1").to_string();
+
+    // Strip HTML/JSX tags while code spans are protected by placeholders
+    text = HTML_TAG_PATTERN.replace_all(&text, "").to_string();
+
+    // Restore code span content
+    for (idx, content) in code_extracts.into_iter().enumerate() {
+        text = text.replace(&format!("\x00CODE{idx}\x00"), &content);
+    }
 
     // DEBUG: Check text before filtering
     #[cfg(test)]
@@ -485,6 +505,14 @@ mod tests {
         assert_eq!(heading_to_fragment("   "), "section"); // Whitespace only
         assert_eq!(heading_to_fragment("a"), "a"); // Single letter
         assert_eq!(heading_to_fragment("1a"), "1a"); // Number then letter (preserved)
+    }
+
+    #[test]
+    fn test_jekyll_html_jsx_tag_stripping() {
+        // HTML/JSX tags should be stripped from headings for anchor generation
+        assert_eq!(heading_to_fragment("retentionPolicy<Component />"), "retentionpolicy");
+        assert_eq!(heading_to_fragment("Test <span>extra</span>"), "test-extra");
+        assert_eq!(heading_to_fragment("Generic<T>"), "generic");
     }
 
     #[test]

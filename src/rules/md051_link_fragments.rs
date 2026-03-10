@@ -940,6 +940,40 @@ See [link](#nonexistent) for details."#;
         assert_eq!(result_invalid.len(), 1, "Invalid anchor should still trigger warning");
     }
 
+    #[test]
+    fn test_jsx_in_heading_anchor() {
+        // Issue #510: JSX/HTML tags in headings should be stripped for anchor generation
+        let rule = MD051LinkFragments::new();
+
+        // Self-closing JSX tag
+        let content = "# Test\n\n### `retentionPolicy`<Component />\n\n[link](#retentionpolicy)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "JSX self-closing tag should be stripped from anchor: got {result:?}"
+        );
+
+        // JSX with attributes
+        let content2 =
+            "### retentionPolicy<HeaderTag type=\"danger\" text=\"required\" />\n\n[link](#retentionpolicy)\n";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "JSX tag with attributes should be stripped from anchor: got {result2:?}"
+        );
+
+        // HTML tags with inner text preserved
+        let content3 = "### Test <span>extra</span>\n\n[link](#test-extra)\n";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert!(
+            result3.is_empty(),
+            "HTML tag content should be preserved in anchor: got {result3:?}"
+        );
+    }
+
     // Cross-file validation tests
     #[test]
     fn test_cross_file_scope() {

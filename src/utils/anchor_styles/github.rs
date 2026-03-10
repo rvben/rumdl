@@ -53,9 +53,11 @@ static LINK_PATTERN: LazyLock<Regex> =
 static AMPERSAND_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+&\s+").unwrap());
 static COPYRIGHT_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+©\s+").unwrap());
 
-// Angle bracket removal (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
-// GitHub removes only the angle brackets themselves, preserving the content
-static ANGLE_BRACKETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([^>]*)>").unwrap());
+// HTML/JSX tag stripping - GitHub removes entire HTML tags from heading anchors
+// Matches opening tags (<div>, <Component />), closing tags (</div>), and self-closing tags
+// Requires first char after < to be a letter or / (to avoid matching arrow patterns like <->)
+// Uses case-insensitive flag since this is applied after lowercasing
+static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
 
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
 ///
@@ -162,13 +164,21 @@ fn heading_to_fragment_internal(heading: &str) -> String {
             }
         }
 
-        // Restore code span content after emphasis processing
+        // Strip HTML/JSX tags BEFORE restoring code spans
+        // Code spans are still protected as placeholders, so their angle brackets are safe
+        text = HTML_TAG_PATTERN.replace_all(&text, "").to_string();
+
+        // Restore code span content after HTML tag stripping
+        // Angle brackets from code spans (e.g., `import <FILE>`) are preserved as plain text
         for (idx, content) in code_extracts.into_iter().enumerate() {
             text = text.replace(&format!("\x00CODE{idx}\x00"), &content);
         }
 
         text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
         text = LINK_PATTERN.replace_all(&text, "$1").to_string();
+    } else if text.contains('<') {
+        // Strip HTML/JSX tags even when no markdown formatting is present
+        text = HTML_TAG_PATTERN.replace_all(&text, "").to_string();
     }
 
     // Step 6: Multi-character arrow patterns (order matters!)
@@ -236,10 +246,9 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     text = text.replace("&", "");
     text = text.replace("©", "");
 
-    // Step 9.5: Remove angle brackets but preserve content (e.g., Generic<T> → GenericT, import <FILE> → import FILE)
-    // GitHub.com removes only the angle brackets themselves, not the content
-    // This handles both type parameters like "Bound<T>" → "boundt" and placeholders like "import <FILE>" → "import file"
-    text = ANGLE_BRACKETS.replace_all(&text, "$1").to_string();
+    // Step 9.5: Remaining angle brackets (from code span content) are handled
+    // during character-by-character processing below - '<' and '>' are simply removed
+    // while their content is preserved as regular text
 
     // Step 10: Character-by-character processing
     let mut result = String::with_capacity(text.len()); // Pre-allocate for efficiency
@@ -679,6 +688,50 @@ mod tests {
         assert_eq!(heading_to_fragment("`code` in heading"), "code-in-heading");
         assert_eq!(heading_to_fragment("[link text](url)"), "link-text");
         assert_eq!(heading_to_fragment("[ref link][]"), "ref-link");
+    }
+
+    #[test]
+    fn test_github_html_jsx_tag_stripping() {
+        // Issue #510: GitHub strips HTML/JSX tags from headings when generating anchors
+
+        // Self-closing JSX tag
+        assert_eq!(heading_to_fragment("retentionPolicy<Component />"), "retentionpolicy");
+
+        // JSX with attributes
+        assert_eq!(
+            heading_to_fragment("retentionPolicy<HeaderTag type=\"danger\" text=\"required\" />"),
+            "retentionpolicy"
+        );
+
+        // HTML span with content (tags stripped, inner text preserved)
+        assert_eq!(heading_to_fragment("Test <span>extra</span>"), "test-extra");
+
+        // Multiple HTML tags
+        assert_eq!(
+            heading_to_fragment("A <b>bold</b> and <i>italic</i>"),
+            "a-bold-and-italic"
+        );
+
+        // Mixed code spans and JSX (code span content preserved, JSX stripped)
+        assert_eq!(heading_to_fragment("`code`<Tag />"), "code");
+
+        // Single-letter type parameter (GitHub strips these too)
+        assert_eq!(heading_to_fragment("Generic<T>"), "generic");
+
+        // Self-closing HTML tag
+        assert_eq!(heading_to_fragment("Text<br />More"), "textmore");
+
+        // Nested HTML
+        assert_eq!(
+            heading_to_fragment("Test <div><span>nested</span></div>"),
+            "test-nested"
+        );
+
+        // Arrow patterns should NOT be affected by HTML tag stripping
+        assert_eq!(
+            heading_to_fragment("Arrow Test <-> bidirectional"),
+            "arrow-test---bidirectional"
+        );
     }
 
     #[test]

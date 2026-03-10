@@ -23,6 +23,12 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::common::MAX_INPUT_LENGTH;
 
+// HTML/JSX tag stripping - strip entire HTML tags from heading text before anchor generation
+static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
+
+// Code span pattern for extracting content from backtick-delimited spans
+static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+([^`]*?)`+").unwrap());
+
 static STRIP_NON_WORD: LazyLock<Regex> = LazyLock::new(|| {
     // Matches anything that is NOT a word character, whitespace, or hyphen.
     // `\w` in Rust's regex (with Unicode enabled) matches [a-zA-Z0-9_] plus Unicode letters/digits.
@@ -66,6 +72,22 @@ pub fn heading_to_fragment(heading: &str) -> String {
     } else {
         heading
     };
+
+    // Extract code span content to protect from HTML tag stripping
+    let mut code_extracts: Vec<String> = Vec::new();
+    let input = CODE_PATTERN
+        .replace_all(input, |caps: &regex::Captures| {
+            let idx = code_extracts.len();
+            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            code_extracts.push(content.to_string());
+            format!("\x00CODE{idx}\x00")
+        })
+        .to_string();
+    let input = HTML_TAG_PATTERN.replace_all(&input, "");
+    let mut input = input.to_string();
+    for (idx, content) in code_extracts.into_iter().enumerate() {
+        input = input.replace(&format!("\x00CODE{idx}\x00"), &content);
+    }
 
     // Step 1: NFKD normalization, then ASCII-only
     // Python-Markdown: unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode()
@@ -120,6 +142,14 @@ mod tests {
         // Unlike GitHub, Python-Markdown collapses consecutive hyphens
         assert_eq!(heading_to_fragment("test--double"), "test-double");
         assert_eq!(heading_to_fragment("test---triple"), "test-triple");
+    }
+
+    #[test]
+    fn test_html_jsx_tag_stripping() {
+        // HTML/JSX tags should be stripped from headings for anchor generation
+        assert_eq!(heading_to_fragment("retentionPolicy<Component />"), "retentionpolicy");
+        assert_eq!(heading_to_fragment("Test <span>extra</span>"), "test-extra");
+        assert_eq!(heading_to_fragment("Generic<T>"), "generic");
     }
 
     #[test]
