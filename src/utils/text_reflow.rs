@@ -238,10 +238,8 @@ fn is_sentence_boundary(
         // Check for single-letter initials (e.g., "J. K. Rowling")
         // A single uppercase letter before the period preceded by whitespace or start
         // is likely an initial, not a sentence ending.
-        if chars[pos - 1].is_ascii_uppercase() {
-            if pos == 1 || (pos >= 2 && chars[pos - 2].is_whitespace()) {
-                return false;
-            }
+        if chars[pos - 1].is_ascii_uppercase() && (pos == 1 || (pos >= 2 && chars[pos - 2].is_whitespace())) {
+            return false;
         }
     }
 
