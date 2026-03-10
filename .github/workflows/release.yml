@@ -481,11 +481,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Make binary executable
-        if: runner.os != 'Windows'
-        shell: bash
-        run: chmod +x npm/${{ matrix.platform-pkg }}/rumdl
-
       - name: Install packages locally
         shell: bash
         run: |
@@ -529,10 +524,6 @@ jobs:
         with:
           name: npm-cli-packages
           path: npm
-
-      - name: Make binary executable
-        shell: sh
-        run: chmod +x npm/cli-linux-x64-musl/rumdl
 
       - name: Install packages locally
         shell: sh
