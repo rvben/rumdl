@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.45] - 2026-03-10
+
+### Fixed
+
+- **MD044**: Names inside backtick code spans in YAML frontmatter are no longer flagged when `code_blocks = false` ([#513](https://github.com/rvben/rumdl/issues/513))
+- **MD051**: HTML/JSX tags in headings (e.g., `<Component />`, `<span>text</span>`) are now stripped before anchor generation, preventing false-positive broken link warnings ([#510](https://github.com/rvben/rumdl/issues/510))
+- **MD032**: Complex nested lists with continuation paragraphs at parent indent levels are no longer incorrectly split into separate lists ([#512](https://github.com/rvben/rumdl/issues/512))
+- **npm**: Binary downloaded from npm registry is now automatically made executable on macOS/Linux, fixing "permission denied" errors ([#511](https://github.com/rvben/rumdl/issues/511))
+
+### Changed
+
+- CI npm tests no longer pre-fix binary permissions, ensuring the auto-chmod logic is properly tested
+- Release workflow test job now includes a lint step
+
 ## [0.1.44] - 2026-03-09
 
 ### Fixed
