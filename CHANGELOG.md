@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.45] - 2026-03-10
 
+### Added
+
+- **MD013**: New `require-sentence-capital` option for sentence-per-line and semantic-line-breaks reflow modes. When set to `false`, periods are recognized as sentence boundaries without requiring an uppercase letter afterward ([#514](https://github.com/rvben/rumdl/issues/514))
+- **MD013**: `!` and `?` are now always recognized as sentence boundaries regardless of the `require-sentence-capital` setting
+- **MD013**: Single-letter initial detection (e.g., "J. K. Rowling") to prevent false sentence splits
+- **MD013**: Expanded default abbreviation list with: vs, fig, no, vol, ch, sec, al
+
 ### Fixed
 
 - **MD044**: Names inside backtick code spans in YAML frontmatter are no longer flagged when `code_blocks = false` ([#513](https://github.com/rvben/rumdl/issues/513))
