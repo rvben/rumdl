@@ -491,7 +491,10 @@ pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
             let after_prefix = &line[start + prefix.len()..];
 
             // Skip more specific variants (disable-line, disable-next-line, disable-file)
-            if after_prefix.starts_with('-') {
+            if after_prefix.starts_with("-line")
+                || after_prefix.starts_with("-next-line")
+                || after_prefix.starts_with("-file")
+            {
                 continue;
             }
 
@@ -522,7 +525,7 @@ pub fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
             let after_prefix = &line[start + prefix.len()..];
 
             // Skip more specific variants (enable-file)
-            if after_prefix.starts_with('-') {
+            if after_prefix.starts_with("-file") {
                 continue;
             }
 
@@ -1054,5 +1057,266 @@ This is a test line."#;
         let obj = json.as_object().unwrap();
         assert!(obj.contains_key("tables"), "Should have tables key");
         assert!(!obj.get("tables").unwrap().as_bool().unwrap());
+    }
+
+    // ── parse_disable_comment / parse_enable_comment edge cases ──────────
+
+    #[test]
+    fn test_parse_disable_does_not_match_disable_line() {
+        // parse_disable_comment must NOT match disable-line or disable-next-line
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable-line MD001 -->"), None);
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable-line MD001 -->"), None);
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable-next-line MD001 -->"), None);
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable-next-line -->"), None);
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable-file MD001 -->"), None);
+        assert_eq!(parse_disable_comment("<!-- markdownlint-disable-file -->"), None);
+    }
+
+    #[test]
+    fn test_parse_enable_does_not_match_enable_file() {
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable-file MD001 -->"), None);
+        assert_eq!(parse_enable_comment("<!-- markdownlint-enable-file -->"), None);
+    }
+
+    #[test]
+    fn test_parse_disable_comment_edge_cases() {
+        // No space before closing
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable-->"), Some(vec![]));
+
+        // Tabs between rules
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable\tMD001\tMD002 -->"),
+            Some(vec!["MD001", "MD002"])
+        );
+
+        // Comment not at start of line
+        assert_eq!(
+            parse_disable_comment("Some text <!-- rumdl-disable MD001 --> more text"),
+            Some(vec!["MD001"])
+        );
+
+        // Malformed: no closing
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable MD001"), None);
+
+        // Malformed: no opening
+        assert_eq!(parse_disable_comment("rumdl-disable MD001 -->"), None);
+
+        // Case sensitive: uppercase should not match
+        assert_eq!(parse_disable_comment("<!-- RUMDL-DISABLE -->"), None);
+
+        // Empty rule list with whitespace
+        assert_eq!(parse_disable_comment("<!-- rumdl-disable   -->"), Some(vec![]));
+
+        // Duplicate rules preserved (caller may deduplicate)
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001 MD001 MD002 -->"),
+            Some(vec!["MD001", "MD001", "MD002"])
+        );
+
+        // Unicode around the comment
+        assert_eq!(
+            parse_disable_comment("🚀 <!-- rumdl-disable MD001 --> 🎉"),
+            Some(vec!["MD001"])
+        );
+
+        // 100 rules
+        let many_rules = (1..=100).map(|i| format!("MD{i:03}")).collect::<Vec<_>>().join(" ");
+        let comment = format!("<!-- rumdl-disable {many_rules} -->");
+        let parsed = parse_disable_comment(&comment);
+        assert!(parsed.is_some());
+        assert_eq!(parsed.unwrap().len(), 100);
+
+        // Special characters in rule names (forward compat)
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable MD001-test -->"),
+            Some(vec!["MD001-test"])
+        );
+        assert_eq!(
+            parse_disable_comment("<!-- rumdl-disable custom_rule -->"),
+            Some(vec!["custom_rule"])
+        );
+    }
+
+    #[test]
+    fn test_parse_enable_comment_edge_cases() {
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable-->"), Some(vec![]));
+        assert_eq!(parse_enable_comment("<!-- RUMDL-ENABLE -->"), None);
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable MD001"), None);
+        assert_eq!(parse_enable_comment("<!-- rumdl-enable   -->"), Some(vec![]));
+    }
+
+    // ── InlineConfig: code blocks must be transparent ────────────────────
+
+    #[test]
+    fn test_disable_inside_fenced_code_block_ignored() {
+        let content = "# Document\n```markdown\n<!-- rumdl-disable MD001 -->\nContent\n```\nAfter code block\n";
+        let config = InlineConfig::from_content(content);
+        // The disable comment is inside a code block — must have no effect
+        assert!(!config.is_rule_disabled("MD001", 6));
+    }
+
+    #[test]
+    fn test_disable_inside_tilde_fence_ignored() {
+        let content = "# Document\n~~~\n<!-- rumdl-disable -->\nContent\n~~~\nAfter code block\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 6));
+    }
+
+    #[test]
+    fn test_disable_before_code_block_persists_after() {
+        // Disable before code block should persist through and after it
+        let content = "<!-- rumdl-disable MD001 -->\n```\ncode\n```\nStill disabled\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 5));
+    }
+
+    #[test]
+    fn test_enable_inside_code_block_ignored() {
+        // Disable before, enable inside code block (should be ignored), still disabled after
+        let content = "<!-- rumdl-disable MD001 -->\n```\n<!-- rumdl-enable MD001 -->\n```\nShould still be disabled\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 5));
+    }
+
+    // ── InlineConfig: mixed comment styles ───────────────────────────────
+
+    #[test]
+    fn test_markdownlint_disable_rumdl_enable_interop() {
+        let content = "<!-- markdownlint-disable MD001 -->\nDisabled\n<!-- rumdl-enable MD001 -->\nEnabled\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 2));
+        assert!(!config.is_rule_disabled("MD001", 4));
+    }
+
+    #[test]
+    fn test_rumdl_disable_markdownlint_enable_interop() {
+        let content = "<!-- rumdl-disable MD013 -->\nDisabled\n<!-- markdownlint-enable MD013 -->\nEnabled\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD013", 2));
+        assert!(!config.is_rule_disabled("MD013", 4));
+    }
+
+    // ── InlineConfig: nested/overlapping disable/enable ──────────────────
+
+    #[test]
+    fn test_global_disable_then_specific_enable() {
+        let content = "<!-- rumdl-disable -->\nAll off\n<!-- rumdl-enable MD001 -->\nMD001 on, rest off\n";
+        let config = InlineConfig::from_content(content);
+        assert!(!config.is_rule_disabled("MD001", 4));
+        assert!(config.is_rule_disabled("MD002", 4));
+        assert!(config.is_rule_disabled("MD013", 4));
+    }
+
+    #[test]
+    fn test_specific_disable_then_global_enable() {
+        let content = "<!-- rumdl-disable MD001 MD002 -->\nBoth off\n<!-- rumdl-enable -->\nAll on\n";
+        let config = InlineConfig::from_content(content);
+        assert!(config.is_rule_disabled("MD001", 2));
+        assert!(config.is_rule_disabled("MD002", 2));
+        assert!(!config.is_rule_disabled("MD001", 4));
+        assert!(!config.is_rule_disabled("MD002", 4));
+    }
+
+    #[test]
+    fn test_multiple_rules_disable_enable_independently() {
+        let content = "\
+Line 1\n\
+<!-- rumdl-disable MD001 MD002 -->\n\
+Line 3\n\
+<!-- rumdl-enable MD001 -->\n\
+Line 5\n\
+<!-- rumdl-disable -->\n\
+Line 7\n\
+<!-- rumdl-enable MD002 -->\n\
+Line 9\n";
+        let config = InlineConfig::from_content(content);
+
+        // Line 1: nothing disabled
+        assert!(!config.is_rule_disabled("MD001", 1));
+        assert!(!config.is_rule_disabled("MD002", 1));
+
+        // Line 3: both disabled
+        assert!(config.is_rule_disabled("MD001", 3));
+        assert!(config.is_rule_disabled("MD002", 3));
+
+        // Line 5: MD001 enabled, MD002 still disabled
+        assert!(!config.is_rule_disabled("MD001", 5));
+        assert!(config.is_rule_disabled("MD002", 5));
+
+        // Line 7: all disabled
+        assert!(config.is_rule_disabled("MD001", 7));
+        assert!(config.is_rule_disabled("MD002", 7));
+
+        // Line 9: MD002 enabled, MD001 still disabled
+        assert!(config.is_rule_disabled("MD001", 9));
+        assert!(!config.is_rule_disabled("MD002", 9));
+    }
+
+    // ── InlineConfig: empty/minimal content ──────────────────────────────
+
+    #[test]
+    fn test_empty_content() {
+        let config = InlineConfig::from_content("");
+        assert!(!config.is_rule_disabled("MD001", 1));
+    }
+
+    #[test]
+    fn test_single_disable_comment_only() {
+        // Persistent disable takes effect from the NEXT line, not the current line.
+        // For a single-line document, the disable on line 1 takes effect at line 2+.
+        let config = InlineConfig::from_content("<!-- rumdl-disable -->");
+        assert!(!config.is_rule_disabled("MD001", 1));
+        assert!(config.is_rule_disabled("MD001", 2));
+        assert!(config.is_rule_disabled("MD999", 2));
+
+        // With content after the disable, rules are disabled from line 2 onward
+        let config = InlineConfig::from_content("<!-- rumdl-disable -->\n# Heading\nSome text");
+        assert!(!config.is_rule_disabled("MD001", 1));
+        assert!(config.is_rule_disabled("MD001", 2));
+        assert!(config.is_rule_disabled("MD001", 3));
+    }
+
+    #[test]
+    fn test_no_inline_markers() {
+        let config = InlineConfig::from_content("# Heading\n\nSome text\n\n- list item\n");
+        assert!(!config.is_rule_disabled("MD001", 1));
+        assert!(!config.is_rule_disabled("MD001", 5));
+    }
+
+    // ── InlineConfig: export_for_file_index correctness ──────────────────
+
+    #[test]
+    fn test_export_for_file_index_persistent_transitions() {
+        let content = "Line 1\n<!-- rumdl-disable MD001 -->\nLine 3\n<!-- rumdl-enable MD001 -->\nLine 5\n";
+        let config = InlineConfig::from_content(content);
+        let (file_disabled, persistent, _line_disabled) = config.export_for_file_index();
+
+        assert!(file_disabled.is_empty());
+        // Should have transitions for the disable and enable
+        assert!(
+            persistent.len() >= 2,
+            "Expected at least 2 transitions, got {}",
+            persistent.len()
+        );
+    }
+
+    #[test]
+    fn test_export_for_file_index_disable_file() {
+        let content = "<!-- rumdl-disable-file MD001 -->\n# Heading\n";
+        let config = InlineConfig::from_content(content);
+        let (file_disabled, _persistent, _line_disabled) = config.export_for_file_index();
+
+        assert!(file_disabled.contains("MD001"));
+    }
+
+    #[test]
+    fn test_export_for_file_index_disable_line() {
+        let content = "Line 1\nLine 2 <!-- rumdl-disable-line MD001 -->\nLine 3\n";
+        let config = InlineConfig::from_content(content);
+        let (_file_disabled, _persistent, line_disabled) = config.export_for_file_index();
+
+        assert!(line_disabled.contains_key(&2), "Line 2 should have disabled rules");
+        assert!(line_disabled[&2].contains("MD001"));
+        assert!(!line_disabled.contains_key(&3), "Line 3 should not be affected");
     }
 }

@@ -600,14 +600,14 @@ fn compute_disabled_ranges(content: &str, rule_name: &str) -> Vec<(usize, usize)
     for (i, line) in content.lines().enumerate() {
         let trimmed = line.trim();
 
-        if let Some(rules) = crate::rule::parse_disable_comment(trimmed)
+        if let Some(rules) = crate::inline_config::parse_disable_comment(trimmed)
             && (rules.is_empty() || rules.contains(&rule_name))
             && disabled_start.is_none()
         {
             disabled_start = Some(i);
         }
 
-        if let Some(rules) = crate::rule::parse_enable_comment(trimmed)
+        if let Some(rules) = crate::inline_config::parse_enable_comment(trimmed)
             && (rules.is_empty() || rules.contains(&rule_name))
             && let Some(start) = disabled_start.take()
         {

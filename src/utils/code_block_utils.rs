@@ -84,13 +84,20 @@ impl CodeBlockUtils {
 
     /// Check if a position is within a code block (for compatibility)
     pub fn is_in_code_block_or_span(blocks: &[(usize, usize)], pos: usize) -> bool {
-        // This is a compatibility function - it only checks code blocks now, not spans
-        blocks.iter().any(|&(start, end)| pos >= start && pos < end)
+        Self::is_in_code_block(blocks, pos)
     }
 
-    /// Check if a position is within a code block (NOT including inline code spans)
+    /// Check if a byte position falls within any of the given sorted, non-overlapping ranges.
+    ///
+    /// Uses binary search on the sorted block ranges for O(log n) lookup.
+    /// The blocks slice must be sorted by start position (as returned by
+    /// `detect_code_blocks` and `detect_code_blocks_and_spans`).
     pub fn is_in_code_block(blocks: &[(usize, usize)], pos: usize) -> bool {
-        blocks.iter().any(|&(start, end)| pos >= start && pos < end)
+        // Binary search: find the last block whose start <= pos
+        let idx = blocks.partition_point(|&(start, _)| start <= pos);
+        // partition_point returns the first index where start > pos,
+        // so the candidate is at idx - 1
+        idx > 0 && pos < blocks[idx - 1].1
     }
 
     /// Analyze code block context relative to list parsing
@@ -733,6 +740,119 @@ fn main() {}
                     "Range exceeds content length in: {content:?}"
                 );
             }
+        }
+    }
+
+    // ── is_in_code_block binary search tests ─────────────────────────────
+
+    #[test]
+    fn test_is_in_code_block_empty_blocks() {
+        assert!(!CodeBlockUtils::is_in_code_block(&[], 0));
+        assert!(!CodeBlockUtils::is_in_code_block(&[], 100));
+        assert!(!CodeBlockUtils::is_in_code_block(&[], usize::MAX));
+    }
+
+    #[test]
+    fn test_is_in_code_block_single_range() {
+        let blocks = [(10, 20)];
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 0));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 9));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 10));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 15));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 19));
+        // end is exclusive
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 20));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 21));
+    }
+
+    #[test]
+    fn test_is_in_code_block_multiple_ranges() {
+        let blocks = [(5, 10), (20, 30), (50, 60)];
+        // Before all
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 0));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 4));
+        // In first
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 5));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 9));
+        // Gap between first and second
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 10));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 15));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 19));
+        // In second
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 20));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 29));
+        // Gap between second and third
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 30));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 49));
+        // In third
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 50));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 59));
+        // After all
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 60));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 1000));
+    }
+
+    #[test]
+    fn test_is_in_code_block_adjacent_ranges() {
+        // Ranges that are exactly adjacent (end of one == start of next)
+        let blocks = [(0, 10), (10, 20), (20, 30)];
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 0));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 9));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 10));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 19));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 20));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 29));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 30));
+    }
+
+    #[test]
+    fn test_is_in_code_block_single_byte_range() {
+        let blocks = [(5, 6)];
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 4));
+        assert!(CodeBlockUtils::is_in_code_block(&blocks, 5));
+        assert!(!CodeBlockUtils::is_in_code_block(&blocks, 6));
+    }
+
+    #[test]
+    fn test_is_in_code_block_matches_linear_scan() {
+        // Verify binary search produces identical results to linear scan
+        // for a realistic document layout
+        let content = "# Heading\n\n```rust\nlet x = 1;\nlet y = 2;\n```\n\nSome text\n\n```\nmore code\n```\n\nEnd\n";
+        let blocks = CodeBlockUtils::detect_code_blocks(content);
+
+        for pos in 0..content.len() {
+            let binary = CodeBlockUtils::is_in_code_block(&blocks, pos);
+            let linear = blocks.iter().any(|&(s, e)| pos >= s && pos < e);
+            assert_eq!(
+                binary, linear,
+                "Mismatch at pos {pos}: binary={binary}, linear={linear}, blocks={blocks:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_in_code_block_at_range_boundaries() {
+        // Exhaustive boundary testing for every block start/end
+        let blocks = [(100, 200), (300, 400), (500, 600)];
+        for &(start, end) in &blocks {
+            assert!(
+                !CodeBlockUtils::is_in_code_block(&blocks, start - 1),
+                "pos={} should be outside",
+                start - 1
+            );
+            assert!(
+                CodeBlockUtils::is_in_code_block(&blocks, start),
+                "pos={start} should be inside"
+            );
+            assert!(
+                CodeBlockUtils::is_in_code_block(&blocks, end - 1),
+                "pos={} should be inside",
+                end - 1
+            );
+            assert!(
+                !CodeBlockUtils::is_in_code_block(&blocks, end),
+                "pos={end} should be outside"
+            );
         }
     }
 }
