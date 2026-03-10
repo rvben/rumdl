@@ -337,9 +337,9 @@ impl MD044ProperNames {
                                 continue;
                             }
                             // pulldown-cmark doesn't parse markdown syntax inside HTML
-                            // comments or HTML blocks, so backtick-wrapped text isn't
-                            // detected by is_in_code_block_or_span. Check directly.
-                            if (line_info.in_html_comment || line_info.in_html_block)
+                            // comments, HTML blocks, or frontmatter, so backtick-wrapped
+                            // text isn't detected by is_in_code_block_or_span. Check directly.
+                            if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
                                 && Self::is_in_backtick_code_in_line(line, start_pos)
                             {
                                 continue;
@@ -2192,6 +2192,95 @@ Visit [github documentation](https://github.com/docs) for details.
         // "test" as list-item key should remain lowercase;
         // "test" in value portion should become "Test"
         assert_eq!(fixed, "---\nitems:\n  - test: a Test value\n---\n\nTest here\n");
+    }
+
+    #[test]
+    fn test_frontmatter_backtick_code_not_flagged() {
+        // Names inside backticks in frontmatter should NOT be flagged when code_blocks=false.
+        let config = MD044Config {
+            names: vec!["GoodApplication".to_string()],
+            code_blocks: false,
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "---\ntitle: \"`goodapplication` CLI\"\n---\n\nIntroductory `goodapplication` CLI text.\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Neither the frontmatter nor the body backtick-wrapped name should be flagged
+        assert!(
+            result.is_empty(),
+            "Should not flag names inside backticks in frontmatter or body: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_bare_name_still_flagged_with_backtick_nearby() {
+        // Names outside backticks in frontmatter should still be flagged.
+        let config = MD044Config {
+            names: vec!["GoodApplication".to_string()],
+            code_blocks: false,
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "---\ntitle: goodapplication `goodapplication` CLI\n---\n\nBody\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the bare "goodapplication" (before backticks) should be flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag bare name but not backtick-wrapped name: {result:?}"
+        );
+        assert_eq!(result[0].line, 2);
+        assert_eq!(result[0].column, 8); // "title: " = 7 chars, name at column 8
+    }
+
+    #[test]
+    fn test_frontmatter_backtick_code_with_code_blocks_true() {
+        // When code_blocks=true, names inside backticks ARE checked.
+        let config = MD044Config {
+            names: vec!["GoodApplication".to_string()],
+            code_blocks: true,
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "---\ntitle: \"`goodapplication` CLI\"\n---\n\nBody\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        // With code_blocks=true, backtick-wrapped name SHOULD be flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag backtick-wrapped name when code_blocks=true: {result:?}"
+        );
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_frontmatter_fix_preserves_backtick_code() {
+        // Fix should NOT change names inside backticks in frontmatter.
+        let config = MD044Config {
+            names: vec!["GoodApplication".to_string()],
+            code_blocks: false,
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "---\ntitle: \"`goodapplication` CLI\"\n---\n\nIntroductory `goodapplication` CLI text.\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // Neither backtick-wrapped occurrence should be changed
+        assert_eq!(
+            fixed, content,
+            "Fix should not modify names inside backticks in frontmatter"
+        );
     }
 
     // --- Angle-bracket URL tests (issue #457) ---
