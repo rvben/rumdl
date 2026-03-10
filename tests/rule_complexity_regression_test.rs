@@ -27,7 +27,7 @@
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::code_block_utils::CodeBlockStyle;
+use rumdl_lib::rules::CodeBlockStyle;
 use rumdl_lib::rules::code_fence_utils::CodeFenceStyle;
 use rumdl_lib::rules::*;
 use std::time::{Duration, Instant};

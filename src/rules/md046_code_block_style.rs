@@ -1,5 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::code_block_utils::CodeBlockStyle;
 use crate::utils::element_cache::ElementCache;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_footnotes;
@@ -9,6 +8,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use toml;
 
 mod md046_config;
+pub use md046_config::CodeBlockStyle;
 use md046_config::MD046Config;
 
 /// Pre-computed context arrays for indented code block detection

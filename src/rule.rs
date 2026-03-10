@@ -242,6 +242,12 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
     let lines: Vec<&str> = content.lines().collect();
     let mut is_disabled = false;
 
+    // Pre-compute which lines are in code blocks using pulldown-cmark
+    let (code_blocks, _) = crate::utils::CodeBlockUtils::detect_code_blocks_and_spans(content);
+    let line_starts: Vec<usize> = std::iter::once(0)
+        .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+        .collect();
+
     // Check for both markdownlint-disable and rumdl-disable comments
     for (i, line) in lines.iter().enumerate() {
         // Stop processing once we reach the target line
@@ -250,8 +256,11 @@ pub fn is_rule_disabled_at_line(content: &str, rule_name: &str, line_num: usize)
         }
 
         // Skip comments that are inside code blocks
-        if crate::rules::code_block_utils::CodeBlockUtils::is_in_code_block(content, i) {
-            continue;
+        if i < line_starts.len() {
+            let line_byte = line_starts[i];
+            if crate::utils::CodeBlockUtils::is_in_code_block(&code_blocks, line_byte) {
+                continue;
+            }
         }
 
         let line = line.trim();
@@ -368,42 +377,6 @@ pub fn is_rule_disabled_by_comment(content: &str, rule_name: &str) -> bool {
     let lines: Vec<&str> = content.lines().collect();
     is_rule_disabled_at_line(content, rule_name, lines.len())
 }
-
-// DocumentStructure has been merged into LintContext - these traits are no longer needed
-// The functionality is now directly available through LintContext methods
-/*
-// Helper trait for dynamic dispatch to check_with_structure
-pub trait MaybeDocumentStructure {
-    fn check_with_structure_opt(
-        &self,
-        ctx: &LintContext,
-        structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> Option<LintResult>;
-}
-
-impl<T> MaybeDocumentStructure for T
-where
-    T: Rule + crate::utils::document_structure::DocumentStructureExtensions + 'static,
-{
-    fn check_with_structure_opt(
-        &self,
-        ctx: &LintContext,
-        structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> Option<LintResult> {
-        Some(self.check_with_structure(ctx, structure))
-    }
-}
-
-impl MaybeDocumentStructure for dyn Rule {
-    fn check_with_structure_opt(
-        &self,
-        _ctx: &LintContext,
-        _structure: &crate::utils::document_structure::DocumentStructure,
-    ) -> Option<LintResult> {
-        None
-    }
-}
-*/
 
 #[cfg(test)]
 mod tests {
@@ -656,15 +629,15 @@ MD001 should still be enabled here"#;
         // Comments inside code blocks should be ignored
         assert!(!is_rule_disabled_at_line(content, "MD001", 5));
 
-        // Test with indented code blocks too
-        let indented_content = r#"# Document
-
-    <!-- rumdl-disable MD001 -->
-    This is in an indented code block
-
+        // Test with disable comment inside a fenced code block (different language)
+        let fenced_content2 = r#"# Document
+```
+<!-- rumdl-disable MD001 -->
+This is in a fenced code block
+```
 MD001 should still be enabled here"#;
 
-        assert!(!is_rule_disabled_at_line(indented_content, "MD001", 5));
+        assert!(!is_rule_disabled_at_line(fenced_content2, "MD001", 5));
     }
 
     #[test]

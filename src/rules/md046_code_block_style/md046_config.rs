@@ -1,7 +1,29 @@
 use crate::rule_config_serde::RuleConfig;
-use crate::rules::code_block_utils::CodeBlockStyle;
 use serde::ser::Serializer;
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// The style for code blocks (MD046)
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
+pub enum CodeBlockStyle {
+    /// Consistent with the first code block style found
+    #[default]
+    Consistent,
+    /// Indented code blocks (4 spaces)
+    Indented,
+    /// Fenced code blocks (``` or ~~~)
+    Fenced,
+}
+
+impl fmt::Display for CodeBlockStyle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CodeBlockStyle::Fenced => write!(f, "fenced"),
+            CodeBlockStyle::Indented => write!(f, "indented"),
+            CodeBlockStyle::Consistent => write!(f, "consistent"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD046Config {

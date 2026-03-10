@@ -302,7 +302,7 @@ Regular text continues here."#;
     assert_eq!(warnings.len(), 0, "MD013 should not flag mkdocstrings blocks");
 
     // MD046 - Should not flag YAML options as indented code blocks
-    let rule_046 = MD046CodeBlockStyle::new(rumdl_lib::rules::code_block_utils::CodeBlockStyle::Fenced);
+    let rule_046 = MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced);
     let warnings = rule_046.check(&ctx).unwrap();
     assert_eq!(
         warnings.len(),
@@ -348,6 +348,6 @@ Regular documentation continues."#;
     let rule_007 = MD007ULIndent::new(2);
     assert_eq!(rule_007.check(&ctx).unwrap().len(), 0);
 
-    let rule_046 = MD046CodeBlockStyle::new(rumdl_lib::rules::code_block_utils::CodeBlockStyle::Fenced);
+    let rule_046 = MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced);
     assert_eq!(rule_046.check(&ctx).unwrap().len(), 0);
 }

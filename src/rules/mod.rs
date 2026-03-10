@@ -1,12 +1,9 @@
-pub mod code_block_utils;
 pub mod code_fence_utils;
 pub mod emphasis_style;
 pub mod front_matter_utils;
 pub mod heading_utils;
 pub mod list_utils;
 pub mod strong_style;
-
-pub mod blockquote_utils;
 
 mod md001_heading_increment;
 mod md003_heading_style;
@@ -72,6 +69,7 @@ mod md075_orphaned_table_rows;
 mod md076_list_item_spacing;
 mod md077_list_continuation_indent;
 
+pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
 pub use md003_heading_style::MD003HeadingStyle;
 pub use md004_unordered_list_style::MD004UnorderedListStyle;
@@ -106,7 +104,7 @@ pub use md042_no_empty_links::MD042NoEmptyLinks;
 pub use md043_required_headings::MD043RequiredHeadings;
 pub use md044_proper_names::MD044ProperNames;
 pub use md045_no_alt_text::MD045NoAltText;
-pub use md046_code_block_style::MD046CodeBlockStyle;
+pub use md046_code_block_style::{CodeBlockStyle, MD046CodeBlockStyle};
 pub use md047_single_trailing_newline::MD047SingleTrailingNewline;
 pub use md048_code_fence_style::MD048CodeFenceStyle;
 pub use md049_emphasis_style::MD049EmphasisStyle;

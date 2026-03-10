@@ -815,7 +815,7 @@ fn test_fix_md046_respects_disable_enable() {
     use rumdl_lib::rules::MD046CodeBlockStyle;
 
     // Target style: indented (fenced blocks should be converted)
-    let rule = MD046CodeBlockStyle::new(rumdl_lib::rules::code_block_utils::CodeBlockStyle::Indented);
+    let rule = MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Indented);
 
     let content = "# Test\n\n<!-- rumdl-disable MD046 -->\n```\npreserved fenced\n```\n<!-- rumdl-enable MD046 -->\n\n```\nconverted to indented\n```\n";
 

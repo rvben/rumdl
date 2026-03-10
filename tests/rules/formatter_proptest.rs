@@ -174,7 +174,7 @@ proptest! {
             Box::new(MD043RequiredHeadings::new(vec![])),
             Box::new(MD044ProperNames::new(vec![], true)),
             Box::new(MD045NoAltText::default()),
-            Box::new(MD046CodeBlockStyle::new(rumdl_lib::rules::code_block_utils::CodeBlockStyle::Fenced)),
+            Box::new(MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced)),
             Box::new(MD047SingleTrailingNewline),
             Box::new(MD048CodeFenceStyle::new(rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick)),
             Box::new(MD049EmphasisStyle::default()),
@@ -771,7 +771,7 @@ proptest! {
 
     #[test]
     fn test_md046_idempotent(content in markdown_content_strategy()) {
-        let rule = MD046CodeBlockStyle::new(rumdl_lib::rules::code_block_utils::CodeBlockStyle::Fenced);
+        let rule = MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced);
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
         let warnings1 = rule.check(&ctx1).unwrap_or_default();

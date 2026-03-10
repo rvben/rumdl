@@ -5,8 +5,6 @@
 pub mod anchor_styles;
 pub mod blockquote;
 pub mod code_block_utils;
-// DocumentStructure has been merged into LintContext
-// pub mod document_structure;
 pub mod early_returns;
 pub mod element_cache;
 pub mod emphasis_utils;
@@ -44,7 +42,6 @@ pub mod text_reflow;
 pub mod utf8_offsets;
 
 pub use code_block_utils::CodeBlockUtils;
-// pub use document_structure::DocumentStructure;
 pub use line_ending::{
     LineEnding, detect_line_ending, detect_line_ending_enum, ensure_consistent_line_endings, get_line_ending_str,
     normalize_line_ending,
