@@ -254,18 +254,28 @@ function findBinary() {
 }
 
 /**
- * Verify the binary is executable
+ * Ensure the binary is executable, fixing permissions if needed.
+ * npm does not preserve file permissions when publishing packages,
+ * so binaries may need chmod +x after install.
  */
-function verifyBinary(binaryPath) {
+function ensureExecutable(binaryPath) {
+  if (process.platform === "win32") {
+    return; // Windows doesn't use Unix file permissions
+  }
+
   try {
     fs.accessSync(binaryPath, fs.constants.X_OK);
-    return true;
   } catch {
-    // On Windows, X_OK check may fail but binary can still run
-    if (process.platform === "win32") {
-      return fs.existsSync(binaryPath);
+    debug(`Binary not executable, fixing permissions: ${binaryPath}`);
+    try {
+      fs.chmodSync(binaryPath, 0o755);
+    } catch (chmodErr) {
+      throw new Error(
+        `Binary found but not executable: ${binaryPath}\n` +
+          `Automatic chmod failed: ${chmodErr.message}\n` +
+          `Try manually: chmod +x "${binaryPath}"`
+      );
     }
-    return false;
   }
 }
 
@@ -277,13 +287,8 @@ function main() {
     const binaryPath = findBinary();
     debug(`Using binary: ${binaryPath}`);
 
-    // Verify the binary is executable
-    if (!verifyBinary(binaryPath)) {
-      throw new Error(
-        `Binary found but not executable: ${binaryPath}\n` +
-          `Try: chmod +x "${binaryPath}"`
-      );
-    }
+    // Ensure the binary is executable (npm doesn't preserve file permissions)
+    ensureExecutable(binaryPath);
 
     // Spawn the binary with all arguments
     const result = spawnSync(binaryPath, process.argv.slice(2), {
@@ -301,10 +306,21 @@ function main() {
         );
       }
       if (result.error.code === "EACCES") {
-        throw new Error(
-          `Permission denied: ${binaryPath}\n` +
-            `Try: chmod +x "${binaryPath}"`
-        );
+        // Try fixing permissions and retrying once
+        try {
+          fs.chmodSync(binaryPath, 0o755);
+          debug("Fixed permissions after EACCES, retrying...");
+          const retry = spawnSync(binaryPath, process.argv.slice(2), {
+            stdio: "inherit",
+            shell: false,
+          });
+          process.exit(retry.status ?? 1);
+        } catch {
+          throw new Error(
+            `Permission denied: ${binaryPath}\n` +
+              `Try: chmod +x "${binaryPath}"`
+          );
+        }
       }
       throw result.error;
     }
