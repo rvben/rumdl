@@ -16,6 +16,7 @@ fn test_list_item_trailing_whitespace_removal() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        require_sentence_capital: true,
     };
 
     let result = reflow_markdown(input, &options);
@@ -181,6 +182,7 @@ fn test_sentence_per_line_reflow() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        require_sentence_capital: true,
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -510,6 +512,7 @@ fn test_ie_abbreviation_split_debug() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        require_sentence_capital: true,
     };
 
     let result = reflow_line(input, &options);
@@ -532,6 +535,7 @@ fn test_ie_abbreviation_paragraph() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        require_sentence_capital: true,
     };
 
     let result = reflow_markdown(input, &options);
@@ -609,6 +613,7 @@ fn test_definition_list_with_paragraphs() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        require_sentence_capital: true,
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
@@ -4942,5 +4947,225 @@ fn test_reflow_blockquote_content_force_explicit_for_structural_lines() {
     assert!(
         result.iter().any(|l| l.starts_with("> # ")),
         "Heading content must carry explicit prefix even in lazy mode: {result:?}"
+    );
+}
+
+// ============================================================
+// require_sentence_capital = false (relaxed sentence detection)
+// ============================================================
+
+#[test]
+fn test_relaxed_sentences_lowercase_after_period() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Issue #514: periods followed by lowercase should be treated as sentence boundaries
+    let input = "lets add some periods. like this we can see if it works. and another sentence here.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 3, "Should split into 3 sentences: {result:?}");
+    assert_eq!(result[0], "lets add some periods.");
+    assert_eq!(result[1], "like this we can see if it works.");
+    assert_eq!(result[2], "and another sentence here.");
+}
+
+#[test]
+fn test_relaxed_sentences_mixed_case() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Mix of uppercase and lowercase sentence starts
+    let input = "first sentence. Second sentence. third sentence. Fourth sentence.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 4, "Should split into 4 sentences: {result:?}");
+    assert_eq!(result[0], "first sentence.");
+    assert_eq!(result[1], "Second sentence.");
+    assert_eq!(result[2], "third sentence.");
+    assert_eq!(result[3], "Fourth sentence.");
+}
+
+#[test]
+fn test_relaxed_sentences_abbreviations_still_work() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Abbreviations should still NOT be treated as sentence boundaries
+    let input = "Use e.g. this method and i.e. that one. then continue.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(
+        result.len(),
+        2,
+        "Should split into 2 sentences (e.g. and i.e. are not boundaries): {result:?}"
+    );
+    assert_eq!(result[0], "Use e.g. this method and i.e. that one.");
+    assert_eq!(result[1], "then continue.");
+}
+
+#[test]
+fn test_relaxed_sentences_vs_abbreviation() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // "vs." should NOT split — it's in the abbreviation list
+    let input = "Python vs. ruby is a common comparison. try both.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 2, "vs. should not split: {result:?}");
+    assert_eq!(result[0], "Python vs. ruby is a common comparison.");
+    assert_eq!(result[1], "try both.");
+}
+
+#[test]
+fn test_relaxed_sentences_exclamation_and_question() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: true, // Even in strict mode, ! and ? should split
+        ..Default::default()
+    };
+
+    // ! and ? are always sentence boundaries regardless of case
+    let input = "does this work? yes it does! and another.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 3, "! and ? should always split: {result:?}");
+    assert_eq!(result[0], "does this work?");
+    assert_eq!(result[1], "yes it does!");
+    assert_eq!(result[2], "and another.");
+}
+
+#[test]
+fn test_relaxed_sentences_initials_not_split() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Single-letter initials should NOT be treated as sentence boundaries
+    let input = "Written by J. K. Rowling in the nineties.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 1, "Initials should not split: {result:?}");
+}
+
+#[test]
+fn test_relaxed_sentences_decimal_not_split() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Decimal numbers should NOT be treated as sentence boundaries
+    let input = "The value is 3.14 and it matters. check it.";
+    let result = reflow_line(input, &options);
+
+    // "3.14" has no space after the period so it won't trigger
+    assert_eq!(result.len(), 2, "Decimals should not split: {result:?}");
+    assert_eq!(result[0], "The value is 3.14 and it matters.");
+    assert_eq!(result[1], "check it.");
+}
+
+#[test]
+fn test_relaxed_sentences_issue_514_exact_case() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Exact reproduction case from issue #514
+    let input = "lets write a whole bunch of words to make a sentence and then lets add some periods some places without capitalization after them. like this we can see if it works or not. we can also test it again and again and then try another one with capitalization. Like this one probably will work correctly, based on my understanding";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 4, "Should split into 4 sentences: {result:?}");
+    assert!(result[0].ends_with("after them."), "First sentence: {}", result[0]);
+    assert!(result[1].ends_with("works or not."), "Second sentence: {}", result[1]);
+    assert!(result[2].ends_with("capitalization."), "Third sentence: {}", result[2]);
+    assert!(result[3].starts_with("Like this"), "Fourth sentence: {}", result[3]);
+}
+
+#[test]
+fn test_require_sentence_capital_preserves_old_behavior() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: true,
+        ..Default::default()
+    };
+
+    // In strict mode, lowercase after period should NOT split
+    let input = "first sentence. second sentence. Third sentence.";
+    let result = reflow_line(input, &options);
+
+    // Only "sentence. Third" should split (uppercase T)
+    assert_eq!(
+        result.len(),
+        2,
+        "Strict mode should only split at uppercase: {result:?}"
+    );
+    assert!(
+        result[1].starts_with("Third"),
+        "Second line should start with Third: {result:?}"
+    );
+}
+
+#[test]
+fn test_relaxed_sentences_fig_no_abbreviations() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // "fig." and "no." should NOT split — they're in the abbreviation list
+    let input = "See fig. 3 for details and no. 5 for more. then continue reading.";
+    let result = reflow_line(input, &options);
+
+    assert_eq!(result.len(), 2, "fig. and no. should not split: {result:?}");
+    assert!(result[0].contains("fig. 3"), "fig. should stay: {result:?}");
+    assert!(result[0].contains("no. 5"), "no. should stay: {result:?}");
+}
+
+#[test]
+fn test_relaxed_sentences_semantic_line_breaks() {
+    let options = ReflowOptions {
+        line_length: 80,
+        sentence_per_line: false,
+        semantic_line_breaks: true,
+        require_sentence_capital: false,
+        ..Default::default()
+    };
+
+    // Semantic line breaks should also respect relaxed sentence detection
+    let input = "first sentence is here. second sentence follows it. Third sentence too.";
+    let result = reflow_line(input, &options);
+
+    assert!(
+        result.len() >= 3,
+        "Semantic should split at all sentence boundaries: {result:?}"
     );
 }

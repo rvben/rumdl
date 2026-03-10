@@ -57,6 +57,7 @@ impl MD013LineLength {
                 reflow_mode: ReflowMode::default(),
                 length_mode: LengthMode::default(),
                 abbreviations: Vec::new(),
+                require_sentence_capital: true,
             },
         }
     }
@@ -698,6 +699,7 @@ impl MD013LineLength {
             abbreviations: config.abbreviations_for_reflow(),
             length_mode: self.reflow_length_mode(),
             attr_lists: ctx.flavor.supports_attr_lists(),
+            require_sentence_capital: config.require_sentence_capital,
         };
 
         let reflowed_with_style =
@@ -954,6 +956,7 @@ impl MD013LineLength {
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
+                    require_sentence_capital: config.require_sentence_capital,
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -1932,6 +1935,7 @@ impl MD013LineLength {
                         abbreviations: config.abbreviations_for_reflow(),
                         length_mode: self.reflow_length_mode(),
                         attr_lists: ctx.flavor.supports_attr_lists(),
+                        require_sentence_capital: config.require_sentence_capital,
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -2276,6 +2280,7 @@ impl MD013LineLength {
                                         abbreviations: config.abbreviations_for_reflow(),
                                         length_mode: self.reflow_length_mode(),
                                         attr_lists: ctx.flavor.supports_attr_lists(),
+                                        require_sentence_capital: config.require_sentence_capital,
                                     };
 
                                     let reflowed =
@@ -2568,6 +2573,7 @@ impl MD013LineLength {
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
+                    require_sentence_capital: config.require_sentence_capital,
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 

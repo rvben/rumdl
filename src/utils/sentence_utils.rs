@@ -16,16 +16,16 @@ use std::collections::HashSet;
 ///
 /// Only includes abbreviations that:
 /// 1. Conventionally ALWAYS have a period in standard writing
-/// 2. Are followed by something (name, example), not sentence-final
+/// 2. Are almost always followed by something, not sentence-final
 ///
 /// Does NOT include:
-/// - Words that don't typically take periods (vs, etc)
-/// - Abbreviations that can end sentences (Inc., Ph.D., U.S.)
+/// - Abbreviations that commonly end sentences (etc., Inc., Ph.D., U.S.)
 pub const DEFAULT_ABBREVIATIONS: &[&str] = &[
     // Titles - always have period, always followed by a name
     "mr", "mrs", "ms", "dr", "prof", "sr", "jr",
     // Latin - always written with periods, introduce examples/references
-    "i.e", "e.g",
+    "i.e", "e.g", // Reference abbreviations - followed by what they refer to
+    "vs", "fig", "no", "vol", "ch", "sec", "al",
 ];
 
 /// Get the effective abbreviations set based on custom additions

@@ -16,6 +16,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec![],
+        require_sentence_capital: true,
     })
 }
 
@@ -182,6 +183,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec![],
+        require_sentence_capital: true,
     });
     let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
                    free-threaded Python.";
@@ -242,6 +244,7 @@ fn test_custom_abbreviations_recognized() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec!["Assn".to_string()],
+        require_sentence_capital: true,
     });
 
     // With custom "Assn" abbreviation, this should be ONE sentence
@@ -270,6 +273,7 @@ fn test_custom_abbreviations_merged_with_builtin() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec!["Assn".to_string()],
+        require_sentence_capital: true,
     });
 
     // Both "Dr." (built-in) and "Assn." (custom) should be recognized
@@ -298,6 +302,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec!["Univ".to_string()],
+        require_sentence_capital: true,
     });
 
     let rule_with_period = MD013LineLength::from_config_struct(MD013Config {
@@ -311,6 +316,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec!["Univ.".to_string()],
+        require_sentence_capital: true,
     });
 
     let content = "Visit Univ. Campus for the tour.";
@@ -346,6 +352,7 @@ fn test_issue_335_abbreviations_config_empty_vec_uses_defaults() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec![], // Empty = use built-in defaults
+        require_sentence_capital: true,
     });
 
     // "Dr." is a built-in abbreviation - should NOT split after it
@@ -395,6 +402,7 @@ fn test_issue_335_custom_abbreviations_extend_defaults() {
         reflow_mode: ReflowMode::SentencePerLine,
         length_mode: rumdl_lib::rules::md013_line_length::md013_config::LengthMode::default(),
         abbreviations: vec!["Corp".to_string(), "Inc".to_string()],
+        require_sentence_capital: true,
     });
 
     // Single sentence with multiple abbreviations - no warning expected

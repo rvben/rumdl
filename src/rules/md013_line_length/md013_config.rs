@@ -95,6 +95,18 @@ pub struct MD013Config {
     /// Custom abbreviations are always added to the built-in defaults
     #[serde(default)]
     pub abbreviations: Vec<String>,
+
+    /// Whether to require uppercase after periods for sentence detection (default: true).
+    /// When true, only "word. Capital" is treated as a sentence boundary.
+    /// When false, "word. lowercase" is also treated as a sentence boundary.
+    /// Does not affect ! and ? which are always treated as sentence boundaries.
+    #[serde(
+        default = "default_require_sentence_capital",
+        alias = "require_sentence_capital",
+        alias = "strict_sentences",
+        alias = "strict-sentences"
+    )]
+    pub require_sentence_capital: bool,
 }
 
 fn default_line_length() -> LineLength {
@@ -117,6 +129,10 @@ fn default_paragraphs() -> bool {
     true
 }
 
+fn default_require_sentence_capital() -> bool {
+    true
+}
+
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -130,6 +146,7 @@ impl Default for MD013Config {
             reflow_mode: ReflowMode::default(),
             length_mode: LengthMode::default(),
             abbreviations: Vec::new(),
+            require_sentence_capital: default_require_sentence_capital(),
         }
     }
 }
@@ -164,6 +181,7 @@ impl MD013Config {
             abbreviations: self.abbreviations_for_reflow(),
             length_mode,
             attr_lists: false,
+            require_sentence_capital: self.require_sentence_capital,
         }
     }
 }
@@ -262,6 +280,7 @@ mod tests {
             reflow_mode: ReflowMode::SentencePerLine,
             length_mode: LengthMode::default(),
             abbreviations: Vec::new(),
+            require_sentence_capital: true,
         };
 
         let toml_str = toml::to_string(&config).unwrap();

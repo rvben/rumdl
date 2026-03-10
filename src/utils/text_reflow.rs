@@ -64,6 +64,11 @@ pub struct ReflowOptions {
     /// Whether to treat {#id .class key="value"} as atomic (unsplittable) elements.
     /// Enabled for MkDocs and Kramdown flavors.
     pub attr_lists: bool,
+    /// Whether to require uppercase after periods for sentence detection.
+    /// When true (default), only "word. Capital" is a sentence boundary.
+    /// When false, "word. lowercase" is also treated as a sentence boundary.
+    /// Does not affect ! and ? which are always treated as sentence boundaries.
+    pub require_sentence_capital: bool,
 }
 
 impl Default for ReflowOptions {
@@ -77,6 +82,7 @@ impl Default for ReflowOptions {
             abbreviations: None,
             length_mode: ReflowLengthMode::default(),
             attr_lists: false,
+            require_sentence_capital: true,
         }
     }
 }
@@ -84,7 +90,12 @@ impl Default for ReflowOptions {
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
-fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>) -> bool {
+fn is_sentence_boundary(
+    text: &str,
+    pos: usize,
+    abbreviations: &HashSet<String>,
+    require_sentence_capital: bool,
+) -> bool {
     let chars: Vec<char> = text.chars().collect();
 
     if pos + 1 >= chars.len() {
@@ -202,26 +213,44 @@ fn is_sentence_boundary(text: &str, pos: usize, abbreviations: &HashSet<String>)
         return false;
     }
 
-    // First character of next sentence must be uppercase or CJK
     let first_char = chars[first_letter_pos];
-    if !first_char.is_uppercase() && !is_cjk_char(first_char) {
-        return false;
+
+    // For ! and ?, sentence boundaries are unambiguous — no uppercase requirement
+    if c == '!' || c == '?' {
+        return true;
     }
 
-    // Look back to check for common abbreviations (only applies to periods)
-    if pos > 0 && c == '.' {
-        // Convert char index to byte offset for string slicing
+    // Period-specific checks: periods are ambiguous (abbreviations, decimals, initials)
+    // so we apply additional guards before accepting a sentence boundary.
+
+    if pos > 0 {
+        // Check for common abbreviations
         let byte_offset: usize = chars[..=pos].iter().map(|ch| ch.len_utf8()).sum();
         if text_ends_with_abbreviation(&text[..byte_offset], abbreviations) {
             return false;
         }
 
-        // Check for decimal numbers (e.g., "3.14")
-        // Make sure to check if first_letter_pos is within bounds
-        if chars[pos - 1].is_numeric() && first_letter_pos < chars.len() && chars[first_letter_pos].is_numeric() {
+        // Check for decimal numbers (e.g., "3.14 is pi")
+        if chars[pos - 1].is_numeric() && first_char.is_ascii_digit() {
             return false;
         }
+
+        // Check for single-letter initials (e.g., "J. K. Rowling")
+        // A single uppercase letter before the period preceded by whitespace or start
+        // is likely an initial, not a sentence ending.
+        if chars[pos - 1].is_ascii_uppercase() {
+            if pos == 1 || (pos >= 2 && chars[pos - 2].is_whitespace()) {
+                return false;
+            }
+        }
     }
+
+    // In strict mode, require uppercase or CJK to start the next sentence after a period.
+    // In relaxed mode, accept any alphanumeric character.
+    if require_sentence_capital && !first_char.is_uppercase() && !is_cjk_char(first_char) {
+        return false;
+    }
+
     true
 }
 
@@ -233,12 +262,16 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
 /// Split text into sentences with custom abbreviations
 pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
     let abbreviations = get_abbreviations(custom_abbreviations);
-    split_into_sentences_with_set(text, &abbreviations)
+    split_into_sentences_with_set(text, &abbreviations, true)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
 /// Use this when calling multiple times in a loop to avoid repeatedly computing the set
-fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) -> Vec<String> {
+fn split_into_sentences_with_set(
+    text: &str,
+    abbreviations: &HashSet<String>,
+    require_sentence_capital: bool,
+) -> Vec<String> {
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
     let mut chars = text.chars().peekable();
@@ -247,7 +280,7 @@ fn split_into_sentences_with_set(text: &str, abbreviations: &HashSet<String>) ->
     while let Some(c) = chars.next() {
         current_sentence.push(c);
 
-        if is_sentence_boundary(text, pos, abbreviations) {
+        if is_sentence_boundary(text, pos, abbreviations, require_sentence_capital) {
             // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
             while let Some(&next) = chars.peek() {
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
@@ -428,7 +461,7 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
-        return reflow_elements_sentence_per_line(&elements, &options.abbreviations);
+        return reflow_elements_sentence_per_line(&elements, &options.abbreviations, options.require_sentence_capital);
     }
 
     // For semantic line breaks mode, use cascading split strategy
@@ -1250,7 +1283,11 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
 }
 
 /// Reflow elements for sentence-per-line mode
-fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
+fn reflow_elements_sentence_per_line(
+    elements: &[Element],
+    custom_abbreviations: &Option<Vec<String>>,
+    require_sentence_capital: bool,
+) -> Vec<String> {
     let abbreviations = get_abbreviations(custom_abbreviations);
     let mut lines = Vec::new();
     let mut current_line = String::new();
@@ -1263,7 +1300,7 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
             // Simply append text - it already has correct spacing from tokenization
             let combined = format!("{current_line}{text}");
             // Use the pre-computed abbreviations set to avoid redundant computation
-            let sentences = split_into_sentences_with_set(&combined, &abbreviations);
+            let sentences = split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital);
 
             if sentences.len() > 1 {
                 // We found sentence boundaries
@@ -1324,14 +1361,35 @@ fn reflow_elements_sentence_per_line(elements: &[Element], custom_abbreviations:
         } else if let Element::Italic { content, underscore } = element {
             // Handle italic elements - may contain multiple sentences that need continuation
             let marker = if *underscore { "_" } else { "*" };
-            handle_emphasis_sentence_split(content, marker, &abbreviations, &mut current_line, &mut lines);
+            handle_emphasis_sentence_split(
+                content,
+                marker,
+                &abbreviations,
+                require_sentence_capital,
+                &mut current_line,
+                &mut lines,
+            );
         } else if let Element::Bold { content, underscore } = element {
             // Handle bold elements - may contain multiple sentences that need continuation
             let marker = if *underscore { "__" } else { "**" };
-            handle_emphasis_sentence_split(content, marker, &abbreviations, &mut current_line, &mut lines);
+            handle_emphasis_sentence_split(
+                content,
+                marker,
+                &abbreviations,
+                require_sentence_capital,
+                &mut current_line,
+                &mut lines,
+            );
         } else if let Element::Strikethrough(content) = element {
             // Handle strikethrough elements - may contain multiple sentences that need continuation
-            handle_emphasis_sentence_split(content, "~~", &abbreviations, &mut current_line, &mut lines);
+            handle_emphasis_sentence_split(
+                content,
+                "~~",
+                &abbreviations,
+                require_sentence_capital,
+                &mut current_line,
+                &mut lines,
+            );
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
             // Check if this element is adjacent to the preceding text (no space between)
@@ -1369,11 +1427,12 @@ fn handle_emphasis_sentence_split(
     content: &str,
     marker: &str,
     abbreviations: &HashSet<String>,
+    require_sentence_capital: bool,
     current_line: &mut String,
     lines: &mut Vec<String>,
 ) {
     // Split the emphasis content into sentences
-    let sentences = split_into_sentences_with_set(content, abbreviations);
+    let sentences = split_into_sentences_with_set(content, abbreviations, require_sentence_capital);
 
     if sentences.len() <= 1 {
         // Single sentence or no boundaries - treat as atomic
@@ -1678,6 +1737,7 @@ fn cascade_split_line(
         abbreviations: abbreviations.clone(),
         length_mode,
         attr_lists,
+        require_sentence_capital: true,
     };
     reflow_elements(&elements, &options)
 }
@@ -1687,7 +1747,8 @@ fn cascade_split_line(
 /// 2. For lines exceeding line_length, cascade through clause punct → break-words → word wrap
 fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     // Step 1: Split into sentences using existing sentence-per-line logic
-    let sentence_lines = reflow_elements_sentence_per_line(elements, &options.abbreviations);
+    let sentence_lines =
+        reflow_elements_sentence_per_line(elements, &options.abbreviations, options.require_sentence_capital);
 
     // Step 2: For each sentence line, apply cascading splits if it exceeds line_length
     // When line_length is 0 (unlimited), skip cascading — sentence splits only
