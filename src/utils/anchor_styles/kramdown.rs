@@ -438,6 +438,8 @@ mod tests {
         assert_eq!(heading_to_fragment("retentionPolicy<Component />"), "retentionpolicy");
         assert_eq!(heading_to_fragment("Test <span>extra</span>"), "test-extra");
         assert_eq!(heading_to_fragment("Generic<T>"), "generic");
+        // Code span content with angle brackets should be preserved
+        assert_eq!(heading_to_fragment("`import <FILE>`"), "import-file");
     }
 
     #[test]

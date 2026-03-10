@@ -2216,6 +2216,26 @@ Visit [github documentation](https://github.com/docs) for details.
     }
 
     #[test]
+    fn test_frontmatter_unquoted_backtick_code_not_flagged() {
+        // Exact case from issue #513: unquoted YAML frontmatter with backticks
+        let config = MD044Config {
+            names: vec!["GoodApplication".to_string()],
+            code_blocks: false,
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "---\ntitle: `goodapplication` CLI\n---\n\nIntroductory `goodapplication` CLI text.\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should not flag names inside backticks in unquoted YAML frontmatter: {result:?}"
+        );
+    }
+
+    #[test]
     fn test_frontmatter_bare_name_still_flagged_with_backtick_nearby() {
         // Names outside backticks in frontmatter should still be flagged.
         let config = MD044Config {
