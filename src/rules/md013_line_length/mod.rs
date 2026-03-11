@@ -512,6 +512,8 @@ impl Rule for MD013LineLength {
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
         let mut aliases = std::collections::HashMap::new();
         aliases.insert("enable_reflow".to_string(), "reflow".to_string());
+        aliases.insert("strict_sentences".to_string(), "require-sentence-capital".to_string());
+        aliases.insert("strict-sentences".to_string(), "require-sentence-capital".to_string());
         Some(aliases)
     }
 
