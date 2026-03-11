@@ -633,6 +633,31 @@ fn test_default_config_passes_validation() {
 }
 
 #[test]
+fn test_enabled_key_valid_for_any_rule() {
+    use crate::rules;
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    // MD070 has no config struct — test that enabled is accepted anyway
+    std::fs::write(&config_path, "[MD070]\nenabled = true\n").unwrap();
+
+    let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("Config should load");
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = validate_config_sourced(&sourced, &registry);
+
+    let enabled_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.key.as_deref() == Some("enabled"))
+        .collect();
+    assert!(
+        enabled_warnings.is_empty(),
+        "'enabled' should be valid for any rule, got warnings: {enabled_warnings:?}"
+    );
+}
+
+#[test]
 fn test_per_file_ignores_config_parsing() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join(".rumdl.toml");

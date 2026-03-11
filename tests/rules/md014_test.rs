@@ -356,3 +356,52 @@ fn test_default_config() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Default config should have show_output=true");
 }
+
+#[test]
+fn test_multiple_violations_have_correct_lines() {
+    let rule = MD014CommandsShowOutput::new();
+    // Exact case from issue #519: two commands without output
+    let content = "\
+---
+title: Heading
+---
+
+Here is a fenced code block:
+
+```shell
+# First invocation of my_command
+$ my_command
+
+# Second invocation of my_command
+$ my_command
+```
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 2, "Both commands should be flagged, got: {result:?}");
+    assert_eq!(result[0].line, 9, "First violation on line 9");
+    assert_eq!(result[1].line, 12, "Second violation on line 12");
+}
+
+#[test]
+fn test_multiple_violations_fix_produces_valid_output() {
+    use rumdl_lib::utils::fix_utils::apply_warning_fixes;
+
+    let rule = MD014CommandsShowOutput::new();
+    let content = "```bash\n$ echo one\n$ echo two\n$ echo three\n```";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 3, "All three commands should be flagged");
+
+    // Applying all fixes should produce valid output (deduplication handles identical fixes)
+    let fixed = apply_warning_fixes(content, &warnings).unwrap();
+    assert_eq!(fixed, "```bash\necho one\necho two\necho three\n```");
+
+    // Verify no warnings remain after fix
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result2 = rule.check(&ctx2).unwrap();
+    assert!(
+        result2.is_empty(),
+        "No warnings should remain after fix, got: {result2:?}"
+    );
+}

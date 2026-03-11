@@ -776,3 +776,45 @@ Text after.
         "Varying whitespace after blockquote marker should not trigger MD032, got: {result:?}"
     );
 }
+
+#[test]
+fn test_no_false_positive_deeply_nested_blockquote_list() {
+    let rule = MD032BlanksAroundLists::default();
+
+    // Deeply nested blockquotes (> >) with list continuation
+    let content = "\
+Text before.
+
+> > - First item.
+> >   Continuation of first.
+> > - Second item.
+> >   Continuation of second.
+
+Text after.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Deeply nested blockquote list continuation should not trigger MD032, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_blockquote_list_still_flags_real_violations() {
+    let rule = MD032BlanksAroundLists::default();
+
+    // A list inside a blockquote that genuinely lacks surrounding blank lines
+    let content = "\
+> Some text.
+> - Item one.
+> - Item two.
+> More text.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Blockquote list without blank lines should still be flagged"
+    );
+}
