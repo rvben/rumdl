@@ -208,8 +208,8 @@ fn test_commands_only_without_other_content() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        1,
-        "Block with only commands (no output) should be flagged"
+        3,
+        "Each command without output should produce a separate warning"
     );
 }
 
@@ -248,8 +248,8 @@ fn test_only_commands_no_output() {
     let result = rule.check(&ctx).unwrap();
     assert_eq!(
         result.len(),
-        1,
-        "Blocks with only commands (no output) should be flagged"
+        2,
+        "Each command without output should produce a separate warning"
     );
 }
 
