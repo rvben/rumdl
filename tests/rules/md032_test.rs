@@ -698,3 +698,81 @@ fn test_issue_268_nested_blockquote_with_space_between_markers() {
         );
     }
 }
+
+/// Regression test for GitHub issue #519:
+/// List continuation text in nested blockquotes should not trigger MD032.
+/// The blockquote prefix can have varying trailing whitespace for item lines
+/// vs continuation lines, but they represent the same blockquote context.
+#[test]
+fn test_no_false_positive_blockquote_list_continuation() {
+    let rule = MD032BlanksAroundLists::default();
+
+    // Exact case from issue #519
+    let content = "\
+---
+title: Heading
+---
+
+Introductory text:
+
+- Level 1 item:
+  - Level 2 item:
+    > - Level 3 item.
+    >   List continuation text.
+    > - Level 3 item.
+    >   List continuation text.
+    >   More list continuation text.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Blockquote list continuation should not trigger MD032, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_no_false_positive_blockquote_multiple_items_with_continuation() {
+    let rule = MD032BlanksAroundLists::default();
+
+    let content = "\
+Some text.
+
+> - First item.
+>   Continuation of first.
+> - Second item.
+>   Continuation of second.
+>   More continuation.
+> - Third item.
+
+More text.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Multiple blockquote list items with continuation should not trigger MD032, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_no_false_positive_varying_whitespace_after_blockquote_marker() {
+    let rule = MD032BlanksAroundLists::default();
+
+    // Varying whitespace after > should still be treated as same blockquote context
+    let content = "\
+Text before.
+
+>  - Item with extra space after >.
+>    Continuation with different spacing.
+>  - Another item.
+
+Text after.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Varying whitespace after blockquote marker should not trigger MD032, got: {result:?}"
+    );
+}

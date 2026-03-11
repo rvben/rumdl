@@ -6,6 +6,34 @@ use super::types::*;
 /// Regex for detecting blockquote prefixes in list context
 static BLOCKQUOTE_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^((?:\s*>\s*)+)").unwrap());
 
+/// Compute the effective indentation of a line after stripping its blockquote prefix.
+///
+/// For a line like `> >   text`, this skips past the `>` markers and the optional
+/// space after the last marker, then counts the remaining leading whitespace.
+/// Returns `None` if the line doesn't have the expected number of blockquote markers.
+fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Option<usize> {
+    let mut pos = 0;
+    let mut found_markers = 0;
+    for c in raw_content.chars() {
+        pos += c.len_utf8();
+        if c == '>' {
+            found_markers += 1;
+            if found_markers == expected_bq_level {
+                // Skip optional space after last marker
+                if raw_content.get(pos..pos + 1) == Some(" ") {
+                    pos += 1;
+                }
+                break;
+            }
+        }
+    }
+    if found_markers < expected_bq_level {
+        return None;
+    }
+    let after_bq = &raw_content[pos..];
+    Some(after_bq.len() - after_bq.trim_start().len())
+}
+
 /// Parse all list blocks in the content (legacy line-by-line approach)
 ///
 /// Uses a forward-scanning O(n) algorithm that tracks two variables during iteration:
@@ -248,7 +276,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 let is_nested = nesting > block.nesting_level;
                 let same_type =
                     (block.is_ordered && list_item.is_ordered) || (!block.is_ordered && !list_item.is_ordered);
-                let same_context = block.blockquote_prefix == blockquote_prefix;
+                let same_context = block.blockquote_prefix.trim() == blockquote_prefix.trim();
                 // Allow one blank line after last item, or lines immediately after block content
                 let reasonable_distance = line_num <= last_list_item_line + 2 || line_num == block.end_line + 1;
 
@@ -408,18 +436,36 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
             };
 
             // Calculate minimum indentation for list continuation
-            let min_continuation_indent = if block.is_ordered {
-                current_indent_level + last_marker_width
+            // For blockquote lists, compute effective indent after stripping prefix
+            let block_bq_level_cont = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
+            let line_raw_content = line_info.content(content);
+            let line_bq_level_cont = line_raw_content
+                .chars()
+                .take_while(|c| *c == '>' || c.is_whitespace())
+                .filter(|&c| c == '>')
+                .count();
+
+            let (effective_line_indent, min_continuation_indent) = if block_bq_level_cont > 0
+                && line_bq_level_cont == block_bq_level_cont
+                && let Some(eff_indent) = indent_after_blockquote(line_raw_content, block_bq_level_cont)
+            {
+                let min_indent = if block.is_ordered { last_marker_width } else { 2 };
+                (eff_indent, min_indent)
             } else {
-                current_indent_level + 2 // Unordered lists need at least 2 spaces (e.g., "- " = 2 chars)
+                let min_indent = if block.is_ordered {
+                    current_indent_level + last_marker_width
+                } else {
+                    current_indent_level + 2
+                };
+                (line_info.indent, min_indent)
             };
 
-            if prev_line_ends_with_backslash || line_info.indent >= min_continuation_indent {
+            if prev_line_ends_with_backslash || effective_line_indent >= min_continuation_indent {
                 // Indented line or backslash continuation continues the list
                 if debug_list {
                     eprintln!(
                         "[DEBUG] Line {}: indented continuation (indent={}, min={})",
-                        line_num, line_info.indent, min_continuation_indent
+                        line_num, effective_line_indent, min_continuation_indent
                     );
                 }
                 block.end_line = line_num;
@@ -612,7 +658,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 }
             } else {
                 // Check for lazy continuation
-                let min_required_indent = if block.is_ordered {
+                let mut min_required_indent = if block.is_ordered {
                     let deep = current_indent_level + last_marker_width;
                     let root = block.nesting_level + block.max_marker_width;
                     deep.min(root)
@@ -630,6 +676,19 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 let current_bq_level = blockquote_prefix.chars().filter(|&c| c == '>').count();
                 let blockquote_level_changed = line_content.starts_with(">") && current_bq_level != block_bq_level;
 
+                // For lines in the same blockquote context, compute indent after
+                // stripping the blockquote prefix and adjust min_required_indent
+                let effective_indent = if block_bq_level > 0
+                    && current_bq_level == block_bq_level
+                    && !blockquote_level_changed
+                    && let Some(eff) = indent_after_blockquote(line_info.content(content), block_bq_level)
+                {
+                    min_required_indent = if block.is_ordered { last_marker_width } else { 2 };
+                    eff
+                } else {
+                    line_info.indent
+                };
+
                 let is_structural_separator = line_info.heading.is_some()
                     || line_content.starts_with("```")
                     || line_content.starts_with("~~~")
@@ -641,8 +700,8 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
                 let is_lazy_continuation = !is_structural_separator
                     && !line_info.is_blank
-                    && (line_info.indent == 0
-                        || line_info.indent >= min_required_indent
+                    && (effective_indent == 0
+                        || effective_indent >= min_required_indent
                         || line_info.in_code_span_continuation);
 
                 if is_lazy_continuation {
