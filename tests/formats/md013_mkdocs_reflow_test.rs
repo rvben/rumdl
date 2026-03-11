@@ -1039,3 +1039,195 @@ fn test_mkdocs_ordered_list_3space_continuation_semantic_breaks() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "Fix should not change already-correct content");
 }
+
+#[test]
+fn test_list_item_admonition_with_code_block_preserves_indent() {
+    // Issue #509: When a list item contains an admonition with a code block,
+    // the paragraph after the code block must retain its admonition indent.
+    // The bug was that code fence markers inside admonitions were classified
+    // as CodeBlock, which flushed the admonition context in the block builder.
+    let content = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+   !!! note
+
+       ```yaml
+       hello: world
+       ```
+
+       Lorem ipsum dolor sit amet.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The admonition content after the code block must keep its 7-space indent
+    assert!(
+        fixed.contains("       Lorem ipsum dolor sit amet."),
+        "Admonition content after code block must retain admonition indent (7 spaces), got:\n{fixed}"
+    );
+    // The code block must be preserved
+    assert!(
+        fixed.contains("       ```yaml"),
+        "Code fence inside admonition must be preserved with correct indent"
+    );
+    assert!(
+        fixed.contains("       hello: world"),
+        "Code block content inside admonition must be preserved"
+    );
+}
+
+#[test]
+fn test_list_item_admonition_multiple_code_blocks_preserve_indent() {
+    // Admonition with two code blocks and text between/after them
+    let content = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+   !!! note
+
+       ```yaml
+       first: block
+       ```
+
+       Some text between code blocks.
+
+       ```python
+       print('hello')
+       ```
+
+       Final paragraph after second code block.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // All admonition content must keep its indent
+    assert!(
+        fixed.contains("       Some text between code blocks."),
+        "Text between code blocks must retain admonition indent"
+    );
+    assert!(
+        fixed.contains("       Final paragraph after second code block."),
+        "Text after second code block must retain admonition indent"
+    );
+    assert!(
+        fixed.contains("       ```python"),
+        "Second code fence must retain admonition indent"
+    );
+}
+
+#[test]
+fn test_list_item_nested_admonition_with_code_block() {
+    // Nested admonition (deeper nesting level) with code block
+    let content = "\
+1. Intro text.
+
+   !!! note
+
+       !!! warning
+
+           ```bash
+           echo hello
+           ```
+
+           Content after nested code block.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Nested admonition content must keep its deeper indent
+    assert!(
+        fixed.contains("           Content after nested code block."),
+        "Nested admonition content after code block must retain its indent, got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_list_item_admonition_code_block_with_long_text_after() {
+    // The text after the code block is overlong and needs reflow,
+    // but should maintain admonition indent (7 spaces for 3-char marker)
+    let content = "\
+1. Short intro.
+
+   !!! note
+
+       ```yaml
+       key: value
+       ```
+
+       Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Code block must be preserved exactly
+    assert!(
+        fixed.contains("       ```yaml"),
+        "Code fence must be preserved with correct indent"
+    );
+    assert!(
+        fixed.contains("       key: value"),
+        "Code block content must be preserved"
+    );
+
+    // The reflowed text lines should all have 7-space admonition indent
+    let in_admonition_text = fixed
+        .lines()
+        .skip_while(|l| !l.contains("key: value"))
+        .skip(1) // skip "key: value"
+        .skip_while(|l| l.trim().starts_with("```") || l.trim().is_empty())
+        .take_while(|l| !l.is_empty())
+        .collect::<Vec<_>>();
+
+    for line in &in_admonition_text {
+        if !line.trim().is_empty() {
+            assert!(
+                line.starts_with("       "),
+                "Reflowed admonition line must have 7-space indent, got: '{line}'"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_list_item_admonition_code_block_short_lines_no_change() {
+    // Short lines in admonition with code block - nothing should change
+    let content = "\
+1. Short intro.
+
+   !!! note
+
+       ```yaml
+       key: value
+       ```
+
+       Short text.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Short lines should produce no warnings, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "Fix should not change content when all lines are short");
+}
