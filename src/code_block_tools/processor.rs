@@ -23,6 +23,32 @@ fn is_markdown_language(lang: &str) -> bool {
     matches!(lang.to_lowercase().as_str(), "markdown" | "md")
 }
 
+/// Strip ANSI escape sequences from tool output.
+///
+/// Many tools output colored text (e.g. `\x1b[1;31mError\x1b[0m`), which prevents
+/// structured parsers from matching patterns like `file:line:col: message`.
+fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                // Consume until we hit an ASCII letter (the terminator)
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Information about a fenced code block for processing.
 #[derive(Debug, Clone)]
 pub struct FencedCodeBlockInfo {
@@ -770,21 +796,45 @@ impl<'a> CodeBlockToolProcessor<'a> {
         let mut diagnostics = Vec::new();
         let mut shellcheck_line: Option<usize> = None;
 
-        // Combine stdout and stderr for parsing
-        let stdout = &output.stdout;
-        let stderr = &output.stderr;
-        let combined = format!("{stdout}\n{stderr}");
+        // Strip ANSI escape codes and combine stdout + stderr for parsing
+        let stdout_clean = strip_ansi_codes(&output.stdout);
+        let stderr_clean = strip_ansi_codes(&output.stderr);
+        let combined = format!("{stdout_clean}\n{stderr_clean}");
 
-        // Look for common line:column:message patterns
-        // Examples:
-        // - ruff: "_.py:1:1: E501 Line too long"
-        // - shellcheck: "In - line 1: ..."
-        // - eslint: "1:10 error Description"
+        // State for multi-line "Error: msg" / "at line N column M" pattern
+        let mut pending_error: Option<(String, DiagnosticSeverity)> = None;
 
         for line in combined.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
+            }
+
+            // Resolve pending "Error: msg" from previous line
+            if let Some((ref msg, severity)) = pending_error {
+                if let Some((line_num, col)) = Self::parse_at_line_column(line) {
+                    diagnostics.push(CodeBlockDiagnostic {
+                        file_line: code_block_start_line + line_num,
+                        column: Some(col),
+                        message: msg.clone(),
+                        severity,
+                        tool: tool_id.to_string(),
+                        code_block_start: code_block_start_line,
+                    });
+                    pending_error = None;
+                    continue;
+                }
+                // No position info found; emit error without line mapping
+                diagnostics.push(CodeBlockDiagnostic {
+                    file_line: code_block_start_line,
+                    column: None,
+                    message: msg.clone(),
+                    severity,
+                    tool: tool_id.to_string(),
+                    code_block_start: code_block_start_line,
+                });
+                pending_error = None;
+                // Fall through to parse current line
             }
 
             if let Some(line_num) = self.parse_shellcheck_header(line) {
@@ -814,20 +864,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
             // Try single-line shellcheck format fallback
             if let Some(diag) = self.parse_shellcheck_format(line, tool_id, code_block_start_line) {
                 diagnostics.push(diag);
+                continue;
+            }
+
+            // Try multi-line "Error: msg" / "Warning: msg" pattern
+            if let Some(error_info) = Self::parse_error_line(line) {
+                pending_error = Some(error_info);
             }
         }
 
-        // If no diagnostics parsed but tool failed, create one diagnostic per output line
-        if diagnostics.is_empty() && !output.success {
-            let raw_output = if !output.stderr.is_empty() {
-                &output.stderr
-            } else if !output.stdout.is_empty() {
-                &output.stdout
-            } else {
-                ""
-            };
+        // Flush any remaining pending error
+        if let Some((msg, severity)) = pending_error {
+            diagnostics.push(CodeBlockDiagnostic {
+                file_line: code_block_start_line,
+                column: None,
+                message: msg,
+                severity,
+                tool: tool_id.to_string(),
+                code_block_start: code_block_start_line,
+            });
+        }
 
-            let lines: Vec<&str> = raw_output.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        // If no diagnostics parsed but tool failed, use combined output as fallback
+        if diagnostics.is_empty() && !output.success {
+            let lines: Vec<&str> = combined.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
 
             if lines.is_empty() {
                 let exit_code = output.exit_code;
@@ -1024,6 +1084,41 @@ impl<'a> CodeBlockToolProcessor<'a> {
             tool: tool_id.to_string(),
             code_block_start: code_block_start_line,
         })
+    }
+
+    /// Parse "Error: <message>" or "Warning: <message>" lines.
+    ///
+    /// Used for tools like tombi that output multi-line diagnostics where the
+    /// error message and position are on separate lines. Only matches capitalized
+    /// prefixes to avoid conflicting with lowercase `error:` in less structured output.
+    fn parse_error_line(line: &str) -> Option<(String, DiagnosticSeverity)> {
+        let (msg, severity) = if let Some(msg) = line.strip_prefix("Error:") {
+            (msg, DiagnosticSeverity::Error)
+        } else if let Some(msg) = line.strip_prefix("Warning:") {
+            (msg, DiagnosticSeverity::Warning)
+        } else {
+            return None;
+        };
+        let msg = msg.trim();
+        if msg.is_empty() {
+            return None;
+        }
+        Some((msg.to_string(), severity))
+    }
+
+    /// Parse "at line N column M" position lines (case-insensitive).
+    ///
+    /// Returns (line_number, column_number) if the pattern matches.
+    fn parse_at_line_column(line: &str) -> Option<(usize, usize)> {
+        let lower = line.to_lowercase();
+        let rest = lower.strip_prefix("at line ")?;
+        let mut parts = rest.split_whitespace();
+        let line_num: usize = parts.next()?.parse().ok()?;
+        if parts.next()? != "column" {
+            return None;
+        }
+        let col: usize = parts.next()?.parse().ok()?;
+        Some((line_num, col))
     }
 
     /// Infer severity from message content.
@@ -2119,5 +2214,324 @@ console.log('hi');
             diags.is_empty(),
             "Successful tool runs should produce no fallback diagnostics"
         );
+    }
+
+    #[test]
+    fn test_ansi_codes_stripped_before_parsing() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // ruff-style output with ANSI color codes wrapping the message
+        let output = ToolOutput {
+            stdout: "\x1b[1m_.py\x1b[0m:\x1b[33m1\x1b[0m:\x1b[33m1\x1b[0m: \x1b[31mE501\x1b[0m Line too long"
+                .to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "ruff:check", 5);
+        assert_eq!(diags.len(), 1, "ANSI-colored output should still be parsed");
+        assert_eq!(diags[0].message, "E501 Line too long");
+        assert_eq!(diags[0].file_line, 6); // 5 + 1
+    }
+
+    #[test]
+    fn test_tombi_multiline_error_format() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Simulates tombi output (ANSI codes stripped for clarity)
+        let output = ToolOutput {
+            stdout: "[test]\ntest: \"test\"\nError: invalid key\n    at line 2 column 1\nError: expected key\n    at line 2 column 1\nError: expected '='\n    at line 2 column 1\nError: expected value\n    at line 2 column 1".to_string(),
+            stderr: "1 file failed to be formatted".to_string(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tombi", 7);
+        assert_eq!(
+            diags.len(),
+            4,
+            "Expected 4 diagnostics from tombi errors, got {diags:?}"
+        );
+        assert_eq!(diags[0].message, "invalid key");
+        assert_eq!(diags[0].file_line, 9); // 7 + 2
+        assert_eq!(diags[0].column, Some(1));
+        assert_eq!(diags[1].message, "expected key");
+        assert_eq!(diags[1].file_line, 9);
+        assert_eq!(diags[2].message, "expected '='");
+        assert_eq!(diags[3].message, "expected value");
+        assert!(diags.iter().all(|d| d.tool == "tombi"));
+    }
+
+    #[test]
+    fn test_tombi_with_ansi_codes() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Real tombi output with ANSI escape codes
+        let output = ToolOutput {
+            stdout: "[test]\ntest: \"test\"\n\x1b[1;31m  Error\x1b[0m: \x1b[1minvalid key\x1b[0m\n    \x1b[90mat line 2 column 1\x1b[0m\n\x1b[1;31m  Error\x1b[0m: \x1b[1mexpected '='\x1b[0m\n    \x1b[90mat line 2 column 1\x1b[0m".to_string(),
+            stderr: "1 file failed to be formatted".to_string(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tombi", 7);
+        assert_eq!(
+            diags.len(),
+            2,
+            "Expected 2 diagnostics from ANSI-colored tombi output, got {diags:?}"
+        );
+        assert_eq!(diags[0].message, "invalid key");
+        assert_eq!(diags[0].file_line, 9);
+        assert_eq!(diags[1].message, "expected '='");
+        assert_eq!(diags[1].file_line, 9);
+    }
+
+    #[test]
+    fn test_fallback_combines_stdout_and_stderr() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Tool puts some errors on stdout, summary on stderr
+        let output = ToolOutput {
+            stdout: "problem found in input".to_string(),
+            stderr: "1 file failed".to_string(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 1);
+        assert_eq!(diags.len(), 2, "Fallback should include both stdout and stderr");
+        assert_eq!(diags[0].message, "problem found in input");
+        assert_eq!(diags[1].message, "1 file failed");
+    }
+
+    #[test]
+    fn test_error_line_without_position_info() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Error: line not followed by "at line N column M"
+        let output = ToolOutput {
+            stdout: "Error: something went wrong\nsome unrelated line".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        // "Error: something went wrong" → parsed by error-line parser (no position)
+        // "some unrelated line" → no parser matches, but diagnostics not empty → no fallback
+        assert!(!diags.is_empty());
+        assert_eq!(diags[0].message, "something went wrong");
+        assert_eq!(diags[0].file_line, 5); // No line offset, uses code_block_start
+    }
+
+    #[test]
+    fn test_warning_line_with_position() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let output = ToolOutput {
+            stdout: "Warning: deprecated syntax\n    at line 3 column 5".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 10);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "deprecated syntax");
+        assert_eq!(diags[0].file_line, 13); // 10 + 3
+        assert_eq!(diags[0].column, Some(5));
+        assert!(matches!(diags[0].severity, DiagnosticSeverity::Warning));
+    }
+
+    #[test]
+    fn test_strip_ansi_codes() {
+        assert_eq!(strip_ansi_codes("hello"), "hello");
+        assert_eq!(strip_ansi_codes("\x1b[31mred\x1b[0m"), "red");
+        assert_eq!(
+            strip_ansi_codes("\x1b[1;31m  Error\x1b[0m: \x1b[1mmsg\x1b[0m"),
+            "  Error: msg"
+        );
+        assert_eq!(strip_ansi_codes("no codes here"), "no codes here");
+        assert_eq!(strip_ansi_codes(""), "");
+        assert_eq!(
+            strip_ansi_codes("\x1b[90mat line 2 column 1\x1b[0m"),
+            "at line 2 column 1"
+        );
+    }
+
+    #[test]
+    fn test_parse_at_line_column() {
+        assert_eq!(
+            CodeBlockToolProcessor::parse_at_line_column("at line 2 column 1"),
+            Some((2, 1))
+        );
+        assert_eq!(
+            CodeBlockToolProcessor::parse_at_line_column("at line 10 column 15"),
+            Some((10, 15))
+        );
+        assert_eq!(
+            CodeBlockToolProcessor::parse_at_line_column("At Line 5 Column 3"),
+            Some((5, 3))
+        );
+        assert_eq!(
+            CodeBlockToolProcessor::parse_at_line_column("not a position line"),
+            None
+        );
+        assert_eq!(
+            CodeBlockToolProcessor::parse_at_line_column("at line abc column 1"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_error_line() {
+        let (msg, sev) = CodeBlockToolProcessor::parse_error_line("Error: invalid key").unwrap();
+        assert_eq!(msg, "invalid key");
+        assert!(matches!(sev, DiagnosticSeverity::Error));
+
+        let (msg, sev) = CodeBlockToolProcessor::parse_error_line("Warning: deprecated").unwrap();
+        assert_eq!(msg, "deprecated");
+        assert!(matches!(sev, DiagnosticSeverity::Warning));
+
+        // Lowercase should NOT match (avoids conflict with unstructured tool output)
+        assert!(CodeBlockToolProcessor::parse_error_line("error: bad input").is_none());
+        assert!(CodeBlockToolProcessor::parse_error_line("warning: minor issue").is_none());
+
+        // Empty message after prefix should not match
+        assert!(CodeBlockToolProcessor::parse_error_line("Error:").is_none());
+        assert!(CodeBlockToolProcessor::parse_error_line("Error:   ").is_none());
+
+        // Not an error line
+        assert!(CodeBlockToolProcessor::parse_error_line("some random text").is_none());
+    }
+
+    #[test]
+    fn test_consecutive_error_lines_without_position() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Two Error: lines in a row — first should flush without position,
+        // second gets position from "at line"
+        let output = ToolOutput {
+            stdout: "Error: first problem\nError: second problem\n    at line 3 column 1".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        assert_eq!(diags.len(), 2, "Expected 2 diagnostics, got {diags:?}");
+        // First error flushed without position when second Error: was encountered
+        assert_eq!(diags[0].message, "first problem");
+        assert_eq!(diags[0].file_line, 5); // No line mapping
+        assert_eq!(diags[0].column, None);
+        // Second error resolved with position
+        assert_eq!(diags[1].message, "second problem");
+        assert_eq!(diags[1].file_line, 8); // 5 + 3
+        assert_eq!(diags[1].column, Some(1));
+    }
+
+    #[test]
+    fn test_error_line_at_end_of_output() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Error: as the very last line — flushed by post-loop code
+        let output = ToolOutput {
+            stdout: "Error: trailing error".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "trailing error");
+        assert_eq!(diags[0].file_line, 5); // No position info available
+        assert_eq!(diags[0].column, None);
+    }
+
+    #[test]
+    fn test_blank_lines_between_error_and_position() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Blank lines between Error: and "at line" should be transparently skipped
+        let output = ToolOutput {
+            stdout: "Error: spaced out\n\n\n    at line 4 column 2".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 10);
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].message, "spaced out");
+        assert_eq!(diags[0].file_line, 14); // 10 + 4
+        assert_eq!(diags[0].column, Some(2));
+    }
+
+    #[test]
+    fn test_mixed_structured_and_error_line_parsers() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // Mix of ruff-style structured output and tombi-style Error: output
+        let output = ToolOutput {
+            stdout: "_.py:1:5: E501 Line too long\nError: invalid syntax\n    at line 3 column 1".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        assert_eq!(diags.len(), 2, "Expected 2 diagnostics, got {diags:?}");
+        // First: standard format parser
+        assert_eq!(diags[0].message, "E501 Line too long");
+        assert_eq!(diags[0].file_line, 6); // 5 + 1
+        // Second: Error: + at line parser
+        assert_eq!(diags[1].message, "invalid syntax");
+        assert_eq!(diags[1].file_line, 8); // 5 + 3
+    }
+
+    #[test]
+    fn test_at_line_without_preceding_error() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // "at line N column M" without a preceding Error: should not create a diagnostic
+        let output = ToolOutput {
+            stdout: "at line 2 column 1\nsome other text".to_string(),
+            stderr: String::new(),
+            exit_code: 1,
+            success: false,
+        };
+
+        let diags = processor.parse_tool_output(&output, "tool", 5);
+        // No pending error, so "at line" is just an unmatched line
+        // Both lines are unmatched, fallback fires with combined output
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].message, "at line 2 column 1");
+        assert_eq!(diags[1].message, "some other text");
+    }
+
+    #[test]
+    fn test_strip_ansi_codes_edge_cases() {
+        // Lone ESC without CSI bracket — non-printable, safely dropped
+        assert_eq!(strip_ansi_codes("before\x1bafter"), "beforeafter");
+        // ESC at end of string
+        assert_eq!(strip_ansi_codes("trailing\x1b"), "trailing");
+        // Nested/consecutive sequences
+        assert_eq!(strip_ansi_codes("\x1b[1m\x1b[31mbold red\x1b[0m"), "bold red");
+        // 256-color and RGB sequences
+        assert_eq!(strip_ansi_codes("\x1b[38;5;196mred\x1b[0m"), "red");
+        assert_eq!(strip_ansi_codes("\x1b[38;2;255;0;0mred\x1b[0m"), "red");
     }
 }
