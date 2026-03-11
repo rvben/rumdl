@@ -20,7 +20,7 @@ fn test_real_world_performance() {
         let content = match fixture.download() {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("  Skipping (download failed): {}", e);
+                eprintln!("  Skipping (download failed): {e}");
                 continue;
             }
         };
@@ -64,11 +64,11 @@ where
             println!("  {} - {:4}ms - {} warnings", rule_name, duration_ms, warnings.len());
 
             if duration_ms > PERF_TIMEOUT_MS {
-                panic!("{} took {}ms (> {}ms timeout)", rule_name, duration_ms, PERF_TIMEOUT_MS);
+                panic!("{rule_name} took {duration_ms}ms (> {PERF_TIMEOUT_MS}ms timeout)");
             }
         }
         Err(e) => {
-            eprintln!("  {} - ERROR: {}", rule_name, e);
+            eprintln!("  {rule_name} - ERROR: {e}");
         }
     }
 }
@@ -97,6 +97,6 @@ mod cache_tests {
         assert!(content2.is_ok());
         assert_eq!(content1.unwrap(), content2.unwrap());
 
-        println!("First: {:?}, Second: {:?}", duration1, duration2);
+        println!("First: {duration1:?}, Second: {duration2:?}");
     }
 }

@@ -140,7 +140,7 @@ mod tests {
                     assert!(!content.is_empty(), "Content should not be empty");
                 }
                 Err(e) => {
-                    eprintln!("  Failed to download: {}", e);
+                    eprintln!("  Failed to download: {e}");
                 }
             }
         }
@@ -159,7 +159,7 @@ mod tests {
         let fixture = &FIXTURES[0];
         let url = fixture.raw_url();
         assert!(url.starts_with("https://raw.githubusercontent.com/"));
-        assert!(url.contains(&fixture.commit));
-        assert!(url.contains(&fixture.path));
+        assert!(url.contains(fixture.commit));
+        assert!(url.contains(fixture.path));
     }
 }

@@ -223,11 +223,11 @@ impl InlineConfig {
                         }
                     }
                     DirectiveKind::ConfigureFile => {
-                        if let Some(json_config) = parse_configure_file_comment(line) {
-                            if let Some(obj) = json_config.as_object() {
-                                for (rule_name, rule_config) in obj {
-                                    config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
-                                }
+                        if let Some(json_config) = parse_configure_file_comment(line)
+                            && let Some(obj) = json_config.as_object()
+                        {
+                            for (rule_name, rule_config) in obj {
+                                config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
                             }
                         }
                     }
@@ -526,7 +526,7 @@ pub fn parse_inline_directives(line: &str) -> Vec<InlineDirective<'_>> {
 // These delegate to parse_inline_directives and filter by DirectiveKind.
 // External callers (e.g., MD040) use these; internal code uses the unified parser.
 
-fn find_directive_rules<'a>(line: &'a str, kind: DirectiveKind) -> Option<Vec<&'a str>> {
+fn find_directive_rules(line: &str, kind: DirectiveKind) -> Option<Vec<&str>> {
     parse_inline_directives(line)
         .into_iter()
         .find(|d| d.kind == kind)
@@ -598,10 +598,10 @@ pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
             let after_prefix = &line[start + prefix.len()..];
             if let Some(end) = after_prefix.find("-->") {
                 let json_str = after_prefix[..end].trim();
-                if !json_str.is_empty() {
-                    if let Ok(value) = serde_json::from_str(json_str) {
-                        return Some(value);
-                    }
+                if !json_str.is_empty()
+                    && let Ok(value) = serde_json::from_str(json_str)
+                {
+                    return Some(value);
                 }
             }
         }
