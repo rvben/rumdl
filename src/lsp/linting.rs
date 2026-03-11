@@ -213,9 +213,11 @@ impl RumdlLanguageServer {
     /// When the client supports pull diagnostics (textDocument/diagnostic),
     /// we skip pushing to avoid duplicate diagnostics.
     pub(super) async fn update_diagnostics(&self, uri: Url, text: String, run_external_tools: bool) {
-        // Skip pushing if client supports pull diagnostics to avoid duplicates
+        // When client supports pull diagnostics, publish empty diagnostics to
+        // invalidate the client cache so it refetches via the pull model
         if *self.client_supports_pull_diagnostics.read().await {
-            log::debug!("Skipping push diagnostics for {uri} - client supports pull model");
+            log::debug!("Invalidating diagnostics for {uri} - client supports pull model");
+            self.client.publish_diagnostics(uri, Vec::new(), None).await;
             return;
         }
 
