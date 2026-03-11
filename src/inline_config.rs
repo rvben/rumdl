@@ -184,208 +184,129 @@ impl InlineConfig {
                 continue;
             }
 
-            // Process file-wide comments first as they affect the entire file
-            // Check for disable-file
-            if let Some(rules) = parse_disable_file_comment(line) {
-                if rules.is_empty() {
-                    // Disable all rules for entire file
-                    config.file_disabled_rules.clear();
-                    config.file_disabled_rules.insert("*".to_string());
-                } else {
-                    // Disable specific rules for entire file
-                    if config.file_disabled_rules.contains("*") {
-                        // All rules are disabled, so remove from enabled list
-                        for rule in rules {
-                            config.file_enabled_rules.remove(&normalize_rule_name(rule));
-                        }
-                    } else {
-                        // Normal case: add to disabled list
-                        for rule in rules {
-                            config.file_disabled_rules.insert(normalize_rule_name(rule));
-                        }
-                    }
-                }
-            }
+            // Parse all directives on this line once via the unified parser.
+            // Directives come back in left-to-right order with correct disambiguation.
+            let directives = parse_inline_directives(line);
 
-            // Check for enable-file
-            if let Some(rules) = parse_enable_file_comment(line) {
-                if rules.is_empty() {
-                    // Enable all rules for entire file
-                    config.file_disabled_rules.clear();
-                    config.file_enabled_rules.clear();
-                } else {
-                    // Enable specific rules for entire file
-                    if config.file_disabled_rules.contains("*") {
-                        // All rules are disabled, so add to enabled list
-                        for rule in rules {
-                            config.file_enabled_rules.insert(normalize_rule_name(rule));
-                        }
-                    } else {
-                        // Normal case: remove from disabled list
-                        for rule in rules {
-                            config.file_disabled_rules.remove(&normalize_rule_name(rule));
+            // Also check for prettier-ignore (not part of the rumdl/markdownlint format)
+            let has_prettier_ignore = line.contains("<!-- prettier-ignore -->");
+
+            // Pass 1: file-wide directives (affect the entire file, not state-tracked)
+            for directive in &directives {
+                match directive.kind {
+                    DirectiveKind::DisableFile => {
+                        if directive.rules.is_empty() {
+                            config.file_disabled_rules.clear();
+                            config.file_disabled_rules.insert("*".to_string());
+                        } else if config.file_disabled_rules.contains("*") {
+                            for rule in &directive.rules {
+                                config.file_enabled_rules.remove(&normalize_rule_name(rule));
+                            }
+                        } else {
+                            for rule in &directive.rules {
+                                config.file_disabled_rules.insert(normalize_rule_name(rule));
+                            }
                         }
                     }
-                }
-            }
-
-            // Check for configure-file
-            if let Some(json_config) = parse_configure_file_comment(line) {
-                // Process the JSON configuration
-                if let Some(obj) = json_config.as_object() {
-                    for (rule_name, rule_config) in obj {
-                        config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
+                    DirectiveKind::EnableFile => {
+                        if directive.rules.is_empty() {
+                            config.file_disabled_rules.clear();
+                            config.file_enabled_rules.clear();
+                        } else if config.file_disabled_rules.contains("*") {
+                            for rule in &directive.rules {
+                                config.file_enabled_rules.insert(normalize_rule_name(rule));
+                            }
+                        } else {
+                            for rule in &directive.rules {
+                                config.file_disabled_rules.remove(&normalize_rule_name(rule));
+                            }
+                        }
                     }
-                }
-            }
-
-            // Process comments - handle multiple comment types on same line
-            // Process line-specific comments first (they don't affect state)
-
-            // Check for disable-next-line
-            if let Some(rules) = parse_disable_next_line_comment(line) {
-                let next_line = line_num + 1;
-                let line_rules = config.line_disabled_rules.entry(next_line).or_default();
-                if rules.is_empty() {
-                    // Disable all rules for next line
-                    line_rules.insert("*".to_string());
-                } else {
-                    for rule in rules {
-                        line_rules.insert(normalize_rule_name(rule));
-                    }
-                }
-            }
-
-            // Check for prettier-ignore (disables all rules for next line)
-            if line.contains("<!-- prettier-ignore -->") {
-                let next_line = line_num + 1;
-                let line_rules = config.line_disabled_rules.entry(next_line).or_default();
-                line_rules.insert("*".to_string());
-            }
-
-            // Check for disable-line
-            if let Some(rules) = parse_disable_line_comment(line) {
-                let line_rules = config.line_disabled_rules.entry(line_num).or_default();
-                if rules.is_empty() {
-                    // Disable all rules for current line
-                    line_rules.insert("*".to_string());
-                } else {
-                    for rule in rules {
-                        line_rules.insert(normalize_rule_name(rule));
-                    }
-                }
-            }
-
-            // Process state-changing comments in the order they appear
-            // This handles multiple comments on the same line correctly
-            let mut processed_capture = false;
-            let mut processed_restore = false;
-
-            // Find all comments on this line and process them in order
-            let mut comment_positions = Vec::new();
-
-            if let Some(pos) = line.find("<!-- markdownlint-disable")
-                && !line[pos..].contains("<!-- markdownlint-disable-line")
-                && !line[pos..].contains("<!-- markdownlint-disable-next-line")
-            {
-                comment_positions.push((pos, "disable"));
-            }
-            if let Some(pos) = line.find("<!-- rumdl-disable")
-                && !line[pos..].contains("<!-- rumdl-disable-line")
-                && !line[pos..].contains("<!-- rumdl-disable-next-line")
-            {
-                comment_positions.push((pos, "disable"));
-            }
-
-            if let Some(pos) = line.find("<!-- markdownlint-enable") {
-                comment_positions.push((pos, "enable"));
-            }
-            if let Some(pos) = line.find("<!-- rumdl-enable") {
-                comment_positions.push((pos, "enable"));
-            }
-
-            if let Some(pos) = line.find("<!-- markdownlint-capture") {
-                comment_positions.push((pos, "capture"));
-            }
-            if let Some(pos) = line.find("<!-- rumdl-capture") {
-                comment_positions.push((pos, "capture"));
-            }
-
-            if let Some(pos) = line.find("<!-- markdownlint-restore") {
-                comment_positions.push((pos, "restore"));
-            }
-            if let Some(pos) = line.find("<!-- rumdl-restore") {
-                comment_positions.push((pos, "restore"));
-            }
-
-            // Sort by position to process in order
-            comment_positions.sort_by_key(|&(pos, _)| pos);
-
-            // Process each comment in order
-            for (_, comment_type) in comment_positions {
-                match comment_type {
-                    "disable" => {
-                        if let Some(rules) = parse_disable_comment(line) {
-                            if rules.is_empty() {
-                                // Disable all rules
-                                currently_disabled.clear();
-                                currently_disabled.insert("*".to_string());
-                                currently_enabled.clear(); // Reset enabled list
-                            } else {
-                                // Disable specific rules
-                                if currently_disabled.contains("*") {
-                                    // All rules are disabled, so remove from enabled list
-                                    for rule in rules {
-                                        currently_enabled.remove(&normalize_rule_name(rule));
-                                    }
-                                } else {
-                                    // Normal case: add to disabled list
-                                    for rule in rules {
-                                        currently_disabled.insert(normalize_rule_name(rule));
-                                    }
+                    DirectiveKind::ConfigureFile => {
+                        if let Some(json_config) = parse_configure_file_comment(line) {
+                            if let Some(obj) = json_config.as_object() {
+                                for (rule_name, rule_config) in obj {
+                                    config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
                                 }
                             }
-                        }
-                    }
-                    "enable" => {
-                        if let Some(rules) = parse_enable_comment(line) {
-                            if rules.is_empty() {
-                                // Enable all rules
-                                currently_disabled.clear();
-                                currently_enabled.clear();
-                            } else {
-                                // Enable specific rules
-                                if currently_disabled.contains("*") {
-                                    // All rules are disabled, so add to enabled list
-                                    for rule in rules {
-                                        currently_enabled.insert(normalize_rule_name(rule));
-                                    }
-                                } else {
-                                    // Normal case: remove from disabled list
-                                    for rule in rules {
-                                        currently_disabled.remove(&normalize_rule_name(rule));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "capture" => {
-                        if !processed_capture && is_capture_comment(line) {
-                            capture_stack.push((currently_disabled.clone(), currently_enabled.clone()));
-                            processed_capture = true;
-                        }
-                    }
-                    "restore" => {
-                        if !processed_restore && is_restore_comment(line) {
-                            if let Some((disabled, enabled)) = capture_stack.pop() {
-                                currently_disabled = disabled;
-                                currently_enabled = enabled;
-                            }
-                            processed_restore = true;
                         }
                     }
                     _ => {}
                 }
+            }
+
+            // Pass 2: line-specific and state-changing directives (in document order)
+            for directive in &directives {
+                match directive.kind {
+                    DirectiveKind::DisableNextLine => {
+                        let next_line = line_num + 1;
+                        let line_rules = config.line_disabled_rules.entry(next_line).or_default();
+                        if directive.rules.is_empty() {
+                            line_rules.insert("*".to_string());
+                        } else {
+                            for rule in &directive.rules {
+                                line_rules.insert(normalize_rule_name(rule));
+                            }
+                        }
+                    }
+                    DirectiveKind::DisableLine => {
+                        let line_rules = config.line_disabled_rules.entry(line_num).or_default();
+                        if directive.rules.is_empty() {
+                            line_rules.insert("*".to_string());
+                        } else {
+                            for rule in &directive.rules {
+                                line_rules.insert(normalize_rule_name(rule));
+                            }
+                        }
+                    }
+                    DirectiveKind::Disable => {
+                        if directive.rules.is_empty() {
+                            currently_disabled.clear();
+                            currently_disabled.insert("*".to_string());
+                            currently_enabled.clear();
+                        } else if currently_disabled.contains("*") {
+                            for rule in &directive.rules {
+                                currently_enabled.remove(&normalize_rule_name(rule));
+                            }
+                        } else {
+                            for rule in &directive.rules {
+                                currently_disabled.insert(normalize_rule_name(rule));
+                            }
+                        }
+                    }
+                    DirectiveKind::Enable => {
+                        if directive.rules.is_empty() {
+                            currently_disabled.clear();
+                            currently_enabled.clear();
+                        } else if currently_disabled.contains("*") {
+                            for rule in &directive.rules {
+                                currently_enabled.insert(normalize_rule_name(rule));
+                            }
+                        } else {
+                            for rule in &directive.rules {
+                                currently_disabled.remove(&normalize_rule_name(rule));
+                            }
+                        }
+                    }
+                    DirectiveKind::Capture => {
+                        capture_stack.push((currently_disabled.clone(), currently_enabled.clone()));
+                    }
+                    DirectiveKind::Restore => {
+                        if let Some((disabled, enabled)) = capture_stack.pop() {
+                            currently_disabled = disabled;
+                            currently_enabled = enabled;
+                        }
+                    }
+                    // File-wide directives already handled in pass 1
+                    DirectiveKind::DisableFile | DirectiveKind::EnableFile | DirectiveKind::ConfigureFile => {}
+                }
+            }
+
+            // prettier-ignore: disables all rules for next line
+            if has_prettier_ignore {
+                let next_line = line_num + 1;
+                let line_rules = config.line_disabled_rules.entry(next_line).or_default();
+                line_rules.insert("*".to_string());
             }
         }
 
@@ -483,197 +404,201 @@ impl InlineConfig {
     }
 }
 
-/// Parse a disable comment and return the list of rules (empty vec means all rules)
-pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl-disable and markdownlint-disable
-    for prefix in &["<!-- rumdl-disable", "<!-- markdownlint-disable"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
+// ── Unified inline directive parser ──────────────────────────────────────────
+//
+// All inline config comments follow one pattern:
+//   <!-- (rumdl|markdownlint)-KEYWORD [RULES...] -->
+//
+// Disambiguation (e.g., "disable" vs "disable-line" vs "disable-next-line")
+// is handled ONCE here by matching the longest keyword first.
 
-            // Skip more specific variants (disable-line, disable-next-line, disable-file)
-            if after_prefix.starts_with("-line")
-                || after_prefix.starts_with("-next-line")
-                || after_prefix.starts_with("-file")
-            {
+/// The type of an inline configuration directive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DirectiveKind {
+    Disable,
+    DisableLine,
+    DisableNextLine,
+    DisableFile,
+    Enable,
+    EnableFile,
+    Capture,
+    Restore,
+    ConfigureFile,
+}
+
+/// A parsed inline configuration directive.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InlineDirective<'a> {
+    pub kind: DirectiveKind,
+    pub rules: Vec<&'a str>,
+}
+
+/// Tool prefixes recognized in inline config comments.
+const TOOL_PREFIXES: &[&str] = &["rumdl-", "markdownlint-"];
+
+/// Directive keywords ordered so that more-specific prefixes come first.
+/// "disable-next-line" before "disable-line" before "disable-file" before "disable";
+/// "enable-file" before "enable". This ensures longest-match-first disambiguation.
+const DIRECTIVE_KEYWORDS: &[(DirectiveKind, &str)] = &[
+    (DirectiveKind::DisableNextLine, "disable-next-line"),
+    (DirectiveKind::DisableLine, "disable-line"),
+    (DirectiveKind::DisableFile, "disable-file"),
+    (DirectiveKind::Disable, "disable"),
+    (DirectiveKind::EnableFile, "enable-file"),
+    (DirectiveKind::Enable, "enable"),
+    (DirectiveKind::ConfigureFile, "configure-file"),
+    (DirectiveKind::Capture, "capture"),
+    (DirectiveKind::Restore, "restore"),
+];
+
+/// Try to parse a single directive from text immediately after `<!-- `.
+/// Returns the directive and the number of bytes consumed (from `s` onward)
+/// so the caller can advance past `-->`.
+fn try_parse_directive(s: &str) -> Option<(InlineDirective<'_>, usize)> {
+    for tool in TOOL_PREFIXES {
+        if !s.starts_with(tool) {
+            continue;
+        }
+        let after_tool = &s[tool.len()..];
+
+        for &(kind, keyword) in DIRECTIVE_KEYWORDS {
+            if !after_tool.starts_with(keyword) {
+                continue;
+            }
+            let after_kw = &after_tool[keyword.len()..];
+
+            // Word boundary: the keyword must be followed by whitespace, `-->`, or end-of-string.
+            // This prevents "disablefoo" from matching "disable".
+            if !after_kw.is_empty() && !after_kw.starts_with(char::is_whitespace) && !after_kw.starts_with("-->") {
                 continue;
             }
 
-            // Global disable: <!-- markdownlint-disable -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
+            // Find closing -->
+            let close_offset = after_kw.find("-->")?;
 
-            // Rule-specific disable: <!-- markdownlint-disable MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
+            let rules_str = after_kw[..close_offset].trim();
+            let rules = if rules_str.is_empty() {
+                Vec::new()
+            } else {
+                rules_str.split_whitespace().collect()
+            };
+
+            let consumed = tool.len() + keyword.len() + close_offset + 3; // 3 for "-->"
+            return Some((InlineDirective { kind, rules }, consumed));
+        }
+
+        // Tool prefix matched but no keyword — not a directive we recognize.
+        return None;
+    }
+    None
+}
+
+/// Parse all inline configuration directives from a line, in left-to-right order.
+///
+/// Each directive is a typed `InlineDirective` with its kind and rule list.
+/// Disambiguation between overlapping prefixes (e.g., `disable` vs `disable-line`)
+/// is handled by matching the longest keyword first — no ad-hoc guards needed.
+pub fn parse_inline_directives(line: &str) -> Vec<InlineDirective<'_>> {
+    let mut results = Vec::new();
+    let mut pos = 0;
+
+    while pos < line.len() {
+        let remaining = &line[pos..];
+        let Some(open_offset) = remaining.find("<!-- ") else {
+            break;
+        };
+        let comment_start = pos + open_offset;
+        let after_open = &line[comment_start + 5..]; // skip "<!-- "
+
+        if let Some((directive, consumed)) = try_parse_directive(after_open) {
+            results.push(directive);
+            pos = comment_start + 5 + consumed;
+        } else {
+            pos = comment_start + 5;
         }
     }
 
-    None
+    results
+}
+
+// ── Backward-compatible wrapper functions ────────────────────────────────────
+//
+// These delegate to parse_inline_directives and filter by DirectiveKind.
+// External callers (e.g., MD040) use these; internal code uses the unified parser.
+
+fn find_directive_rules<'a>(line: &'a str, kind: DirectiveKind) -> Option<Vec<&'a str>> {
+    parse_inline_directives(line)
+        .into_iter()
+        .find(|d| d.kind == kind)
+        .map(|d| d.rules)
+}
+
+/// Parse a disable comment and return the list of rules (empty vec means all rules)
+pub fn parse_disable_comment(line: &str) -> Option<Vec<&str>> {
+    find_directive_rules(line, DirectiveKind::Disable)
 }
 
 /// Parse an enable comment and return the list of rules (empty vec means all rules)
 pub fn parse_enable_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl-enable and markdownlint-enable
-    for prefix in &["<!-- rumdl-enable", "<!-- markdownlint-enable"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
-
-            // Skip more specific variants (enable-file)
-            if after_prefix.starts_with("-file") {
-                continue;
-            }
-
-            // Global enable: <!-- markdownlint-enable -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
-
-            // Rule-specific enable: <!-- markdownlint-enable MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
-        }
-    }
-
-    None
+    find_directive_rules(line, DirectiveKind::Enable)
 }
 
 /// Parse a disable-line comment
 pub fn parse_disable_line_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl and markdownlint variants
-    for prefix in &["<!-- rumdl-disable-line", "<!-- markdownlint-disable-line"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
-
-            // Global disable-line: <!-- markdownlint-disable-line -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
-
-            // Rule-specific disable-line: <!-- markdownlint-disable-line MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
-        }
-    }
-
-    None
+    find_directive_rules(line, DirectiveKind::DisableLine)
 }
 
 /// Parse a disable-next-line comment
 pub fn parse_disable_next_line_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl and markdownlint variants
-    for prefix in &["<!-- rumdl-disable-next-line", "<!-- markdownlint-disable-next-line"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
-
-            // Global disable-next-line: <!-- markdownlint-disable-next-line -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
-
-            // Rule-specific disable-next-line: <!-- markdownlint-disable-next-line MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
-        }
-    }
-
-    None
-}
-
-/// Check if line contains a capture comment
-pub fn is_capture_comment(line: &str) -> bool {
-    line.contains("<!-- markdownlint-capture -->") || line.contains("<!-- rumdl-capture -->")
-}
-
-/// Check if line contains a restore comment
-pub fn is_restore_comment(line: &str) -> bool {
-    line.contains("<!-- markdownlint-restore -->") || line.contains("<!-- rumdl-restore -->")
+    find_directive_rules(line, DirectiveKind::DisableNextLine)
 }
 
 /// Parse a disable-file comment and return the list of rules (empty vec means all rules)
 pub fn parse_disable_file_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl and markdownlint variants
-    for prefix in &["<!-- rumdl-disable-file", "<!-- markdownlint-disable-file"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
-
-            // Global disable-file: <!-- markdownlint-disable-file -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
-
-            // Rule-specific disable-file: <!-- markdownlint-disable-file MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
-        }
-    }
-
-    None
+    find_directive_rules(line, DirectiveKind::DisableFile)
 }
 
 /// Parse an enable-file comment and return the list of rules (empty vec means all rules)
 pub fn parse_enable_file_comment(line: &str) -> Option<Vec<&str>> {
-    // Check for both rumdl and markdownlint variants
-    for prefix in &["<!-- rumdl-enable-file", "<!-- markdownlint-enable-file"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
-
-            // Global enable-file: <!-- markdownlint-enable-file -->
-            if after_prefix.trim_start().starts_with("-->") {
-                return Some(Vec::new()); // Empty vec means all rules
-            }
-
-            // Rule-specific enable-file: <!-- markdownlint-enable-file MD001 MD002 -->
-            if let Some(end) = after_prefix.find("-->") {
-                let rules_str = after_prefix[..end].trim();
-                if !rules_str.is_empty() {
-                    let rules: Vec<&str> = rules_str.split_whitespace().collect();
-                    return Some(rules);
-                }
-            }
-        }
-    }
-
-    None
+    find_directive_rules(line, DirectiveKind::EnableFile)
 }
 
-/// Parse a configure-file comment and return the JSON configuration
-pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
-    // Check for both rumdl and markdownlint variants
-    for prefix in &["<!-- rumdl-configure-file", "<!-- markdownlint-configure-file"] {
-        if let Some(start) = line.find(prefix) {
-            let after_prefix = &line[start + prefix.len()..];
+/// Check if line contains a capture comment
+pub fn is_capture_comment(line: &str) -> bool {
+    parse_inline_directives(line)
+        .iter()
+        .any(|d| d.kind == DirectiveKind::Capture)
+}
 
-            // Find the JSON content between the prefix and -->
+/// Check if line contains a restore comment
+pub fn is_restore_comment(line: &str) -> bool {
+    parse_inline_directives(line)
+        .iter()
+        .any(|d| d.kind == DirectiveKind::Restore)
+}
+
+/// Parse a configure-file comment and return the JSON configuration.
+///
+/// Uses the unified parser for directive detection/disambiguation, then
+/// extracts the raw JSON payload directly from the line (since JSON
+/// cannot be reliably reconstructed from whitespace-split tokens).
+pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
+    // First check if the unified parser even found a configure-file directive
+    if !parse_inline_directives(line)
+        .iter()
+        .any(|d| d.kind == DirectiveKind::ConfigureFile)
+    {
+        return None;
+    }
+
+    // Extract the raw JSON content between the keyword and -->
+    for tool in TOOL_PREFIXES {
+        let prefix = format!("<!-- {tool}configure-file");
+        if let Some(start) = line.find(&prefix) {
+            let after_prefix = &line[start + prefix.len()..];
             if let Some(end) = after_prefix.find("-->") {
                 let json_str = after_prefix[..end].trim();
                 if !json_str.is_empty() {
-                    // Try to parse as JSON
                     if let Ok(value) = serde_json::from_str(json_str) {
                         return Some(value);
                     }
@@ -681,7 +606,6 @@ pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
             }
         }
     }
-
     None
 }
 
@@ -739,56 +663,42 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
     for (idx, line) in content.lines().enumerate() {
         let line_num = idx + 1;
 
-        // Collect all rule names from various comment types
+        // Parse all directives on this line once
+        let directives = parse_inline_directives(line);
         let mut rule_entries: Vec<(&str, &str)> = Vec::new();
 
-        // Check each comment type and collect rules with their type names
-        if let Some(rules) = parse_disable_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "disable"));
-            }
-        }
-        if let Some(rules) = parse_enable_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "enable"));
-            }
-        }
-        if let Some(rules) = parse_disable_line_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "disable-line"));
-            }
-        }
-        if let Some(rules) = parse_disable_next_line_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "disable-next-line"));
-            }
-        }
-        if let Some(rules) = parse_disable_file_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "disable-file"));
-            }
-        }
-        if let Some(rules) = parse_enable_file_comment(line) {
-            for rule in rules {
-                rule_entries.push((rule, "enable-file"));
-            }
-        }
-
-        // Check configure-file comments - rule names are JSON keys
-        if let Some(json_config) = parse_configure_file_comment(line)
-            && let Some(obj) = json_config.as_object()
-        {
-            for rule_name in obj.keys() {
-                if !is_valid_rule_name(rule_name) {
-                    let suggestion = suggest_similar_key(rule_name, &all_rule_names)
-                        .map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() });
-                    warnings.push(InlineConfigWarning {
-                        line_number: line_num,
-                        rule_name: rule_name.to_string(),
-                        comment_type: "configure-file".to_string(),
-                        suggestion,
-                    });
+        for directive in &directives {
+            let comment_type = match directive.kind {
+                DirectiveKind::Disable => "disable",
+                DirectiveKind::Enable => "enable",
+                DirectiveKind::DisableLine => "disable-line",
+                DirectiveKind::DisableNextLine => "disable-next-line",
+                DirectiveKind::DisableFile => "disable-file",
+                DirectiveKind::EnableFile => "enable-file",
+                DirectiveKind::ConfigureFile => {
+                    // configure-file: rule names are JSON keys, handle separately
+                    if let Some(json_config) = parse_configure_file_comment(line)
+                        && let Some(obj) = json_config.as_object()
+                    {
+                        for rule_name in obj.keys() {
+                            if !is_valid_rule_name(rule_name) {
+                                let suggestion = suggest_similar_key(rule_name, &all_rule_names)
+                                    .map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() });
+                                warnings.push(InlineConfigWarning {
+                                    line_number: line_num,
+                                    rule_name: rule_name.to_string(),
+                                    comment_type: "configure-file".to_string(),
+                                    suggestion,
+                                });
+                            }
+                        }
+                    }
+                    continue;
                 }
+                DirectiveKind::Capture | DirectiveKind::Restore => continue,
+            };
+            for rule in &directive.rules {
+                rule_entries.push((rule, comment_type));
             }
         }
 
@@ -813,6 +723,172 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Unified parser tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_inline_directives_all_kinds() {
+        // Every directive kind is correctly identified
+        let cases: &[(&str, DirectiveKind)] = &[
+            ("<!-- rumdl-disable -->", DirectiveKind::Disable),
+            ("<!-- rumdl-disable-line -->", DirectiveKind::DisableLine),
+            ("<!-- rumdl-disable-next-line -->", DirectiveKind::DisableNextLine),
+            ("<!-- rumdl-disable-file -->", DirectiveKind::DisableFile),
+            ("<!-- rumdl-enable -->", DirectiveKind::Enable),
+            ("<!-- rumdl-enable-file -->", DirectiveKind::EnableFile),
+            ("<!-- rumdl-capture -->", DirectiveKind::Capture),
+            ("<!-- rumdl-restore -->", DirectiveKind::Restore),
+            ("<!-- rumdl-configure-file {} -->", DirectiveKind::ConfigureFile),
+            // markdownlint variants
+            ("<!-- markdownlint-disable -->", DirectiveKind::Disable),
+            ("<!-- markdownlint-disable-line -->", DirectiveKind::DisableLine),
+            (
+                "<!-- markdownlint-disable-next-line -->",
+                DirectiveKind::DisableNextLine,
+            ),
+            ("<!-- markdownlint-enable -->", DirectiveKind::Enable),
+            ("<!-- markdownlint-capture -->", DirectiveKind::Capture),
+            ("<!-- markdownlint-restore -->", DirectiveKind::Restore),
+        ];
+        for (input, expected_kind) in cases {
+            let directives = parse_inline_directives(input);
+            assert_eq!(
+                directives.len(),
+                1,
+                "Expected 1 directive for {input:?}, got {directives:?}"
+            );
+            assert_eq!(directives[0].kind, *expected_kind, "Wrong kind for {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse_inline_directives_disambiguation() {
+        // The core property: "disable" must NOT match "disable-line" etc.
+        let line = "<!-- rumdl-disable-line MD001 -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::DisableLine);
+
+        let line = "<!-- rumdl-disable-next-line -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::DisableNextLine);
+
+        let line = "<!-- rumdl-disable-file MD001 -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::DisableFile);
+
+        let line = "<!-- rumdl-enable-file -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::EnableFile);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_no_space_before_close() {
+        // <!-- rumdl-disable--> must parse as Disable (the bug that started this refactor)
+        let directives = parse_inline_directives("<!-- rumdl-disable-->");
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::Disable);
+        assert!(directives[0].rules.is_empty());
+
+        let directives = parse_inline_directives("<!-- rumdl-enable-->");
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].kind, DirectiveKind::Enable);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_multiple_on_one_line() {
+        let line = "<!-- rumdl-disable MD001 --> text <!-- rumdl-enable MD001 -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 2);
+        assert_eq!(directives[0].kind, DirectiveKind::Disable);
+        assert_eq!(directives[0].rules, vec!["MD001"]);
+        assert_eq!(directives[1].kind, DirectiveKind::Enable);
+        assert_eq!(directives[1].rules, vec!["MD001"]);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_global_disable_then_specific_enable() {
+        let line = "<!-- rumdl-disable --> <!-- rumdl-enable MD001 -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 2);
+        assert_eq!(directives[0].kind, DirectiveKind::Disable);
+        assert!(directives[0].rules.is_empty());
+        assert_eq!(directives[1].kind, DirectiveKind::Enable);
+        assert_eq!(directives[1].rules, vec!["MD001"]);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_word_boundary() {
+        // "disablefoo" should NOT match "disable"
+        assert!(parse_inline_directives("<!-- rumdl-disablefoo -->").is_empty());
+        // "enablebar" should NOT match "enable"
+        assert!(parse_inline_directives("<!-- rumdl-enablebar -->").is_empty());
+        // "captures" should NOT match "capture"
+        assert!(parse_inline_directives("<!-- rumdl-captures -->").is_empty());
+    }
+
+    #[test]
+    fn test_parse_inline_directives_no_closing_tag() {
+        // Missing --> means no directive
+        assert!(parse_inline_directives("<!-- rumdl-disable MD001").is_empty());
+        assert!(parse_inline_directives("<!-- rumdl-enable").is_empty());
+    }
+
+    #[test]
+    fn test_parse_inline_directives_not_a_comment() {
+        assert!(parse_inline_directives("rumdl-disable MD001 -->").is_empty());
+        assert!(parse_inline_directives("Some regular text").is_empty());
+        assert!(parse_inline_directives("").is_empty());
+    }
+
+    #[test]
+    fn test_parse_inline_directives_case_sensitive() {
+        assert!(parse_inline_directives("<!-- RUMDL-DISABLE -->").is_empty());
+        assert!(parse_inline_directives("<!-- Markdownlint-Disable -->").is_empty());
+    }
+
+    #[test]
+    fn test_parse_inline_directives_rules_extraction() {
+        let directives = parse_inline_directives("<!-- rumdl-disable MD001 MD002 MD013 -->");
+        assert_eq!(directives[0].rules, vec!["MD001", "MD002", "MD013"]);
+
+        // Tabs between rules
+        let directives = parse_inline_directives("<!-- rumdl-disable\tMD001\tMD002 -->");
+        assert_eq!(directives[0].rules, vec!["MD001", "MD002"]);
+
+        // Extra whitespace
+        let directives = parse_inline_directives("<!-- rumdl-disable   MD001   -->");
+        assert_eq!(directives[0].rules, vec!["MD001"]);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_embedded_in_text() {
+        let line = "Some text <!-- rumdl-disable MD001 --> more text";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].rules, vec!["MD001"]);
+
+        let line = "🚀 <!-- rumdl-disable MD001 --> 🎉";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 1);
+        assert_eq!(directives[0].rules, vec!["MD001"]);
+    }
+
+    #[test]
+    fn test_parse_inline_directives_mixed_tools_same_line() {
+        let line = "<!-- rumdl-disable MD001 --> <!-- markdownlint-enable MD002 -->";
+        let directives = parse_inline_directives(line);
+        assert_eq!(directives.len(), 2);
+        assert_eq!(directives[0].kind, DirectiveKind::Disable);
+        assert_eq!(directives[0].rules, vec!["MD001"]);
+        assert_eq!(directives[1].kind, DirectiveKind::Enable);
+        assert_eq!(directives[1].rules, vec!["MD002"]);
+    }
+
+    // ── Backward-compatible wrapper tests ────────────────────────────────
 
     #[test]
     fn test_parse_disable_comment() {
