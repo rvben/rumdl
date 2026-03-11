@@ -33,6 +33,10 @@ jobs:
       - name: Install Rust components
         run: rustup component add rustfmt clippy
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+
       - name: Install actionlint
         run: |
           bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -59,6 +63,10 @@ jobs:
             echo "Attempt $attempt failed, retrying in 10s..."
             sleep 10
           done
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
 
       - name: Run tests
         run: make test-ci

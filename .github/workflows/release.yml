@@ -60,6 +60,10 @@ jobs:
       - name: Install Rust components
         run: rustup component add rustfmt clippy
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-test
+
       - name: Install actionlint
         run: |
           bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -137,6 +141,10 @@ jobs:
       - name: Verify zig installation
         if: matrix.os == 'ubuntu-latest'
         run: mise exec zig -- zig version || echo "Zig verification failed"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       # Install rust target for cross-compilation
       - name: Install Rust target
