@@ -482,11 +482,11 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // TOML - tombi
+    // TOML - tombi (default runs `tombi lint` since users typically configure it in the lint slot)
     m.insert(
         "tombi",
         ToolDefinition {
-            command: vec!["tombi".to_string(), "format".to_string(), "-".to_string()],
+            command: vec!["tombi".to_string(), "lint".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
             lint_args: vec![],

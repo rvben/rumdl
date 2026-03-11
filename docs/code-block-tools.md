@@ -123,7 +123,9 @@ rumdl includes definitions for common tools:
 | `clang-format`    | C/C++      | Format | `clang-format`                         |
 | `stylua`          | Lua        | Format | `stylua -`                             |
 | `taplo`           | TOML       | Format | `taplo format -`                       |
-| `tombi`           | TOML       | Both   | `tombi format -` / `tombi lint -`      |
+| `tombi`           | TOML       | Lint   | `tombi lint -`                         |
+| `tombi:lint`      | TOML       | Lint   | `tombi lint -`                         |
+| `tombi:format`    | TOML       | Format | `tombi format -`                       |
 | `yamlfmt`         | YAML       | Format | `yamlfmt -`                            |
 | `jq`              | JSON       | Both   | `jq .`                                 |
 | `sql-formatter`   | SQL        | Format | `sql-formatter`                        |
