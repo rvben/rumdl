@@ -71,8 +71,9 @@ impl RuleRegistry {
         self.rule_schemas.get(rule).map(|schema| {
             let mut all_keys = std::collections::BTreeSet::new();
 
-            // Always allow 'severity' for any rule
+            // Always allow 'severity' and 'enabled' for any rule
             all_keys.insert("severity".to_string());
+            all_keys.insert("enabled".to_string());
 
             // Add original keys from schema
             for key in schema.keys() {
