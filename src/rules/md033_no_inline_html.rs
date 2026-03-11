@@ -1231,6 +1231,14 @@ impl Rule for MD033NoInlineHtml {
         ))
     }
 
+    fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
+        let mut aliases = std::collections::HashMap::new();
+        // Shorthand aliases for allowed-elements/disallowed-elements
+        aliases.insert("allowed".to_string(), "allowed-elements".to_string());
+        aliases.insert("disallowed".to_string(), "disallowed-elements".to_string());
+        Some(aliases)
+    }
+
     fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
