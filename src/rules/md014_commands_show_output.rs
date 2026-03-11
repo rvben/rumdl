@@ -122,21 +122,6 @@ impl MD014CommandsShowOutput {
         None // All commands are no-output commands
     }
 
-    fn get_command_from_block(&self, block: &[&str]) -> String {
-        // Return the first command that should produce output
-        if let Some((_, cmd)) = self.get_first_output_command(block) {
-            return cmd;
-        }
-        // Fallback to first command (for backwards compatibility)
-        for line in block {
-            let trimmed = line.trim();
-            if self.is_command_line(line) {
-                return trimmed[1..].trim().to_string();
-            }
-        }
-        String::new()
-    }
-
     fn fix_command_block(&self, block: &[&str]) -> String {
         block
             .iter()
@@ -162,12 +147,6 @@ impl MD014CommandsShowOutput {
             .next()
             .unwrap_or("")
             .to_string()
-    }
-
-    /// Find the first command line that should produce output.
-    /// Skips no-output commands (cd, mkdir, etc.) to report the correct position.
-    fn find_first_command_line<'a>(&self, block: &[&'a str]) -> Option<(usize, &'a str)> {
-        self.find_all_command_lines(block).into_iter().next()
     }
 
     /// Find all command lines in the block that should produce output.
@@ -488,22 +467,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_command_from_block() {
-        let rule = MD014CommandsShowOutput::new();
-        let block = vec!["$ echo test", "output"];
-        assert_eq!(rule.get_command_from_block(&block), "echo test");
-
-        let block2 = vec!["  $ ls -la", "file1 file2"];
-        assert_eq!(rule.get_command_from_block(&block2), "ls -la");
-
-        let block3 = vec!["> pwd", "/home"];
-        assert_eq!(rule.get_command_from_block(&block3), "pwd");
-
-        let empty_block: Vec<&str> = vec![];
-        assert_eq!(rule.get_command_from_block(&empty_block), "");
-    }
-
-    #[test]
     fn test_fix_command_block() {
         let rule = MD014CommandsShowOutput::new();
         let block = vec!["$ echo test", "$ ls -la"];
@@ -532,14 +495,19 @@ mod tests {
     }
 
     #[test]
-    fn test_find_first_command_line() {
+    fn test_find_all_command_lines() {
         let rule = MD014CommandsShowOutput::new();
         let block = vec!["# comment", "$ echo test", "output"];
-        let result = rule.find_first_command_line(&block);
-        assert_eq!(result, Some((1, "$ echo test")));
+        let result = rule.find_all_command_lines(&block);
+        assert_eq!(result, vec![(1, "$ echo test")]);
 
         let no_commands = vec!["output1", "output2"];
-        assert_eq!(rule.find_first_command_line(&no_commands), None);
+        assert!(rule.find_all_command_lines(&no_commands).is_empty());
+
+        let multiple = vec!["$ echo one", "$ echo two", "$ cd /tmp"];
+        let result = rule.find_all_command_lines(&multiple);
+        // cd is a no-output command, so only echo commands are returned
+        assert_eq!(result, vec![(0, "$ echo one"), (1, "$ echo two")]);
     }
 
     #[test]
