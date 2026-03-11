@@ -464,8 +464,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 // Indented line or backslash continuation continues the list
                 if debug_list {
                     eprintln!(
-                        "[DEBUG] Line {}: indented continuation (indent={}, min={})",
-                        line_num, effective_line_indent, min_continuation_indent
+                        "[DEBUG] Line {line_num}: indented continuation (indent={effective_line_indent}, min={min_continuation_indent})",
                     );
                 }
                 block.end_line = line_num;
