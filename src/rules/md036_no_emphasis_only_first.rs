@@ -139,9 +139,9 @@ impl MD036NoEmphasisAsHeading {
         // Skip if line is in a list, blockquote, code block, or HTML comment
         if LIST_MARKER.is_match(line)
             || BLOCKQUOTE_MARKER.is_match(line)
-            || ctx
-                .line_info(line_num + 1)
-                .is_some_and(|info| info.in_code_block || info.in_html_comment || info.in_pymdown_block)
+            || ctx.line_info(line_num + 1).is_some_and(|info| {
+                info.in_code_block || info.in_html_comment || info.in_pymdown_block || info.in_mkdocstrings
+            })
         {
             return None;
         }

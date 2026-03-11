@@ -191,10 +191,10 @@ impl MD050StrongStyle {
         let lines = ctx.raw_lines();
         let (line_num, col) = ctx.offset_to_line_col(span_start);
 
-        // Skip matches in front matter
+        // Skip matches in front matter or mkdocstrings blocks
         if ctx
             .line_info(line_num)
-            .map(|info| info.in_front_matter)
+            .map(|info| info.in_front_matter || info.in_mkdocstrings)
             .unwrap_or(false)
         {
             return true;
@@ -1076,6 +1076,52 @@ This __should be flagged__ text."#;
                 "{count} asterisks should not be flagged. Got: {result_a:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_mkdocstrings_block_not_flagged() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "# Example\n\nWe have here some **bold text**.\n\n::: my_module.MyClass\n    options:\n      members:\n        - __init__\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "__init__ inside mkdocstrings block should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocstrings_block_fix_preserves_content() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "# Example\n\nWe have here some **bold text**.\n\n::: my_module.MyClass\n    options:\n      members:\n        - __init__\n        - __repr__\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains("__init__"),
+            "__init__ in mkdocstrings block should be preserved"
+        );
+        assert!(
+            fixed.contains("__repr__"),
+            "__repr__ in mkdocstrings block should be preserved"
+        );
+        assert!(fixed.contains("**bold text**"), "Real bold text should be unchanged");
+    }
+
+    #[test]
+    fn test_mkdocstrings_block_with_strong_outside() {
+        let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+        let content = "::: my_module.MyClass\n    options:\n      members:\n        - __init__\n\nThis __should be flagged__ outside.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Only strong outside mkdocstrings should be flagged. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 6);
     }
 
     #[test]

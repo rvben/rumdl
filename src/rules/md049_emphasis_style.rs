@@ -119,6 +119,7 @@ impl Rule for MD049EmphasisStyle {
             .skip_mdx_comments()
             .skip_math_blocks()
             .skip_obsidian_comments()
+            .skip_mkdocstrings()
         {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
@@ -399,6 +400,34 @@ This should be _flagged_ since we're using asterisk style.
         // The underscore emphasis should still be flagged
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Emphasis should use * instead of _"));
+    }
+
+    #[test]
+    fn test_mkdocstrings_block_not_flagged() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "# Example\n\n::: my_module.MyClass\n    options:\n      members:\n        - _private_method\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "_private_method_ inside mkdocstrings block should not be flagged. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocstrings_block_with_emphasis_outside() {
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "::: my_module.MyClass\n    options:\n      members:\n        - _init\n\nThis _should be flagged_ outside.\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Only emphasis outside mkdocstrings should be flagged. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 6);
     }
 
     #[test]

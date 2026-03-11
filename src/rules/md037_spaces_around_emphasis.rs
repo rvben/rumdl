@@ -105,6 +105,7 @@ impl Rule for MD037NoSpaceInEmphasis {
             .skip_jsx_expressions()
             .skip_mdx_comments()
             .skip_obsidian_comments()
+            .skip_mkdocstrings()
         {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
