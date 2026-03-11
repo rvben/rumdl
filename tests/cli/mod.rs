@@ -1,0 +1,17 @@
+mod cli_alias_test;
+mod cli_duplication_test;
+mod cli_explain_test;
+mod cli_fail_on_test;
+mod cli_flag_precedence_test;
+mod cli_flavor_test;
+mod cli_integration_tests;
+mod cli_lsp_fix_consistency;
+mod cli_respect_gitignore_test;
+mod cli_show_full_path_test;
+mod cli_statistics_test;
+mod exclude_with_explicit_paths_test;
+pub(crate) mod fixtures;
+mod import_command_test;
+mod init_command_test;
+mod init_tests;
+mod markdownlintignore_test;

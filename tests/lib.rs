@@ -1,10 +1,14 @@
-mod advanced_integration_tests;
 mod character_ranges;
-mod cli_duplication_test;
-mod cli_integration_tests;
-mod comprehensive_integration_tests;
-mod init_command_test;
-mod output_format_tests;
-mod pyproject_config_tests;
+mod cli;
+mod config;
+mod formats;
+mod integration;
+#[allow(deprecated)]
+mod lsp;
+mod output;
+mod perf;
+mod regressions;
 mod rules;
+mod unicode;
 mod utils;
+mod vscode;

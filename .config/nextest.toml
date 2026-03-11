@@ -23,9 +23,7 @@ status-level = "pass"
 [profile.ci]
 
 # Skip performance and memory tests in CI (they're flaky due to resource variability)
-# Exclude specific integration test binaries and performance-related test functions
-# Including perf_regression_issue_148 which contains timing-based complexity tests
-default-filter = 'not (package(rumdl) and binary(deeply_nested_lists_performance_test)) and not (package(rumdl) and binary(performance_validation_tests)) and not (package(rumdl) and binary(perf_check)) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test) and not test(/performance|benchmark|memory|linear_complexity|scaling/)'
+default-filter = 'not test(/^perf::/) and not test(/performance|benchmark|memory|linear_complexity|scaling/)'
 
 # More conservative in CI
 test-threads = "num-cpus"
@@ -57,9 +55,9 @@ status-level = "fail"
 [profile.dev]
 
 # Skip the slowest tests but include integration tests
-# Complexity regression tests (perf_regression_issue_148) are excluded because timing-based
-# assertions are inherently flaky under parallel execution - they run in the performance profile
-default-filter = 'not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/perf_check/) and not test(/linear_complexity/) and not binary(perf_regression_issue_148) and not binary(rule_complexity_regression_test)'
+# Perf module tests are excluded because timing-based assertions are inherently flaky
+# under parallel execution - they run in the performance profile
+default-filter = 'not test(/^perf::/) and not test(/error_propagation/) and not test(/deeply_nested/) and not test(/memory/) and not test(/stress/) and not test(/large/) and not test(/performance/) and not test(/linear_complexity/)'
 
 # Good parallelization for dev machines
 test-threads = "num-cpus"
@@ -113,8 +111,9 @@ fail-fast = false
 
 # Smoke testing profile - lighter, stable test runs suitable for package managers
 [profile.smoke]
-# Exclude heavy, randomized and other potentially flaky tests
-default-filter = 'package(rumdl) and not kind(lib) and not test(/performance|benchmark|memory|linear_complexity|scaling|stress|large|comprehensive|deeply_nested|error_propagation|proptest|property_based|perf_|regression|vscode/)'
+# Run integration-style tests, excluding heavy/flaky ones
+# Note: exclusion patterns must not inadvertently match module names (e.g. "regression" would match "regressions::")
+default-filter = 'test(/^(cli|config|integration|formats|output|lsp|regressions|unicode)::/) and not test(/performance|benchmark|memory|linear_complexity|scaling|stress|large|comprehensive|deeply_nested|error_propagation|proptest|property_based|perf_/)'
 
 test-threads = "num-cpus"
 failure-output = "immediate"

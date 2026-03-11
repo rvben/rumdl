@@ -1,8 +1,6 @@
 //! Test that LSP properly handles initialization options for configuration
 //! This verifies that VSCode extension settings are properly passed through
 
-#![allow(deprecated)] // root_path is deprecated but required for InitializeParams
-
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
 

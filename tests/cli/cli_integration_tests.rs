@@ -5,8 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
 
-#[path = "common/fixtures.rs"]
-mod fixtures;
+use super::fixtures;
 
 fn setup_test_files() -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().unwrap();

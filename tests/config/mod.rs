@@ -1,0 +1,16 @@
+mod config_application_tests;
+mod config_documentation_completeness;
+mod config_file_command_test;
+mod config_path_resolution_test;
+mod config_style_normalization_test;
+mod config_tests;
+mod config_upward_traversal_test;
+mod configuration_inheritance_tests;
+mod fixable_unfixable_config_test;
+mod inline_config_blocks_test;
+mod inline_config_test;
+mod markdownlint_config_test;
+mod per_directory_config_test;
+mod per_file_ignores_integration_test;
+mod pyproject_config_tests;
+mod schema_validation_test;

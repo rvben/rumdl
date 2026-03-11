@@ -1,5 +1,3 @@
-#![allow(deprecated)] // root_path is deprecated but required for InitializeParams
-
 /// Test for LSP formatting on unopened documents
 /// This test verifies that formatting works even when textDocument/didOpen
 /// hasn't been called first, which is the behavior some LSP clients expect

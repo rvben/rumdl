@@ -2,8 +2,6 @@
 //! These tests ensure that the LSP server properly advertises and implements
 //! document formatting, preventing regressions like issue #72
 
-#![allow(deprecated)] // root_path is deprecated but required for InitializeParams
-
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
 

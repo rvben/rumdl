@@ -1,6 +1,6 @@
 /// Performance test fixtures - downloads real-world markdown files from GitHub
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::PathBuf;
 
 /// Test fixture definition
 #[derive(Debug, Clone)]
@@ -54,15 +54,18 @@ impl Fixture {
 
 /// Download with retry logic
 fn download_with_retry(url: &str, max_retries: usize) -> Result<String, Box<dyn std::error::Error>> {
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(std::time::Duration::from_secs(30)))
+            .build(),
+    );
     let mut last_error = None;
 
     for attempt in 0..max_retries {
-        match ureq::get(url)
-            .timeout(std::time::Duration::from_secs(30))
-            .call()
-        {
+        match agent.get(url).call() {
             Ok(response) => {
-                return Ok(response.into_string()?);
+                let body = response.into_body().read_to_string()?;
+                return Ok(body);
             }
             Err(e) => {
                 eprintln!("Download attempt {} failed: {}", attempt + 1, e);
@@ -84,19 +87,17 @@ pub const FIXTURES: &[Fixture] = &[
         name: "rust-book",
         description: "The Rust Programming Language book - chapter on ownership",
         url: "rust-lang/book",
-        commit: "c06006157b14b3d47882530fcb94e0b3c304f07d", // Pin to specific commit
+        commit: "c06006157b14b3d47882530fcb94e0b3c304f07d",
         path: "src/ch04-01-what-is-ownership.md",
     },
-
     // Large GitHub README with complex formatting
     Fixture {
         name: "awesome-rust",
         description: "Awesome Rust - massive README with many links and lists",
         url: "rust-unofficial/awesome-rust",
-        commit: "main", // Can use branch or tag
+        commit: "main",
         path: "README.md",
     },
-
     // RFC document - formal specification style
     Fixture {
         name: "rust-rfc",
@@ -105,7 +106,6 @@ pub const FIXTURES: &[Fixture] = &[
         commit: "master",
         path: "text/0002-rfc-process.md",
     },
-
     // Documentation with code blocks
     Fixture {
         name: "mdbook-guide",
@@ -114,7 +114,6 @@ pub const FIXTURES: &[Fixture] = &[
         commit: "master",
         path: "guide/src/README.md",
     },
-
     // Blog post style - narrative writing
     Fixture {
         name: "blog-post",
@@ -137,12 +136,11 @@ mod tests {
 
             match fixture.download() {
                 Ok(content) => {
-                    println!("  ✓ Downloaded {} bytes", content.len());
+                    println!("  Downloaded {} bytes", content.len());
                     assert!(!content.is_empty(), "Content should not be empty");
                 }
                 Err(e) => {
-                    // Network tests can fail, so warn instead of panic
-                    eprintln!("  ⚠ Failed to download: {}", e);
+                    eprintln!("  Failed to download: {}", e);
                 }
             }
         }

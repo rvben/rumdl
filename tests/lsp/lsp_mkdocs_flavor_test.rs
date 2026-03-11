@@ -1,8 +1,6 @@
 //! Test that LSP properly respects the markdown flavor configuration
 //! This prevents regression of issues where LSP hardcoded MarkdownFlavor::Standard
 
-#![allow(deprecated)] // root_path is deprecated but required for InitializeParams
-
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
 
