@@ -127,24 +127,46 @@ impl Config {
         self.is_mkdocs_flavor()
     }
 
-    /// For rules with `enabled = true` in their per-rule config, add them to
-    /// `extend_enable` so they pass through `filter_rules()`.
+    /// Apply per-rule `enabled` config to the global enable/disable lists.
     ///
-    /// This bridges the deprecated `[MD060] enabled = true` syntax to the
-    /// `extend-enable` mechanism. Only affects rules not already in `extend_enable`.
-    /// Promoting non-opt-in rules is harmless since `filter_rules()` only
-    /// consults `extend_enable` for opt-in rules.
-    pub fn promote_enabled_to_extend_enable(&mut self) {
-        let to_promote: Vec<String> = self
-            .rules
-            .iter()
-            .filter(|(name, cfg)| {
-                matches!(cfg.values.get("enabled"), Some(toml::Value::Boolean(true)))
-                    && !self.global.extend_enable.contains(name)
-            })
-            .map(|(name, _)| name.clone())
-            .collect();
-        self.global.extend_enable.extend(to_promote);
+    /// For `[MD060] enabled = true`: adds the rule to `extend_enable` and
+    /// removes it from `disable` and `extend_disable`, ensuring the rule is active.
+    ///
+    /// For `[MD041] enabled = false`: adds the rule to `disable` and
+    /// removes it from `extend_enable`, ensuring the rule is inactive.
+    ///
+    /// Per-rule `enabled` takes precedence over global lists when there
+    /// is a conflict, since it represents a more specific intent.
+    pub fn apply_per_rule_enabled(&mut self) {
+        let mut to_enable: Vec<String> = Vec::new();
+        let mut to_disable: Vec<String> = Vec::new();
+
+        for (name, cfg) in &self.rules {
+            match cfg.values.get("enabled") {
+                Some(toml::Value::Boolean(true)) => {
+                    to_enable.push(name.clone());
+                }
+                Some(toml::Value::Boolean(false)) => {
+                    to_disable.push(name.clone());
+                }
+                _ => {}
+            }
+        }
+
+        for name in to_enable {
+            if !self.global.extend_enable.contains(&name) {
+                self.global.extend_enable.push(name.clone());
+            }
+            self.global.disable.retain(|n| n != &name);
+            self.global.extend_disable.retain(|n| n != &name);
+        }
+
+        for name in to_disable {
+            if !self.global.disable.contains(&name) {
+                self.global.disable.push(name.clone());
+            }
+            self.global.extend_enable.retain(|n| n != &name);
+        }
     }
 
     /// Get the severity override for a specific rule, if configured

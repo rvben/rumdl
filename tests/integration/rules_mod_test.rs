@@ -391,7 +391,7 @@ fn test_promote_opt_in_enabled_adds_to_extend_enable() {
         "MD060 should not be in extend_enable before promotion"
     );
 
-    config.promote_enabled_to_extend_enable();
+    config.apply_per_rule_enabled();
 
     assert!(
         config.global.extend_enable.contains(&"MD060".to_string()),
@@ -409,7 +409,7 @@ fn test_promote_opt_in_enabled_adds_to_extend_enable() {
 }
 
 #[test]
-fn test_promote_opt_in_enabled_skips_when_not_enabled() {
+fn test_per_rule_enabled_false_adds_to_disable() {
     let mut config = Config::default();
 
     let mut values = BTreeMap::new();
@@ -418,11 +418,122 @@ fn test_promote_opt_in_enabled_skips_when_not_enabled() {
         .rules
         .insert("MD060".to_string(), RuleConfig { severity: None, values });
 
-    config.promote_enabled_to_extend_enable();
+    config.apply_per_rule_enabled();
 
     assert!(
         !config.global.extend_enable.contains(&"MD060".to_string()),
-        "MD060 should NOT be promoted when enabled=false"
+        "MD060 should NOT be in extend_enable when enabled=false"
+    );
+    assert!(
+        config.global.disable.contains(&"MD060".to_string()),
+        "MD060 should be added to disable when enabled=false"
+    );
+}
+
+#[test]
+fn test_per_rule_enabled_false_disables_non_opt_in_rule() {
+    // `[MD041] enabled = false` should actually disable MD041
+    let mut config = Config::default();
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(false));
+    config
+        .rules
+        .insert("MD041".to_string(), RuleConfig { severity: None, values });
+
+    config.apply_per_rule_enabled();
+
+    assert!(
+        config.global.disable.contains(&"MD041".to_string()),
+        "MD041 should be in disable list"
+    );
+
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(
+        !names.contains("MD041"),
+        "MD041 should be excluded by filter_rules when enabled=false"
+    );
+}
+
+#[test]
+fn test_per_rule_enabled_true_overrides_global_disable() {
+    // `disable = ["MD001"]` + `[MD001] enabled = true` → enabled=true wins
+    let mut config = Config::default();
+    config.global.disable.push("MD001".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    config
+        .rules
+        .insert("MD001".to_string(), RuleConfig { severity: None, values });
+
+    config.apply_per_rule_enabled();
+
+    assert!(
+        !config.global.disable.contains(&"MD001".to_string()),
+        "MD001 should be removed from disable when enabled=true"
+    );
+    assert!(
+        config.global.extend_enable.contains(&"MD001".to_string()),
+        "MD001 should be in extend_enable when enabled=true"
+    );
+}
+
+#[test]
+fn test_per_rule_enabled_false_overrides_extend_enable() {
+    // `extend-enable = ["MD060"]` + `[MD060] enabled = false` → enabled=false wins
+    let mut config = Config::default();
+    config.global.extend_enable.push("MD060".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(false));
+    config
+        .rules
+        .insert("MD060".to_string(), RuleConfig { severity: None, values });
+
+    config.apply_per_rule_enabled();
+
+    assert!(
+        !config.global.extend_enable.contains(&"MD060".to_string()),
+        "MD060 should be removed from extend_enable when enabled=false"
+    );
+    assert!(
+        config.global.disable.contains(&"MD060".to_string()),
+        "MD060 should be in disable when enabled=false"
+    );
+}
+
+#[test]
+fn test_per_rule_enabled_true_overrides_extend_disable() {
+    // `extend-disable = ["MD001"]` + `[MD001] enabled = true` → enabled=true wins
+    let mut config = Config::default();
+    config.global.extend_disable.push("MD001".to_string());
+
+    let mut values = BTreeMap::new();
+    values.insert("enabled".to_string(), toml::Value::Boolean(true));
+    config
+        .rules
+        .insert("MD001".to_string(), RuleConfig { severity: None, values });
+
+    config.apply_per_rule_enabled();
+
+    assert!(
+        !config.global.extend_disable.contains(&"MD001".to_string()),
+        "MD001 should be removed from extend_disable when enabled=true"
+    );
+    assert!(
+        config.global.extend_enable.contains(&"MD001".to_string()),
+        "MD001 should be in extend_enable when enabled=true"
+    );
+
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(
+        names.contains("MD001"),
+        "MD001 should be included when per-rule enabled=true overrides extend-disable"
     );
 }
 
@@ -437,7 +548,7 @@ fn test_promote_opt_in_enabled_no_duplicate_when_already_extended() {
         .rules
         .insert("MD060".to_string(), RuleConfig { severity: None, values });
 
-    config.promote_enabled_to_extend_enable();
+    config.apply_per_rule_enabled();
 
     let count = config.global.extend_enable.iter().filter(|s| *s == "MD060").count();
     assert_eq!(count, 1, "MD060 should not be duplicated in extend_enable");
@@ -445,7 +556,7 @@ fn test_promote_opt_in_enabled_no_duplicate_when_already_extended() {
 
 #[test]
 fn test_promote_enabled_harmless_for_non_opt_in_rules() {
-    // promote_enabled_to_extend_enable adds ALL rules with enabled=true,
+    // apply_per_rule_enabled adds ALL rules with enabled=true,
     // but filter_rules only consults extend_enable for opt-in rules,
     // so adding a non-opt-in rule to extend_enable is harmless.
     let mut config = Config::default();
@@ -456,7 +567,7 @@ fn test_promote_enabled_harmless_for_non_opt_in_rules() {
         .rules
         .insert("MD001".to_string(), RuleConfig { severity: None, values });
 
-    config.promote_enabled_to_extend_enable();
+    config.apply_per_rule_enabled();
 
     // MD001 IS added to extend_enable (the method promotes all enabled=true rules)
     assert!(config.global.extend_enable.contains(&"MD001".to_string()));
@@ -484,7 +595,7 @@ fn test_promote_opt_in_md060_fix_produces_aligned_table() {
         .rules
         .insert("MD060".to_string(), RuleConfig { severity: None, values });
 
-    config.promote_enabled_to_extend_enable();
+    config.apply_per_rule_enabled();
 
     let all = all_rules(&config);
     let rules = filter_rules(&all, &config.global);

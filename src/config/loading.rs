@@ -1033,8 +1033,8 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             per_file_flavor_cache: Arc::new(OnceLock::new()),
         };
 
-        // Backward compatibility: per-rule `enabled = true` → extend_enable
-        config.promote_enabled_to_extend_enable();
+        // Apply per-rule `enabled = true/false` to global enable/disable lists
+        config.apply_per_rule_enabled();
 
         config
     }

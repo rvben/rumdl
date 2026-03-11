@@ -2921,11 +2921,11 @@ enabled = true
 }
 
 #[test]
-fn test_backward_compat_enabled_true_with_disable() {
+fn test_per_rule_enabled_true_overrides_global_disable() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let config_path = temp_dir.path().join(".rumdl.toml");
 
-    // Legacy config: [MD060] enabled = true, but also disable = ["MD060"]
+    // Per-rule `enabled = true` should override global `disable`
     let config_content = r#"
 [global]
 disable = ["MD060"]
@@ -2939,24 +2939,28 @@ enabled = true
         .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
-    // The bridge adds to extend_enable, but disable should still win
+    // Per-rule enabled=true is more specific, so it wins over global disable
     let all = all_rules(&config);
     let filtered = filter_rules(&all, &config.global);
     let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
     assert!(
-        !names.contains("MD060"),
-        "disable should win over backward-compat bridge"
+        names.contains("MD060"),
+        "per-rule enabled=true should override global disable"
+    );
+    assert!(
+        !config.global.disable.contains(&"MD060".to_string()),
+        "MD060 should be removed from disable list"
     );
 }
 
 #[test]
-fn test_backward_compat_enabled_false_is_noop() {
+fn test_per_rule_enabled_false_disables_rule() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let config_path = temp_dir.path().join(".rumdl.toml");
 
-    // Legacy config: [MD060] enabled = false
+    // Per-rule `enabled = false` should disable the rule
     let config_content = r#"
-[MD060]
+[MD041]
 enabled = false
 "#;
     fs::write(&config_path, config_content).expect("Failed to write config");
@@ -2965,11 +2969,20 @@ enabled = false
         .expect("Should load config");
 
     let config: Config = sourced.into_validated_unchecked().into();
-    // enabled = false should NOT add to extend_enable
     assert!(
-        !config.global.extend_enable.contains(&"MD060".to_string()),
+        !config.global.extend_enable.contains(&"MD041".to_string()),
         "enabled=false should not add to extend_enable"
     );
+    assert!(
+        config.global.disable.contains(&"MD041".to_string()),
+        "enabled=false should add to disable list"
+    );
+
+    // Verify it actually gets filtered out
+    let all = all_rules(&config);
+    let filtered = filter_rules(&all, &config.global);
+    let names: HashSet<String> = filtered.iter().map(|r| r.name().to_string()).collect();
+    assert!(!names.contains("MD041"), "MD041 should be excluded when enabled=false");
 }
 
 #[test]

@@ -242,8 +242,8 @@ impl LinterConfig {
             }
         }
 
-        // Per-rule `enabled = true` → extend_enable for opt-in rules
-        config.promote_enabled_to_extend_enable();
+        // Apply per-rule `enabled = true/false` to global enable/disable lists
+        config.apply_per_rule_enabled();
 
         (config, warnings)
     }
