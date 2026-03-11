@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.46] - 2026-03-11
+
+### Added
+
+- Per-rule `enabled = false` now actually disables rules; `enabled = true/false` is fully bidirectional and takes precedence over global `disable`/`extend-disable`/`extend-enable` lists ([#520](https://github.com/rvben/rumdl/issues/520))
+
+### Fixed
+
+- **MD032**: False positive for list continuation text in nested blockquotes ([#519](https://github.com/rvben/rumdl/issues/519))
+- **MD014**: Now reports all violations per code block, not just the first ([#516](https://github.com/rvben/rumdl/issues/516))
+- **MD033**: `allowed` and `disallowed` shorthand config options no longer produce unknown key warnings ([#508](https://github.com/rvben/rumdl/issues/508))
+- **MD013**: `strict-sentences` alias now correctly recognized in config validation
+- **MD049/MD050**: Skip mkdocstrings blocks in emphasis-related rules to prevent false positives ([#515](https://github.com/rvben/rumdl/issues/515))
+- **Code block tools**: Strip ANSI codes, parse multi-line errors, and combine stdout/stderr for complete diagnostic output ([#506](https://github.com/rvben/rumdl/issues/506))
+- **Code block tools**: Default `tombi` tool now runs `tombi lint` instead of `tombi format` when configured in the `lint` slot ([#506](https://github.com/rvben/rumdl/issues/506))
+- **Config**: `enabled` key no longer rejected as unknown in per-rule config blocks ([#520](https://github.com/rvben/rumdl/issues/520))
+- **Inline config**: Unified directive parser eliminates disambiguation bugs between enable/disable/configure directives
+
+### Changed
+
+- Consolidated ~110 test binaries into a single lib binary for faster builds
+- Removed dead code from rule.rs, MD014, and code_block_utils modules
+
 ## [0.1.45] - 2026-03-10
 
 ### Added
