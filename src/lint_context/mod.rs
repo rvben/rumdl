@@ -540,6 +540,29 @@ impl<'a> LintContext<'a> {
         }
     }
 
+    /// Binary search for whether `pos` falls inside any range in a sorted, non-overlapping
+    /// slice of `(start, end)` byte ranges. O(log n) instead of O(n).
+    #[inline]
+    fn binary_search_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
+        // Find the rightmost range whose start <= pos
+        let idx = ranges.partition_point(|&(start, _)| start <= pos);
+        // If idx == 0, no range starts at or before pos
+        idx > 0 && pos < ranges[idx - 1].1
+    }
+
+    /// Check if `pos` is inside any link byte range. O(log n).
+    pub fn is_in_link(&self, pos: usize) -> bool {
+        let idx = self.links.partition_point(|link| link.byte_offset <= pos);
+        if idx > 0 && pos < self.links[idx - 1].byte_end {
+            return true;
+        }
+        let idx = self.images.partition_point(|img| img.byte_offset <= pos);
+        if idx > 0 && pos < self.images[idx - 1].byte_end {
+            return true;
+        }
+        self.is_in_reference_def(pos)
+    }
+
     /// Get parsed inline configuration state.
     pub fn inline_config(&self) -> &InlineConfig {
         &self.inline_config
@@ -599,9 +622,7 @@ impl<'a> LintContext<'a> {
     ///
     /// Returns false for non-Obsidian flavors.
     pub fn is_in_obsidian_comment(&self, byte_pos: usize) -> bool {
-        self.obsidian_comment_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+        Self::binary_search_ranges(&self.obsidian_comment_ranges, byte_pos)
     }
 
     /// Check if a line/column position is inside an Obsidian comment
@@ -750,17 +771,15 @@ impl<'a> LintContext<'a> {
         }
     }
 
-    /// Check if a position is within a code block or code span
+    /// Check if a position is within a code block or code span. O(log n).
     pub fn is_in_code_block_or_span(&self, pos: usize) -> bool {
-        // Check code blocks first
+        // Check code blocks first (already uses binary search internally)
         if CodeBlockUtils::is_in_code_block_or_span(&self.code_blocks, pos) {
             return true;
         }
 
-        // Check inline code spans (lazy load if needed)
-        self.code_spans()
-            .iter()
-            .any(|span| pos >= span.byte_offset && pos < span.byte_end)
+        // Check inline code spans via binary search
+        self.is_byte_offset_in_code_span(pos)
     }
 
     /// Get line information by line number (1-indexed)
@@ -872,61 +891,52 @@ impl<'a> LintContext<'a> {
         })
     }
 
-    /// Check if a byte offset is within a code span
+    /// Check if a byte offset is within a code span. O(log n).
     #[inline]
     pub fn is_byte_offset_in_code_span(&self, byte_offset: usize) -> bool {
         let code_spans = self.code_spans();
-        code_spans
-            .iter()
-            .any(|span| byte_offset >= span.byte_offset && byte_offset < span.byte_end)
+        let idx = code_spans.partition_point(|span| span.byte_offset <= byte_offset);
+        idx > 0 && byte_offset < code_spans[idx - 1].byte_end
     }
 
-    /// Check if a byte position is within a reference definition
+    /// Check if a byte position is within a reference definition. O(log n).
     #[inline]
     pub fn is_in_reference_def(&self, byte_pos: usize) -> bool {
-        self.reference_defs
-            .iter()
-            .any(|ref_def| byte_pos >= ref_def.byte_offset && byte_pos < ref_def.byte_end)
+        let idx = self.reference_defs.partition_point(|rd| rd.byte_offset <= byte_pos);
+        idx > 0 && byte_pos < self.reference_defs[idx - 1].byte_end
     }
 
-    /// Check if a byte position is within an HTML comment
+    /// Check if a byte position is within an HTML comment. O(log n).
     #[inline]
     pub fn is_in_html_comment(&self, byte_pos: usize) -> bool {
-        self.html_comment_ranges
-            .iter()
-            .any(|range| byte_pos >= range.start && byte_pos < range.end)
+        let idx = self.html_comment_ranges.partition_point(|r| r.start <= byte_pos);
+        idx > 0 && byte_pos < self.html_comment_ranges[idx - 1].end
     }
 
-    /// Check if a byte position is within an HTML tag (including multiline tags)
-    /// Uses the pre-parsed html_tags which correctly handles tags spanning multiple lines
+    /// Check if a byte position is within an HTML tag (including multiline tags).
+    /// Uses the pre-parsed html_tags which correctly handles tags spanning multiple lines. O(log n).
     #[inline]
     pub fn is_in_html_tag(&self, byte_pos: usize) -> bool {
-        self.html_tags()
-            .iter()
-            .any(|tag| byte_pos >= tag.byte_offset && byte_pos < tag.byte_end)
+        let tags = self.html_tags();
+        let idx = tags.partition_point(|tag| tag.byte_offset <= byte_pos);
+        idx > 0 && byte_pos < tags[idx - 1].byte_end
     }
 
-    /// Check if a byte position is within a Jinja template ({{ }} or {% %})
+    /// Check if a byte position is within a Jinja template ({{ }} or {% %}). O(log n).
     pub fn is_in_jinja_range(&self, byte_pos: usize) -> bool {
-        self.jinja_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+        Self::binary_search_ranges(&self.jinja_ranges, byte_pos)
     }
 
-    /// Check if a byte position is within a JSX expression (MDX: {expression})
+    /// Check if a byte position is within a JSX expression (MDX: {expression}). O(log n).
     #[inline]
     pub fn is_in_jsx_expression(&self, byte_pos: usize) -> bool {
-        self.jsx_expression_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+        Self::binary_search_ranges(&self.jsx_expression_ranges, byte_pos)
     }
 
-    /// Check if a byte position is within an MDX comment ({/* ... */})
+    /// Check if a byte position is within an MDX comment ({/* ... */}). O(log n).
     #[inline]
     pub fn is_in_mdx_comment(&self, byte_pos: usize) -> bool {
-        self.mdx_comment_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+        Self::binary_search_ranges(&self.mdx_comment_ranges, byte_pos)
     }
 
     /// Get all JSX expression byte ranges
@@ -939,13 +949,12 @@ impl<'a> LintContext<'a> {
         &self.mdx_comment_ranges
     }
 
-    /// Check if a byte position is within a Pandoc/Quarto citation (`@key` or `[@key]`)
-    /// Only active in Quarto flavor
+    /// Check if a byte position is within a Pandoc/Quarto citation (`@key` or `[@key]`).
+    /// Only active in Quarto flavor. O(log n).
     #[inline]
     pub fn is_in_citation(&self, byte_pos: usize) -> bool {
-        self.citation_ranges
-            .iter()
-            .any(|range| byte_pos >= range.start && byte_pos < range.end)
+        let idx = self.citation_ranges.partition_point(|r| r.start <= byte_pos);
+        idx > 0 && byte_pos < self.citation_ranges[idx - 1].end
     }
 
     /// Get all citation byte ranges (Quarto flavor only)
@@ -953,12 +962,10 @@ impl<'a> LintContext<'a> {
         &self.citation_ranges
     }
 
-    /// Check if a byte position is within a Hugo/Quarto shortcode ({{< ... >}} or {{% ... %}})
+    /// Check if a byte position is within a Hugo/Quarto shortcode ({{< ... >}} or {{% ... %}}). O(log n).
     #[inline]
     pub fn is_in_shortcode(&self, byte_pos: usize) -> bool {
-        self.shortcode_ranges
-            .iter()
-            .any(|(start, end)| byte_pos >= *start && byte_pos < *end)
+        Self::binary_search_ranges(&self.shortcode_ranges, byte_pos)
     }
 
     /// Get all shortcode byte ranges

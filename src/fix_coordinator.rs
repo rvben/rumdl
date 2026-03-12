@@ -108,17 +108,19 @@ impl FixCoordinator {
 
         // Perform topological sort
         let mut sorted = Vec::new();
-        let mut visited = HashSet::new();
-        let mut visiting = HashSet::new();
+        let mut visited: HashSet<&str> = HashSet::new();
+        let mut visiting: HashSet<&str> = HashSet::new();
 
-        fn visit<'a>(
-            rule_name: &str,
+        fn visit<'a, 'b>(
+            rule_name: &'b str,
             rule_map: &HashMap<&str, &'a dyn Rule>,
-            reverse_deps: &HashMap<&str, HashSet<&str>>,
-            visited: &mut HashSet<String>,
-            visiting: &mut HashSet<String>,
+            reverse_deps: &HashMap<&'b str, HashSet<&'b str>>,
+            visited: &mut HashSet<&'b str>,
+            visiting: &mut HashSet<&'b str>,
             sorted: &mut Vec<&'a dyn Rule>,
-        ) {
+        ) where
+            'a: 'b,
+        {
             if visited.contains(rule_name) {
                 return;
             }
@@ -128,7 +130,7 @@ impl FixCoordinator {
                 return;
             }
 
-            visiting.insert(rule_name.to_string());
+            visiting.insert(rule_name);
 
             // Visit dependencies first
             if let Some(deps) = reverse_deps.get(rule_name) {
@@ -140,7 +142,7 @@ impl FixCoordinator {
             }
 
             visiting.remove(rule_name);
-            visited.insert(rule_name.to_string());
+            visited.insert(rule_name);
 
             // Add this rule to sorted list
             if let Some(&rule) = rule_map.get(rule_name) {
@@ -198,10 +200,10 @@ impl FixCoordinator {
 
         // History tracks (content_hash, rule_that_produced_this_state).
         // The initial entry has an empty rule name (no rule produced the initial content).
-        let mut history: Vec<(u64, String)> = vec![(hash_content(content), String::new())];
+        let mut history: Vec<(u64, &str)> = vec![(hash_content(content), "")];
 
         // Track which rules actually applied fixes
-        let mut fixed_rule_names = HashSet::new();
+        let mut fixed_rule_names: HashSet<&str> = HashSet::new();
 
         // Build set of unfixable rules for quick lookup, resolving aliases to canonical IDs
         let unfixable_rules: HashSet<String> = config
@@ -234,7 +236,7 @@ impl FixCoordinator {
 
             let mut any_fix_applied = false;
             // The rule that applied a fix this iteration (used for cycle reporting).
-            let mut this_iter_rule = String::new();
+            let mut this_iter_rule: &str = "";
 
             // Check and fix each rule in dependency order
             for rule in &ordered_rules {
@@ -283,8 +285,8 @@ impl FixCoordinator {
                             *content = fixed_content;
                             total_fixed += 1;
                             any_fix_applied = true;
-                            this_iter_rule = rule.name().to_string();
-                            fixed_rule_names.insert(rule.name().to_string());
+                            this_iter_rule = rule.name();
+                            fixed_rule_names.insert(rule.name());
 
                             // Break to re-check all rules with the new content
                             // This is the key difference from the old approach:
@@ -309,7 +311,7 @@ impl FixCoordinator {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
-                        fixed_rule_names,
+                        fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
                         converged: true,
                         conflicting_rules: Vec::new(),
                         conflict_cycle: Vec::new(),
@@ -319,23 +321,24 @@ impl FixCoordinator {
                     // Collect the rules that participate in the cycle.
                     let conflict_cycle: Vec<String> = history[cycle_start + 1..]
                         .iter()
-                        .map(|(_, r)| r.clone())
-                        .chain(std::iter::once(this_iter_rule.clone()))
+                        .map(|(_, r)| r.to_string())
+                        .chain(std::iter::once(this_iter_rule.to_string()))
                         .filter(|r| !r.is_empty())
                         .collect();
                     let conflicting_rules: Vec<String> = history[cycle_start + 1..]
                         .iter()
-                        .map(|(_, r)| r.clone())
+                        .map(|(_, r)| *r)
                         .chain(std::iter::once(this_iter_rule))
                         .filter(|r| !r.is_empty())
-                        .collect::<HashSet<_>>()
+                        .collect::<HashSet<&str>>()
                         .into_iter()
+                        .map(|s| s.to_string())
                         .collect();
                     return Ok(FixResult {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
-                        fixed_rule_names,
+                        fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
                         converged: false,
                         conflicting_rules,
                         conflict_cycle,
@@ -352,7 +355,7 @@ impl FixCoordinator {
                     rules_fixed: total_fixed,
                     iterations,
                     context_creations: total_ctx_creations,
-                    fixed_rule_names,
+                    fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
                     converged: true,
                     conflicting_rules: Vec::new(),
                     conflict_cycle: Vec::new(),
@@ -365,7 +368,7 @@ impl FixCoordinator {
             rules_fixed: total_fixed,
             iterations,
             context_creations: total_ctx_creations,
-            fixed_rule_names,
+            fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
             converged: false,
             conflicting_rules: Vec::new(),
             conflict_cycle: Vec::new(),

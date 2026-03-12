@@ -64,7 +64,8 @@ impl MarkdownHtmlTracker {
                 self.tag_stack.push((tag.clone(), self.depth));
 
                 // Check if this line also closes the tag (self-contained)
-                if self.count_closes(line, &tag) > 0 {
+                let line_lower = line.to_lowercase();
+                if Self::count_closes_lowered(&line_lower, &tag) > 0 {
                     self.depth -= 1;
                     self.tag_stack.pop();
                 }
@@ -74,10 +75,14 @@ impl MarkdownHtmlTracker {
 
         // If we're inside a markdown HTML block at the start of this line
         if !self.tag_stack.is_empty() {
-            // Count opening and closing tags for our tracked tags
-            for (tag, _) in self.tag_stack.clone() {
-                let opens = self.count_opens(trimmed, &tag);
-                let closes = self.count_closes(trimmed, &tag);
+            // Lowercase the line once for all tag comparisons
+            let line_lower = trimmed.to_lowercase();
+
+            // Collect tag names by reference before mutating depth
+            let tags: Vec<String> = self.tag_stack.iter().map(|(tag, _)| tag.clone()).collect();
+            for tag in &tags {
+                let opens = Self::count_opens_lowered(&line_lower, tag);
+                let closes = Self::count_closes_lowered(&line_lower, tag);
 
                 self.depth += opens;
 
@@ -105,10 +110,10 @@ impl MarkdownHtmlTracker {
         false
     }
 
-    /// Count opening tags of a specific type in a line (case-insensitive)
-    fn count_opens(&self, line: &str, tag: &str) -> usize {
-        let line_lower = line.to_lowercase();
-        let open_pattern = format!("<{}", tag.to_lowercase());
+    /// Count opening tags of a specific type in a pre-lowercased line.
+    /// `tag` is already lowercase (stored that way in `tag_stack`).
+    fn count_opens_lowered(line_lower: &str, tag: &str) -> usize {
+        let open_pattern = format!("<{tag}");
         let mut count = 0;
         let mut search_start = 0;
 
@@ -127,10 +132,10 @@ impl MarkdownHtmlTracker {
         count
     }
 
-    /// Count closing tags of a specific type in a line (case-insensitive)
-    fn count_closes(&self, line: &str, tag: &str) -> usize {
-        let line_lower = line.to_lowercase();
-        let close_pattern = format!("</{}", tag.to_lowercase());
+    /// Count closing tags of a specific type in a pre-lowercased line.
+    /// `tag` is already lowercase (stored that way in `tag_stack`).
+    fn count_closes_lowered(line_lower: &str, tag: &str) -> usize {
+        let close_pattern = format!("</{tag}");
         let mut count = 0;
         let mut search_start = 0;
 
@@ -341,29 +346,38 @@ mod tests {
 
     #[test]
     fn test_count_opens_boundary_check() {
-        let tracker = MarkdownHtmlTracker::new();
-
-        // Should match
-        assert_eq!(tracker.count_opens("<div>", "div"), 1);
-        assert_eq!(tracker.count_opens("<div class='x'>", "div"), 1);
-        assert_eq!(tracker.count_opens("<DIV>", "div"), 1);
-        assert_eq!(tracker.count_opens("<div/><div>", "div"), 2);
+        // Should match (input is pre-lowercased)
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<div>", "div"), 1);
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<div class='x'>", "div"), 1);
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<div>", "div"), 1);
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<div/><div>", "div"), 2);
 
         // Should NOT match (divider is not div)
-        assert_eq!(tracker.count_opens("<divider>", "div"), 0);
-        assert_eq!(tracker.count_opens("<dividend>", "div"), 0);
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<divider>", "div"), 0);
+        assert_eq!(MarkdownHtmlTracker::count_opens_lowered("<dividend>", "div"), 0);
+
+        // Case-insensitive via pre-lowercased input
+        assert_eq!(
+            MarkdownHtmlTracker::count_opens_lowered(&"<DIV>".to_lowercase(), "div"),
+            1
+        );
     }
 
     #[test]
     fn test_count_closes_variations() {
-        let tracker = MarkdownHtmlTracker::new();
-
-        assert_eq!(tracker.count_closes("</div>", "div"), 1);
-        assert_eq!(tracker.count_closes("</DIV>", "div"), 1);
-        assert_eq!(tracker.count_closes("</div >", "div"), 1);
-        assert_eq!(tracker.count_closes("</div  >", "div"), 1);
-        assert_eq!(tracker.count_closes("</div></div>", "div"), 2);
-        assert_eq!(tracker.count_closes("text</div>more</div>end", "div"), 2);
+        // Input is pre-lowercased
+        assert_eq!(MarkdownHtmlTracker::count_closes_lowered("</div>", "div"), 1);
+        assert_eq!(
+            MarkdownHtmlTracker::count_closes_lowered(&"</DIV>".to_lowercase(), "div"),
+            1
+        );
+        assert_eq!(MarkdownHtmlTracker::count_closes_lowered("</div >", "div"), 1);
+        assert_eq!(MarkdownHtmlTracker::count_closes_lowered("</div  >", "div"), 1);
+        assert_eq!(MarkdownHtmlTracker::count_closes_lowered("</div></div>", "div"), 2);
+        assert_eq!(
+            MarkdownHtmlTracker::count_closes_lowered("text</div>more</div>end", "div"),
+            2
+        );
     }
 
     #[test]
