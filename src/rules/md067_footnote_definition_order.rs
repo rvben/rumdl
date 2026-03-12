@@ -54,9 +54,6 @@ impl Rule for MD067FootnoteDefinitionOrder {
         // Track definition positions
         let mut definition_order: Vec<(String, usize, usize)> = Vec::new(); // (id, line, byte_offset)
 
-        // Get code spans to avoid false positives
-        let code_spans = ctx.code_spans();
-
         // First pass: collect references in order of first occurrence
         for line_info in &ctx.lines {
             // Skip special contexts
@@ -70,17 +67,21 @@ impl Rule for MD067FootnoteDefinitionOrder {
 
             let line = line_info.content(ctx.content);
 
-            for caps in FOOTNOTE_REF_PATTERN.captures_iter(line).flatten() {
+            for caps in FOOTNOTE_REF_PATTERN.captures_iter(line) {
                 if let Some(id_match) = caps.get(1) {
+                    // Skip if followed by : (would be a definition, not a reference)
+                    let full_match = caps.get(0).unwrap();
+                    if line.as_bytes().get(full_match.end()) == Some(&b':') {
+                        continue;
+                    }
+
                     let id = id_match.as_str().to_lowercase();
 
                     // Check if this match is inside a code span
-                    let match_start = caps.get(0).unwrap().start();
+                    let match_start = full_match.start();
                     let byte_offset = line_info.byte_offset + match_start;
 
-                    let in_code_span = code_spans
-                        .iter()
-                        .any(|span| byte_offset >= span.byte_offset && byte_offset < span.byte_end);
+                    let in_code_span = ctx.is_in_code_span_byte(byte_offset);
 
                     if !in_code_span && !seen_refs.contains_key(&id) {
                         seen_refs.insert(id.clone(), reference_order.len());

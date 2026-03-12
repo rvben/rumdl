@@ -1,5 +1,4 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -10,10 +9,8 @@ use std::sync::LazyLock;
 pub static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
 
 /// Pattern to match footnote references in text: [^id]
-/// Must NOT be followed by : (which would make it a definition)
-/// Uses fancy_regex for negative lookahead support
-pub static FOOTNOTE_REF_PATTERN: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"\[\^([^\]]+)\](?!:)").unwrap());
+/// Callers must manually check that the match is NOT followed by `:` (which would make it a definition)
+pub static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^([^\]]+)\]").unwrap());
 
 /// Strip blockquote prefixes from a line to check for footnote definitions
 /// Handles nested blockquotes like `> > > ` and variations with/without spaces
@@ -121,7 +118,6 @@ impl Rule for MD066FootnoteValidation {
         }
 
         // Also parse references directly to find orphaned ones (without definitions)
-        let code_spans = ctx.code_spans();
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip if in code block, frontmatter, HTML comment, or HTML block
             if line_info.in_code_block
@@ -135,17 +131,21 @@ impl Rule for MD066FootnoteValidation {
             let line = line_info.content(ctx.content);
             let line_num = line_idx + 1; // 1-indexed
 
-            for caps in FOOTNOTE_REF_PATTERN.captures_iter(line).flatten() {
+            for caps in FOOTNOTE_REF_PATTERN.captures_iter(line) {
                 if let Some(id_match) = caps.get(1) {
+                    // Skip if followed by : (would be a definition, not a reference)
+                    let full_match = caps.get(0).unwrap();
+                    if line.as_bytes().get(full_match.end()) == Some(&b':') {
+                        continue;
+                    }
+
                     let id = id_match.as_str().to_lowercase();
 
                     // Check if this match is inside a code span
-                    let match_start = caps.get(0).unwrap().start();
+                    let match_start = full_match.start();
                     let byte_offset = line_info.byte_offset + match_start;
 
-                    let in_code_span = code_spans
-                        .iter()
-                        .any(|span| byte_offset >= span.byte_offset && byte_offset < span.byte_end);
+                    let in_code_span = ctx.is_in_code_span_byte(byte_offset);
 
                     if !in_code_span {
                         // Only add if not already found (avoid duplicates with pulldown-cmark)
