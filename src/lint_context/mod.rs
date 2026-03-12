@@ -611,9 +611,9 @@ impl<'a> LintContext<'a> {
     /// Check if a byte position is within a math span (inline $...$ or display $$...$$)
     pub fn is_in_math_span(&self, byte_pos: usize) -> bool {
         let math_spans = self.math_spans();
-        math_spans
-            .iter()
-            .any(|span| byte_pos >= span.byte_offset && byte_pos < span.byte_end)
+        // Binary search: find the last span whose byte_offset <= byte_pos
+        let idx = math_spans.partition_point(|span| span.byte_offset <= byte_pos);
+        idx > 0 && byte_pos < math_spans[idx - 1].byte_end
     }
 
     /// Get HTML comment ranges - pre-computed during LintContext construction
