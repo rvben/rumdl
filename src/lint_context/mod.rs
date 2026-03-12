@@ -84,6 +84,7 @@ pub struct LintContext<'a> {
     mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (Quarto: @key, [@key])
     shortcode_ranges: Vec<(usize, usize)>, // Pre-computed Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
+    link_title_ranges: Vec<(usize, usize)>, // Pre-computed sorted link title byte ranges
     code_span_byte_ranges: Vec<(usize, usize)>, // Pre-computed code span byte ranges from pulldown-cmark
     inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
@@ -467,6 +468,15 @@ impl<'a> LintContext<'a> {
             .map(|(idx, def)| (def.id.to_lowercase(), idx))
             .collect();
 
+        // Pre-compute sorted link title byte ranges for binary search
+        let link_title_ranges: Vec<(usize, usize)> = reference_defs
+            .iter()
+            .filter_map(|def| match (def.title_byte_start, def.title_byte_end) {
+                (Some(start), Some(end)) => Some((start, end)),
+                _ => None,
+            })
+            .collect();
+
         // Reuse already-computed line_offsets and code_blocks instead of re-detecting
         let line_index = profile_section!(
             "Line index",
@@ -538,6 +548,7 @@ impl<'a> LintContext<'a> {
             mdx_comment_ranges,
             citation_ranges,
             shortcode_ranges,
+            link_title_ranges,
             code_span_byte_ranges: code_span_ranges,
             inline_config,
             obsidian_comment_ranges,
@@ -982,15 +993,9 @@ impl<'a> LintContext<'a> {
         &self.shortcode_ranges
     }
 
-    /// Check if a byte position is within a link reference definition title
+    /// Check if a byte position is within a link reference definition title. O(log n).
     pub fn is_in_link_title(&self, byte_pos: usize) -> bool {
-        self.reference_defs.iter().any(|def| {
-            if let (Some(start), Some(end)) = (def.title_byte_start, def.title_byte_end) {
-                byte_pos >= start && byte_pos < end
-            } else {
-                false
-            }
-        })
+        Self::binary_search_ranges(&self.link_title_ranges, byte_pos)
     }
 
     /// Check if content has any instances of a specific character (fast)
