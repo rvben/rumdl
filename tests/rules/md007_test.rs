@@ -1,3 +1,4 @@
+use rumdl_lib::config::{Config, MarkdownFlavor};
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD007ULIndent;
@@ -1821,4 +1822,121 @@ mod issue247_nested_unordered_in_ordered {
 
         assert!(warnings.is_empty(), "Deeply nested mixed lists should work correctly");
     }
+}
+
+// ========================================================================
+// MkDocs flavor tests (#522)
+// ========================================================================
+
+fn mkdocs_config() -> Config {
+    let mut config = Config::default();
+    config.global.flavor = MarkdownFlavor::MkDocs;
+    config
+}
+
+fn mkdocs_config_with_indent(indent: i64) -> Config {
+    let mut config = mkdocs_config();
+    config.rules.insert(
+        "MD007".to_string(),
+        rumdl_lib::config::RuleConfig {
+            severity: None,
+            values: {
+                let mut m = std::collections::BTreeMap::new();
+                m.insert("indent".to_string(), toml::Value::Integer(indent));
+                m
+            },
+        },
+    );
+    config
+}
+
+#[test]
+fn test_mkdocs_flavor_enforces_4_space_indent() {
+    let config = mkdocs_config();
+    let rule = MD007ULIndent::from_config(&config);
+
+    let content = "- text\n    - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MkDocs flavor should accept 4-space indent, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_flavor_rejects_2_space_indent() {
+    let config = mkdocs_config();
+    let rule = MD007ULIndent::from_config(&config);
+
+    let content = "- text\n  - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(!result.is_empty(), "MkDocs flavor should reject 2-space indent");
+}
+
+#[test]
+fn test_mkdocs_flavor_overrides_explicit_indent_2() {
+    let config = mkdocs_config_with_indent(2);
+    let rule = MD007ULIndent::from_config(&config);
+
+    // 4-space indent should still be accepted (enforcement overrides user config)
+    let content = "- text\n    - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MkDocs should enforce indent>=4 even when user sets indent=2, got: {result:?}"
+    );
+
+    // 2-space indent should be rejected
+    let content = "- text\n  - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "MkDocs should reject 2-space indent even when user sets indent=2"
+    );
+}
+
+#[test]
+fn test_mkdocs_flavor_allows_explicit_indent_above_4() {
+    let config = mkdocs_config_with_indent(6);
+    let rule = MD007ULIndent::from_config(&config);
+
+    let content = "- text\n      - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MkDocs with explicit indent=6 should accept 6-space indent, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_standard_flavor_keeps_2_space_default() {
+    let config = Config::default();
+    let rule = MD007ULIndent::from_config(&config);
+
+    let content = "- text\n  - indented\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Standard flavor should accept 2-space indent, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_flavor_deeply_nested() {
+    let config = mkdocs_config();
+    let rule = MD007ULIndent::from_config(&config);
+
+    let content = "- level 1\n    - level 2\n        - level 3\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MkDocs should accept 4-space nested lists, got: {result:?}"
+    );
 }
