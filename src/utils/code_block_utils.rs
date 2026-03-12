@@ -8,10 +8,26 @@
 //! - Mixed fence types (tilde fence contains backticks as content)
 //! - Indented code blocks with proper list context handling
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 
 /// Type alias for code block and span ranges: (code_blocks, code_spans)
 pub type CodeRanges = (Vec<(usize, usize)>, Vec<(usize, usize)>);
+
+/// Detailed information about a code block captured during parsing
+#[derive(Debug, Clone)]
+pub struct CodeBlockDetail {
+    /// Byte offset where this code block starts
+    pub start: usize,
+    /// Byte offset where this code block ends
+    pub end: usize,
+    /// Whether this is a fenced code block (true) or indented (false)
+    pub is_fenced: bool,
+    /// The info string from fenced blocks (e.g., "rust" from ```rust), empty for indented
+    pub info_string: String,
+}
+
+/// Extended return type including per-block details
+pub type CodeRangesWithDetails = (Vec<(usize, usize)>, Vec<(usize, usize)>, Vec<CodeBlockDetail>);
 
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,15 +54,17 @@ impl CodeBlockUtils {
     ///
     /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
-        let (blocks, _) = Self::detect_code_blocks_and_spans(content);
+        let (blocks, _, _) = Self::detect_code_blocks_and_spans(content);
         blocks
     }
 
-    /// Returns code block ranges and inline code span ranges in a single pulldown-cmark pass.
-    pub fn detect_code_blocks_and_spans(content: &str) -> CodeRanges {
+    /// Returns code block ranges, inline code span ranges, and detailed code block info
+    /// in a single pulldown-cmark pass.
+    pub fn detect_code_blocks_and_spans(content: &str) -> CodeRangesWithDetails {
         let mut blocks = Vec::new();
         let mut spans = Vec::new();
-        let mut code_block_start: Option<usize> = None;
+        let mut details = Vec::new();
+        let mut code_block_start: Option<(usize, bool, String)> = None;
 
         // Use pulldown-cmark with all extensions for maximum compatibility
         let options = Options::all();
@@ -54,14 +72,22 @@ impl CodeBlockUtils {
 
         for (event, range) in parser {
             match event {
-                Event::Start(Tag::CodeBlock(_)) => {
-                    // Record start position of code block
-                    code_block_start = Some(range.start);
+                Event::Start(Tag::CodeBlock(kind)) => {
+                    let (is_fenced, info_string) = match &kind {
+                        CodeBlockKind::Fenced(info) => (true, info.to_string()),
+                        CodeBlockKind::Indented => (false, String::new()),
+                    };
+                    code_block_start = Some((range.start, is_fenced, info_string));
                 }
                 Event::End(TagEnd::CodeBlock) => {
-                    // Complete the code block range
-                    if let Some(start) = code_block_start.take() {
+                    if let Some((start, is_fenced, info_string)) = code_block_start.take() {
                         blocks.push((start, range.end));
+                        details.push(CodeBlockDetail {
+                            start,
+                            end: range.end,
+                            is_fenced,
+                            info_string,
+                        });
                     }
                 }
                 Event::Code(_) => {
@@ -73,13 +99,20 @@ impl CodeBlockUtils {
 
         // Handle edge case: unclosed code block at end of content
         // pulldown-cmark should handle this, but be defensive
-        if let Some(start) = code_block_start {
+        if let Some((start, is_fenced, info_string)) = code_block_start {
             blocks.push((start, content.len()));
+            details.push(CodeBlockDetail {
+                start,
+                end: content.len(),
+                is_fenced,
+                info_string,
+            });
         }
 
         // Sort by start position (should already be sorted, but ensure consistency)
         blocks.sort_by_key(|&(start, _)| start);
-        (blocks, spans)
+        details.sort_by_key(|d| d.start);
+        (blocks, spans, details)
     }
 
     /// Check if a position is within a code block (for compatibility)

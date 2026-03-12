@@ -2,7 +2,6 @@ use crate::linguist_data::{default_alias, get_aliases, is_valid_alias, resolve_c
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::{RuleConfig, load_rule_config};
 use crate::utils::range_utils::calculate_line_range;
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 use std::collections::HashMap;
 
 /// Rule MD040: Fenced code blocks should have a language
@@ -238,8 +237,8 @@ impl Rule for MD040FencedCodeLanguage {
             });
         }
 
-        // Use pulldown-cmark to detect fenced code blocks with language info
-        let fenced_blocks = detect_fenced_code_blocks(content, &ctx.line_offsets);
+        // Derive fenced code blocks from pre-computed context
+        let fenced_blocks = derive_fenced_code_blocks(ctx);
 
         // Pre-compute disabled ranges for efficient lookup
         let disabled_ranges = compute_disabled_ranges(content, self.name());
@@ -383,8 +382,8 @@ impl Rule for MD040FencedCodeLanguage {
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
         let content = ctx.content;
 
-        // Use pulldown-cmark to detect fenced code blocks
-        let fenced_blocks = detect_fenced_code_blocks(content, &ctx.line_offsets);
+        // Derive fenced code blocks from pre-computed context
+        let fenced_blocks = derive_fenced_code_blocks(ctx);
 
         // Pre-compute disabled ranges
         let disabled_ranges = compute_disabled_ranges(content, self.name());
@@ -547,16 +546,19 @@ enum FixAction {
     },
 }
 
-/// Detect fenced code blocks using pulldown-cmark, returning info about each block's opening fence
-fn detect_fenced_code_blocks(content: &str, line_offsets: &[usize]) -> Vec<FencedCodeBlock> {
-    let mut blocks = Vec::new();
-    let options = Options::all();
-    let parser = Parser::new_ext(content, options).into_offset_iter();
+/// Derive fenced code blocks from pre-computed CodeBlockDetail data
+fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<FencedCodeBlock> {
+    let content = ctx.content;
+    let line_offsets = &ctx.line_offsets;
 
-    for (event, range) in parser {
-        if let Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) = event {
-            // Find the line index for this byte offset
-            let line_idx = line_idx_from_offset(line_offsets, range.start);
+    ctx.code_block_details
+        .iter()
+        .filter(|d| d.is_fenced)
+        .map(|detail| {
+            let line_idx = match line_offsets.binary_search(&detail.start) {
+                Ok(idx) => idx,
+                Err(idx) => idx.saturating_sub(1),
+            };
 
             // Determine fence marker from the actual line content
             let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
@@ -570,29 +572,18 @@ fn detect_fenced_code_blocks(content: &str, line_offsets: &[usize]) -> Vec<Fence
                 let count = trimmed.chars().take_while(|&c| c == '~').count();
                 "~".repeat(count)
             } else {
-                "```".to_string() // Fallback
+                "```".to_string()
             };
 
-            // Extract just the language (first word of info string)
-            let language = info.split_whitespace().next().unwrap_or("").to_string();
+            let language = detail.info_string.split_whitespace().next().unwrap_or("").to_string();
 
-            blocks.push(FencedCodeBlock {
+            FencedCodeBlock {
                 line_idx,
                 language,
                 fence_marker,
-            });
-        }
-    }
-
-    blocks
-}
-
-#[inline]
-fn line_idx_from_offset(line_offsets: &[usize], offset: usize) -> usize {
-    match line_offsets.binary_search(&offset) {
-        Ok(idx) => idx,
-        Err(idx) => idx.saturating_sub(1),
-    }
+            }
+        })
+        .collect()
 }
 
 /// Compute disabled line ranges from disable/enable comments

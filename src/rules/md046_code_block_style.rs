@@ -4,7 +4,6 @@ use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use toml;
 
 mod md046_config;
@@ -493,155 +492,90 @@ impl MD046CodeBlockStyle {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
 
-        // Use pulldown-cmark to detect fenced code blocks - this handles list-indented fences correctly
-        let options = Options::all();
-        let parser = Parser::new_ext(ctx.content, options).into_offset_iter();
-
-        // Track code blocks: (start_byte, end_byte, fence_marker, line_idx, is_fenced, is_markdown_doc)
-        let mut code_blocks: Vec<(usize, usize, String, usize, bool, bool)> = Vec::new();
-        let mut current_block_start: Option<(usize, String, usize, bool)> = None;
-
-        for (event, range) in parser {
-            match event {
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
-                    // Find the line index for this byte offset
-                    let line_idx = ctx
-                        .line_offsets
-                        .iter()
-                        .enumerate()
-                        .rev()
-                        .find(|&(_, offset)| *offset <= range.start)
-                        .map(|(idx, _)| idx)
-                        .unwrap_or(0);
-
-                    // Determine fence marker from the actual line content
-                    let line = lines.get(line_idx).unwrap_or(&"");
-                    let trimmed = line.trim();
-
-                    // Find the fence marker - could be at start of line or after list marker
-                    let fence_marker = if let Some(pos) = trimmed.find("```") {
-                        let count = trimmed[pos..].chars().take_while(|&c| c == '`').count();
-                        "`".repeat(count)
-                    } else if let Some(pos) = trimmed.find("~~~") {
-                        let count = trimmed[pos..].chars().take_while(|&c| c == '~').count();
-                        "~".repeat(count)
-                    } else {
-                        "```".to_string()
-                    };
-
-                    // Check if this is a markdown documentation block
-                    let lang_info = info.to_string().to_lowercase();
-                    let is_markdown_doc = lang_info.starts_with("markdown") || lang_info.starts_with("md");
-
-                    current_block_start = Some((range.start, fence_marker, line_idx, is_markdown_doc));
-                }
-                Event::End(TagEnd::CodeBlock) => {
-                    if let Some((start, fence_marker, line_idx, is_markdown_doc)) = current_block_start.take() {
-                        code_blocks.push((start, range.end, fence_marker, line_idx, true, is_markdown_doc));
-                    }
-                }
-                _ => {}
+        // Check if any fenced block has a markdown/md language tag
+        let has_markdown_doc_block = ctx.code_block_details.iter().any(|d| {
+            if !d.is_fenced {
+                return false;
             }
+            let lang = d.info_string.to_lowercase();
+            lang.starts_with("markdown") || lang.starts_with("md")
+        });
+
+        // Skip unclosed block detection if document contains markdown documentation blocks
+        // (they have nested fence examples that pulldown-cmark misparses)
+        if has_markdown_doc_block {
+            return Ok(warnings);
         }
 
-        // Check if any block is a markdown documentation block - if so, skip all
-        // unclosed block detection since markdown docs often contain fence examples
-        // that pulldown-cmark misparses
-        let has_markdown_doc_block = code_blocks.iter().any(|(_, _, _, _, _, is_md)| *is_md);
+        for detail in &ctx.code_block_details {
+            if !detail.is_fenced {
+                continue;
+            }
 
-        // Handle unclosed code block - pulldown-cmark extends unclosed blocks to EOF
-        // and still emits End event, so we need to check if block ends at EOF without closing fence
-        // Skip if document contains markdown documentation blocks (they have nested fence examples)
-        if !has_markdown_doc_block {
-            for (block_start, block_end, fence_marker, opening_line_idx, is_fenced, _is_md) in &code_blocks {
-                if !is_fenced {
+            // Only check blocks that extend to EOF
+            if detail.end != ctx.content.len() {
+                continue;
+            }
+
+            // Find the line index for this block's start
+            let opening_line_idx = match ctx.line_offsets.binary_search(&detail.start) {
+                Ok(idx) => idx,
+                Err(idx) => idx.saturating_sub(1),
+            };
+
+            // Determine fence marker from the actual line content
+            let line = lines.get(opening_line_idx).unwrap_or(&"");
+            let trimmed = line.trim();
+            let fence_marker = if let Some(pos) = trimmed.find("```") {
+                let count = trimmed[pos..].chars().take_while(|&c| c == '`').count();
+                "`".repeat(count)
+            } else if let Some(pos) = trimmed.find("~~~") {
+                let count = trimmed[pos..].chars().take_while(|&c| c == '~').count();
+                "~".repeat(count)
+            } else {
+                "```".to_string()
+            };
+
+            // Check if the last non-empty line is a valid closing fence
+            let last_non_empty_line = lines.iter().rev().find(|l| !l.trim().is_empty()).unwrap_or(&"");
+            let last_trimmed = last_non_empty_line.trim();
+            let fence_char = fence_marker.chars().next().unwrap_or('`');
+
+            let has_closing_fence = if fence_char == '`' {
+                last_trimmed.starts_with("```") && {
+                    let fence_len = last_trimmed.chars().take_while(|&c| c == '`').count();
+                    last_trimmed[fence_len..].trim().is_empty()
+                }
+            } else {
+                last_trimmed.starts_with("~~~") && {
+                    let fence_len = last_trimmed.chars().take_while(|&c| c == '~').count();
+                    last_trimmed[fence_len..].trim().is_empty()
+                }
+            };
+
+            if !has_closing_fence {
+                // Skip if inside HTML comment
+                if ctx.lines.get(opening_line_idx).is_some_and(|info| info.in_html_comment) {
                     continue;
                 }
 
-                // Only check blocks that extend to EOF
-                if *block_end != ctx.content.len() {
-                    continue;
-                }
+                let (start_line, start_col, end_line, end_col) = calculate_line_range(opening_line_idx + 1, line);
 
-                // Check if the last NON-EMPTY line of content is a valid closing fence
-                // (skip trailing empty lines)
-                let last_non_empty_line = lines.iter().rev().find(|l| !l.trim().is_empty()).unwrap_or(&"");
-                let trimmed = last_non_empty_line.trim();
-                let fence_char = fence_marker.chars().next().unwrap_or('`');
-
-                // Check if it's a closing fence (just fence chars, no content after)
-                let has_closing_fence = if fence_char == '`' {
-                    trimmed.starts_with("```") && {
-                        let fence_len = trimmed.chars().take_while(|&c| c == '`').count();
-                        trimmed[fence_len..].trim().is_empty()
-                    }
-                } else {
-                    trimmed.starts_with("~~~") && {
-                        let fence_len = trimmed.chars().take_while(|&c| c == '~').count();
-                        trimmed[fence_len..].trim().is_empty()
-                    }
-                };
-
-                if !has_closing_fence {
-                    let line = lines.get(*opening_line_idx).unwrap_or(&"");
-                    let (start_line, start_col, end_line, end_col) = calculate_line_range(*opening_line_idx + 1, line);
-
-                    // Skip if inside HTML comment
-                    if let Some(line_info) = ctx.lines.get(*opening_line_idx)
-                        && line_info.in_html_comment
-                    {
-                        continue;
-                    }
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: format!("Code block opened with '{fence_marker}' but never closed"),
-                        severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: (ctx.content.len()..ctx.content.len()),
-                            replacement: format!("\n{fence_marker}"),
-                        }),
-                    });
-                }
-
-                let _ = block_start; // Suppress unused warning
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: start_line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Code block opened with '{fence_marker}' but never closed"),
+                    severity: Severity::Warning,
+                    fix: Some(Fix {
+                        range: (ctx.content.len()..ctx.content.len()),
+                        replacement: format!("\n{fence_marker}"),
+                    }),
+                });
             }
         }
-
-        // Also check for truly unclosed blocks (pulldown-cmark saw Start but no End)
-        // Skip if document contains markdown documentation blocks
-        if !has_markdown_doc_block && let Some((_start, fence_marker, line_idx, _is_md)) = current_block_start {
-            let line = lines.get(line_idx).unwrap_or(&"");
-            let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
-
-            // Skip if inside HTML comment
-            if let Some(line_info) = ctx.lines.get(line_idx)
-                && line_info.in_html_comment
-            {
-                return Ok(warnings);
-            }
-
-            warnings.push(LintWarning {
-                rule_name: Some(self.name().to_string()),
-                line: start_line,
-                column: start_col,
-                end_line,
-                end_column: end_col,
-                message: format!("Code block opened with '{fence_marker}' but never closed"),
-                severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: (ctx.content.len()..ctx.content.len()),
-                    replacement: format!("\n{fence_marker}"),
-                }),
-            });
-        }
-
-        // Nested fence collision detection is handled by MD070, which provides
-        // better diagnostics and auto-fix (suggesting longer outer fences).
 
         Ok(warnings)
     }
@@ -690,14 +624,6 @@ impl MD046CodeBlockStyle {
         } else {
             Some(CodeBlockStyle::Indented)
         }
-    }
-}
-
-#[inline]
-fn line_idx_from_offset(line_offsets: &[usize], offset: usize) -> usize {
-    match line_offsets.binary_search(&offset) {
-        Ok(idx) => idx,
-        Err(idx) => idx.saturating_sub(1),
     }
 }
 
@@ -771,108 +697,96 @@ impl Rule for MD046CodeBlockStyle {
             _ => self.config.style,
         };
 
-        // Parse code blocks using pulldown-cmark to get the actual block kind
-        // (Fenced vs Indented) - this is crucial for correct detection
+        // Use pre-computed code block details to classify fenced vs indented blocks
         let mut in_fenced_block = vec![false; lines.len()];
         let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
-        let options = Options::all();
-        let parser = Parser::new_ext(ctx.content, options).into_offset_iter();
-
-        for (event, range) in parser {
-            let start = range.start;
-            let end = range.end;
-
-            if start >= ctx.content.len() || end > ctx.content.len() {
+        for detail in &ctx.code_block_details {
+            if detail.start >= ctx.content.len() || detail.end > ctx.content.len() {
                 continue;
             }
 
-            // Find the line index for this block's start
-            let start_line_idx = line_idx_from_offset(&ctx.line_offsets, start);
+            let start_line_idx = match ctx.line_offsets.binary_search(&detail.start) {
+                Ok(idx) => idx,
+                Err(idx) => idx.saturating_sub(1),
+            };
 
-            match event {
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {
-                    // Mark lines in this fenced block using binary search on byte offsets
-                    let first = ctx.lines.partition_point(|info| info.byte_offset < start);
-                    for line_idx in first..ctx.lines.len() {
-                        if ctx.lines[line_idx].byte_offset >= end {
-                            break;
-                        }
-                        in_fenced_block[line_idx] = true;
+            if detail.is_fenced {
+                // Mark lines in this fenced block using binary search on byte offsets
+                let first = ctx.lines.partition_point(|info| info.byte_offset < detail.start);
+                for line_idx in first..ctx.lines.len() {
+                    if ctx.lines[line_idx].byte_offset >= detail.end {
+                        break;
                     }
-
-                    // Flag fenced blocks when we want indented style
-                    if target_style == CodeBlockStyle::Indented {
-                        let line = lines.get(start_line_idx).unwrap_or(&"");
-
-                        // Skip if inside HTML comment
-                        if ctx.lines.get(start_line_idx).is_some_and(|info| info.in_html_comment) {
-                            continue;
-                        }
-
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Use indented code blocks".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
-                    }
+                    in_fenced_block[line_idx] = true;
                 }
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Indented)) => {
-                    // This is an indented code block (per pulldown-cmark's CommonMark parsing)
-                    // This includes 4-space indented fences which are invalid per CommonMark
-                    // Flag when we want fenced style
-                    if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
-                        let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                        // Skip if inside HTML comment, mkdocstrings, or blockquote
-                        // Indented content inside blockquotes is NOT an indented code block
-                        if ctx.lines.get(start_line_idx).is_some_and(|info| {
-                            info.in_html_comment
-                                || info.in_html_block
-                                || info.in_jsx_block
-                                || info.in_mkdocstrings
-                                || info.blockquote.is_some()
-                        }) {
-                            continue;
-                        }
+                // Flag fenced blocks when we want indented style
+                if target_style == CodeBlockStyle::Indented {
+                    let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                        // Skip if inside a footnote definition
-                        if mkdocs_footnotes::is_within_footnote_definition(ctx.content, start) {
-                            continue;
-                        }
-
-                        // Skip if inside MkDocs tab content
-                        if is_mkdocs && in_tab_context.get(start_line_idx).copied().unwrap_or(false) {
-                            continue;
-                        }
-
-                        // Skip if inside MkDocs admonition content
-                        if is_mkdocs && in_admonition_context.get(start_line_idx).copied().unwrap_or(false) {
-                            continue;
-                        }
-
-                        reported_indented_lines.insert(start_line_idx);
-
-                        let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message: "Use fenced code blocks".to_string(),
-                            severity: Severity::Warning,
-                            fix: None,
-                        });
+                    // Skip if inside HTML comment
+                    if ctx.lines.get(start_line_idx).is_some_and(|info| info.in_html_comment) {
+                        continue;
                     }
+
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Use indented code blocks".to_string(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 }
-                _ => {}
+            } else {
+                // Indented code block
+                if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
+                    let line = lines.get(start_line_idx).unwrap_or(&"");
+
+                    // Skip if inside HTML comment, mkdocstrings, or blockquote
+                    if ctx.lines.get(start_line_idx).is_some_and(|info| {
+                        info.in_html_comment
+                            || info.in_html_block
+                            || info.in_jsx_block
+                            || info.in_mkdocstrings
+                            || info.blockquote.is_some()
+                    }) {
+                        continue;
+                    }
+
+                    // Skip if inside a footnote definition
+                    if mkdocs_footnotes::is_within_footnote_definition(ctx.content, detail.start) {
+                        continue;
+                    }
+
+                    // Skip if inside MkDocs tab content
+                    if is_mkdocs && in_tab_context.get(start_line_idx).copied().unwrap_or(false) {
+                        continue;
+                    }
+
+                    // Skip if inside MkDocs admonition content
+                    if is_mkdocs && in_admonition_context.get(start_line_idx).copied().unwrap_or(false) {
+                        continue;
+                    }
+
+                    reported_indented_lines.insert(start_line_idx);
+
+                    let (start_line, start_col, end_line, end_col) = calculate_line_range(start_line_idx + 1, line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "Use fenced code blocks".to_string(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
+                }
             }
         }
 

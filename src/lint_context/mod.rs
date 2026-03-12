@@ -13,7 +13,7 @@ mod tests;
 use crate::config::MarkdownFlavor;
 use crate::inline_config::InlineConfig;
 use crate::rules::front_matter_utils::FrontMatterUtils;
-use crate::utils::code_block_utils::CodeBlockUtils;
+use crate::utils::code_block_utils::{CodeBlockDetail, CodeBlockUtils};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -57,6 +57,7 @@ pub struct LintContext<'a> {
     content_lines: Vec<&'a str>, // Pre-split lines from content (avoids repeated allocations)
     pub line_offsets: Vec<usize>,
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
+    pub code_block_details: Vec<CodeBlockDetail>, // Per-block metadata (fenced/indented, info string)
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     pub links: Vec<ParsedLink<'a>>,       // Pre-parsed links
     pub images: Vec<ParsedImage<'a>>,     // Pre-parsed images
@@ -111,7 +112,7 @@ impl<'a> LintContext<'a> {
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
         // Detect code blocks and code spans once and cache them
-        let (mut code_blocks, code_span_ranges) = profile_section!(
+        let (mut code_blocks, code_span_ranges, code_block_details) = profile_section!(
             "Code blocks",
             profile,
             CodeBlockUtils::detect_code_blocks_and_spans(content)
@@ -509,6 +510,7 @@ impl<'a> LintContext<'a> {
             content_lines,
             line_offsets,
             code_blocks,
+            code_block_details,
             lines,
             links,
             images,
