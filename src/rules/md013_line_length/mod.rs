@@ -2702,34 +2702,39 @@ impl MD013LineLength {
         // Collect inline links/images on this line: (byte_offset, byte_end, text_only_display_len)
         let mut constructs: Vec<(usize, usize, usize)> = Vec::new();
 
-        for link in &ctx.links {
-            if link.line != line_number || link.is_reference {
+        // Binary search: links are sorted by byte_offset, so link.line is non-decreasing
+        let link_start = ctx.links.partition_point(|l| l.line < line_number);
+        for link in &ctx.links[link_start..] {
+            if link.line != line_number {
+                break;
+            }
+            if link.is_reference {
                 continue;
             }
             if !matches!(link.link_type, LinkType::Inline) {
                 continue;
             }
-            // Skip cross-line links
             if link.byte_end > line_byte_end {
                 continue;
             }
-            // `[text]` in configured length mode
             let text_only_len = 2 + self.calculate_string_length(&link.text);
             constructs.push((link.byte_offset, link.byte_end, text_only_len));
         }
 
-        for image in &ctx.images {
-            if image.line != line_number || image.is_reference {
+        let img_start = ctx.images.partition_point(|i| i.line < line_number);
+        for image in &ctx.images[img_start..] {
+            if image.line != line_number {
+                break;
+            }
+            if image.is_reference {
                 continue;
             }
             if !matches!(image.link_type, LinkType::Inline) {
                 continue;
             }
-            // Skip cross-line images
             if image.byte_end > line_byte_end {
                 continue;
             }
-            // `![alt]` in configured length mode
             let text_only_len = 3 + self.calculate_string_length(&image.alt_text);
             constructs.push((image.byte_offset, image.byte_end, text_only_len));
         }
