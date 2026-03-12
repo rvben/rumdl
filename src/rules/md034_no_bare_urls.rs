@@ -194,10 +194,6 @@ impl MD034NoBareUrls {
             }
         }
 
-        // Sort ranges for binary search containment checks
-        buffers.markdown_link_ranges.sort_unstable_by_key(|&(s, _)| s);
-        buffers.image_ranges.sort_unstable_by_key(|&(s, _)| s);
-
         // Check if this line contains only a badge link (common pattern)
         if BADGE_LINK_LINE_REGEX.is_match(line) {
             return warnings;
@@ -293,14 +289,14 @@ impl MD034NoBareUrls {
             // We check if the URL starts within a construct, not if it's entirely contained.
             // This handles cases where URL detection may include trailing characters
             // that extend past the construct boundary (e.g., parentheses).
-            // Binary search for construct containment (ranges are sorted by start)
-            let link_idx = buffers.markdown_link_ranges.partition_point(|&(s, _)| s <= start);
-            let is_inside_link = link_idx > 0 && start < buffers.markdown_link_ranges[link_idx - 1].1;
+            // Linear scan is correct here because ranges can overlap/nest (e.g., [[1]](url))
+            let is_inside_construct = buffers
+                .markdown_link_ranges
+                .iter()
+                .any(|&(s, e)| start >= s && start < e)
+                || buffers.image_ranges.iter().any(|&(s, e)| start >= s && start < e);
 
-            let img_idx = buffers.image_ranges.partition_point(|&(s, _)| s <= start);
-            let is_inside_image = img_idx > 0 && start < buffers.image_ranges[img_idx - 1].1;
-
-            if is_inside_link || is_inside_image {
+            if is_inside_construct {
                 continue;
             }
 
