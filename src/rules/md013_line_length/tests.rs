@@ -5030,3 +5030,79 @@ fn test_reflow_tab_container_in_list_item() {
         "Tab container content should not be silently dropped; got:\n{replacement}"
     );
 }
+
+/// Regression test: ctx.links must be sorted by line number for binary search
+/// in calculate_text_only_length to work correctly. The link parser appends
+/// regex-fallback reference links (from earlier lines) after pulldown-cmark links,
+/// which can produce an unsorted vector.
+#[test]
+fn test_md013_links_sorted_by_line_number() {
+    // This document has:
+    // - An inline link on the last line (found by pulldown-cmark)
+    // - Undefined reference links on earlier lines (found by regex fallback, appended later)
+    // The regex fallback links should not break the sort order.
+    let content = "\
+# Document
+
+See [undefined-ref] for details.
+
+Some text with [another-undef-ref] here.
+
+Short text [link](https://github.com/example/repo/blob/master/keps/sig-node/very-long-name).
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    // Verify links are sorted by line number
+    for i in 1..ctx.links.len() {
+        assert!(
+            ctx.links[i].line >= ctx.links[i - 1].line,
+            "ctx.links must be sorted by line; link[{}].line={} < link[{}].line={}",
+            i,
+            ctx.links[i].line,
+            i - 1,
+            ctx.links[i - 1].line,
+        );
+    }
+
+    // Verify images are sorted by line number
+    for i in 1..ctx.images.len() {
+        assert!(
+            ctx.images[i].line >= ctx.images[i - 1].line,
+            "ctx.images must be sorted by line; image[{}].line={} < image[{}].line={}",
+            i,
+            ctx.images[i].line,
+            i - 1,
+            ctx.images[i - 1].line,
+        );
+    }
+}
+
+/// Regression test: inline link URL subtraction must work even when regex-fallback
+/// reference links from earlier lines are present. Without proper sorting, binary
+/// search in calculate_text_only_length misses the inline link.
+#[test]
+fn test_md013_url_subtraction_with_earlier_reference_links() {
+    // Line 7 is ~95 chars raw, but text-only (without URL) is ~35 chars.
+    // The undefined references on lines 3 and 5 are picked up by regex fallback.
+    let content = "\
+# Document
+
+See [undefined-ref] for details.
+
+Some text with [another-undef-ref] here.
+
+Short text [link](https://github.com/example/repo/blob/master/keps/sig-node/very-long-name).
+";
+    let rule = MD013LineLength::new(80, true, true, true, false);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // Line 7 should NOT produce a warning because the text-only length (excluding URL)
+    // is well under 80 characters.
+    let line7_warnings: Vec<_> = result.iter().filter(|w| w.line == 7).collect();
+    assert!(
+        line7_warnings.is_empty(),
+        "Line 7 should not trigger MD013 — text-only length (excluding URL) is <= 80; got: {:?}",
+        line7_warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}

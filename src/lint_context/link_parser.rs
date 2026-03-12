@@ -341,6 +341,10 @@ pub(super) fn parse_links<'a>(
         }
     }
 
+    // Sort by line number so binary search consumers work correctly.
+    // Regex fallback links (appended after pulldown-cmark links) may be on earlier lines.
+    links.sort_by_key(|l| (l.line, l.byte_offset));
+
     (links, broken_links, footnote_refs)
 }
 
@@ -538,6 +542,10 @@ pub(super) fn parse_images<'a>(
             });
         }
     }
+
+    // Sort by line number so binary search consumers work correctly.
+    // Regex fallback images (appended after pulldown-cmark images) may be on earlier lines.
+    images.sort_by_key(|i| (i.line, i.byte_offset));
 
     images
 }
