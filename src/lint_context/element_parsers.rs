@@ -325,19 +325,12 @@ pub(super) fn parse_html_tags(
             continue;
         }
 
-        // Find which line this tag is on
-        let mut line_num = 1;
-        let mut col_start = match_start;
-        let mut col_end = match_end;
-        for (idx, line_info) in lines.iter().enumerate() {
-            if match_start >= line_info.byte_offset {
-                line_num = idx + 1;
-                col_start = match_start - line_info.byte_offset;
-                col_end = match_end - line_info.byte_offset;
-            } else {
-                break;
-            }
-        }
+        // Find which line this tag is on using binary search
+        let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
+        let line_idx = line_idx.saturating_sub(1);
+        let line_num = line_idx + 1;
+        let col_start = match_start - lines[line_idx].byte_offset;
+        let col_end = match_end - lines[line_idx].byte_offset;
 
         html_tags.push(HtmlTag {
             line: line_num,
@@ -453,19 +446,13 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
             "other"
         };
 
-        // Find which line this URL is on
-        let mut line_num = 1;
-        let mut col_start = match_start;
-        let mut col_end = match_end;
-        for (idx, line_info) in lines.iter().enumerate() {
-            if match_start >= line_info.byte_offset {
-                line_num = idx + 1;
-                col_start = match_start - line_info.byte_offset;
-                col_end = match_end - line_info.byte_offset;
-            } else {
-                break;
-            }
-        }
+        // Find which line this URL is on using binary search
+        let line_idx = lines
+            .partition_point(|info| info.byte_offset <= match_start)
+            .saturating_sub(1);
+        let line_num = line_idx + 1;
+        let col_start = match_start - lines[line_idx].byte_offset;
+        let col_end = match_end - lines[line_idx].byte_offset;
 
         bare_urls.push(BareUrl {
             line: line_num,
@@ -507,19 +494,13 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
 
         let email = full_match.as_str();
 
-        // Find which line this email is on
-        let mut line_num = 1;
-        let mut col_start = match_start;
-        let mut col_end = match_end;
-        for (idx, line_info) in lines.iter().enumerate() {
-            if match_start >= line_info.byte_offset {
-                line_num = idx + 1;
-                col_start = match_start - line_info.byte_offset;
-                col_end = match_end - line_info.byte_offset;
-            } else {
-                break;
-            }
-        }
+        // Find which line this email is on using binary search
+        let line_idx = lines
+            .partition_point(|info| info.byte_offset <= match_start)
+            .saturating_sub(1);
+        let line_num = line_idx + 1;
+        let col_start = match_start - lines[line_idx].byte_offset;
+        let col_end = match_end - lines[line_idx].byte_offset;
 
         bare_urls.push(BareUrl {
             line: line_num,
