@@ -443,25 +443,21 @@ impl MD005ListIndent {
             .map(|(ln, _, _, item)| (*ln, item.is_ordered))
             .collect();
 
+        // Collect parent-level items sorted by line number for binary search
+        let parent_items: Vec<(usize, usize)> = all_list_items
+            .iter()
+            .filter(|(ln, _, _, _)| level_map.get(ln) == Some(&parent_level))
+            .map(|(ln, _, _, item)| (*ln, item.content_column))
+            .collect();
+
         let mut parent_content_groups: ParentContentGroups<'a> = HashMap::new();
 
         for (line_num, indent, line_info) in group {
             let item_is_ordered = is_ordered_map.get(line_num).copied().unwrap_or(false);
 
-            // Find the most recent item at parent_level before this line
-            let mut parent_content_col: Option<usize> = None;
-
-            for (prev_line, _, _, list_item) in all_list_items.iter().rev() {
-                if *prev_line >= *line_num {
-                    continue;
-                }
-                if let Some(&prev_level) = level_map.get(prev_line)
-                    && prev_level == parent_level
-                {
-                    parent_content_col = Some(list_item.content_column);
-                    break;
-                }
-            }
+            // Find the most recent parent-level item before this line using binary search
+            let idx = parent_items.partition_point(|&(ln, _)| ln < *line_num);
+            let parent_content_col = if idx > 0 { Some(parent_items[idx - 1].1) } else { None };
 
             if let Some(parent_col) = parent_content_col {
                 parent_content_groups
@@ -624,12 +620,10 @@ impl MD005ListIndent {
     fn check_list_block_group(
         &self,
         ctx: &crate::lint_context::LintContext,
+        cache: &LineCacheInfo,
         group: &[&crate::lint_context::ListBlock],
         warnings: &mut Vec<LintWarning>,
     ) -> Result<(), LintError> {
-        // Build cache once for O(n) preprocessing instead of O(n²) scanning
-        let cache = LineCacheInfo::new(ctx);
-
         // First pass: collect all candidate items without filtering
         // We need to process in line order so parents are seen before children
         let mut candidate_items: Vec<(
@@ -840,12 +834,15 @@ impl MD005ListIndent {
 
         let mut warnings = Vec::new();
 
+        // Build cache once for all groups instead of per-group
+        let cache = LineCacheInfo::new(ctx);
+
         // Group consecutive list blocks that should be treated as one logical structure
         // This is needed because mixed list types (ordered/unordered) get split into separate blocks
         let block_groups = self.group_related_list_blocks(&ctx.list_blocks);
 
         for group in block_groups {
-            self.check_list_block_group(ctx, &group, &mut warnings)?;
+            self.check_list_block_group(ctx, &cache, &group, &mut warnings)?;
         }
 
         Ok(warnings)

@@ -76,6 +76,14 @@ impl MD054LinkImageStyle {
         Self { config }
     }
 
+    /// Convert a byte offset to a 1-indexed character column within its line.
+    /// Only called for disallowed links (cold path), so O(line_length) is fine.
+    fn byte_to_char_col(content: &str, byte_offset: usize) -> usize {
+        let before = &content[..byte_offset];
+        let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        before[last_newline..].chars().count() + 1
+    }
+
     /// Check if a style is allowed based on configuration
     fn is_style_allowed(&self, style: &str) -> bool {
         match style {
@@ -88,16 +96,6 @@ impl MD054LinkImageStyle {
             _ => false,
         }
     }
-}
-
-/// Convert a byte offset in the content to a 1-indexed (line, column) pair.
-/// Column is measured in characters, not bytes.
-fn byte_offset_to_line_col(content: &str, byte_offset: usize) -> (usize, usize) {
-    let before = &content[..byte_offset];
-    let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
-    let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let col = before[last_newline..].chars().count() + 1;
-    (line, col)
 }
 
 impl Rule for MD054LinkImageStyle {
@@ -154,7 +152,7 @@ impl Rule for MD054LinkImageStyle {
                             _ => continue,
                         };
 
-                        let (start_line, start_col) = byte_offset_to_line_col(content, start_byte);
+                        let (start_line, _) = ctx.offset_to_line_col(start_byte);
 
                         // Filter out links in frontmatter or code blocks
                         if ctx
@@ -165,7 +163,10 @@ impl Rule for MD054LinkImageStyle {
                         }
 
                         if !self.is_style_allowed(style) {
-                            let (end_line, end_col) = byte_offset_to_line_col(content, end_byte);
+                            // Compute character-based columns for the warning
+                            let start_col = Self::byte_to_char_col(content, start_byte);
+                            let (end_line, _) = ctx.offset_to_line_col(end_byte);
+                            let end_col = Self::byte_to_char_col(content, end_byte);
 
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
