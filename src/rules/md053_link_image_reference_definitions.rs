@@ -1,7 +1,6 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_line_range;
-use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -10,8 +9,7 @@ use std::sync::LazyLock;
 // Shortcut reference links: [reference] - must not be followed by another bracket
 // Allow references followed by punctuation like colon, period, comma (e.g., "[reference]:", "[reference].")
 // Don't exclude references followed by ": " in the middle of a line (only at start of line)
-static SHORTCUT_REFERENCE_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(?<!\!)\[([^\]]+)\](?!\[)").unwrap());
+static SHORTCUT_REFERENCE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]").unwrap());
 
 // Link/image reference definition format: [reference]: URL
 static REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
@@ -356,11 +354,24 @@ impl MD053LinkImageReferenceDefinitions {
                 continue;
             }
 
-            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line_content).flatten() {
+            for caps in SHORTCUT_REFERENCE_REGEX.captures_iter(line_content) {
                 if let Some(full_match) = caps.get(0)
                     && let Some(ref_id_match) = caps.get(1)
                 {
-                    let match_byte_offset = line_info.byte_offset + full_match.start();
+                    let match_start = full_match.start();
+
+                    // Negative lookbehind: skip if preceded by ! (image syntax)
+                    if match_start > 0 && line_content.as_bytes()[match_start - 1] == b'!' {
+                        continue;
+                    }
+
+                    // Negative lookahead: skip if followed by [ (full reference link)
+                    let match_end = full_match.end();
+                    if match_end < line_content.len() && line_content.as_bytes()[match_end] == b'[' {
+                        continue;
+                    }
+
+                    let match_byte_offset = line_info.byte_offset + match_start;
 
                     // Binary search for code span containment
                     let in_code_span = span_ranges
