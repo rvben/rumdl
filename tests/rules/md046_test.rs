@@ -220,63 +220,52 @@ fn test_unclosed_tilde_code_block() {
 }
 
 #[test]
-fn test_nested_code_block_opening() {
+fn test_nested_code_block_not_detected_by_md046() {
+    // Nested fence collision detection is handled by MD070, not MD046
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "# Test\n\n```bash\n\n```markdown\n\n# Hello world\n\n```\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 1, "Should detect exactly one nested code block issue");
-    assert_eq!(
-        result[0].line, 3,
-        "Should flag the opening line (```bash) not the nested line"
-    );
+    // MD046 should not produce "should be closed before" warnings
+    let nested_warnings: Vec<_> = result
+        .iter()
+        .filter(|w| w.message.contains("should be closed before"))
+        .collect();
     assert!(
-        result[0]
-            .message
-            .contains("Code block '```' should be closed before starting new one at line 5"),
-        "Should explain the problem clearly"
-    );
-
-    // Test fix - should add closing fence before the nested opening
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(
-        fixed.contains("```bash\n\n```\n\n```markdown"),
-        "Should close bash block before markdown block"
+        nested_warnings.is_empty(),
+        "MD046 should not detect nested fences (MD070 handles this)"
     );
 }
 
 #[test]
-fn test_nested_code_block_different_languages() {
+fn test_nested_code_block_different_languages_no_md046_warning() {
+    // Nested fence collision is handled by MD070, not MD046
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```python\n\n```javascript\ncode here\n```\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 1, "Should detect nested opening");
-    assert_eq!(result[0].line, 1, "Should flag the opening python block");
-    assert!(
-        result[0]
-            .message
-            .contains("Code block '```' should be closed before starting new one at line 3")
-    );
+    let nested_warnings: Vec<_> = result
+        .iter()
+        .filter(|w| w.message.contains("should be closed before"))
+        .collect();
+    assert!(nested_warnings.is_empty(), "MD046 should not detect nested fences");
 }
 
 #[test]
-fn test_nested_markdown_blocks_allowed() {
-    // This tests that we're detecting ALL nested openings, including markdown
-    // The user's requirement was that nested openings should be flagged "unless the code block is 'markdown' type"
-    // But based on our conversation, we're now flagging ALL nested openings
+fn test_nested_markdown_blocks_no_md046_warning() {
+    // Nested fence collision is handled by MD070, not MD046
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```bash\n\n```markdown\n# Example\n```\n```\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // This test case has both nested opening AND unclosed blocks, so we get multiple warnings
-    assert!(!result.is_empty(), "Should detect at least the nested markdown opening");
-    // Find the nested opening warning (should be on line 1)
-    let nested_warning = result.iter().find(|w| w.line == 1);
-    assert!(nested_warning.is_some(), "Should flag the opening bash block");
+    let nested_warnings: Vec<_> = result
+        .iter()
+        .filter(|w| w.message.contains("should be closed before"))
+        .collect();
+    assert!(nested_warnings.is_empty(), "MD046 should not detect nested fences");
 }
 
 #[test]
@@ -313,16 +302,19 @@ fn main() {
 }
 
 #[test]
-fn test_nested_same_language() {
-    // Test nested blocks with same language (not markdown)
+fn test_nested_same_language_no_md046_warning() {
+    // Nested fence collision is handled by MD070, not MD046
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let content = "```python\n\n```python\nprint('nested')\n```";
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 1, "Should flag nested non-markdown blocks");
-    assert!(result[0].message.contains("should be closed before starting new one"));
+    let nested_warnings: Vec<_> = result
+        .iter()
+        .filter(|w| w.message.contains("should be closed before"))
+        .collect();
+    assert!(nested_warnings.is_empty(), "MD046 should not detect nested fences");
 }
 
 #[test]

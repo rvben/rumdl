@@ -1,12 +1,13 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 /// Rule MD070: Nested code fence collision detection
 ///
 /// Detects when a fenced code block contains fence markers that would cause
 /// premature closure. Suggests using longer fences to avoid this issue.
 ///
-/// Only checks markdown-related blocks (empty language, "markdown", "md")
-/// since other languages don't use fence syntax.
+/// Checks languages where triple backtick sequences commonly appear:
+/// markdown, Python, JavaScript, shell, Rust, Go, and others with multiline
+/// strings, heredocs, template literals, or doc comments.
 ///
 /// See [docs/md070.md](../../docs/md070.md) for full documentation.
 #[derive(Clone, Default)]
@@ -18,9 +19,85 @@ impl MD070NestedCodeFence {
     }
 
     /// Check if the given language should be checked for nested fences.
-    /// Only markdown-related blocks can have fence collisions.
+    /// Covers languages where triple backtick sequences commonly appear in source:
+    /// multiline strings with embedded markdown, heredocs, doc comments, template
+    /// literals, and data formats with multiline string values.
     fn should_check_language(lang: &str) -> bool {
-        lang.is_empty() || lang.eq_ignore_ascii_case("markdown") || lang.eq_ignore_ascii_case("md")
+        let base = lang.split_whitespace().next().unwrap_or("");
+        matches!(
+            base.to_ascii_lowercase().as_str(),
+            // Documentation / markup
+            ""
+                | "markdown"
+                | "md"
+                | "mdx"
+                | "text"
+                | "txt"
+                | "plain"
+                // Multiline strings / docstrings
+                | "python"
+                | "py"
+                | "ruby"
+                | "rb"
+                | "perl"
+                | "pl"
+                | "php"
+                | "lua"
+                | "r"
+                | "rmd"
+                | "rmarkdown"
+                // Template literals / raw strings
+                | "javascript"
+                | "js"
+                | "jsx"
+                | "mjs"
+                | "cjs"
+                | "typescript"
+                | "ts"
+                | "tsx"
+                | "mts"
+                | "rust"
+                | "rs"
+                | "go"
+                | "golang"
+                | "swift"
+                | "kotlin"
+                | "kt"
+                | "kts"
+                | "java"
+                | "csharp"
+                | "cs"
+                | "c#"
+                | "scala"
+                // Shell heredocs
+                | "shell"
+                | "sh"
+                | "bash"
+                | "zsh"
+                | "fish"
+                | "powershell"
+                | "ps1"
+                | "pwsh"
+                // Data / config formats
+                | "yaml"
+                | "yml"
+                | "toml"
+                | "json"
+                | "jsonc"
+                | "json5"
+                // Template engines
+                | "jinja"
+                | "jinja2"
+                | "handlebars"
+                | "hbs"
+                | "liquid"
+                | "nunjucks"
+                | "njk"
+                | "ejs"
+                // Terminal output
+                | "console"
+                | "terminal"
+        )
     }
 
     /// Find the maximum fence length of same-character fences in the content
@@ -82,6 +159,29 @@ impl MD070NestedCodeFence {
         }
 
         max_fence
+    }
+
+    /// Find the user's intended closing fence when a collision is detected.
+    /// Searches past the first (premature) closing fence for the last bare
+    /// fence of the same type before hitting a new opening fence.
+    fn find_intended_close(
+        lines: &[&str],
+        first_close: usize,
+        fence_char: char,
+        fence_length: usize,
+        opening_indent: usize,
+    ) -> usize {
+        let mut intended_close = first_close;
+        for (j, line_j) in lines.iter().enumerate().skip(first_close + 1) {
+            if Self::is_closing_fence(line_j, fence_char, fence_length) {
+                intended_close = j;
+            } else if Self::parse_fence_line(line_j)
+                .is_some_and(|(ind, ch, _, info)| ind <= opening_indent && ch == fence_char && !info.is_empty())
+            {
+                break;
+            }
+        }
+        intended_close
     }
 
     /// Parse a fence marker from a line, returning (indent, fence_char, fence_length, info_string)
@@ -204,25 +304,62 @@ impl Rule for MD070NestedCodeFence {
                         if let Some((collision_line_offset, _collision_length)) =
                             Self::find_fence_collision(&block_content, fence_char, fence_length)
                         {
-                            let safe_length = Self::find_safe_fence_length(&block_content, fence_char) + 1;
-                            let suggested_fence: String = std::iter::repeat_n(fence_char, safe_length).collect();
-                            let current_fence: String = std::iter::repeat_n(fence_char, fence_length).collect();
-
                             let collision_line_num = block_start + 1 + collision_line_offset + 1; // 1-indexed
 
-                            // Single warning with clear message
-                            // Format matches other rules: "Problem description — solution"
+                            // Find the user's intended closing fence (may be past the
+                            // CommonMark-visible close when inner ``` causes premature closure)
+                            let indent = line.len() - line.trim_start().len();
+                            let intended_close =
+                                Self::find_intended_close(lines, end_line, fence_char, fence_length, indent);
+
+                            // Compute safe fence length from the full intended content
+                            let full_content: String = if block_start + 1 < intended_close {
+                                lines[(block_start + 1)..intended_close].join("\n")
+                            } else {
+                                block_content.clone()
+                            };
+                            let safe_length = Self::find_safe_fence_length(&full_content, fence_char) + 1;
+                            let suggested_fence: String = std::iter::repeat_n(fence_char, safe_length).collect();
+
+                            // Build a Fix that replaces the block from opening fence
+                            // through the intended closing fence. This must be safe for
+                            // direct application by the LSP code action path.
+                            let open_byte_start = ctx.line_index.get_line_start_byte(block_start + 1).unwrap_or(0);
+                            let close_byte_end = ctx
+                                .line_index
+                                .get_line_start_byte(intended_close + 2)
+                                .unwrap_or(ctx.content.len());
+
+                            let indent_str = &line[..indent];
+                            let closing_line = lines[intended_close];
+                            let closing_indent = &closing_line[..closing_line.len() - closing_line.trim_start().len()];
+                            let mut replacement = format!("{indent_str}{suggested_fence}");
+                            if !info_string.is_empty() {
+                                replacement.push_str(info_string);
+                            }
+                            replacement.push('\n');
+                            for content_line in &lines[(block_start + 1)..intended_close] {
+                                replacement.push_str(content_line);
+                                replacement.push('\n');
+                            }
+                            replacement.push_str(closing_indent);
+                            replacement.push_str(&suggested_fence);
+                            replacement.push('\n');
+
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
                                 message: format!(
-                                    "Nested {current_fence} at line {collision_line_num} closes block prematurely — use {suggested_fence} for outer fence"
+                                    "Code block contains fence markers at line {collision_line_num} that interfere with block parsing — use {suggested_fence} for outer fence"
                                 ),
                                 line: block_start + 1,
                                 column: 1,
-                                end_line: end_line + 1, // Span includes both fences
-                                end_column: lines[end_line].len() + 1,
+                                end_line: intended_close + 1,
+                                end_column: lines[intended_close].len() + 1,
                                 severity: Severity::Warning,
-                                fix: None, // Fix is handled by the fix() method which updates both fences
+                                fix: Some(Fix {
+                                    range: (open_byte_start..close_byte_end),
+                                    replacement,
+                                }),
                             });
                         }
                     }
@@ -305,20 +442,8 @@ impl Rule for MD070NestedCodeFence {
 
                         // Check for fence collision
                         if Self::find_fence_collision(&block_content, fence_char, fence_length).is_some() {
-                            // When there's a collision, find the INTENDED closing fence
-                            // This is the last matching closing fence at similar indentation
-                            let mut intended_close = end_line;
-                            for (j, line_j) in lines.iter().enumerate().skip(end_line + 1) {
-                                if Self::is_closing_fence(line_j, fence_char, fence_length) {
-                                    intended_close = j;
-                                    // Don't break - we want the last one in a reasonable range
-                                    // But stop if we hit another opening fence at same indent
-                                } else if Self::parse_fence_line(line_j).is_some_and(|(ind, ch, _, info)| {
-                                    ind <= indent && ch == fence_char && !info.is_empty()
-                                }) {
-                                    break; // Hit a new block, stop looking
-                                }
-                            }
+                            let intended_close =
+                                Self::find_intended_close(lines, end_line, fence_char, fence_length, indent);
 
                             // Get content between opening and intended close
                             let full_block_content: String = if block_start + 1 < intended_close {
@@ -420,11 +545,51 @@ mod tests {
     }
 
     #[test]
-    fn test_no_collision_non_doc_language() {
-        // Python is not checked for nested fences
-        let content = "```python\n```bash\necho hello\n```\n```\n";
+    fn test_no_collision_unchecked_language() {
+        // C is not checked for nested fences (triple backticks don't appear in C source)
+        let content = "```c\n```bash\necho hello\n```\n```\n";
         let result = run_check(content).unwrap();
-        assert!(result.is_empty(), "Non-doc language should not be checked");
+        assert!(result.is_empty(), "Unchecked language should not trigger");
+    }
+
+    #[test]
+    fn test_collision_python_language() {
+        // Python is checked — triple-quoted strings commonly contain markdown
+        let content = "```python\n```json\n{}\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Python should be checked for nested fences");
+        assert!(result[0].message.contains("````"));
+    }
+
+    #[test]
+    fn test_collision_javascript_language() {
+        let content = "```javascript\n```html\n<div></div>\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "JavaScript should be checked for nested fences");
+    }
+
+    #[test]
+    fn test_collision_shell_language() {
+        let content = "```bash\n```yaml\nkey: val\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Shell should be checked for nested fences");
+    }
+
+    #[test]
+    fn test_collision_rust_language() {
+        let content = "```rust\n```toml\n[dep]\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Rust should be checked for nested fences");
+    }
+
+    #[test]
+    fn test_no_collision_assembly_language() {
+        // Assembly, C, SQL etc. should NOT be checked
+        for lang in ["asm", "c", "cpp", "sql", "css", "fortran"] {
+            let content = format!("```{lang}\n```inner\ncontent\n```\n```\n");
+            let result = run_check(&content).unwrap();
+            assert!(result.is_empty(), "{lang} should not be checked for nested fences");
+        }
     }
 
     #[test]
@@ -432,8 +597,8 @@ mod tests {
         let content = "```markdown\n```python\ncode()\n```\n```\n";
         let result = run_check(content).unwrap();
         assert_eq!(result.len(), 1, "Should emit single warning for collision");
-        assert!(result[0].message.contains("Nested"));
-        assert!(result[0].message.contains("closes block prematurely"));
+        assert!(result[0].message.contains("fence markers at line"));
+        assert!(result[0].message.contains("interfere with block parsing"));
         assert!(result[0].message.contains("use ````"));
     }
 
@@ -872,5 +1037,150 @@ b()
         // Empty
         let ctx4 = LintContext::new("", crate::config::MarkdownFlavor::Standard, None);
         assert!(rule.should_skip(&ctx4), "Should skip empty content");
+    }
+
+    #[test]
+    fn test_python_triplestring_fence_collision_fix() {
+        // Reproduces GitHub issue #518: Python triple-quoted strings with embedded
+        // markdown cause premature fence closure
+        let content = "# Test\n\n```python\ndef f():\n    text = \"\"\"\n```json\n{}\n```\n\"\"\"\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1, "Should detect collision in python block");
+        assert!(result[0].fix.is_some(), "Warning should be marked as fixable");
+
+        let fixed = run_fix(content).unwrap();
+        assert!(
+            fixed.contains("````python"),
+            "Should upgrade opening fence to 4 backticks"
+        );
+        assert!(
+            fixed.contains("````\n") || fixed.ends_with("````"),
+            "Should upgrade closing fence to 4 backticks"
+        );
+        // Content between fences should be preserved
+        assert!(fixed.contains("```json"), "Inner fences should be preserved as content");
+    }
+
+    #[test]
+    fn test_warning_is_fixable() {
+        // All MD070 warnings must have fix.is_some() so the fix coordinator calls fix()
+        let content = "```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].fix.is_some(),
+            "MD070 warnings must be marked fixable for the fix coordinator"
+        );
+    }
+
+    #[test]
+    fn test_fix_via_warning_struct_is_safe() {
+        // The Fix on warnings is used directly by the LSP code action path.
+        // It must produce valid output (not delete the fence or corrupt the file).
+        let content = "```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let fix = result[0].fix.as_ref().unwrap();
+        // Apply the Fix directly (simulating LSP path)
+        let mut fixed = String::new();
+        fixed.push_str(&content[..fix.range.start]);
+        fixed.push_str(&fix.replacement);
+        fixed.push_str(&content[fix.range.end..]);
+
+        // The fixed content should have upgraded fences
+        assert!(
+            fixed.contains("````markdown"),
+            "Direct Fix application should upgrade opening fence, got: {fixed}"
+        );
+        assert!(
+            fixed.contains("````\n") || fixed.ends_with("````"),
+            "Direct Fix application should upgrade closing fence, got: {fixed}"
+        );
+        // Content should be preserved
+        assert!(
+            fixed.contains("```python"),
+            "Inner content should be preserved, got: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_via_warning_struct_python_block() {
+        // Test the LSP code action path for a Python block where CommonMark's
+        // closing fence differs from the user's intended closing fence.
+        // CommonMark sees: ```python (line 1) closed by bare ``` (line 6).
+        // User intended: ```python (line 1) closed by ``` (line 10).
+        let content = "```python\ndef f():\n    text = \"\"\"\n```json\n{}\n```\n\"\"\"\n    print(text)\nf()\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let fix = result[0].fix.as_ref().unwrap();
+        let mut fixed = String::new();
+        fixed.push_str(&content[..fix.range.start]);
+        fixed.push_str(&fix.replacement);
+        fixed.push_str(&content[fix.range.end..]);
+
+        // The Fix must cover the full intended block (lines 1-10), not just
+        // the CommonMark-visible block (lines 1-6). Verify the fixed content
+        // has one code block containing ALL the Python code.
+        assert!(
+            fixed.starts_with("````python\n"),
+            "Should upgrade opening fence, got:\n{fixed}"
+        );
+        assert!(
+            fixed.contains("````\n") || fixed.trim_end().ends_with("````"),
+            "Should upgrade closing fence, got:\n{fixed}"
+        );
+        // ALL Python code must be between the fences
+        let fence_start = fixed.find("````python\n").unwrap();
+        let after_open = fence_start + "````python\n".len();
+        let close_pos = fixed[after_open..]
+            .find("\n````\n")
+            .or_else(|| fixed[after_open..].find("\n````"));
+        assert!(
+            close_pos.is_some(),
+            "Should have closing fence after content, got:\n{fixed}"
+        );
+        let block_content = &fixed[after_open..after_open + close_pos.unwrap()];
+        assert!(
+            block_content.contains("print(text)"),
+            "print(text) must be inside the code block, got block:\n{block_content}"
+        );
+        assert!(
+            block_content.contains("f()"),
+            "f() must be inside the code block, got block:\n{block_content}"
+        );
+        assert!(
+            block_content.contains("```json"),
+            "Inner fences must be preserved as content, got block:\n{block_content}"
+        );
+    }
+
+    #[test]
+    fn test_fix_via_apply_warning_fixes() {
+        // End-to-end test of the LSP fix path using apply_warning_fixes
+        let content = "```markdown\n```python\ncode()\n```\n```\n";
+        let result = run_check(content).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let fixed = crate::utils::fix_utils::apply_warning_fixes(content, &result).unwrap();
+        assert!(
+            fixed.contains("````markdown"),
+            "apply_warning_fixes should upgrade opening fence"
+        );
+        assert!(
+            fixed.contains("````\n") || fixed.ends_with("````"),
+            "apply_warning_fixes should upgrade closing fence"
+        );
+
+        // Re-check should find no issues
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD070NestedCodeFence::new();
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            result2.is_empty(),
+            "Re-check after LSP fix should find no issues, got: {:?}",
+            result2.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
     }
 }

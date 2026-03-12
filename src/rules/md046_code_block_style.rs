@@ -640,96 +640,8 @@ impl MD046CodeBlockStyle {
             });
         }
 
-        // Check for nested fence issues (same fence char with >= length inside a block)
-        // This uses a separate pass with manual parsing, but only for fences that
-        // pulldown-cmark recognized as valid code blocks
-        // Skip entirely if document has markdown documentation blocks
-        if has_markdown_doc_block {
-            return Ok(warnings);
-        }
-
-        for (block_start, block_end, fence_marker, opening_line_idx, is_fenced, is_markdown_doc) in &code_blocks {
-            if !is_fenced {
-                continue;
-            }
-
-            // Skip nested fence detection for markdown documentation blocks
-            if *is_markdown_doc {
-                continue;
-            }
-
-            let opening_line = lines.get(*opening_line_idx).unwrap_or(&"");
-
-            let fence_char = fence_marker.chars().next().unwrap_or('`');
-            let fence_length = fence_marker.len();
-
-            // Check lines within this code block for potential nested fences
-            for (i, line) in lines.iter().enumerate() {
-                let line_start = ctx.line_offsets.get(i).copied().unwrap_or(0);
-                let line_end = ctx.line_offsets.get(i + 1).copied().unwrap_or(ctx.content.len());
-
-                // Skip if line is not inside this code block (excluding opening/closing lines)
-                if line_start <= *block_start || line_end >= *block_end {
-                    continue;
-                }
-
-                // Skip lines inside HTML comments
-                if let Some(line_info) = ctx.lines.get(i)
-                    && line_info.in_html_comment
-                {
-                    continue;
-                }
-
-                let trimmed = line.trim();
-
-                // Check if this looks like a fence with same char and >= length
-                if (trimmed.starts_with("```") || trimmed.starts_with("~~~"))
-                    && trimmed.starts_with(&fence_char.to_string())
-                {
-                    let inner_fence_length = trimmed.chars().take_while(|&c| c == fence_char).count();
-                    let after_fence = &trimmed[inner_fence_length..];
-
-                    // Only flag if same char, >= length, and has language (opening fence pattern)
-                    if inner_fence_length >= fence_length
-                        && !after_fence.trim().is_empty()
-                        && !after_fence.contains('`')
-                    {
-                        // Check if it looks like a valid language identifier
-                        let identifier = after_fence.trim();
-                        let looks_like_language =
-                            identifier.chars().next().is_some_and(|c| c.is_alphabetic() || c == '#')
-                                && identifier.len() <= 30
-                                && identifier.chars().all(|c| c.is_alphanumeric() || "-_+#. ".contains(c));
-
-                        if looks_like_language {
-                            let (start_line, start_col, end_line, end_col) =
-                                calculate_line_range(*opening_line_idx + 1, opening_line);
-
-                            let line_start_byte = ctx.line_index.get_line_start_byte(i + 1).unwrap_or(0);
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                message: format!(
-                                    "Code block '{fence_marker}' should be closed before starting new one at line {}",
-                                    i + 1
-                                ),
-                                severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: (line_start_byte..line_start_byte),
-                                    replacement: format!("{fence_marker}\n\n"),
-                                }),
-                            });
-
-                            break; // Only report first nested issue per block
-                        }
-                    }
-                }
-            }
-        }
+        // Nested fence collision detection is handled by MD070, which provides
+        // better diagnostics and auto-fix (suggesting longer outer fences).
 
         Ok(warnings)
     }
@@ -995,29 +907,6 @@ impl Rule for MD046CodeBlockStyle {
         let content = ctx.content;
         if content.is_empty() {
             return Ok(String::new());
-        }
-
-        // First check if we have nested fence issues that need special handling
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx)?;
-
-        // If we have nested fence warnings, apply those fixes first
-        if !unclosed_warnings.is_empty() {
-            // Check if any warnings are about nested fences (not just unclosed blocks)
-            for warning in &unclosed_warnings {
-                if warning
-                    .message
-                    .contains("should be closed before starting new one at line")
-                {
-                    // Apply the nested fence fix
-                    if let Some(fix) = &warning.fix {
-                        let mut result = String::new();
-                        result.push_str(&content[..fix.range.start]);
-                        result.push_str(&fix.replacement);
-                        result.push_str(&content[fix.range.start..]);
-                        return Ok(result);
-                    }
-                }
-            }
         }
 
         let lines = ctx.raw_lines();
