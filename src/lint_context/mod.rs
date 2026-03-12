@@ -84,6 +84,7 @@ pub struct LintContext<'a> {
     mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (Quarto: @key, [@key])
     shortcode_ranges: Vec<(usize, usize)>, // Pre-computed Hugo/Quarto shortcode ranges ({{< ... >}} and {{% ... %}})
+    code_span_byte_ranges: Vec<(usize, usize)>, // Pre-computed code span byte ranges from pulldown-cmark
     inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
 }
@@ -537,6 +538,7 @@ impl<'a> LintContext<'a> {
             mdx_comment_ranges,
             citation_ranges,
             shortcode_ranges,
+            code_span_byte_ranges: code_span_ranges,
             inline_config,
             obsidian_comment_ranges,
         }
@@ -550,6 +552,11 @@ impl<'a> LintContext<'a> {
         let idx = ranges.partition_point(|&(start, _)| start <= pos);
         // If idx == 0, no range starts at or before pos
         idx > 0 && pos < ranges[idx - 1].1
+    }
+
+    /// Check if a byte position is within a code span. O(log n).
+    pub fn is_in_code_span_byte(&self, pos: usize) -> bool {
+        Self::binary_search_ranges(&self.code_span_byte_ranges, pos)
     }
 
     /// Check if `pos` is inside any link byte range. O(log n).

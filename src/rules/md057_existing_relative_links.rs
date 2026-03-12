@@ -6,7 +6,6 @@
 use crate::rule::{
     CrossFileScope, Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
 };
-use crate::utils::element_cache::ElementCache;
 use crate::workspace_index::{FileIndex, extract_cross_file_links};
 use regex::Regex;
 use std::collections::HashMap;
@@ -445,9 +444,6 @@ impl Rule for MD057ExistingRelativeLinks {
             // Use LineIndex for correct position calculation across all line ending types
             let line_index = &ctx.line_index;
 
-            // Create element cache once for all links
-            let element_cache = ElementCache::new(content);
-
             // Pre-collected lines from context
             let lines = ctx.raw_lines();
 
@@ -488,7 +484,7 @@ impl Rule for MD057ExistingRelativeLinks {
                     let absolute_start_pos = line_start_byte + start_pos;
 
                     // Skip if this link is in a code span
-                    if element_cache.is_in_code_span(absolute_start_pos) {
+                    if ctx.is_in_code_span_byte(absolute_start_pos) {
                         continue;
                     }
 

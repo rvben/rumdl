@@ -111,6 +111,7 @@ impl CodeBlockUtils {
 
         // Sort by start position (should already be sorted, but ensure consistency)
         blocks.sort_by_key(|&(start, _)| start);
+        spans.sort_by_key(|&(start, _)| start);
         details.sort_by_key(|d| d.start);
         (blocks, spans, details)
     }

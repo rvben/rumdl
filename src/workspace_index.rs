@@ -25,7 +25,6 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::lint_context::LintContext;
-use crate::utils::element_cache::ElementCache;
 
 // =============================================================================
 // URL Decoding Helper
@@ -149,7 +148,6 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
 
     let mut links = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
-    let element_cache = ElementCache::new(content);
     let line_index = &ctx.line_index;
 
     // Track which lines we've already processed to avoid duplicates
@@ -182,7 +180,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
             let absolute_start_pos = line_start_byte + start_pos;
 
             // Skip if in code span
-            if element_cache.is_in_code_span(absolute_start_pos) {
+            if ctx.is_in_code_span_byte(absolute_start_pos) {
                 continue;
             }
 
