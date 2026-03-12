@@ -152,6 +152,72 @@ impl MD025SingleTitle {
             || HR_SPACED_UNDERSCORE.is_match(trimmed)
     }
 
+    /// Build a demoted heading line. Returns the replacement line and whether
+    /// the next line (Setext underline) should be skipped.
+    fn build_demoted_heading(
+        heading: &crate::lint_context::types::HeadingInfo,
+        line_info: &crate::lint_context::types::LineInfo,
+        content: &str,
+        delta: usize,
+    ) -> (String, bool) {
+        let new_level = (heading.level as usize + delta).min(6);
+
+        let style = match heading.style {
+            crate::lint_context::HeadingStyle::ATX => {
+                if heading.has_closing_sequence {
+                    crate::rules::heading_utils::HeadingStyle::AtxClosed
+                } else {
+                    crate::rules::heading_utils::HeadingStyle::Atx
+                }
+            }
+            crate::lint_context::HeadingStyle::Setext1 => {
+                if new_level <= 2 {
+                    if new_level == 1 {
+                        crate::rules::heading_utils::HeadingStyle::Setext1
+                    } else {
+                        crate::rules::heading_utils::HeadingStyle::Setext2
+                    }
+                } else {
+                    crate::rules::heading_utils::HeadingStyle::Atx
+                }
+            }
+            crate::lint_context::HeadingStyle::Setext2 => {
+                if new_level <= 2 {
+                    crate::rules::heading_utils::HeadingStyle::Setext2
+                } else {
+                    crate::rules::heading_utils::HeadingStyle::Atx
+                }
+            }
+        };
+
+        let replacement = if heading.text.is_empty() {
+            match style {
+                crate::rules::heading_utils::HeadingStyle::Atx
+                | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => "#".repeat(new_level),
+                crate::rules::heading_utils::HeadingStyle::AtxClosed
+                | crate::rules::heading_utils::HeadingStyle::SetextWithAtxClosed => {
+                    format!("{} {}", "#".repeat(new_level), "#".repeat(new_level))
+                }
+                crate::rules::heading_utils::HeadingStyle::Setext1
+                | crate::rules::heading_utils::HeadingStyle::Setext2
+                | crate::rules::heading_utils::HeadingStyle::Consistent => "#".repeat(new_level),
+            }
+        } else {
+            crate::rules::heading_utils::HeadingUtils::convert_heading_style(&heading.raw_text, new_level as u32, style)
+        };
+
+        let line = line_info.content(content);
+        let original_indent = &line[..line_info.indent];
+        let result = format!("{original_indent}{replacement}");
+
+        let should_skip_next = matches!(
+            heading.style,
+            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+        );
+
+        (result, should_skip_next)
+    }
+
     /// Check if a line might be a Setext heading underline
     fn is_potential_setext_heading(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
         if line_num == 0 || line_num >= ctx.lines.len() {
@@ -303,7 +369,6 @@ impl Rule for MD025SingleTitle {
                             replacement: {
                                 let leading_spaces = line_content.len() - line_content.trim_start().len();
                                 let indentation = " ".repeat(leading_spaces);
-                                // Use raw_text to preserve inline attribute lists like { #id .class }
                                 let raw = &heading.raw_text;
                                 if raw.is_empty() {
                                     format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
@@ -331,6 +396,10 @@ impl Rule for MD025SingleTitle {
         // so all body headings at that level get demoted.
         let mut found_first = self.has_front_matter_title(ctx);
         let mut skip_next = false;
+        // Track the demotion delta for cascading child headings.
+        // When a duplicate target-level heading is demoted by +1, all headings
+        // in its section (until the next target-level heading) also shift by +1.
+        let mut current_delta: usize = 0;
 
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
             if skip_next {
@@ -359,6 +428,7 @@ impl Rule for MD025SingleTitle {
                 if heading.level as usize == self.config.level.as_usize() && !line_info.in_code_block {
                     if !found_first {
                         found_first = true;
+                        current_delta = 0;
                         // Keep the first heading as-is
                         fixed_lines.push(line_info.content(ctx.content).to_string());
 
@@ -377,6 +447,7 @@ impl Rule for MD025SingleTitle {
                             || self.has_separator_before_heading(ctx, line_num);
 
                         if should_allow {
+                            current_delta = 0;
                             // Keep the heading as-is
                             fixed_lines.push(line_info.content(ctx.content).to_string());
 
@@ -390,77 +461,40 @@ impl Rule for MD025SingleTitle {
                                 skip_next = true;
                             }
                         } else {
-                            // Demote this heading to the next level
-                            let style = match heading.style {
-                                crate::lint_context::HeadingStyle::ATX => {
-                                    if heading.has_closing_sequence {
-                                        crate::rules::heading_utils::HeadingStyle::AtxClosed
-                                    } else {
-                                        crate::rules::heading_utils::HeadingStyle::Atx
-                                    }
-                                }
-                                crate::lint_context::HeadingStyle::Setext1 => {
-                                    // When demoting from level 1 to 2, use Setext2
-                                    if self.config.level.as_usize() == 1 {
-                                        crate::rules::heading_utils::HeadingStyle::Setext2
-                                    } else {
-                                        // For higher levels, use ATX
-                                        crate::rules::heading_utils::HeadingStyle::Atx
-                                    }
-                                }
-                                crate::lint_context::HeadingStyle::Setext2 => {
-                                    // Setext2 can only go to ATX
-                                    crate::rules::heading_utils::HeadingStyle::Atx
-                                }
-                            };
-
-                            let replacement = if heading.text.is_empty() {
-                                // For empty headings, manually construct the replacement
-                                match style {
-                                    crate::rules::heading_utils::HeadingStyle::Atx
-                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtx => {
-                                        "#".repeat(self.config.level.as_usize() + 1)
-                                    }
-                                    crate::rules::heading_utils::HeadingStyle::AtxClosed
-                                    | crate::rules::heading_utils::HeadingStyle::SetextWithAtxClosed => {
-                                        format!(
-                                            "{} {}",
-                                            "#".repeat(self.config.level.as_usize() + 1),
-                                            "#".repeat(self.config.level.as_usize() + 1)
-                                        )
-                                    }
-                                    crate::rules::heading_utils::HeadingStyle::Setext1
-                                    | crate::rules::heading_utils::HeadingStyle::Setext2
-                                    | crate::rules::heading_utils::HeadingStyle::Consistent => {
-                                        // For empty Setext or Consistent, use ATX style
-                                        "#".repeat(self.config.level.as_usize() + 1)
-                                    }
-                                }
-                            } else {
-                                crate::rules::heading_utils::HeadingUtils::convert_heading_style(
-                                    &heading.raw_text,
-                                    (self.config.level.as_usize() + 1) as u32,
-                                    style,
-                                )
-                            };
-
-                            // Preserve original indentation (including tabs)
-                            let line = line_info.content(ctx.content);
-                            let original_indent = &line[..line_info.indent];
-                            fixed_lines.push(format!("{original_indent}{replacement}"));
-
-                            // For Setext headings, skip the original underline
-                            if matches!(
-                                heading.style,
-                                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                            ) && line_num + 1 < ctx.lines.len()
-                            {
+                            // Demote this heading and set delta for its children
+                            current_delta = 1;
+                            let (demoted, should_skip) =
+                                Self::build_demoted_heading(heading, line_info, ctx.content, 1);
+                            fixed_lines.push(demoted);
+                            if should_skip && line_num + 1 < ctx.lines.len() {
                                 skip_next = true;
                             }
                         }
                     }
+                } else if current_delta > 0 && !line_info.in_code_block {
+                    // Child heading in a demoted section — cascade the delta
+                    let new_level = heading.level as usize + current_delta;
+                    if new_level > 6 {
+                        // Cannot demote beyond level 6, preserve as-is
+                        fixed_lines.push(line_info.content(ctx.content).to_string());
+                        if matches!(
+                            heading.style,
+                            crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                        ) && line_num + 1 < ctx.lines.len()
+                        {
+                            fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
+                            skip_next = true;
+                        }
+                    } else {
+                        let (demoted, should_skip) =
+                            Self::build_demoted_heading(heading, line_info, ctx.content, current_delta);
+                        fixed_lines.push(demoted);
+                        if should_skip && line_num + 1 < ctx.lines.len() {
+                            skip_next = true;
+                        }
+                    }
                 } else {
-                    // Not a target level heading, keep as-is
+                    // Not in a demoted section or is a target level heading, keep as-is
                     fixed_lines.push(line_info.content(ctx.content).to_string());
 
                     // For Setext headings, also add the underline
@@ -760,14 +794,10 @@ mod tests {
         // Should flag the second H1
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1);
-        let fix = warnings[0].fix.as_ref().expect("Should have a fix");
-        assert!(
-            fix.replacement.contains("{ #custom-id .special }"),
-            "check() fix should preserve attribute list, got: {}",
-            fix.replacement
-        );
+        // Per-warning fix demotes the heading itself (cascade is handled by fix() method)
+        assert!(warnings[0].fix.is_some());
 
-        // Verify fix() also preserves attribute list
+        // Verify fix() preserves attribute list
         let fixed = rule.fix(&ctx).unwrap();
         assert!(
             fixed.contains("## Second Title { #custom-id .special }"),

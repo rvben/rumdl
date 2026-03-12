@@ -154,7 +154,8 @@ fn test_md025_fix() {
     let content = "# Title 1\n# Title 2\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
+    // ## Heading is a child of demoted # Title 2, so it cascades to ###
+    assert_eq!(result, "# Title 1\n## Title 2\n### Heading\n");
 }
 
 #[test]
@@ -163,7 +164,9 @@ fn test_md025_fix_multiple() {
     let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
+    // Title 2 and Title 3 are demoted to ##, and ## Heading after Title 3
+    // gets cascaded to ### since it's a child of a demoted section
+    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n### Heading\n");
 }
 
 #[test]
@@ -184,4 +187,109 @@ fn test_md025_fix_with_indentation() {
     // Ensure there are no duplicate H1 headings (the issue this rule checks for)
     let result = rule.check(&fixed_ctx).unwrap();
     assert!(result.is_empty(), "Fixed content should have no warnings");
+}
+
+#[test]
+fn test_md025_fix_cascades_child_headings() {
+    // Issue #525: when a duplicate # is demoted to ##, its child headings
+    // must also shift down to preserve the heading hierarchy.
+    let rule = MD025SingleTitle::default();
+
+    let content = "# 1_1\n# 1_2\n## 1_2-2_1\n# 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        result, "# 1_1\n## 1_2\n### 1_2-2_1\n## 1_3\n### 1_3-2_1\n#### 1_3-2_1-3_1\n",
+        "Fix should cascade demotion to child headings"
+    );
+}
+
+#[test]
+fn test_md025_fix_cascade_no_overflow_past_level_6() {
+    // If cascading would push a heading beyond level 6, preserve it as-is
+    let rule = MD025SingleTitle::default();
+
+    let content = "# Title\n# Second\n###### Deep\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    // # Second → ## Second, but ###### Deep + 1 = 7 > 6, so preserved as ######
+    assert_eq!(result, "# Title\n## Second\n###### Deep\n");
+}
+
+#[test]
+fn test_md025_fix_cascade_resets_at_next_target_heading() {
+    // The cascade delta should apply per-section: each demoted # starts its own section
+    let rule = MD025SingleTitle::default();
+
+    let content = "# Keep\n# Demote1\n## Child1\n## Child2\n# Demote2\n## Child3\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        result,
+        "# Keep\n## Demote1\n### Child1\n### Child2\n## Demote2\n### Child3\n"
+    );
+}
+
+#[test]
+fn test_md025_fix_cascade_deep_hierarchy() {
+    let rule = MD025SingleTitle::default();
+
+    let content = "# Main\n# Other\n## H2\n### H3\n#### H4\n##### H5\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(result, "# Main\n## Other\n### H2\n#### H3\n##### H4\n###### H5\n");
+}
+
+#[test]
+fn test_md025_fix_cascade_with_frontmatter_title() {
+    let rule = MD025SingleTitle::default();
+
+    // Frontmatter title counts as first heading, so ALL body # headings get demoted
+    let content = "---\ntitle: FM Title\n---\n\n# Body H1\n## Sub\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert!(
+        result.contains("## Body H1") && result.contains("### Sub"),
+        "Frontmatter title should trigger cascade for body headings, got: {result}"
+    );
+}
+
+#[test]
+fn test_md025_fix_cascade_allowed_section_resets_delta() {
+    // Allowed sections (like "References") should not be demoted,
+    // and should reset the cascade delta for headings that follow.
+    // MD025SingleTitle::new() sets allow_document_sections: true.
+    let rule = MD025SingleTitle::new(1, "");
+
+    let content = "# Main\n# Other\n## Child\n# References\n## Ref1\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    // "Other" demoted to ##, "Child" cascaded to ###
+    // "References" is allowed (kept as #), so "Ref1" stays as ## (delta reset to 0)
+    assert_eq!(result, "# Main\n## Other\n### Child\n# References\n## Ref1\n");
+}
+
+#[test]
+fn test_md025_fix_idempotent() {
+    // Running fix twice should produce the same result
+    let rule = MD025SingleTitle::default();
+
+    let content = "# 1_1\n# 1_2\n## 1_2-2_1\n# 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let first_fix = rule.fix(&ctx).unwrap();
+
+    let ctx2 = LintContext::new(&first_fix, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let second_fix = rule.fix(&ctx2).unwrap();
+    assert_eq!(first_fix, second_fix, "Fix should be idempotent");
+}
+
+#[test]
+fn test_md025_check_has_per_warning_fix() {
+    // Per-warning fix demotes the target heading; cascade is handled by fix() method
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n# Title 2\n## Heading\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].fix.is_some(), "Per-warning fix should exist");
 }
