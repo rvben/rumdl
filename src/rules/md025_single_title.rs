@@ -353,6 +353,37 @@ impl Rule for MD025SingleTitle {
                         heading_text.len(),
                     );
 
+                    // For Setext headings, the fix range must cover both
+                    // the text line and the underline line
+                    let is_setext = matches!(
+                        heading.style,
+                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                    );
+                    let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
+                        // Cover text line + underline line
+                        let text_range = ctx.line_index.line_content_range(line_num + 1);
+                        let underline_range = ctx.line_index.line_content_range(line_num + 2);
+                        text_range.start..underline_range.end
+                    } else {
+                        ctx.line_index.line_content_range(line_num + 1)
+                    };
+
+                    let replacement = {
+                        let leading_spaces = line_content.len() - line_content.trim_start().len();
+                        let indentation = " ".repeat(leading_spaces);
+                        let raw = &heading.raw_text;
+                        if raw.is_empty() {
+                            format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
+                        } else {
+                            format!(
+                                "{}{} {}",
+                                indentation,
+                                "#".repeat(self.config.level.as_usize() + 1),
+                                raw
+                            )
+                        }
+                    };
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message: format!(
@@ -365,22 +396,8 @@ impl Rule for MD025SingleTitle {
                         end_column: end_col,
                         severity: Severity::Error,
                         fix: Some(Fix {
-                            range: ctx.line_index.line_content_range(line_num + 1),
-                            replacement: {
-                                let leading_spaces = line_content.len() - line_content.trim_start().len();
-                                let indentation = " ".repeat(leading_spaces);
-                                let raw = &heading.raw_text;
-                                if raw.is_empty() {
-                                    format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
-                                } else {
-                                    format!(
-                                        "{}{} {}",
-                                        indentation,
-                                        "#".repeat(self.config.level.as_usize() + 1),
-                                        raw
-                                    )
-                                }
-                            },
+                            range: fix_range,
+                            replacement,
                         }),
                     });
                 }
@@ -410,16 +427,21 @@ impl Rule for MD025SingleTitle {
             // Skip lines where this rule is disabled by inline config
             if ctx.inline_config().is_rule_disabled(self.name(), line_num + 1) {
                 fixed_lines.push(line_info.content(ctx.content).to_string());
-                // For Setext headings, also preserve the underline
-                if let Some(heading) = &line_info.heading
-                    && matches!(
+                if let Some(heading) = &line_info.heading {
+                    // A target-level heading in a disabled region is preserved as-is,
+                    // so it resets the cascade delta (it's not demoted)
+                    if heading.level as usize == self.config.level.as_usize() {
+                        current_delta = 0;
+                    }
+                    // For Setext headings, also preserve the underline
+                    if matches!(
                         heading.style,
                         crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    )
-                    && line_num + 1 < ctx.lines.len()
-                {
-                    fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
-                    skip_next = true;
+                    ) && line_num + 1 < ctx.lines.len()
+                    {
+                        fixed_lines.push(ctx.lines[line_num + 1].content(ctx.content).to_string());
+                        skip_next = true;
+                    }
                 }
                 continue;
             }

@@ -293,3 +293,98 @@ fn test_md025_check_has_per_warning_fix() {
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].fix.is_some(), "Per-warning fix should exist");
 }
+
+#[test]
+fn test_md025_fix_setext_child_under_demoted_section() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title\n# Other\nSetext Child\n-------------\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    // Setext Child is level 2, cascaded to level 3 → must convert to ATX
+    assert!(
+        result.contains("### Setext Child"),
+        "Setext child should cascade to ATX level 3, got: {result}"
+    );
+    assert!(
+        !result.contains("-------------"),
+        "Setext underline must not appear in output, got: {result}"
+    );
+}
+
+#[test]
+fn test_md025_fix_level2_config_cascades() {
+    let rule = MD025SingleTitle::new(2, "");
+    let content = "# H1\n## First\n### Child1\n## Dup\n### Child2\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    // ## First kept, ## Dup demoted to ###, ### Child2 cascaded to ####
+    assert_eq!(result, "# H1\n## First\n### Child1\n### Dup\n#### Child2\n");
+}
+
+#[test]
+fn test_md025_fix_atx_closed_child_cascades() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Keep\n# Demote\n## Child ##\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(result, "# Keep\n## Demote\n### Child ###\n");
+}
+
+#[test]
+fn test_md025_fix_code_block_inside_demoted_section() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Keep\n# Demote\n```\n## Not a heading\n```\n## Real Child\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert!(
+        result.contains("## Not a heading"),
+        "Heading in code block must not be demoted, got: {result}"
+    );
+    assert!(
+        result.contains("### Real Child"),
+        "Real child heading must be cascaded, got: {result}"
+    );
+}
+
+#[test]
+fn test_md025_fix_inline_disable_resets_cascade() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title\n# Dup\n## Child\n<!-- markdownlint-disable MD025 -->\n# Preserved\n## Under\n<!-- markdownlint-enable MD025 -->\n## After\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    // # Dup demoted to ##, ## Child cascaded to ###
+    assert!(result.contains("## Dup"), "Dup should be demoted, got: {result}");
+    assert!(result.contains("### Child"), "Child should cascade, got: {result}");
+    // # Preserved is in a disabled region, kept as-is, resets delta
+    assert!(
+        result.contains("# Preserved"),
+        "Preserved heading must stay as-is, got: {result}"
+    );
+    // ## Under is after delta reset, should stay as ##
+    assert!(
+        result.contains("## Under"),
+        "Under should not cascade (delta reset), got: {result}"
+    );
+}
+
+#[test]
+fn test_md025_per_warning_fix_setext_includes_underline() {
+    // Per-warning fix for Setext duplicate must cover both text + underline
+    let rule = MD025SingleTitle::default();
+    let content = "# First ATX\n\nDuplicate Setext\n================\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1);
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // Apply the fix and verify no stray underline
+    let mut fixed = ctx.content.to_string();
+    fixed.replace_range(fix.range.clone(), &fix.replacement);
+    assert!(
+        !fixed.contains("================"),
+        "Per-warning fix must not leave stray Setext underline, got: {fixed}"
+    );
+    assert!(
+        fixed.contains("## Duplicate Setext"),
+        "Per-warning fix should demote to ##, got: {fixed}"
+    );
+}
