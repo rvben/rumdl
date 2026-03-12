@@ -253,13 +253,16 @@ impl TableUtils {
             // Skip lines in code blocks, code spans, or HTML comments
             let line_start = line_positions[i];
             let in_code =
-                crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start)
-                    || code_spans
-                        .iter()
-                        .any(|span| line_start >= span.byte_offset && line_start < span.byte_end);
-            let in_html_comment = html_comment_ranges
-                .iter()
-                .any(|range| line_start >= range.start && line_start < range.end);
+                crate::utils::code_block_utils::CodeBlockUtils::is_in_code_block_or_span(code_blocks, line_start) || {
+                    // Binary search on sorted code spans
+                    let idx = code_spans.partition_point(|span| span.byte_offset <= line_start);
+                    idx > 0 && line_start < code_spans[idx - 1].byte_end
+                };
+            let in_html_comment = {
+                // Binary search on sorted HTML comment ranges
+                let idx = html_comment_ranges.partition_point(|range| range.start <= line_start);
+                idx > 0 && line_start < html_comment_ranges[idx - 1].end
+            };
 
             if in_code || in_html_comment {
                 i += 1;
