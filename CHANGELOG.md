@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.47] - 2026-03-12
+
+### Fixed
+
+- **MD007**: MkDocs flavor now enforces 4-space indentation (`indent=4, style=fixed`) as required by Python-Markdown; conflicting user config emits a warning and is overridden ([#522](https://github.com/rvben/rumdl/issues/522))
+- **MD013**: Reflow fix no longer dedents continuation paragraphs after code blocks inside admonitions in list items ([#509](https://github.com/rvben/rumdl/issues/509))
+- **MD025**: Auto-fix now cascades heading demotion to child headings, preserving the document's heading hierarchy ([#525](https://github.com/rvben/rumdl/issues/525))
+- **MD070**: Fence collision detection expanded to ~50 language identifiers (Python, JS, Shell, Rust, Go, YAML, etc.) where triple backtick sequences commonly appear ([#518](https://github.com/rvben/rumdl/issues/518))
+- **MD070**: Auto-fix integration now works correctly in both CLI and LSP code action paths by including a complete `Fix` struct on warnings
+- **MD046**: Removed redundant nested fence detection that produced false positives on Python code blocks containing embedded markdown
+- **LSP**: Server now publishes empty diagnostics to invalidate client cache when switching to pull mode, preventing stale errors from persisting ([#517](https://github.com/rvben/rumdl/issues/517))
+
 ## [0.1.46] - 2026-03-11
 
 ### Added
