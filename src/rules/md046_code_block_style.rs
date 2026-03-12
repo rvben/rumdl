@@ -646,35 +646,13 @@ impl MD046CodeBlockStyle {
         Ok(warnings)
     }
 
-    fn detect_style(&self, content: &str, is_mkdocs: bool, in_jsx_context: &[bool]) -> Option<CodeBlockStyle> {
-        // Empty content has no style
-        if content.is_empty() {
+    fn detect_style(&self, lines: &[&str], is_mkdocs: bool, ictx: &IndentContext) -> Option<CodeBlockStyle> {
+        if lines.is_empty() {
             return None;
         }
 
-        let lines: Vec<&str> = content.lines().collect();
         let mut fenced_count = 0;
         let mut indented_count = 0;
-
-        // Pre-compute list, tab, and admonition contexts for efficiency
-        let in_list_context = self.precompute_block_continuation_context(&lines);
-        let in_tab_context = if is_mkdocs {
-            self.precompute_mkdocs_tab_context(&lines)
-        } else {
-            vec![false; lines.len()]
-        };
-        let in_admonition_context = if is_mkdocs {
-            self.precompute_mkdocs_admonition_context(&lines)
-        } else {
-            vec![false; lines.len()]
-        };
-
-        let ictx = IndentContext {
-            in_list_context: &in_list_context,
-            in_tab_context: &in_tab_context,
-            in_admonition_context: &in_admonition_context,
-            in_jsx_context,
-        };
 
         // Count all code block occurrences (prevalence-based approach)
         let mut in_fenced = false;
@@ -690,7 +668,7 @@ impl MD046CodeBlockStyle {
                     // Closing fence
                     in_fenced = false;
                 }
-            } else if !in_fenced && self.is_indented_code_block_with_context(&lines, i, is_mkdocs, &ictx) {
+            } else if !in_fenced && self.is_indented_code_block_with_context(lines, i, is_mkdocs, ictx) {
                 // Count each continuous indented block once
                 if !prev_was_indented {
                     indented_count += 1;
@@ -702,22 +680,15 @@ impl MD046CodeBlockStyle {
         }
 
         if fenced_count == 0 && indented_count == 0 {
-            // No code blocks found
             None
         } else if fenced_count > 0 && indented_count == 0 {
-            // Only fenced blocks found
             Some(CodeBlockStyle::Fenced)
         } else if fenced_count == 0 && indented_count > 0 {
-            // Only indented blocks found
             Some(CodeBlockStyle::Indented)
+        } else if fenced_count >= indented_count {
+            Some(CodeBlockStyle::Fenced)
         } else {
-            // Both types found - use most prevalent
-            // In case of tie, prefer fenced (more common, widely supported)
-            if fenced_count >= indented_count {
-                Some(CodeBlockStyle::Fenced)
-            } else {
-                Some(CodeBlockStyle::Indented)
-            }
+            Some(CodeBlockStyle::Indented)
         }
     }
 }
@@ -769,20 +740,10 @@ impl Rule for MD046CodeBlockStyle {
         // Check if we're in MkDocs mode
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        // Pre-compute JSX block context from LineInfo
+        // Pre-compute all contexts once (shared between detect_style and check)
         let in_jsx_context: Vec<bool> = (0..lines.len())
             .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
             .collect();
-
-        // Determine the target style from the detected style in the document
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => self
-                .detect_style(ctx.content, is_mkdocs, &in_jsx_context)
-                .unwrap_or(CodeBlockStyle::Fenced),
-            _ => self.config.style,
-        };
-
-        // Pre-compute tab and admonition contexts for MkDocs filtering
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(lines)
         } else {
@@ -792,6 +753,22 @@ impl Rule for MD046CodeBlockStyle {
             self.precompute_mkdocs_admonition_context(lines)
         } else {
             vec![false; lines.len()]
+        };
+
+        // Determine the target style using pre-computed contexts
+        let target_style = match self.config.style {
+            CodeBlockStyle::Consistent => {
+                let in_list_context = self.precompute_block_continuation_context(lines);
+                let ictx = IndentContext {
+                    in_list_context: &in_list_context,
+                    in_tab_context: &in_tab_context,
+                    in_admonition_context: &in_admonition_context,
+                    in_jsx_context: &in_jsx_context,
+                };
+                self.detect_style(lines, is_mkdocs, &ictx)
+                    .unwrap_or(CodeBlockStyle::Fenced)
+            }
+            _ => self.config.style,
         };
 
         // Parse code blocks using pulldown-cmark to get the actual block kind
@@ -815,11 +792,13 @@ impl Rule for MD046CodeBlockStyle {
 
             match event {
                 Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {
-                    // Mark all lines in this fenced block
-                    for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-                        if line_info.byte_offset >= start && line_info.byte_offset < end {
-                            in_fenced_block[line_idx] = true;
+                    // Mark lines in this fenced block using binary search on byte offsets
+                    let first = ctx.lines.partition_point(|info| info.byte_offset < start);
+                    for line_idx in first..ctx.lines.len() {
+                        if ctx.lines[line_idx].byte_offset >= end {
+                            break;
                         }
+                        in_fenced_block[line_idx] = true;
                     }
 
                     // Flag fenced blocks when we want indented style
@@ -919,14 +898,7 @@ impl Rule for MD046CodeBlockStyle {
             .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
             .collect();
 
-        let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => self
-                .detect_style(content, is_mkdocs, &in_jsx_context)
-                .unwrap_or(CodeBlockStyle::Fenced),
-            _ => self.config.style,
-        };
-
-        // Pre-compute list, tab, and admonition contexts for efficiency
+        // Pre-compute list, tab, and admonition contexts once
         let in_list_context = self.precompute_block_continuation_context(lines);
         let in_tab_context = if is_mkdocs {
             self.precompute_mkdocs_tab_context(lines)
@@ -937,6 +909,20 @@ impl Rule for MD046CodeBlockStyle {
             self.precompute_mkdocs_admonition_context(lines)
         } else {
             vec![false; lines.len()]
+        };
+
+        let target_style = match self.config.style {
+            CodeBlockStyle::Consistent => {
+                let ictx = IndentContext {
+                    in_list_context: &in_list_context,
+                    in_tab_context: &in_tab_context,
+                    in_admonition_context: &in_admonition_context,
+                    in_jsx_context: &in_jsx_context,
+                };
+                self.detect_style(lines, is_mkdocs, &ictx)
+                    .unwrap_or(CodeBlockStyle::Fenced)
+            }
+            _ => self.config.style,
         };
 
         // Categorize indented blocks:
@@ -1154,6 +1140,34 @@ impl Rule for MD046CodeBlockStyle {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    /// Test helper: detect_style with automatic context computation
+    fn detect_style_from_content(
+        rule: &MD046CodeBlockStyle,
+        content: &str,
+        is_mkdocs: bool,
+        in_jsx_context: &[bool],
+    ) -> Option<CodeBlockStyle> {
+        let lines: Vec<&str> = content.lines().collect();
+        let in_list_context = rule.precompute_block_continuation_context(&lines);
+        let in_tab_context = if is_mkdocs {
+            rule.precompute_mkdocs_tab_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+        let in_admonition_context = if is_mkdocs {
+            rule.precompute_mkdocs_admonition_context(&lines)
+        } else {
+            vec![false; lines.len()]
+        };
+        let ictx = IndentContext {
+            in_list_context: &in_list_context,
+            in_tab_context: &in_tab_context,
+            in_admonition_context: &in_admonition_context,
+            in_jsx_context,
+        };
+        rule.detect_style(&lines, is_mkdocs, &ictx)
+    }
 
     #[test]
     fn test_fenced_code_block_detection() {
@@ -1464,7 +1478,7 @@ key:
     fn test_detect_style_fenced() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```";
-        let style = rule.detect_style(content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false, &[]);
 
         assert_eq!(style, Some(CodeBlockStyle::Fenced));
     }
@@ -1473,7 +1487,7 @@ key:
     fn test_detect_style_indented() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n\nMore";
-        let style = rule.detect_style(content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false, &[]);
 
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
@@ -1482,7 +1496,7 @@ key:
     fn test_detect_style_none() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "No code blocks here";
-        let style = rule.detect_style(content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false, &[]);
 
         assert_eq!(style, None);
     }
@@ -1608,11 +1622,11 @@ Regular text
     Content in second tab"#;
 
         // In MkDocs mode, tab content should not be detected as indented code blocks
-        let style = rule.detect_style(content, true, &[]);
+        let style = detect_style_from_content(&rule, content, true, &[]);
         assert_eq!(style, None); // No code blocks detected
 
         // In standard mode, it would detect indented code blocks
-        let style = rule.detect_style(content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false, &[]);
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
 

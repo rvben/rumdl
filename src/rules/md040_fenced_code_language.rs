@@ -251,6 +251,8 @@ impl Rule for MD040FencedCodeLanguage {
             HashMap::new()
         };
 
+        let lines = ctx.raw_lines();
+
         for block in &fenced_blocks {
             // Skip if this line is in a disabled range
             if is_line_disabled(&disabled_ranges, block.line_idx) {
@@ -258,7 +260,7 @@ impl Rule for MD040FencedCodeLanguage {
             }
 
             // Get the actual line content for additional checks
-            let line = content.lines().nth(block.line_idx).unwrap_or("");
+            let line = lines.get(block.line_idx).unwrap_or(&"");
             let trimmed = line.trim();
             let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 
@@ -407,7 +409,8 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            let line = content.lines().nth(block.line_idx).unwrap_or("");
+            let fix_lines = ctx.raw_lines();
+            let line = fix_lines.get(block.line_idx).unwrap_or(&"");
             let trimmed = line.trim();
             let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 

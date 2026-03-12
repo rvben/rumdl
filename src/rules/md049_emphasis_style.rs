@@ -33,24 +33,10 @@ impl MD049EmphasisStyle {
         Self { config }
     }
 
-    /// Check if a byte position is within a link (inline links, reference links, or reference definitions)
-    fn is_in_link(&self, ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        // Check inline and reference links
-        for link in &ctx.links {
-            if link.byte_offset <= byte_pos && byte_pos < link.byte_end {
-                return true;
-            }
-        }
-
-        // Check images (which use similar syntax)
-        for image in &ctx.images {
-            if image.byte_offset <= byte_pos && byte_pos < image.byte_end {
-                return true;
-            }
-        }
-
-        // Check reference definitions [ref]: url "title" using pre-computed data (O(1) vs O(n))
-        ctx.is_in_reference_def(byte_pos)
+    /// Check if a byte position is within a link (inline links, reference links, or reference definitions).
+    /// Delegates to LintContext::is_in_link which uses O(log n) binary search.
+    fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        ctx.is_in_link(byte_pos)
     }
 
     // Collect emphasis from a single line
@@ -139,7 +125,7 @@ impl Rule for MD049EmphasisStyle {
                 return false;
             }
             // Skip if inside a link
-            if self.is_in_link(ctx, *abs_pos) {
+            if Self::is_in_link(ctx, *abs_pos) {
                 return false;
             }
             // Skip if inside MkDocs markup (Keys, Caret, Mark, icon shortcodes)
