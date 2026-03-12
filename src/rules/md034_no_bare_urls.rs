@@ -3,7 +3,6 @@
 /// See [docs/md034.md](../../docs/md034.md) for full documentation, configuration, and examples.
 use std::sync::LazyLock;
 
-use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -39,9 +38,7 @@ static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
 static REFERENCE_DEF_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)").unwrap());
 static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
-// Uses FancyRegex for negative lookahead support
-static SHORTCUT_REF_FANCY_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r#"\[([^\[\]]+)\](?!\s*[\[(])"#).unwrap());
+static SHORTCUT_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[([^\[\]]+)\]"#).unwrap());
 
 /// Reusable buffers for check_line to reduce allocations
 #[derive(Default)]
@@ -173,8 +170,13 @@ impl MD034NoBareUrls {
 
         // Also exclude shortcut reference links like [URL] - even if no definition exists,
         // the brackets indicate user intent to use markdown formatting
-        // Uses FancyRegex for negative lookahead support
-        for mat in SHORTCUT_REF_FANCY_REGEX.find_iter(line).flatten() {
+        for mat in SHORTCUT_REF_REGEX.find_iter(line) {
+            let end = mat.end();
+            // Equivalent to negative lookahead (?!\s*[\[(]): skip if followed by whitespace then ( or [
+            let next_non_ws = line[end..].bytes().find(|b| !b.is_ascii_whitespace());
+            if next_non_ws == Some(b'(') || next_non_ws == Some(b'[') {
+                continue;
+            }
             buffers.markdown_link_ranges.push((mat.start(), mat.end()));
         }
 
@@ -191,6 +193,10 @@ impl MD034NoBareUrls {
                 buffers.image_ranges.push((mat.start(), mat.end()));
             }
         }
+
+        // Sort ranges for binary search containment checks
+        buffers.markdown_link_ranges.sort_unstable_by_key(|&(s, _)| s);
+        buffers.image_ranges.sort_unstable_by_key(|&(s, _)| s);
 
         // Check if this line contains only a badge link (common pattern)
         if BADGE_LINK_LINE_REGEX.is_match(line) {
@@ -287,22 +293,14 @@ impl MD034NoBareUrls {
             // We check if the URL starts within a construct, not if it's entirely contained.
             // This handles cases where URL detection may include trailing characters
             // that extend past the construct boundary (e.g., parentheses).
-            let mut is_inside_construct = false;
-            for &(link_start, link_end) in buffers.markdown_link_ranges.iter() {
-                if start >= link_start && start < link_end {
-                    is_inside_construct = true;
-                    break;
-                }
-            }
+            // Binary search for construct containment (ranges are sorted by start)
+            let link_idx = buffers.markdown_link_ranges.partition_point(|&(s, _)| s <= start);
+            let is_inside_link = link_idx > 0 && start < buffers.markdown_link_ranges[link_idx - 1].1;
 
-            for &(img_start, img_end) in buffers.image_ranges.iter() {
-                if start >= img_start && start < img_end {
-                    is_inside_construct = true;
-                    break;
-                }
-            }
+            let img_idx = buffers.image_ranges.partition_point(|&(s, _)| s <= start);
+            let is_inside_image = img_idx > 0 && start < buffers.image_ranges[img_idx - 1].1;
 
-            if is_inside_construct {
+            if is_inside_link || is_inside_image {
                 continue;
             }
 
