@@ -1215,4 +1215,28 @@ Some text using [ref1] here.
         // [ref] is inside a code span, so the definition is unused
         assert_eq!(result.len(), 1);
     }
+
+    #[test]
+    fn test_shortcut_ref_at_byte_zero() {
+        let rule = MD053LinkImageReferenceDefinitions::default();
+        let content = "[example]\n\n[example]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "[ref] at byte 0 should be recognized as usage: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_shortcut_ref_at_end_of_line() {
+        let rule = MD053LinkImageReferenceDefinitions::default();
+        let content = "Text [example]\n\n[example]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "[ref] at end of line should be recognized as usage: {result:?}"
+        );
+    }
 }

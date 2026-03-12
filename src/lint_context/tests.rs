@@ -1008,3 +1008,74 @@ fn test_reference_lookup_o1_unicode_id() {
     assert_eq!(ctx.get_reference_url("émoji"), Some("/emoji"));
     assert_eq!(ctx.get_reference_url("ÉMOJI"), Some("/emoji")); // uppercase
 }
+
+#[test]
+fn test_is_in_link_title_multiple_ranges_binary_search() {
+    // Three reference defs with titles — verifies binary search works across all three
+    let content = "[a]: /url1 \"Title A\"\n[b]: /url2 \"Title B\"\n[c]: /url3 \"Title C\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 3, "Should have 3 reference defs");
+
+    // Position inside first title should return true
+    if let (Some(start), Some(end)) = (
+        ctx.reference_defs[0].title_byte_start,
+        ctx.reference_defs[0].title_byte_end,
+    ) {
+        assert!(ctx.is_in_link_title(start + 1), "Inside first title should return true");
+        // Position at exclusive end should return false
+        assert!(!ctx.is_in_link_title(end), "At exclusive end should return false");
+    }
+
+    // Position between titles (in URL area of def B, before its title) should return false
+    if let (Some(end_a), Some(start_b)) = (
+        ctx.reference_defs[0].title_byte_end,
+        ctx.reference_defs[1].title_byte_start,
+    ) {
+        if end_a + 1 < start_b {
+            assert!(!ctx.is_in_link_title(end_a + 1), "Between titles should return false");
+        }
+    }
+
+    // Position inside third title should return true
+    if let Some(start) = ctx.reference_defs[2].title_byte_start {
+        assert!(ctx.is_in_link_title(start + 1), "Inside third title should return true");
+    }
+}
+
+#[test]
+fn test_is_in_math_span_between_two_spans() {
+    // Position in text between two math spans should return false
+    let content = "$a$ text $b$";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let math_spans = ctx.math_spans();
+    if math_spans.len() >= 2 {
+        let between = math_spans[0].byte_end + 1;
+        assert!(
+            !ctx.is_in_math_span(between),
+            "Position between math spans should return false"
+        );
+    }
+}
+
+// =========================================================================
+// Tests for code span and HTML tag detection at boundaries
+// =========================================================================
+
+#[test]
+fn test_code_span_at_line_start() {
+    let content = "Line one\n`code` end\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let spans = ctx.code_spans();
+    let line2_spans: Vec<_> = spans.iter().filter(|s| s.line == 2).collect();
+    assert!(!line2_spans.is_empty(), "Should detect code span on line 2");
+    assert_eq!(line2_spans[0].start_col, 0, "Code span should start at column 0");
+}
+
+#[test]
+fn test_html_tag_at_byte_zero() {
+    let content = "<br/> text";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let tags = ctx.html_tags();
+    assert!(!tags.is_empty(), "Should detect HTML tag at byte 0");
+    assert_eq!(tags[0].line, 1, "Tag at byte 0 should be on line 1");
+}

@@ -780,4 +780,28 @@ Regular text[^valid] and[^missing].
             "Should find orphaned def"
         );
     }
+
+    #[test]
+    fn test_footnote_ref_at_end_of_file_no_newline() {
+        let content = "[^1]: Definition here.\n\nText with[^1]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Valid footnote pair without trailing newline should not warn: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_orphaned_footnote_ref_at_eof_no_newline() {
+        let content = "Text with[^missing]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Orphaned ref at EOF without newline should warn: {result:?}"
+        );
+    }
 }
