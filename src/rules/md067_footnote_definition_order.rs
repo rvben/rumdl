@@ -69,10 +69,14 @@ impl Rule for MD067FootnoteDefinitionOrder {
 
             for caps in FOOTNOTE_REF_PATTERN.captures_iter(line) {
                 if let Some(id_match) = caps.get(1) {
-                    // Skip if followed by : (would be a definition, not a reference)
+                    // Skip if this is a footnote definition (at line start with 0-3 spaces indent)
+                    // Also handle blockquote prefixes (e.g., "> [^id]:")
                     let full_match = caps.get(0).unwrap();
                     if line.as_bytes().get(full_match.end()) == Some(&b':') {
-                        continue;
+                        let before_match = &line[..full_match.start()];
+                        if before_match.chars().all(|c| c == ' ' || c == '>') {
+                            continue;
+                        }
                     }
 
                     let id = id_match.as_str().to_lowercase();
@@ -292,5 +296,26 @@ mod tests {
 "#;
         let warnings = check(content);
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_midline_footnote_ref_with_colon_counted_for_ordering() {
+        // Mid-line [^a]: should count as a reference for ordering purposes
+        let content = "# Test\n\nSecond ref [^b] here.\n\nFirst ref [^a]: and text.\n\n[^a]: First definition.\n[^b]: Second definition.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD067FootnoteDefinitionOrder::default();
+        let result = rule.check(&ctx).unwrap();
+        // Reference order is [^b] then [^a], but definitions are [^a] then [^b]
+        assert!(!result.is_empty(), "Should detect ordering mismatch: {result:?}");
+    }
+
+    #[test]
+    fn test_linestart_footnote_def_not_counted_as_reference_for_ordering() {
+        // [^a]: at line start is a definition, not a reference
+        let content = "# Test\n\n[^a] first ref.\n[^b] second ref.\n\n[^a]: First.\n[^b]: Second.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD067FootnoteDefinitionOrder::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Correct order should pass: {result:?}");
     }
 }

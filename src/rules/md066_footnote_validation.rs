@@ -133,10 +133,14 @@ impl Rule for MD066FootnoteValidation {
 
             for caps in FOOTNOTE_REF_PATTERN.captures_iter(line) {
                 if let Some(id_match) = caps.get(1) {
-                    // Skip if followed by : (would be a definition, not a reference)
+                    // Skip if this is a footnote definition (at line start with 0-3 spaces indent)
+                    // Also handle blockquote prefixes (e.g., "> [^id]:")
                     let full_match = caps.get(0).unwrap();
                     if line.as_bytes().get(full_match.end()) == Some(&b':') {
-                        continue;
+                        let before_match = &line[..full_match.start()];
+                        if before_match.chars().all(|c| c == ' ' || c == '>') {
+                            continue;
+                        }
                     }
 
                     let id = id_match.as_str().to_lowercase();
@@ -802,6 +806,116 @@ Regular text[^valid] and[^missing].
         assert!(
             !result.is_empty(),
             "Orphaned ref at EOF without newline should warn: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_midline_footnote_ref_with_colon_detected_as_reference() {
+        // [^note]: mid-line is a reference followed by colon, NOT a definition
+        let content = "# Test\n\nI think [^note]: this is relevant.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Mid-line [^note]: should be detected as undefined reference: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("no corresponding definition"),
+            "Should warn about missing definition: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_midline_footnote_ref_with_colon_matched_to_definition() {
+        // [^note]: mid-line is a reference; [^note]: at line start is the definition
+        let content = "# Test\n\nI think [^note]: this is relevant.\n\n[^note]: The actual definition.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Mid-line ref should match line-start definition: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_linestart_footnote_def_still_skipped_as_reference() {
+        // [^note]: at line start IS a definition and should NOT be counted as reference
+        let content = "# Test\n\n[^note]: The definition.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        // Should warn about orphaned definition (no reference)
+        assert_eq!(result.len(), 1, "Orphaned def should be flagged: {result:?}");
+        assert!(
+            result[0].message.contains("never referenced"),
+            "Should say 'never referenced': {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_indented_footnote_def_still_skipped() {
+        // [^note]: with 1-3 spaces indent is still a definition
+        let content = "# Test\n\n   [^note]: Indented definition.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        // Should be treated as an orphaned definition (no reference)
+        assert_eq!(result.len(), 1, "Indented def should still be detected: {result:?}");
+        assert!(
+            result[0].message.contains("never referenced"),
+            "Should say 'never referenced': {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_multiple_midline_refs_with_colons_on_same_line() {
+        // Both [^a]: and [^b]: mid-line should be counted as references
+        let content = "# Test\n\nText [^a]: and [^b]: more text.\n\n[^a]: Def A.\n[^b]: Def B.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Both mid-line refs should match their definitions: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_footnote_def_still_skipped() {
+        // > [^note]: inside blockquote is a definition, not a reference
+        let content = "# Test\n\n> [^note]: Definition in blockquote.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        // Orphaned definition (no reference uses it)
+        assert_eq!(
+            result.len(),
+            1,
+            "Blockquote def should be detected as orphaned: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("never referenced"),
+            "Should say 'never referenced': {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_list_item_footnote_ref_with_colon_is_reference() {
+        // - [^note]: inside a list item is a reference, not a definition
+        let content = "# Test\n\n- [^note]: list item text.\n\n[^note]: The actual definition.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD066FootnoteValidation::default();
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "List item [^note]: should be a ref matching the definition: {result:?}"
         );
     }
 }
