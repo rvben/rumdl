@@ -663,28 +663,25 @@ impl Rule for MD046CodeBlockStyle {
         let lines = ctx.raw_lines();
         let mut warnings = Vec::new();
 
-        // Check if we're in MkDocs mode
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        // Pre-compute all contexts once (shared between detect_style and check)
-        let in_jsx_context: Vec<bool> = (0..lines.len())
-            .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
-            .collect();
-        let in_tab_context = if is_mkdocs {
-            self.precompute_mkdocs_tab_context(lines)
-        } else {
-            vec![false; lines.len()]
-        };
-        let in_admonition_context = if is_mkdocs {
-            self.precompute_mkdocs_admonition_context(lines)
-        } else {
-            vec![false; lines.len()]
-        };
-
-        // Determine the target style using pre-computed contexts
+        // Determine the target style
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
                 let in_list_context = self.precompute_block_continuation_context(lines);
+                let in_jsx_context: Vec<bool> = (0..lines.len())
+                    .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
+                    .collect();
+                let in_tab_context = if is_mkdocs {
+                    self.precompute_mkdocs_tab_context(lines)
+                } else {
+                    vec![false; lines.len()]
+                };
+                let in_admonition_context = if is_mkdocs {
+                    self.precompute_mkdocs_admonition_context(lines)
+                } else {
+                    vec![false; lines.len()]
+                };
                 let ictx = IndentContext {
                     in_list_context: &in_list_context,
                     in_tab_context: &in_tab_context,
@@ -697,8 +694,16 @@ impl Rule for MD046CodeBlockStyle {
             _ => self.config.style,
         };
 
-        // Use pre-computed code block details to classify fenced vs indented blocks
-        let mut in_fenced_block = vec![false; lines.len()];
+        // Pre-compute footnote definition ranges once (O(n)) for O(log n) lookups
+        // Only needed when checking indented blocks
+        let footnote_ranges =
+            if target_style == CodeBlockStyle::Fenced && ctx.code_block_details.iter().any(|d| !d.is_fenced) {
+                compute_footnote_ranges(ctx.content)
+            } else {
+                Vec::new()
+            };
+
+        // Iterate code_block_details directly (O(k) where k is number of blocks)
         let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
         for detail in &ctx.code_block_details {
@@ -712,20 +717,9 @@ impl Rule for MD046CodeBlockStyle {
             };
 
             if detail.is_fenced {
-                // Mark lines in this fenced block using binary search on byte offsets
-                let first = ctx.lines.partition_point(|info| info.byte_offset < detail.start);
-                for line_idx in first..ctx.lines.len() {
-                    if ctx.lines[line_idx].byte_offset >= detail.end {
-                        break;
-                    }
-                    in_fenced_block[line_idx] = true;
-                }
-
-                // Flag fenced blocks when we want indented style
                 if target_style == CodeBlockStyle::Indented {
                     let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                    // Skip if inside HTML comment
                     if ctx.lines.get(start_line_idx).is_some_and(|info| info.in_html_comment) {
                         continue;
                     }
@@ -747,7 +741,7 @@ impl Rule for MD046CodeBlockStyle {
                 if target_style == CodeBlockStyle::Fenced && !reported_indented_lines.contains(&start_line_idx) {
                     let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                    // Skip if inside HTML comment, mkdocstrings, or blockquote
+                    // Skip blocks in contexts that aren't real indented code blocks
                     if ctx.lines.get(start_line_idx).is_some_and(|info| {
                         info.in_html_comment
                             || info.in_html_block
@@ -758,18 +752,18 @@ impl Rule for MD046CodeBlockStyle {
                         continue;
                     }
 
-                    // Skip if inside a footnote definition
-                    if mkdocs_footnotes::is_within_footnote_definition(ctx.content, detail.start) {
+                    // Skip if inside a footnote definition (O(log n) lookup)
+                    if is_in_footnote_range(&footnote_ranges, detail.start) {
                         continue;
                     }
 
-                    // Skip if inside MkDocs tab content
-                    if is_mkdocs && in_tab_context.get(start_line_idx).copied().unwrap_or(false) {
-                        continue;
-                    }
-
-                    // Skip if inside MkDocs admonition content
-                    if is_mkdocs && in_admonition_context.get(start_line_idx).copied().unwrap_or(false) {
+                    // Use pre-computed LineInfo for MkDocs container context
+                    if is_mkdocs
+                        && ctx
+                            .lines
+                            .get(start_line_idx)
+                            .is_some_and(|info| info.in_admonition || info.in_content_tab)
+                    {
                         continue;
                     }
 
@@ -1048,6 +1042,48 @@ impl Rule for MD046CodeBlockStyle {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
         Box::new(Self::from_config_struct(rule_config))
     }
+}
+
+/// Compute byte ranges of footnote definitions in a single O(n) pass.
+/// Returns sorted, non-overlapping (start, end) byte ranges.
+fn compute_footnote_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut footnote_start: Option<(usize, usize)> = None; // (byte_start, indent)
+
+    let mut offset = 0;
+    for line in content.split('\n') {
+        let line_end = offset + line.len();
+
+        if mkdocs_footnotes::is_footnote_definition(line) {
+            // Close previous footnote if any
+            if let Some((start, _)) = footnote_start.take() {
+                ranges.push((start, offset.saturating_sub(1)));
+            }
+            let indent = mkdocs_footnotes::get_footnote_indent(line).unwrap_or(0);
+            footnote_start = Some((offset, indent));
+        } else if let Some((_, indent)) = footnote_start {
+            if !line.trim().is_empty() && !mkdocs_footnotes::is_footnote_continuation(line, indent) {
+                // Non-continuation line ends the footnote
+                let (start, _) = footnote_start.take().unwrap();
+                ranges.push((start, offset.saturating_sub(1)));
+            }
+        }
+
+        offset = line_end + 1; // +1 for the \n
+    }
+
+    // Close final footnote
+    if let Some((start, _)) = footnote_start {
+        ranges.push((start, content.len()));
+    }
+
+    ranges
+}
+
+/// Check if a byte position falls within any footnote range using binary search.
+fn is_in_footnote_range(ranges: &[(usize, usize)], pos: usize) -> bool {
+    let idx = ranges.partition_point(|&(start, _)| start <= pos);
+    idx > 0 && pos < ranges[idx - 1].1
 }
 
 #[cfg(test)]
