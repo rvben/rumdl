@@ -43,8 +43,6 @@ static REF_DEF_PATTERN: LazyLock<Regex> =
 /// This is used to skip heading detection for lines that fall within link syntax
 /// (e.g., multiline links like `[text](url\n#fragment)`)
 pub(super) fn collect_link_byte_ranges(content: &str) -> Vec<(usize, usize)> {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-
     let mut link_ranges = Vec::new();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_WIKILINKS);
@@ -70,26 +68,32 @@ pub(super) fn collect_link_byte_ranges(content: &str) -> Vec<(usize, usize)> {
     link_ranges
 }
 
-/// Parse all links in the content
-pub(super) fn parse_links<'a>(
+/// Parse all links and images in the content in a single pulldown-cmark pass
+pub(super) fn parse_links_and_images<'a>(
     content: &'a str,
     lines: &[LineInfo],
     code_blocks: &[(usize, usize)],
     code_spans: &[CodeSpan],
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-) -> (Vec<ParsedLink<'a>>, Vec<BrokenLinkInfo>, Vec<FootnoteRef>) {
+) -> (
+    Vec<ParsedLink<'a>>,
+    Vec<ParsedImage<'a>>,
+    Vec<BrokenLinkInfo>,
+    Vec<FootnoteRef>,
+) {
     use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
     use std::collections::HashSet;
 
     let mut links = Vec::with_capacity(content.len() / 500);
+    let mut images = Vec::with_capacity(content.len() / 1000);
     let mut broken_links = Vec::new();
     let mut footnote_refs = Vec::new();
 
-    // Track byte positions of links found by pulldown-cmark
-    let mut found_positions = HashSet::new();
+    // Track byte positions found by pulldown-cmark (separate sets for links and images)
+    let mut link_found_positions = HashSet::new();
+    let mut image_found_positions = HashSet::new();
 
-    // Use pulldown-cmark's streaming parser with BrokenLink callback
     let mut options = Options::empty();
     options.insert(Options::ENABLE_WIKILINKS);
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -107,14 +111,9 @@ pub(super) fn parse_links<'a>(
     )
     .into_offset_iter();
 
-    let mut link_stack: Vec<(
-        usize,
-        usize,
-        pulldown_cmark::CowStr<'a>,
-        LinkType,
-        pulldown_cmark::CowStr<'a>,
-    )> = Vec::new();
-    let mut text_chunks: Vec<(String, usize, usize)> = Vec::new(); // (text, start, end)
+    let mut link_stack: Vec<(usize, pulldown_cmark::CowStr<'a>, LinkType, pulldown_cmark::CowStr<'a>)> = Vec::new();
+    let mut image_stack: Vec<(usize, pulldown_cmark::CowStr<'a>, LinkType, pulldown_cmark::CowStr<'a>)> = Vec::new();
+    let mut link_text_chunks: Vec<(String, usize, usize)> = Vec::new();
 
     for (event, range) in parser {
         match event {
@@ -124,33 +123,35 @@ pub(super) fn parse_links<'a>(
                 id,
                 ..
             }) => {
-                // Link start - record position, URL, and reference ID
-                link_stack.push((range.start, range.end, dest_url, link_type, id));
-                text_chunks.clear();
+                link_stack.push((range.start, dest_url, link_type, id));
+                link_text_chunks.clear();
+            }
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                id,
+                ..
+            }) => {
+                image_stack.push((range.start, dest_url, link_type, id));
             }
             Event::Text(text) if !link_stack.is_empty() => {
-                // Track text content with its byte range
-                text_chunks.push((text.to_string(), range.start, range.end));
+                link_text_chunks.push((text.to_string(), range.start, range.end));
             }
             Event::Code(code) if !link_stack.is_empty() => {
-                // Include inline code in link text (with backticks)
                 let code_text = format!("`{code}`");
-                text_chunks.push((code_text, range.start, range.end));
+                link_text_chunks.push((code_text, range.start, range.end));
             }
             Event::End(TagEnd::Link) => {
-                if let Some((start_pos, _link_start_end, url, link_type, ref_id)) = link_stack.pop() {
-                    // Skip if in HTML comment
+                if let Some((start_pos, url, link_type, ref_id)) = link_stack.pop() {
                     if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
-                        text_chunks.clear();
+                        link_text_chunks.clear();
                         continue;
                     }
 
-                    // Find line and column information
                     let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, start_pos);
 
-                    // Skip if this link is on a MkDocs snippet line
                     if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
-                        text_chunks.clear();
+                        link_text_chunks.clear();
                         continue;
                     }
 
@@ -163,8 +164,8 @@ pub(super) fn parse_links<'a>(
 
                     // Extract link text directly from source bytes to preserve escaping
                     let link_text = if matches!(link_type, LinkType::WikiLink { .. }) {
-                        if !text_chunks.is_empty() {
-                            let text: String = text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
+                        if !link_text_chunks.is_empty() {
+                            let text: String = link_text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
                             Cow::Owned(text)
                         } else {
                             Cow::Owned(url.to_string())
@@ -220,7 +221,7 @@ pub(super) fn parse_links<'a>(
                         None
                     };
 
-                    found_positions.insert(start_pos);
+                    link_found_positions.insert(start_pos);
 
                     links.push(ParsedLink {
                         line: line_num,
@@ -235,11 +236,95 @@ pub(super) fn parse_links<'a>(
                         link_type,
                     });
 
-                    text_chunks.clear();
+                    link_text_chunks.clear();
+                }
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some((start_pos, url, link_type, ref_id)) = image_stack.pop() {
+                    if CodeBlockUtils::is_in_code_block(code_blocks, start_pos) {
+                        continue;
+                    }
+
+                    if super::LintContext::is_offset_in_code_span(code_spans, start_pos) {
+                        continue;
+                    }
+
+                    if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
+                        continue;
+                    }
+
+                    let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, start_pos);
+                    let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, range.end);
+
+                    let is_reference = matches!(
+                        link_type,
+                        LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+                    );
+
+                    let alt_text = if start_pos < content.len() {
+                        let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
+
+                        let mut close_pos = None;
+                        let mut depth = 0;
+
+                        if image_bytes.len() > 2 {
+                            for (i, &byte) in image_bytes.iter().enumerate().skip(2) {
+                                let mut backslash_count = 0;
+                                let mut j = i;
+                                while j > 0 && image_bytes[j - 1] == b'\\' {
+                                    backslash_count += 1;
+                                    j -= 1;
+                                }
+                                let is_escaped = backslash_count % 2 != 0;
+
+                                if !is_escaped {
+                                    if byte == b'[' {
+                                        depth += 1;
+                                    } else if byte == b']' {
+                                        if depth == 0 {
+                                            close_pos = Some(i);
+                                            break;
+                                        } else {
+                                            depth -= 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(pos) = close_pos {
+                            Cow::Borrowed(std::str::from_utf8(&image_bytes[2..pos]).unwrap_or(""))
+                        } else {
+                            Cow::Borrowed("")
+                        }
+                    } else {
+                        Cow::Borrowed("")
+                    };
+
+                    let reference_id = if is_reference && !ref_id.is_empty() {
+                        Some(Cow::Owned(ref_id.to_lowercase()))
+                    } else if is_reference {
+                        Some(Cow::Owned(alt_text.to_lowercase()))
+                    } else {
+                        None
+                    };
+
+                    image_found_positions.insert(start_pos);
+                    images.push(ParsedImage {
+                        line: line_num,
+                        start_col: col_start,
+                        end_col: col_end,
+                        byte_offset: start_pos,
+                        byte_end: range.end,
+                        alt_text,
+                        url: Cow::Owned(url.to_string()),
+                        is_reference,
+                        reference_id,
+                        link_type,
+                    });
                 }
             }
             Event::FootnoteReference(footnote_id) => {
-                // Skip if in HTML comment
                 if is_in_html_comment_ranges(html_comment_ranges, range.start) {
                     continue;
                 }
@@ -256,13 +341,13 @@ pub(super) fn parse_links<'a>(
         }
     }
 
-    // Also find undefined references using regex
+    // Regex fallback for links: find undefined references missed by pulldown-cmark
     for cap in LINK_PATTERN.captures_iter(content) {
         let full_match = cap.get(0).unwrap();
         let match_start = full_match.start();
         let match_end = full_match.end();
 
-        if found_positions.contains(&match_start) {
+        if link_found_positions.contains(&match_start) {
             continue;
         }
 
@@ -341,145 +426,13 @@ pub(super) fn parse_links<'a>(
         }
     }
 
-    // Sort by line number so binary search consumers work correctly.
-    // Regex fallback links (appended after pulldown-cmark links) may be on earlier lines.
-    links.sort_by_key(|l| (l.line, l.byte_offset));
-
-    (links, broken_links, footnote_refs)
-}
-
-/// Parse all images in the content
-pub(super) fn parse_images<'a>(
-    content: &'a str,
-    lines: &[LineInfo],
-    code_blocks: &[(usize, usize)],
-    code_spans: &[CodeSpan],
-    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-) -> Vec<ParsedImage<'a>> {
-    use crate::utils::skip_context::is_in_html_comment_ranges;
-    use std::collections::HashSet;
-
-    let mut images = Vec::with_capacity(content.len() / 1000);
-    let mut found_positions = HashSet::new();
-
-    let parser = Parser::new(content).into_offset_iter();
-    let mut image_stack: Vec<(usize, pulldown_cmark::CowStr<'a>, LinkType, pulldown_cmark::CowStr<'a>)> = Vec::new();
-    let mut text_chunks: Vec<(String, usize, usize)> = Vec::new();
-
-    for (event, range) in parser {
-        match event {
-            Event::Start(Tag::Image {
-                link_type,
-                dest_url,
-                id,
-                ..
-            }) => {
-                image_stack.push((range.start, dest_url, link_type, id));
-                text_chunks.clear();
-            }
-            Event::Text(text) if !image_stack.is_empty() => {
-                text_chunks.push((text.to_string(), range.start, range.end));
-            }
-            Event::Code(code) if !image_stack.is_empty() => {
-                let code_text = format!("`{code}`");
-                text_chunks.push((code_text, range.start, range.end));
-            }
-            Event::End(TagEnd::Image) => {
-                if let Some((start_pos, url, link_type, ref_id)) = image_stack.pop() {
-                    if CodeBlockUtils::is_in_code_block(code_blocks, start_pos) {
-                        continue;
-                    }
-
-                    if super::LintContext::is_offset_in_code_span(code_spans, start_pos) {
-                        continue;
-                    }
-
-                    if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
-                        continue;
-                    }
-
-                    let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, start_pos);
-                    let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, range.end);
-
-                    let is_reference = matches!(
-                        link_type,
-                        LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
-                    );
-
-                    let alt_text = if start_pos < content.len() {
-                        let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
-
-                        let mut close_pos = None;
-                        let mut depth = 0;
-
-                        if image_bytes.len() > 2 {
-                            for (i, &byte) in image_bytes.iter().enumerate().skip(2) {
-                                let mut backslash_count = 0;
-                                let mut j = i;
-                                while j > 0 && image_bytes[j - 1] == b'\\' {
-                                    backslash_count += 1;
-                                    j -= 1;
-                                }
-                                let is_escaped = backslash_count % 2 != 0;
-
-                                if !is_escaped {
-                                    if byte == b'[' {
-                                        depth += 1;
-                                    } else if byte == b']' {
-                                        if depth == 0 {
-                                            close_pos = Some(i);
-                                            break;
-                                        } else {
-                                            depth -= 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if let Some(pos) = close_pos {
-                            Cow::Borrowed(std::str::from_utf8(&image_bytes[2..pos]).unwrap_or(""))
-                        } else {
-                            Cow::Borrowed("")
-                        }
-                    } else {
-                        Cow::Borrowed("")
-                    };
-
-                    let reference_id = if is_reference && !ref_id.is_empty() {
-                        Some(Cow::Owned(ref_id.to_lowercase()))
-                    } else if is_reference {
-                        Some(Cow::Owned(alt_text.to_lowercase()))
-                    } else {
-                        None
-                    };
-
-                    found_positions.insert(start_pos);
-                    images.push(ParsedImage {
-                        line: line_num,
-                        start_col: col_start,
-                        end_col: col_end,
-                        byte_offset: start_pos,
-                        byte_end: range.end,
-                        alt_text,
-                        url: Cow::Owned(url.to_string()),
-                        is_reference,
-                        reference_id,
-                        link_type,
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Regex fallback for undefined references
+    // Regex fallback for images: find undefined references missed by pulldown-cmark
     for cap in IMAGE_PATTERN.captures_iter(content) {
         let full_match = cap.get(0).unwrap();
         let match_start = full_match.start();
         let match_end = full_match.end();
 
-        if found_positions.contains(&match_start) {
+        if image_found_positions.contains(&match_start) {
             continue;
         }
 
@@ -544,10 +497,11 @@ pub(super) fn parse_images<'a>(
     }
 
     // Sort by line number so binary search consumers work correctly.
-    // Regex fallback images (appended after pulldown-cmark images) may be on earlier lines.
+    // Regex fallback entries (appended after pulldown-cmark entries) may be on earlier lines.
+    links.sort_by_key(|l| (l.line, l.byte_offset));
     images.sort_by_key(|i| (i.line, i.byte_offset));
 
-    images
+    (links, images, broken_links, footnote_refs)
 }
 
 /// Parse reference definitions

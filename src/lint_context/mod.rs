@@ -381,16 +381,17 @@ impl<'a> LintContext<'a> {
         }
 
         // Parse links, images, references, and list blocks
-        let (links, broken_links, footnote_refs) = profile_section!(
-            "Links",
+        let (links, images, broken_links, footnote_refs) = profile_section!(
+            "Links & images",
             profile,
-            link_parser::parse_links(content, &lines, &code_blocks, &code_spans, flavor, &html_comment_ranges)
-        );
-
-        let images = profile_section!(
-            "Images",
-            profile,
-            link_parser::parse_images(content, &lines, &code_blocks, &code_spans, &html_comment_ranges)
+            link_parser::parse_links_and_images(
+                content,
+                &lines,
+                &code_blocks,
+                &code_spans,
+                flavor,
+                &html_comment_ranges
+            )
         );
 
         let reference_defs = profile_section!(
