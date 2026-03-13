@@ -3,7 +3,7 @@
 //!
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
@@ -172,6 +172,10 @@ impl Rule for MD014CommandsShowOutput {
 
     fn description(&self) -> &'static str {
         "Commands in code blocks should show output"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::CodeBlock
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

@@ -2,7 +2,7 @@
 ///
 /// See [docs/md011.md](../../docs/md011.md) for full documentation, configuration, and examples.
 use crate::filtered_lines::FilteredLinesExt;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::is_in_math_context;
@@ -92,6 +92,10 @@ impl Rule for MD011NoReversedLinks {
 
     fn description(&self) -> &'static str {
         "Reversed link syntax"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

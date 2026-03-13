@@ -131,6 +131,10 @@ impl Rule for MD059LinkText {
         RuleCategory::Link
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        !ctx.likely_has_links_or_images()
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

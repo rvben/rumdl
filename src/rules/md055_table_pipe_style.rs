@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::table_utils::{TableBlock, TableUtils};
 
@@ -301,6 +301,10 @@ impl Rule for MD055TablePipeStyle {
 
     fn description(&self) -> &'static str {
         "Table pipe style should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Table
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

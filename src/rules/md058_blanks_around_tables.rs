@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use serde::{Deserialize, Serialize};
@@ -100,6 +100,10 @@ impl Rule for MD058BlanksAroundTables {
 
     fn description(&self) -> &'static str {
         "Tables should be surrounded by blank lines"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Table
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

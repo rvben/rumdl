@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
@@ -905,6 +905,10 @@ impl Rule for MD060TableFormat {
 
     fn description(&self) -> &'static str {
         "Table columns should be consistently aligned"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Table
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

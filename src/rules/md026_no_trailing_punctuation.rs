@@ -1,7 +1,7 @@
 /// Rule MD026: No trailing punctuation in headings
 ///
 /// See [docs/md026.md](../../docs/md026.md) for full documentation, configuration, and examples.
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::{LineIndex, calculate_match_range};
 use regex::Regex;
 use std::collections::HashMap;
@@ -154,6 +154,10 @@ impl Rule for MD026NoTrailingPunctuation {
 
     fn description(&self) -> &'static str {
         "Trailing punctuation in heading"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

@@ -1,5 +1,5 @@
 use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::skip_context::is_table_line;
 
 /// Rule MD076: Enforce consistent blank lines between list items
@@ -232,6 +232,14 @@ impl Rule for MD076ListItemSpacing {
 
     fn description(&self) -> &'static str {
         "List item spacing should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::List
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {

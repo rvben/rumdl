@@ -3,7 +3,7 @@
 //!
 //! See [docs/md036.md](../../docs/md036.md) for full documentation, configuration, and examples.
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_emphasis_range;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -202,6 +202,10 @@ impl Rule for MD036NoEmphasisAsHeading {
 
     fn description(&self) -> &'static str {
         "Emphasis should not be used instead of a heading"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Emphasis
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

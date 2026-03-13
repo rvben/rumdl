@@ -1,4 +1,4 @@
-use crate::rule::{CrossFileScope, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{CrossFileScope, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 use pulldown_cmark::LinkType;
@@ -486,6 +486,10 @@ impl Rule for MD051LinkFragments {
 
     fn description(&self) -> &'static str {
         "Link fragments should reference valid headings"
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

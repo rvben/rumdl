@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -87,6 +87,18 @@ impl Rule for MD066FootnoteValidation {
 
     fn description(&self) -> &'static str {
         "Footnote validation"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains("[^")
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

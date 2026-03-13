@@ -1,6 +1,6 @@
 use toml;
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_match_range;
 use std::collections::{HashMap, HashSet};
@@ -35,6 +35,10 @@ impl Rule for MD024NoDuplicateHeading {
 
     fn description(&self) -> &'static str {
         "Multiple headings with the same content"
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

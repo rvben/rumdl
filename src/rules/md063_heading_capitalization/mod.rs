@@ -11,7 +11,7 @@
 /// enabled = true
 /// style = "title_case"
 /// ```
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::LineIndex;
 use regex::Regex;
 use std::collections::HashSet;
@@ -907,6 +907,10 @@ impl Rule for MD063HeadingCapitalization {
 
     fn description(&self) -> &'static str {
         "Heading capitalization"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Heading
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

@@ -1,7 +1,7 @@
 use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -692,6 +692,10 @@ impl Rule for MD044ProperNames {
 
     fn description(&self) -> &'static str {
         "Proper names should have the correct capitalization"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

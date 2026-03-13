@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 /// Rule MD047: File should end with a single newline
 ///
@@ -14,6 +14,10 @@ impl Rule for MD047SingleTrailingNewline {
 
     fn description(&self) -> &'static str {
         "Files should end with a single newline character"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

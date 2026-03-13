@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::SHORTCUT_REF_REGEX;
@@ -838,6 +838,14 @@ impl Rule for MD052ReferenceLinkImages {
 
     fn description(&self) -> &'static str {
         "Reference links and images should use a reference that exists"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

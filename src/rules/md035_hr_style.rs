@@ -5,7 +5,7 @@
 
 use crate::utils::range_utils::calculate_line_range;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use toml;
 
 mod md035_config;
@@ -89,6 +89,10 @@ impl Rule for MD035HRStyle {
 
     fn description(&self) -> &'static str {
         "Horizontal rule style"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

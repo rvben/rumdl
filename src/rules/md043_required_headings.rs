@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_heading_range;
 use serde::{Deserialize, Serialize};
@@ -195,6 +195,10 @@ impl Rule for MD043RequiredHeadings {
 
     fn description(&self) -> &'static str {
         "Required heading structure"
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

@@ -1,6 +1,6 @@
 use crate::utils::range_utils::calculate_match_range;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -47,6 +47,10 @@ impl Rule for MD027MultipleSpacesBlockquote {
 
     fn description(&self) -> &'static str {
         "Multiple spaces after quote marker (>)"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Blockquote
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

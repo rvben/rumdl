@@ -3,7 +3,7 @@
 //!
 //! See [docs/md074.md](../../docs/md074.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::mkdocs_config::find_mkdocs_yml;
 use serde::Deserialize;
@@ -424,9 +424,11 @@ impl Rule for MD074MkDocsNav {
     }
 
     fn category(&self) -> RuleCategory {
-        // Use Other to bypass content-based filtering since this rule
-        // validates mkdocs.yml, not links in the markdown content
         RuleCategory::Other
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

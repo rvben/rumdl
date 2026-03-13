@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::code_fence_utils::CodeFenceStyle;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
@@ -176,6 +176,10 @@ impl Rule for MD048CodeFenceStyle {
 
     fn description(&self) -> &'static str {
         "Code fence style should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::CodeBlock
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

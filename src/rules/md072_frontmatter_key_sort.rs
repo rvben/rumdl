@@ -196,12 +196,12 @@ impl MD072FrontmatterKeySort {
     fn find_first_unsorted_indexed_pair<'a>(
         keys: &'a [(usize, String)],
         key_order: Option<&[String]>,
-    ) -> Option<(&'a str, &'a str)> {
+    ) -> Option<(usize, &'a str, &'a str)> {
         for i in 1..keys.len() {
             let pos_curr = Self::key_sort_position(&keys[i].1, key_order);
             let pos_prev = Self::key_sort_position(&keys[i - 1].1, key_order);
             if pos_curr < pos_prev {
-                return Some((&keys[i].1, &keys[i - 1].1));
+                return Some((keys[i].0, &keys[i].1, &keys[i - 1].1));
             }
         }
         None
@@ -255,10 +255,13 @@ impl Rule for MD072FrontmatterKeySort {
 
                 let keys = Self::extract_yaml_keys(&frontmatter_lines);
                 let key_order = self.config.key_order.as_deref();
-                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys, key_order)
+                let Some((key_idx, out_of_place, should_come_after)) =
+                    Self::find_first_unsorted_indexed_pair(&keys, key_order)
                 else {
                     return Ok(warnings);
                 };
+                // key_idx is relative to frontmatter_lines; +2 for 1-indexing and the opening ---
+                let key_line = key_idx + 2;
 
                 let has_comments = Self::has_comments(&frontmatter_lines);
 
@@ -288,10 +291,10 @@ impl Rule for MD072FrontmatterKeySort {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
-                    line: 2, // First line after opening ---
+                    line: key_line,
                     column: 1,
-                    end_line: 2,
-                    end_column: 1,
+                    end_line: key_line,
+                    end_column: out_of_place.len() + 1,
                     severity: Severity::Warning,
                     fix,
                 });
@@ -304,10 +307,12 @@ impl Rule for MD072FrontmatterKeySort {
 
                 let keys = Self::extract_toml_keys(&frontmatter_lines);
                 let key_order = self.config.key_order.as_deref();
-                let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_indexed_pair(&keys, key_order)
+                let Some((key_idx, out_of_place, should_come_after)) =
+                    Self::find_first_unsorted_indexed_pair(&keys, key_order)
                 else {
                     return Ok(warnings);
                 };
+                let key_line = key_idx + 2;
 
                 let has_comments = Self::has_comments(&frontmatter_lines);
 
@@ -337,10 +342,10 @@ impl Rule for MD072FrontmatterKeySort {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
-                    line: 2, // First line after opening +++
+                    line: key_line,
                     column: 1,
-                    end_line: 2,
-                    end_column: 1,
+                    end_line: key_line,
+                    end_column: out_of_place.len() + 1,
                     severity: Severity::Warning,
                     fix,
                 });
@@ -373,10 +378,10 @@ impl Rule for MD072FrontmatterKeySort {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
-                    line: 2, // First line after opening {
+                    line: 2,
                     column: 1,
                     end_line: 2,
-                    end_column: 1,
+                    end_column: out_of_place.len() + 1,
                     severity: Severity::Warning,
                     fix,
                 });
@@ -409,6 +414,11 @@ impl Rule for MD072FrontmatterKeySort {
 
     fn category(&self) -> RuleCategory {
         RuleCategory::FrontMatter
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty()
+            || !ctx.content.starts_with("---") && !ctx.content.starts_with("+++") && !ctx.content.starts_with('{')
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

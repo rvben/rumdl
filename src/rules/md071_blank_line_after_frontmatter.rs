@@ -111,7 +111,11 @@ impl Rule for MD071BlankLineAfterFrontmatter {
     }
 
     fn category(&self) -> RuleCategory {
-        RuleCategory::Whitespace
+        RuleCategory::FrontMatter
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.starts_with("---") && !ctx.content.starts_with("+++")
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

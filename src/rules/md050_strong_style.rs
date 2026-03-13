@@ -1,6 +1,6 @@
 use crate::utils::range_utils::calculate_match_range;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::code_block_utils::StrongSpanDetail;
 use crate::utils::skip_context::{is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup};
@@ -228,6 +228,10 @@ impl Rule for MD050StrongStyle {
 
     fn description(&self) -> &'static str {
         "Strong emphasis style should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Emphasis
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

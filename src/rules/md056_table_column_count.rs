@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_line_range;
 use crate::utils::table_utils::TableUtils;
 
@@ -129,6 +129,10 @@ impl Rule for MD056TableColumnCount {
 
     fn description(&self) -> &'static str {
         "Table column count should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Table
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

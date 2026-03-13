@@ -5,7 +5,7 @@ use crate::utils::LineIndex;
 use crate::utils::range_utils::calculate_line_range;
 use std::collections::HashSet;
 
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 
 mod md012_config;
@@ -168,6 +168,10 @@ impl Rule for MD012NoMultipleBlanks {
 
     fn description(&self) -> &'static str {
         "Multiple consecutive blank lines"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

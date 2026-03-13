@@ -1,7 +1,7 @@
 use crate::filtered_lines::FilteredLinesExt;
 use regex::{Regex, RegexBuilder};
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 
 mod md061_config;
@@ -136,8 +136,15 @@ impl Rule for MD061ForbiddenTerms {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // No auto-fix for this rule - return content unchanged
         Ok(ctx.content.to_string())
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

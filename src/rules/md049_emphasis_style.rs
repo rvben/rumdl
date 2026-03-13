@@ -1,5 +1,5 @@
 use crate::filtered_lines::FilteredLinesExt;
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
 use crate::utils::skip_context::is_in_mkdocs_markup;
@@ -76,6 +76,10 @@ impl Rule for MD049EmphasisStyle {
 
     fn description(&self) -> &'static str {
         "Emphasis style should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Emphasis
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

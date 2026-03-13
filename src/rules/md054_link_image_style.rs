@@ -3,7 +3,7 @@
 //!
 //! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use pulldown_cmark::LinkType;
 
 mod md054_config;
@@ -105,6 +105,10 @@ impl Rule for MD054LinkImageStyle {
 
     fn description(&self) -> &'static str {
         "Link and image style should be consistent"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

@@ -1,4 +1,4 @@
-use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 /// Rule MD065: Blanks around horizontal rules
 ///
@@ -95,6 +95,15 @@ impl Rule for MD065BlanksAroundHorizontalRules {
 
     fn description(&self) -> &'static str {
         "Horizontal rules should be surrounded by blank lines"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Whitespace
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty()
+            || !ctx.content.contains("---") && !ctx.content.contains("***") && !ctx.content.contains("___")
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

@@ -237,6 +237,10 @@ impl Rule for MD077ListContinuationIndent {
         RuleCategory::List
     }
 
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || ctx.list_blocks.is_empty()
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

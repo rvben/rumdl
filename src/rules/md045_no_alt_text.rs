@@ -1,4 +1,4 @@
-use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 pub mod md045_config;
 use md045_config::MD045Config;
@@ -41,6 +41,10 @@ impl Rule for MD045NoAltText {
 
     fn description(&self) -> &'static str {
         "Images should have alternate text (alt text)"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Image
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {

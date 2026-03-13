@@ -1,4 +1,4 @@
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_line_range;
 use regex::Regex;
@@ -451,6 +451,14 @@ impl Rule for MD053LinkImageReferenceDefinitions {
 
     fn description(&self) -> &'static str {
         "Link and image reference definitions should be needed"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Link
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
     }
 
     /// Check the content for unused and duplicate link/image reference definitions.

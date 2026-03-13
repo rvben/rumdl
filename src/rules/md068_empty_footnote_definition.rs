@@ -19,7 +19,7 @@
 //! [^1]: This is the footnote content.
 //! ```
 
-use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::md066_footnote_validation::{FOOTNOTE_DEF_PATTERN, strip_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
 use regex::Regex;
@@ -94,6 +94,18 @@ impl Rule for MD068EmptyFootnoteDefinition {
 
     fn description(&self) -> &'static str {
         "Footnote definitions should not be empty"
+    }
+
+    fn category(&self) -> RuleCategory {
+        RuleCategory::Other
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        FixCapability::Unfixable
+    }
+
+    fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.content.is_empty() || !ctx.content.contains("[^")
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
