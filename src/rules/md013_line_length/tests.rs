@@ -5646,3 +5646,113 @@ fn test_reflow_nested_checkbox_mkdocs_continuation() {
         }
     }
 }
+
+#[test]
+fn test_reflow_checkbox_mkdocs_idempotent() {
+    // Reflowing a mkdocs checkbox twice should produce identical output
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: crate::types::LineLength::from_const(80),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // First pass: reflow a long checkbox item
+    let content =
+        "- [ ] This checkbox item has a long description that definitely needs to be reflowed across multiple lines.\n";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+    let first_fix = rule.fix(&ctx).unwrap();
+
+    // Verify first fix uses 4-space indent
+    for line in first_fix.lines().skip(1) {
+        if !line.is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 4,
+                "First fix should use 4-space indent, got {indent} in: {line:?}"
+            );
+        }
+    }
+
+    // Second pass: the fixed output should not trigger further warnings
+    let ctx2 = crate::lint_context::LintContext::new(&first_fix, crate::config::MarkdownFlavor::MkDocs, None);
+    let second_fix = rule.fix(&ctx2).unwrap();
+    assert_eq!(
+        first_fix, second_fix,
+        "MkDocs checkbox reflow should be idempotent.\nFirst:  {first_fix:?}\nSecond: {second_fix:?}"
+    );
+}
+
+#[test]
+fn test_reflow_nested_checkbox_standard_uses_content_aligned() {
+    // Standard flavor nested checkbox should use content-aligned indent (10 for "    - [ ] ")
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: crate::types::LineLength::from_const(80),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "- Parent item\n    - [ ] Nested checkbox item that is very long and needs to wrap across multiple lines properly with content alignment.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        !result.is_empty(),
+        "Should detect long nested checkbox in standard mode"
+    );
+    let fix = result[0].fix.as_ref().expect("Should have a fix");
+    // Standard uses content-aligned: "    - [ ] " = 10 chars
+    for line in fix.replacement.lines().skip(1) {
+        if !line.is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 10,
+                "Standard nested checkbox should use 10-space content-aligned indent, got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_reflow_mixed_checkbox_and_regular_mkdocs() {
+    // A list with both checkbox and regular items should handle each correctly
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: crate::types::LineLength::from_const(80),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Regular item followed by checkbox item, both long enough to wrap
+    let content = "- This regular item is long enough to need wrapping across multiple lines so we can verify indent.\n- [ ] This checkbox item is also long enough to need wrapping across multiple lines to verify indent.\n";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Check each list item's continuation indent
+    let mut in_checkbox_item = false;
+    for line in fixed.lines() {
+        if line.starts_with("- [ ] ") {
+            in_checkbox_item = true;
+        } else if line.starts_with("- ") && !line.starts_with("- [") {
+            in_checkbox_item = false;
+        } else if !line.is_empty() && line.starts_with(' ') {
+            let indent = line.len() - line.trim_start().len();
+            if in_checkbox_item {
+                assert_eq!(
+                    indent, 4,
+                    "MkDocs checkbox continuation should be 4-space, got {indent} in: {line:?}"
+                );
+            }
+            // Regular items may use 2-space or 4-space depending on mode; just verify they're indented
+            assert!(
+                indent >= 2,
+                "Continuation should be indented at least 2, got {indent} in: {line:?}"
+            );
+        }
+    }
+}

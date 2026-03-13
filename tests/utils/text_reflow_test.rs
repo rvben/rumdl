@@ -5822,3 +5822,52 @@ fn test_checkbox_idempotent_reflow_with_ordered_list() {
         "Ordered checkbox reflow should be idempotent.\nFirst:  {result1:?}\nSecond: {result2:?}"
     );
 }
+
+#[test]
+fn test_reflow_markdown_checkbox_with_max_list_indent() {
+    // When max_list_continuation_indent is set (mkdocs), checkbox items should
+    // cap continuation indent at the specified value
+    let options = ReflowOptions {
+        line_length: 60,
+        max_list_continuation_indent: Some(4),
+        ..ReflowOptions::default()
+    };
+
+    let input = "- [ ] This checkbox item has a long description that needs wrapping to multiple lines.\n";
+    let result = reflow_markdown(input, &options);
+
+    // Continuation should be 4-space, not 6-space (content-aligned)
+    for line in result.lines().skip(1) {
+        if !line.is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 4,
+                "Checkbox with max_list_indent=4 should use 4-space continuation, got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_reflow_markdown_nested_checkbox_with_max_list_indent() {
+    // Nested checkbox items should apply max_list_indent relative to nesting level
+    let options = ReflowOptions {
+        line_length: 60,
+        max_list_continuation_indent: Some(4),
+        ..ReflowOptions::default()
+    };
+
+    let input = "- Parent\n    - [ ] Nested checkbox with a long description that needs wrapping to multiple lines.\n";
+    let result = reflow_markdown(input, &options);
+
+    for line in result.lines() {
+        // Find continuation lines of the nested checkbox (indented, not a list marker)
+        if line.starts_with("        ") && !line.trim_start().starts_with('-') {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 8,
+                "Nested checkbox with max_list_indent=4 should use 8-space (4 nesting + 4), got {indent} in: {line:?}"
+            );
+        }
+    }
+}
