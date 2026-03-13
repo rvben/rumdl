@@ -117,11 +117,17 @@ impl<'a> LintContext<'a> {
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
         // Detect code blocks and code spans once and cache them
-        let (mut code_blocks, code_span_ranges, code_block_details, strong_spans, line_to_list, list_start_values) = profile_section!(
+        let parse_result = profile_section!(
             "Code blocks",
             profile,
             CodeBlockUtils::detect_code_blocks_and_spans(content)
         );
+        let mut code_blocks = parse_result.code_blocks;
+        let code_span_ranges = parse_result.code_spans;
+        let code_block_details = parse_result.code_block_details;
+        let strong_spans = parse_result.strong_spans;
+        let line_to_list = parse_result.line_to_list;
+        let list_start_values = parse_result.list_start_values;
 
         // Pre-compute HTML comment ranges ONCE for all operations
         let html_comment_ranges = profile_section!(

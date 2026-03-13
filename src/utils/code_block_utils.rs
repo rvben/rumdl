@@ -42,15 +42,21 @@ pub type LineToListMap = std::collections::HashMap<usize, usize>;
 /// Ordered list start values: maps list ID to the start value
 pub type ListStartValues = std::collections::HashMap<usize, u64>;
 
-/// Extended return type including per-block details, strong spans, and list membership
-pub type CodeRangesWithDetails = (
-    Vec<(usize, usize)>,
-    Vec<(usize, usize)>,
-    Vec<CodeBlockDetail>,
-    Vec<StrongSpanDetail>,
-    LineToListMap,
-    ListStartValues,
-);
+/// Result of the central pulldown-cmark parse, capturing all data needed by individual rules
+pub struct ParseResult {
+    /// Code block byte ranges (start, end)
+    pub code_blocks: Vec<(usize, usize)>,
+    /// Inline code span byte ranges (start, end)
+    pub code_spans: Vec<(usize, usize)>,
+    /// Detailed code block info (fenced vs indented, info string)
+    pub code_block_details: Vec<CodeBlockDetail>,
+    /// Strong emphasis span details
+    pub strong_spans: Vec<StrongSpanDetail>,
+    /// Ordered list membership: maps line number (1-indexed) to list ID
+    pub line_to_list: LineToListMap,
+    /// Ordered list start values: maps list ID to start value
+    pub list_start_values: ListStartValues,
+}
 
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,13 +83,12 @@ impl CodeBlockUtils {
     ///
     /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
-        let (blocks, _, _, _, _, _) = Self::detect_code_blocks_and_spans(content);
-        blocks
+        Self::detect_code_blocks_and_spans(content).code_blocks
     }
 
     /// Returns code block ranges, inline code span ranges, and detailed code block info
     /// in a single pulldown-cmark pass.
-    pub fn detect_code_blocks_and_spans(content: &str) -> CodeRangesWithDetails {
+    pub fn detect_code_blocks_and_spans(content: &str) -> ParseResult {
         let mut blocks = Vec::new();
         let mut spans = Vec::new();
         let mut details = Vec::new();
@@ -181,7 +186,14 @@ impl CodeBlockUtils {
         spans.sort_by_key(|&(start, _)| start);
         details.sort_by_key(|d| d.start);
         strong_spans.sort_by_key(|s| s.start);
-        (blocks, spans, details, strong_spans, line_to_list, list_start_values)
+        ParseResult {
+            code_blocks: blocks,
+            code_spans: spans,
+            code_block_details: details,
+            strong_spans,
+            line_to_list,
+            list_start_values,
+        }
     }
 
     /// Check if a position is within a code block (for compatibility)
