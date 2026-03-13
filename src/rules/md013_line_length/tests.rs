@@ -641,6 +641,131 @@ fn test_link_ref_definition_exempt_in_non_strict_mode() {
     assert_eq!(result.len(), 0);
 }
 
+// =============================================================================
+// Issue #528: link reference definitions with titles should be exempt
+// =============================================================================
+
+#[test]
+fn test_link_ref_definition_with_double_quoted_title_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = r#"[polars.expr.qcut]: https://docs.pola.rs/api/python/stable/reference/expressions/api/polars.Expr.qcut.html "Bin continuous values into discrete categories based on their quantiles.""#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with double-quoted title should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_with_single_quoted_title_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "[reference]: https://example.com/very/long/url/that/exceeds/the/configured/limit 'A single-quoted title that makes the line even longer'";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with single-quoted title should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_with_parenthesized_title_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "[reference]: https://example.com/very/long/url/that/exceeds/the/configured/limit (A parenthesized title that makes the line even longer)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with parenthesized title should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_non_http_url_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "[reference]: /very/long/relative/path/to/some/document/that/exceeds/the/limit/by/far.md";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with non-HTTP URL should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_non_http_url_with_title_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content =
+        "[reference]: /very/long/relative/path/to/some/document/that/exceeds.md \"A long title for the reference\"";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with non-HTTP URL and title should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_angle_bracket_url_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = "[reference]: <https://example.com/very/long/url/that/exceeds/the/configured/limit>";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with angle-bracket URL should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_with_title_in_list_item_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, false);
+    let content = r#"- [polars.expr.qcut]: https://docs.pola.rs/api/python/stable/reference/api/polars.Expr.qcut.html "Bin continuous values""#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with title inside list item should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_with_title_exempt_in_strict_mode() {
+    let rule = MD013LineLength::new(50, false, false, false, true); // strict=true
+    let content = r#"[reference]: https://example.com/very/long/url/that/exceeds/the/configured/limit "Title""#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with title should be exempt even in strict mode, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_link_ref_definition_no_space_after_colon_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, true); // strict=true
+    let content = "[reference]:https://example.com/very/long/url/that/exceeds/the/configured/limit";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Link ref definition with no space after colon should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_bracket_colon_non_link_ref_not_exempt() {
+    let rule = MD013LineLength::new(50, false, false, false, true); // strict=true
+    let content = "[WARNING]: Do not use this deprecated API in production code or any other environment because it will cause severe data loss";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Non-link-ref-def text starting with [WORD]: should NOT be exempt from MD013"
+    );
+}
+
 #[test]
 fn test_trailing_word_replacement_preserves_warning_length() {
     // The warning message should report ACTUAL line length, not the check_length

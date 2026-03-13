@@ -342,7 +342,8 @@ pub fn is_blank_in_blockquote_context(line: &str) -> bool {
 
 // MD013 specific patterns
 pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
-pub static LINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap());
+pub static LINK_REF_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^\[.*?\]:\s*\S+(\s+["'(].*)?\s*$"#).unwrap());
 pub static ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap()
 });
