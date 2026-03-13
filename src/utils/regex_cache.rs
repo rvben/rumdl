@@ -272,29 +272,11 @@ pub static XMPP_URI_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(XMPP_UR
 
 // Heading patterns
 pub static ATX_HEADING_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+|$)").unwrap());
-pub static CLOSED_ATX_HEADING_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)(#{1,6})(\s+)(.*)(\s+)(#+)(\s*)$").unwrap());
-pub static SETEXT_HEADING_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)[^\s]+.*\n(\s*)(=+|-+)\s*$").unwrap());
-pub static TRAILING_PUNCTUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.,:);!?]$").unwrap());
 
-// ATX heading patterns for MD051 and other rules
-pub static ATX_HEADING_WITH_CAPTURE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap());
 // List patterns
 pub static UNORDERED_LIST_MARKER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
 pub static ORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)(\d+)([.)])(\s+)").unwrap());
-pub static LIST_MARKER_ANY_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)(?:([*+-])|(\d+)[.)])(\s+)").unwrap());
-
-// Code block patterns
-pub static FENCED_CODE_BLOCK_START_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(.*)$").unwrap());
-pub static FENCED_CODE_BLOCK_END_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)(```|~~~)(\s*)$").unwrap());
-pub static INDENTED_CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})(.*)$").unwrap());
-pub static CODE_FENCE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(`{3,}|~{3,})").unwrap());
 
 // Emphasis patterns
 
@@ -310,48 +292,13 @@ pub static DOUBLE_UNDERSCORE_EMPHASIS: LazyLock<Regex> =
 // Code block patterns
 pub static FENCED_CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap());
 pub static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```\s*$").unwrap());
-pub static ALTERNATE_FENCED_CODE_BLOCK_START: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(\s*)~~~(?:[^~\r\n]*)$").unwrap());
-pub static ALTERNATE_FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)~~~\s*$").unwrap());
-pub static INDENTED_CODE_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s{4,})").unwrap());
 
 // HTML patterns
 pub static HTML_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([a-zA-Z][^>]*)>").unwrap());
-pub static HTML_SELF_CLOSING_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<([a-zA-Z][^>]*/)>").unwrap());
-pub static HTML_TAG_FINDER: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)</?[a-zA-Z][^>]*>").unwrap());
-pub static HTML_OPENING_TAG_FINDER: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)<[a-zA-Z][^>]*>").unwrap());
 pub static HTML_TAG_QUICK_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new("(?i)</?[a-zA-Z]").unwrap());
-
-// Link patterns for MD051 and other rules
-pub static LINK_REFERENCE_DEFINITION_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[([^\]]+)\]:\s+(.+)$").unwrap());
-pub static INLINE_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap());
-pub static LINK_TEXT_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]").unwrap());
-pub static LINK_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(?<!\\)\[([^\]]*)\]\(([^)#]*)#([^)]+)\)").unwrap());
-pub static EXTERNAL_URL_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"^(https?://|ftp://|www\.|[^/]+\.[a-z]{2,})").unwrap());
 
 // Image patterns
 pub static IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap());
-
-// Whitespace patterns
-pub static TRAILING_WHITESPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+$").unwrap());
-pub static MULTIPLE_BLANK_LINES_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
-
-// Front matter patterns
-pub static FRONT_MATTER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^---\n.*?\n---\n").unwrap());
-
-// MD051 specific patterns
-pub static INLINE_CODE_REGEX: LazyLock<FancyRegex> = LazyLock::new(|| FancyRegex::new(r"`[^`]+`").unwrap());
-pub static ITALIC_ASTERISK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+?)\*").unwrap());
-pub static ITALIC_UNDERSCORE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"_([^_]+?)_").unwrap());
-pub static LINK_TEXT_FULL_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"\[([^\]]*)\]\([^)]*\)").unwrap());
-pub static STRIKETHROUGH_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"~~(.+?)~~").unwrap());
-pub static MULTIPLE_HYPHENS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-{2,}").unwrap());
-pub static TOC_SECTION_START: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^#+\s*(?:Table of Contents|Contents|TOC)\s*$").unwrap());
 
 // Blockquote patterns
 pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*>+\s*)").unwrap());
@@ -396,21 +343,10 @@ pub fn is_blank_in_blockquote_context(line: &str) -> bool {
 // MD013 specific patterns
 pub static IMAGE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^!\[.*?\]\[.*?\]$").unwrap());
 pub static LINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[.*?\]:\s*https?://\S+$").unwrap());
-/// Greedy URL pattern for finding URLs in text for length calculation.
-///
-/// Pattern `https?://\S+` matches until whitespace, which may include trailing
-/// punctuation. This is intentional for MD013 line length calculation where
-/// we replace URLs with fixed-length placeholders.
-///
-/// For precise URL extraction, use `URL_STANDARD_REGEX` instead.
-pub static URL_IN_TEXT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
-pub static SENTENCE_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[.!?]\s+[A-Z]").unwrap());
 pub static ABBREVIATION: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g|Inc|Corp|Ltd|Co|St|Ave|Blvd|Rd|Ph\.D|M\.D|B\.A|M\.A|Ph\.D|U\.S|U\.K|U\.N|N\.Y|L\.A|D\.C)\.\s+[A-Z]").unwrap()
 });
-pub static DECIMAL_NUMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\d+\.\s*\d+").unwrap());
 pub static LIST_ITEM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\d+\.\s+").unwrap());
-pub static REFERENCE_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\[([^\]]*)\]").unwrap());
 
 // Email pattern
 pub static EMAIL_PATTERN: LazyLock<Regex> =
@@ -497,9 +433,6 @@ pub static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r
 pub static HTML_HEADING_PATTERN: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap());
 
-// Heading quick check pattern
-pub static HEADING_CHECK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^(?:\s*)#").unwrap());
-
 // Horizontal rule patterns
 pub static HR_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\-{3,}\s*$").unwrap());
 pub static HR_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\*{3,}\s*$").unwrap());
@@ -507,31 +440,6 @@ pub static HR_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_{3,}
 pub static HR_SPACED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap());
 pub static HR_SPACED_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap());
 pub static HR_SPACED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(_\s+){2,}_\s*$").unwrap());
-
-/// Utility functions for quick content checks
-/// Check if content contains any headings (quick check before regex)
-pub fn has_heading_markers(content: &str) -> bool {
-    content.contains('#')
-}
-
-/// Check if content contains any lists (quick check before regex)
-pub fn has_list_markers(content: &str) -> bool {
-    content.contains('*')
-        || content.contains('-')
-        || content.contains('+')
-        || (content.contains('.') && content.contains(|c: char| c.is_ascii_digit()))
-}
-
-/// Check if content contains any code blocks (quick check before regex)
-pub fn has_code_block_markers(content: &str) -> bool {
-    content.contains("```") || content.contains("~~~") || content.contains("\n    ")
-    // Indented code block potential
-}
-
-/// Check if content contains any emphasis markers (quick check before regex)
-pub fn has_emphasis_markers(content: &str) -> bool {
-    content.contains('*') || content.contains('_')
-}
 
 /// Check if content contains any HTML tags (quick check before regex)
 pub fn has_html_tags(content: &str) -> bool {
@@ -708,39 +616,6 @@ mod tests {
     }
 
     #[test]
-    fn test_has_heading_markers() {
-        assert!(has_heading_markers("# Heading"));
-        assert!(has_heading_markers("Text with # symbol"));
-        assert!(!has_heading_markers("Text without heading marker"));
-    }
-
-    #[test]
-    fn test_has_list_markers() {
-        assert!(has_list_markers("* Item"));
-        assert!(has_list_markers("- Item"));
-        assert!(has_list_markers("+ Item"));
-        assert!(has_list_markers("1. Item"));
-        assert!(!has_list_markers("Text without list markers"));
-    }
-
-    #[test]
-    fn test_has_code_block_markers() {
-        assert!(has_code_block_markers("```code```"));
-        assert!(has_code_block_markers("~~~code~~~"));
-        assert!(has_code_block_markers("Text\n    indented code"));
-        assert!(!has_code_block_markers("Text without code blocks"));
-    }
-
-    #[test]
-    fn test_has_emphasis_markers() {
-        assert!(has_emphasis_markers("*emphasis*"));
-        assert!(has_emphasis_markers("_emphasis_"));
-        assert!(has_emphasis_markers("**bold**"));
-        assert!(has_emphasis_markers("__bold__"));
-        assert!(!has_emphasis_markers("no emphasis"));
-    }
-
-    #[test]
     fn test_has_html_tags() {
         assert!(has_html_tags("<div>content</div>"));
         assert!(has_html_tags("<br/>"));
@@ -833,28 +708,9 @@ mod tests {
         assert!(ORDERED_LIST_MARKER_REGEX.is_match("1. Item"));
         assert!(ORDERED_LIST_MARKER_REGEX.is_match("99. Item"));
 
-        // Test code block patterns
-        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("```"));
-        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("```rust"));
-        assert!(FENCED_CODE_BLOCK_START_REGEX.is_match("~~~"));
-        assert!(FENCED_CODE_BLOCK_END_REGEX.is_match("```"));
-        assert!(FENCED_CODE_BLOCK_END_REGEX.is_match("~~~"));
-
-        // Test emphasis patterns
-        assert!(ITALIC_ASTERISK_REGEX.is_match("*italic*"));
-        assert!(ITALIC_UNDERSCORE_REGEX.is_match("_italic_"));
-
         // Test HTML patterns
         assert!(HTML_TAG_REGEX.is_match("<div>"));
         assert!(HTML_TAG_REGEX.is_match("<span class='test'>"));
-        assert!(HTML_SELF_CLOSING_TAG_REGEX.is_match("<br/>"));
-        assert!(HTML_SELF_CLOSING_TAG_REGEX.is_match("<img src='test'/>"));
-
-        // Test whitespace patterns
-        assert!(TRAILING_WHITESPACE_REGEX.is_match("line with spaces   "));
-        assert!(TRAILING_WHITESPACE_REGEX.is_match("tabs\t\t"));
-        assert!(MULTIPLE_BLANK_LINES_REGEX.is_match("\n\n\n"));
-        assert!(MULTIPLE_BLANK_LINES_REGEX.is_match("\n\n\n\n"));
 
         // Test blockquote pattern
         assert!(BLOCKQUOTE_PREFIX_RE.is_match("> Quote"));
