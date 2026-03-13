@@ -226,7 +226,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // Try context-specific variants first
         let suffixes = match context {
-            ToolContext::Format => &["format", "fmt"][..],
+            ToolContext::Format => &["format", "fmt", "fix", "reformat"][..],
             ToolContext::Lint => &["lint", "check"][..],
         };
 
@@ -2727,6 +2727,104 @@ console.log('hi');
             def.command.iter().any(|arg| arg == "shellcheck"),
             "shellcheck should resolve to itself, got: {:?}",
             def.command
+        );
+    }
+
+    /// Context-aware resolution for tools with non-standard format suffixes.
+    #[test]
+    fn test_resolve_tool_context_aware_sqlfluff() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // sqlfluff uses ":fix" as its format variant
+        let format_def = processor
+            .resolve_tool("sqlfluff", ToolContext::Format)
+            .expect("Should resolve sqlfluff in format context");
+        assert!(
+            format_def.command.iter().any(|arg| arg == "fix"),
+            "Bare 'sqlfluff' in format context should resolve to 'sqlfluff fix', got: {:?}",
+            format_def.command
+        );
+    }
+
+    /// Context-aware resolution for djlint (:reformat suffix).
+    #[test]
+    fn test_resolve_tool_context_aware_djlint() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // djlint uses ":reformat" as its format variant
+        let format_def = processor
+            .resolve_tool("djlint", ToolContext::Format)
+            .expect("Should resolve djlint in format context");
+        assert!(
+            format_def.command.iter().any(|arg| arg.contains("reformat")),
+            "Bare 'djlint' in format context should resolve to djlint reformat, got: {:?}",
+            format_def.command
+        );
+    }
+
+    /// User-defined tools with context-specific variants resolve correctly.
+    #[test]
+    fn test_resolve_tool_user_defined_with_context_variant() {
+        use super::super::config::ToolDefinition;
+
+        let mut config = default_config();
+        config.tools.insert(
+            "mytool".to_string(),
+            ToolDefinition {
+                command: vec!["mytool".to_string(), "--lint".to_string()],
+                ..Default::default()
+            },
+        );
+        config.tools.insert(
+            "mytool:format".to_string(),
+            ToolDefinition {
+                command: vec!["mytool".to_string(), "--format".to_string()],
+                ..Default::default()
+            },
+        );
+
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // In format context, should resolve to "mytool:format"
+        let def = processor
+            .resolve_tool("mytool", ToolContext::Format)
+            .expect("Should resolve user tool in format context");
+        assert!(
+            def.command.iter().any(|arg| arg == "--format"),
+            "User 'mytool' in format context should resolve to mytool:format, got: {:?}",
+            def.command
+        );
+
+        // In lint context, should fall back to bare "mytool" (no mytool:lint exists)
+        let def = processor
+            .resolve_tool("mytool", ToolContext::Lint)
+            .expect("Should resolve user tool in lint context via fallback");
+        assert!(
+            def.command.iter().any(|arg| arg == "--lint"),
+            "User 'mytool' in lint context should fall back to bare name, got: {:?}",
+            def.command
+        );
+    }
+
+    /// Nonexistent tool returns None.
+    #[test]
+    fn test_resolve_tool_nonexistent_returns_none() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        assert!(
+            processor
+                .resolve_tool("nonexistent-tool-xyz", ToolContext::Lint)
+                .is_none(),
+            "Nonexistent tool should return None in lint context"
+        );
+        assert!(
+            processor
+                .resolve_tool("nonexistent-tool-xyz", ToolContext::Format)
+                .is_none(),
+            "Nonexistent tool should return None in format context"
         );
     }
 
