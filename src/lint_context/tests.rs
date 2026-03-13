@@ -484,6 +484,41 @@ fn test_is_in_html_tag_multiline() {
 }
 
 #[test]
+fn test_is_in_html_tag_with_url_attributes() {
+    // Tags with URLs in attributes contain '/' which must not be treated as self-closing
+    let content = r#"<input name="fields[url]" value="https://www.example.com">"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let tags = ctx.html_tags();
+
+    assert_eq!(tags.len(), 1, "Should detect one HTML tag");
+    assert_eq!(tags[0].tag_name, "input");
+    assert!(!tags[0].is_self_closing);
+    assert!(ctx.is_in_html_tag(35), "URL position should be inside HTML tag");
+}
+
+#[test]
+fn test_is_in_html_tag_self_closing_with_slash() {
+    let content = "<br />";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let tags = ctx.html_tags();
+
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].tag_name, "br");
+    assert!(tags[0].is_self_closing);
+}
+
+#[test]
+fn test_is_in_html_tag_nested_angle_brackets() {
+    // Hugo shortcodes: <a href="{{< ref ... >}}"> contain nested '<'
+    let content = r#"<a href="{{< ref "../common-parameters" >}}">"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let tags = ctx.html_tags();
+
+    // The regex handles nested '<' by matching the shortest valid tag
+    assert!(!tags.is_empty(), "Should detect at least one tag fragment");
+}
+
+#[test]
 fn test_is_in_html_tag_no_tags() {
     let content = "Plain text without any HTML";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

@@ -302,47 +302,87 @@ pub(super) fn parse_html_tags(
     static HTML_TAG_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
 
-    let mut html_tags = Vec::with_capacity(content.matches('<').count());
+    let bytes = content.as_bytes();
+    let content_len = bytes.len();
+    let mut html_tags = Vec::new();
+    let mut search_pos = 0;
 
-    for cap in HTML_TAG_REGEX.captures_iter(content) {
-        let full_match = cap.get(0).unwrap();
-        let match_start = full_match.start();
-        let match_end = full_match.end();
+    // Find each '<' and run the regex from that position instead of scanning full content
+    while search_pos < content_len {
+        let Some(lt_offset) = bytes[search_pos..].iter().position(|&b| b == b'<') else {
+            break;
+        };
+        let lt_pos = search_pos + lt_offset;
+        search_pos = lt_pos + 1;
+
+        // Quick check: next char after '<' must be '/' or ASCII alpha for a valid tag
+        if lt_pos + 1 >= content_len {
+            break;
+        }
+        let next = bytes[lt_pos + 1];
+        if next != b'/' && !next.is_ascii_alphabetic() {
+            continue;
+        }
 
         // Skip if in code block
-        if CodeBlockUtils::is_in_code_block_or_span(code_blocks, match_start) {
+        if CodeBlockUtils::is_in_code_block_or_span(code_blocks, lt_pos) {
             continue;
         }
 
-        let is_closing = !cap.get(1).unwrap().as_str().is_empty();
-        let tag_name_original = cap.get(2).unwrap().as_str();
-        let tag_name = tag_name_original.to_lowercase();
-        let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
+        // Determine search window: from '<' to the next '>' (with a reasonable limit)
+        // This handles multi-line tags where attributes span lines
+        let window_end = bytes[lt_pos..]
+            .iter()
+            .position(|&b| b == b'>')
+            .map_or(content_len.min(lt_pos + 4096), |offset| lt_pos + offset + 1);
+        let window = &content[lt_pos..window_end];
 
-        // Skip JSX components in MDX files (tags starting with uppercase letter)
-        // JSX components like <Chart />, <MyComponent> should not be treated as HTML
-        if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(|c| c.is_uppercase()) {
-            continue;
+        if let Some(cap) = HTML_TAG_REGEX.captures(window) {
+            let full_match = cap.get(0).unwrap();
+            // Only accept matches starting at position 0 (the '<' we found)
+            if full_match.start() != 0 {
+                continue;
+            }
+
+            let match_start = lt_pos;
+            let match_end = lt_pos + full_match.end();
+
+            let is_closing = !cap.get(1).unwrap().as_str().is_empty();
+            let tag_name_original = cap.get(2).unwrap().as_str();
+            let tag_name = tag_name_original.to_lowercase();
+            let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
+
+            // Skip JSX components in MDX files (tags starting with uppercase letter)
+            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(|c| c.is_uppercase()) {
+                continue;
+            }
+
+            // Find which line this tag is on using binary search
+            let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
+            let line_idx = line_idx.saturating_sub(1);
+            let line_num = line_idx + 1;
+            let col_start = match_start - lines[line_idx].byte_offset;
+            let col_end = if match_end <= lines[line_idx].byte_offset + lines[line_idx].byte_len {
+                match_end - lines[line_idx].byte_offset
+            } else {
+                lines[line_idx].byte_len
+            };
+
+            html_tags.push(HtmlTag {
+                line: line_num,
+                start_col: col_start,
+                end_col: col_end,
+                byte_offset: match_start,
+                byte_end: match_end,
+                tag_name,
+                is_closing,
+                is_self_closing,
+                raw_content: full_match.as_str().to_string(),
+            });
+
+            // Advance past the match to avoid overlapping
+            search_pos = match_end;
         }
-
-        // Find which line this tag is on using binary search
-        let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
-        let line_idx = line_idx.saturating_sub(1);
-        let line_num = line_idx + 1;
-        let col_start = match_start - lines[line_idx].byte_offset;
-        let col_end = match_end - lines[line_idx].byte_offset;
-
-        html_tags.push(HtmlTag {
-            line: line_num,
-            start_col: col_start,
-            end_col: col_end,
-            byte_offset: match_start,
-            byte_end: match_end,
-            tag_name,
-            is_closing,
-            is_self_closing,
-            raw_content: full_match.as_str().to_string(),
-        });
     }
 
     html_tags
