@@ -2150,6 +2150,17 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
                 }
             }
 
+            // Minimum indent for continuation lines (based on list marker, before checkbox)
+            let min_continuation_indent = content_start;
+
+            // Detect checkbox/task list markers: [ ], [x], [X]
+            // GFM task lists work with both unordered and ordered lists
+            let rest = &line[content_start..];
+            if rest.starts_with("[ ] ") || rest.starts_with("[x] ") || rest.starts_with("[X] ") {
+                marker_end = content_start + 3; // Include the checkbox `[ ]`
+                content_start += 4; // Skip past `[ ] `
+            }
+
             let marker = &line[indent..marker_end];
 
             // Collect all content for this list item (including continuation lines)
@@ -2158,6 +2169,8 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             i += 1;
 
             // Collect continuation lines (indented lines that are part of this list item)
+            // Use the base marker indent (not checkbox-extended) for collection,
+            // since users may indent continuations to the bullet level, not the checkbox level
             while i < lines.len() {
                 let next_line = lines[i];
                 let next_trimmed = next_line.trim();
@@ -2169,7 +2182,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 
                 // Check if this line is indented (continuation of list item)
                 let next_indent = next_line.len() - next_line.trim_start().len();
-                if next_indent >= content_start {
+                if next_indent >= min_continuation_indent {
                     // This is a continuation line - add its content
                     // Preserve hard breaks while trimming excessive whitespace
                     let trimmed_start = next_line.trim_start();

@@ -5169,3 +5169,651 @@ fn test_relaxed_sentences_semantic_line_breaks() {
         "Semantic should split at all sentence boundaries: {result:?}"
     );
 }
+
+// =============================================================================
+// Checkbox / task list item reflow tests (issue #529)
+// =============================================================================
+
+/// Helper to create options that force wrapping at a given line length.
+fn reflow_options_at(line_length: usize) -> ReflowOptions {
+    ReflowOptions {
+        line_length,
+        ..Default::default()
+    }
+}
+
+/// Helper to create semantic-line-break options at a given line length.
+fn semantic_options_at(line_length: usize) -> ReflowOptions {
+    ReflowOptions {
+        line_length,
+        break_on_sentences: true,
+        semantic_line_breaks: true,
+        require_sentence_capital: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_checkbox_list_continuation_indent_unchecked() {
+    // Core bug: `- [ ] long text` should produce continuation lines indented
+    // to align under the text content (6 spaces for `- [ ] `).
+    let options = reflow_options_at(40);
+    let input = "- [ ] This is a checkbox item that is long enough to require wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap into multiple lines. Got: {result:?}");
+
+    // First line must start with the checkbox marker
+    assert!(
+        lines[0].starts_with("- [ ] "),
+        "First line must start with '- [ ] '. Got: {:?}",
+        lines[0]
+    );
+
+    // Continuation lines must be indented 6 spaces (width of `- [ ] `)
+    for line in &lines[1..] {
+        assert!(
+            line.starts_with("      "),
+            "Continuation line must be indented 6 spaces to align under checkbox content. Got: {line:?}"
+        );
+        // Must not be indented more than 6 spaces
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        assert_eq!(
+            indent, 6,
+            "Continuation indent should be exactly 6 spaces. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_continuation_indent_checked() {
+    // Same test but with `[x]` (checked state)
+    let options = reflow_options_at(40);
+    let input = "- [x] This is a completed checkbox item that is long enough to require wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("- [x] "),
+        "First line must preserve checked state. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(
+            indent, 6,
+            "Continuation indent should be 6 for '- [x] '. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_continuation_indent_uppercase_x() {
+    // `[X]` (uppercase) must also be handled
+    let options = reflow_options_at(40);
+    let input = "- [X] This is a completed checkbox item that is long enough to require wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("- [X] "),
+        "First line must preserve uppercase X. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(
+            indent, 6,
+            "Continuation indent should be 6 for '- [X] '. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_with_star_marker() {
+    // Checkbox with `*` marker instead of `-`
+    let options = reflow_options_at(40);
+    let input = "* [ ] This is a checkbox item that is long enough to require wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("* [ ] "),
+        "First line must preserve '* [ ]' marker. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(
+            indent, 6,
+            "Continuation indent should be 6 for '* [ ] '. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_with_plus_marker() {
+    // Checkbox with `+` marker
+    let options = reflow_options_at(40);
+    let input = "+ [ ] This is a checkbox item that is long enough to require wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("+ [ ] "),
+        "First line must preserve '+ [ ]' marker. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(
+            indent, 6,
+            "Continuation indent should be 6 for '+ [ ] '. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_indented_nested() {
+    // Nested checkbox list: `  - [ ] text` (2-space indent)
+    // Content starts at position 8 (2 + 6)
+    let options = reflow_options_at(40);
+    let input = "  - [ ] This nested checkbox item is long enough to need wrapping here\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("  - [ ] "),
+        "First line must preserve indent + checkbox. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(
+            indent, 8,
+            "Continuation indent should be 8 for '  - [ ] '. Got {indent} in: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_list_existing_continuation_collected() {
+    // A checkbox item with an existing continuation line should be collected
+    // and reflowed together, then re-indented correctly.
+    let options = reflow_options_at(60);
+    let input = "- [ ] First part of the text.\n      Second part continues here and goes on.\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    // First line must start with checkbox
+    assert!(
+        lines[0].starts_with("- [ ] "),
+        "First line must start with checkbox. Got: {:?}",
+        lines[0]
+    );
+
+    // Any continuation lines must have 6-space indent
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 6,
+                "Continuation must be indented 6 spaces. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_list_does_not_strip_to_zero_indent() {
+    // The exact bug from issue #529: continuation should NOT have zero indent
+    let options = reflow_options_at(80);
+    let input = "- [ ] whatever long line which goes on and on and on and on and on and on and on and on and on and on.\n      A continuation line which should get formatted with proper indentation.\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        // The bug produced 0-indent continuation lines
+        assert!(
+            !line.starts_with(|c: char| c.is_alphabetic()),
+            "Continuation line must NOT start at column 0. Got: {line:?}"
+        );
+        let indent = line.len() - line.trim_start().len();
+        assert_eq!(indent, 6, "Continuation must be indented 6. Got {indent} in: {line:?}");
+    }
+}
+
+#[test]
+fn test_checkbox_list_line_length_accounts_for_checkbox() {
+    // When calculating effective line length for reflow, the full prefix
+    // `- [ ] ` (6 chars) must be subtracted, not just `- ` (2 chars).
+    // With line_length=30, effective content width should be 24 chars (30-6).
+    let options = reflow_options_at(30);
+    let input = "- [ ] Word word word word word word word word\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    for line in &lines {
+        assert!(
+            line.len() <= 32, // small tolerance for word boundaries
+            "Line exceeds target length (accounting for checkbox prefix). Line len={}, line: {line:?}",
+            line.len()
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_short_content_no_wrap() {
+    // A checkbox item that fits on one line should not be wrapped
+    let options = reflow_options_at(80);
+    let input = "- [ ] Short task\n";
+    let result = reflow_markdown(input, &options);
+
+    assert_eq!(
+        result.trim(),
+        "- [ ] Short task",
+        "Short checkbox should remain single line. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_checkbox_preserves_check_state_after_reflow() {
+    // After reflowing, the checkbox state must not be altered
+    let options = reflow_options_at(40);
+
+    for marker in &["[ ]", "[x]", "[X]"] {
+        let input = format!("- {marker} This is a long task item that needs to be wrapped across lines\n");
+        let result = reflow_markdown(&input, &options);
+
+        assert!(
+            result.starts_with(&format!("- {marker} ")),
+            "Checkbox state '{marker}' must be preserved. Got: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_checkbox_multiple_items_each_indented_correctly() {
+    // Multiple checkbox items in sequence: each one should get independent
+    // correct continuation indentation.
+    let options = reflow_options_at(40);
+    let input = "\
+- [ ] First task which is long enough to require wrapping across lines
+- [x] Second task which is also long enough to require wrapping across lines
+- [ ] Third short task
+";
+    let result = reflow_markdown(input, &options);
+
+    let mut current_marker: Option<&str> = None;
+    for line in result.lines() {
+        if line.starts_with("- [") {
+            current_marker = Some(if line.starts_with("- [ ]") { "- [ ] " } else { "- [x] " });
+        } else if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 6,
+                "Continuation of {:?} must be indented 6. Got {indent} in: {line:?}",
+                current_marker
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_semantic_line_breaks() {
+    // Semantic line breaks mode should also respect checkbox continuation indent
+    let options = semantic_options_at(120);
+    let input =
+        "- [ ] First sentence of the task. Second sentence continues the description. Third sentence wraps up.\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    assert!(
+        lines[0].starts_with("- [ ] "),
+        "First line must have checkbox. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 6,
+                "Semantic continuation must be indented 6. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_mixed_with_regular_list_items() {
+    // Regular list items should still use 2-space indent, checkbox items 6-space
+    let options = reflow_options_at(40);
+    let input = "\
+- Regular item that is long enough to need wrapping across multiple lines
+- [ ] Checkbox item that is also long enough to need wrapping across lines
+- Another regular item that is long enough to wrap
+";
+    let result = reflow_markdown(input, &options);
+
+    let mut expect_checkbox_continuation = false;
+    for line in result.lines() {
+        if line.starts_with("- [ ]") || line.starts_with("- [x]") {
+            expect_checkbox_continuation = true;
+        } else if line.starts_with("- ") {
+            expect_checkbox_continuation = false;
+        } else if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            if expect_checkbox_continuation {
+                assert_eq!(
+                    indent, 6,
+                    "Checkbox continuation should be 6 spaces. Got {indent} in: {line:?}"
+                );
+            } else {
+                assert_eq!(
+                    indent, 2,
+                    "Regular list continuation should be 2 spaces. Got {indent} in: {line:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_not_confused_with_link_reference() {
+    // `[x]` at start of content (not after a list marker) should not be
+    // treated as a checkbox. Only `- [ ]` / `- [x]` / `* [ ]` etc.
+    let options = reflow_options_at(40);
+    let input = "- Start with bracket [x] in the middle of a long list item text\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    // This is a regular list item, continuation should be 2 spaces
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 2,
+                "Non-checkbox list continuation should be 2 spaces. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_ordered_list_continuation_indent() {
+    // GFM task lists work with ordered lists too: `1. [ ] task`
+    // Content starts at position 7 (after `1. [ ] `), so continuation should be 7.
+    let options = reflow_options_at(40);
+    let input = "1. [ ] This is an ordered checkbox item that is long enough to need wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("1. [ ] "),
+        "First line must start with '1. [ ] '. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 7,
+                "Ordered checkbox continuation should be 7 spaces (for '1. [ ] '). Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_ordered_list_without_checkbox_unchanged() {
+    // Regular ordered list (no checkbox) should still use normal indent
+    let options = reflow_options_at(40);
+    let input = "1. This is an ordered list item that is long enough to need wrapping\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 3,
+                "Regular ordered list continuation should be 3 spaces. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_multi_digit_ordered_list() {
+    // `10. [ ] task` — multi-digit number, content at position 9 (after `10. [ ] `)
+    let options = reflow_options_at(40);
+    let input = "10. [ ] This is a multi-digit ordered checkbox item long enough to wrap\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    assert!(lines.len() >= 2, "Should wrap. Got: {result:?}");
+
+    assert!(
+        lines[0].starts_with("10. [ ] "),
+        "First line must start with '10. [ ] '. Got: {:?}",
+        lines[0]
+    );
+
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 8,
+                "Multi-digit ordered checkbox continuation should be 8 spaces (for '10. [ ] '). Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_idempotent_reflow() {
+    // Reflowing an already-correctly-formatted checkbox should produce identical output
+    let options = reflow_options_at(50);
+    let input = "- [ ] First part of the task\n      continues on this line\n";
+    let result1 = reflow_markdown(input, &options);
+    let result2 = reflow_markdown(&result1, &options);
+
+    assert_eq!(
+        result1, result2,
+        "Reflow should be idempotent.\nFirst:  {result1:?}\nSecond: {result2:?}"
+    );
+}
+
+#[test]
+fn test_checkbox_with_inline_code() {
+    // Checkbox items with inline code should still get correct indent
+    let options = reflow_options_at(40);
+    let input = "- [ ] Run `cargo test` and verify that all tests pass successfully\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+    if lines.len() >= 2 {
+        for line in &lines[1..] {
+            if !line.trim().is_empty() {
+                let indent = line.len() - line.trim_start().len();
+                assert_eq!(
+                    indent, 6,
+                    "Checkbox + code continuation should be 6 spaces. Got {indent} in: {line:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_no_content_after_marker() {
+    // `- [ ]` with no text after — should not panic or produce garbage
+    let options = reflow_options_at(80);
+    let input = "- [ ]\n";
+    let result = reflow_markdown(input, &options);
+
+    assert_eq!(
+        result.trim(),
+        "- [ ]",
+        "Empty checkbox should pass through unchanged. Got: {result:?}"
+    );
+}
+
+#[test]
+fn test_checkbox_lazy_continuation_with_low_indent() {
+    // The exact scenario from issue #529: continuation line has only 3 spaces,
+    // which is less than the checkbox content start (6). The reflow must still
+    // collect it as a continuation (lazy continuation) and output with correct indent.
+    let options = reflow_options_at(80);
+    let input = "- [ ] whatever long line which goes on and on and on and on and on and on and on.\n   A continuation line which should get formatted with proper indentation.\n";
+    let result = reflow_markdown(input, &options);
+
+    // The continuation must NOT appear at column 0 (the original bug)
+    assert!(
+        !result.contains("\nA "),
+        "Continuation must not appear at column 0. Got:\n{result}"
+    );
+
+    for (i, line) in result.lines().enumerate() {
+        if i > 0 && !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 6,
+                "Lazy continuation must be re-indented to 6 spaces. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_lazy_continuation_two_space_indent() {
+    // Continuation with only 2 spaces (minimum for bullet list continuation)
+    let options = reflow_options_at(40);
+    let input = "- [ ] A checkbox item with long text here.\n  Continuation indented only two spaces.\n";
+    let result = reflow_markdown(input, &options);
+
+    // Must be collected and reflowed with proper 6-space indent
+    for (i, line) in result.lines().enumerate() {
+        if i > 0 && !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 6,
+                "2-space lazy continuation must be re-indented to 6. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_lazy_continuation_idempotent() {
+    // After fixing a lazily-indented continuation (2 spaces → 6 spaces),
+    // a second reflow must produce identical output
+    let options = reflow_options_at(50);
+    let input = "- [ ] A checkbox item with long enough text to wrap.\n  Lazily indented continuation line.\n";
+    let result1 = reflow_markdown(input, &options);
+    let result2 = reflow_markdown(&result1, &options);
+
+    assert_eq!(
+        result1, result2,
+        "Lazy continuation reflow must be idempotent.\nFirst:  {result1:?}\nSecond: {result2:?}"
+    );
+
+    // Verify the result actually has 6-space indent (not 2)
+    for (i, line) in result1.lines().enumerate() {
+        if i > 0 && !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(indent, 6, "Should have 6-space indent. Got {indent} in: {line:?}");
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_no_trailing_space_after_brackets() {
+    // `- [ ]text` (no space after brackets) is NOT a valid GFM task list item
+    // It should be treated as regular content after bullet marker
+    let options = reflow_options_at(40);
+    let input = "- [ ]text that is long enough to need to be wrapped across multiple lines here\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    // Should be treated as regular bullet item with 2-space continuation
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 2,
+                "Invalid checkbox (no space) should use regular 2-space indent. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_invalid_marker_content() {
+    // `- [X]` without space is not a checkbox — but `- [X] ` with space is.
+    // Also test `- [y] ` — only space, x, X are valid checkbox states
+    let options = reflow_options_at(40);
+    let input = "- [y] This has an invalid checkbox state that is long enough to wrap across lines\n";
+    let result = reflow_markdown(input, &options);
+
+    let lines: Vec<&str> = result.lines().collect();
+
+    // `[y]` is not a valid checkbox, should be treated as regular content
+    for line in &lines[1..] {
+        if !line.trim().is_empty() {
+            let indent = line.len() - line.trim_start().len();
+            assert_eq!(
+                indent, 2,
+                "Invalid checkbox char should use regular 2-space indent. Got {indent} in: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_checkbox_idempotent_reflow_with_ordered_list() {
+    // Idempotency for ordered list checkboxes
+    let options = reflow_options_at(50);
+    let input = "1. [ ] First part of this task\n       continues on this line here\n";
+    let result1 = reflow_markdown(input, &options);
+    let result2 = reflow_markdown(&result1, &options);
+
+    assert_eq!(
+        result1, result2,
+        "Ordered checkbox reflow should be idempotent.\nFirst:  {result1:?}\nSecond: {result2:?}"
+    );
+}
