@@ -5,15 +5,6 @@ use crate::rules::strong_style::StrongStyle;
 use crate::utils::code_block_utils::StrongSpanDetail;
 use crate::utils::skip_context::{is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup};
 
-/// Convert a StrongSpanDetail to a StrongStyle
-fn span_style(span: &StrongSpanDetail) -> StrongStyle {
-    if span.is_asterisk {
-        StrongStyle::Asterisk
-    } else {
-        StrongStyle::Underscore
-    }
-}
-
 /// Check if a byte position within a line is inside a backtick-delimited code span.
 /// This is a line-level fallback for cases where pulldown-cmark's code span detection
 /// misses spans due to table parsing interference (e.g., pipes inside code spans
@@ -63,6 +54,15 @@ fn is_in_inline_code_on_line(line: &str, byte_pos: usize) -> bool {
     }
 
     false
+}
+
+/// Convert a StrongSpanDetail to a StrongStyle
+fn span_style(span: &StrongSpanDetail) -> StrongStyle {
+    if span.is_asterisk {
+        StrongStyle::Asterisk
+    } else {
+        StrongStyle::Underscore
+    }
 }
 
 mod md050_config;
