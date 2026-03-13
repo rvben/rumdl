@@ -1,24 +1,12 @@
+use crate::lint_context::LazyContLine;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::blockquote::{content_after_blockquote, effective_indent_in_blockquote};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::quarto_divs;
 use crate::utils::range_utils::{LineIndex, calculate_line_range};
 use crate::utils::regex_cache::BLOCKQUOTE_PREFIX_RE;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
-use std::collections::HashMap;
 use std::sync::LazyLock;
-
-/// Information needed to fix a lazy continuation line
-#[derive(Debug, Clone)]
-struct LazyContInfo {
-    /// Expected indentation (marker width for blockquotes, content_column otherwise)
-    expected_indent: usize,
-    /// Current indentation in bytes (after blockquote prefix when applicable)
-    current_indent: usize,
-    /// Blockquote nesting level (0 = not in blockquote)
-    blockquote_level: usize,
-}
 
 mod md032_config;
 pub use md032_config::MD032Config;
@@ -181,121 +169,6 @@ impl MD032BlanksAroundLists {
         false
     }
 
-    /// Detect lazy continuation lines within list items using pulldown-cmark's SoftBreak events.
-    ///
-    /// Lazy continuation occurs when text continues a list item paragraph but with less
-    /// indentation than expected. pulldown-cmark identifies this via SoftBreak followed by Text
-    /// within a list Item, where the Text starts at a column less than the item's content column.
-    ///
-    /// Returns a map of line numbers to fix information for auto-fix support.
-    fn detect_lazy_continuation_lines(ctx: &crate::lint_context::LintContext) -> HashMap<usize, LazyContInfo> {
-        let mut lazy_lines = HashMap::new();
-        let parser = Parser::new_ext(ctx.content, Options::all());
-
-        // Stack of (expected_indent_within_context, blockquote_level) for nested items
-        let mut item_stack: Vec<(usize, usize)> = vec![];
-        let mut after_soft_break = false;
-
-        for (event, range) in parser.into_offset_iter() {
-            match event {
-                Event::Start(Tag::Item) => {
-                    let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
-                    let line_info = ctx.lines.get(line_num.saturating_sub(1));
-                    let line_content = line_info.map(|li| li.content(ctx.content)).unwrap_or("");
-
-                    // Determine blockquote level from the line content
-                    let bq_level = line_content
-                        .chars()
-                        .take_while(|c| *c == '>' || c.is_whitespace())
-                        .filter(|&c| c == '>')
-                        .count();
-
-                    // Calculate expected indent relative to blockquote context
-                    let expected_indent = if bq_level > 0 {
-                        // For blockquote lists, expected indent is the marker width
-                        // (content_column - marker_column gives us marker + spacing width)
-                        line_info
-                            .and_then(|li| li.list_item.as_ref())
-                            .map(|item| item.content_column.saturating_sub(item.marker_column))
-                            .unwrap_or(2)
-                    } else {
-                        // For regular lists, use content_column directly
-                        line_info
-                            .and_then(|li| li.list_item.as_ref())
-                            .map(|item| item.content_column)
-                            .unwrap_or(0)
-                    };
-
-                    item_stack.push((expected_indent, bq_level));
-                    after_soft_break = false;
-                }
-                Event::End(TagEnd::Item) => {
-                    item_stack.pop();
-                    after_soft_break = false;
-                }
-                Event::SoftBreak if !item_stack.is_empty() => {
-                    after_soft_break = true;
-                }
-                // Detect content starting after a soft break - text, code, or inline formatting
-                // All inline formatting tags that could appear at line start:
-                // - Emphasis (*text* or _text_)
-                // - Strong (**text** or __text__)
-                // - Strikethrough (~~text~~ - GFM extension)
-                // - Subscript (~text~ - extension)
-                // - Superscript (^text^ - extension)
-                // - Link ([text](url))
-                // - Image (![alt](url))
-                Event::Text(_)
-                | Event::Code(_)
-                | Event::Start(Tag::Emphasis)
-                | Event::Start(Tag::Strong)
-                | Event::Start(Tag::Strikethrough)
-                | Event::Start(Tag::Subscript)
-                | Event::Start(Tag::Superscript)
-                | Event::Start(Tag::Link { .. })
-                | Event::Start(Tag::Image { .. })
-                    if after_soft_break =>
-                {
-                    if let Some(&(expected_indent, expected_bq_level)) = item_stack.last() {
-                        let line_num = Self::byte_to_line(&ctx.line_offsets, range.start);
-                        let line_info = ctx.lines.get(line_num.saturating_sub(1));
-                        let line_content = line_info.map(|li| li.content(ctx.content)).unwrap_or("");
-                        let fallback_indent = line_info.map(|li| li.indent).unwrap_or(0);
-
-                        let actual_indent =
-                            effective_indent_in_blockquote(line_content, expected_bq_level, fallback_indent);
-
-                        if actual_indent < expected_indent {
-                            // Store fix information along with the line number
-                            lazy_lines.insert(
-                                line_num,
-                                LazyContInfo {
-                                    expected_indent,
-                                    current_indent: actual_indent,
-                                    blockquote_level: expected_bq_level,
-                                },
-                            );
-                        }
-                    }
-                    after_soft_break = false;
-                }
-                _ => {
-                    after_soft_break = false;
-                }
-            }
-        }
-
-        lazy_lines
-    }
-
-    /// Convert a byte offset to a 1-indexed line number
-    fn byte_to_line(line_offsets: &[usize], byte_offset: usize) -> usize {
-        match line_offsets.binary_search(&byte_offset) {
-            Ok(idx) => idx + 1,
-            Err(idx) => idx.max(1),
-        }
-    }
-
     /// Check if a lazy continuation fix should be applied to a line.
     /// Returns false for lines inside code blocks, front matter, or HTML comments.
     fn should_apply_lazy_fix(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
@@ -310,7 +183,7 @@ impl MD032BlanksAroundLists {
     fn calculate_lazy_continuation_fix(
         ctx: &crate::lint_context::LintContext,
         line_num: usize,
-        lazy_info: &LazyContInfo,
+        lazy_info: &LazyContLine,
     ) -> Option<Fix> {
         let line_info = ctx.lines.get(line_num.saturating_sub(1))?;
         let line_content = line_info.content(ctx.content);
@@ -347,7 +220,7 @@ impl MD032BlanksAroundLists {
 
     /// Apply a lazy continuation fix to a single line.
     /// Replaces the current indentation with the expected indentation.
-    fn apply_lazy_fix_to_line(line: &str, lazy_info: &LazyContInfo) -> String {
+    fn apply_lazy_fix_to_line(line: &str, lazy_info: &LazyContLine) -> String {
         if lazy_info.blockquote_level == 0 {
             // Regular list: strip current indent, add expected indent
             let content = line.trim_start();
@@ -876,9 +749,11 @@ impl Rule for MD032BlanksAroundLists {
         // indentation than expected). Lazy continuation at the END of list blocks is
         // already handled by the segment extension logic above.
         if !self.config.allow_lazy_continuation {
-            let lazy_lines = Self::detect_lazy_continuation_lines(ctx);
+            let lazy_cont_lines = ctx.lazy_continuation_lines();
 
-            for (line_num, lazy_info) in lazy_lines {
+            for lazy_info in lazy_cont_lines.iter() {
+                let line_num = lazy_info.line_num;
+
                 // Only warn about lazy continuation lines that are WITHIN a list block
                 // (i.e., between list items). End-of-block lazy continuation is already
                 // handled by the existing "list should be followed by blank line" logic.
@@ -896,7 +771,7 @@ impl Rule for MD032BlanksAroundLists {
 
                 // Calculate fix: add proper indentation to the lazy continuation line
                 let fix = if Self::should_apply_lazy_fix(ctx, line_num) {
-                    Self::calculate_lazy_continuation_fix(ctx, line_num, &lazy_info)
+                    Self::calculate_lazy_continuation_fix(ctx, line_num, lazy_info)
                 } else {
                     None
                 };
@@ -976,11 +851,12 @@ impl MD032BlanksAroundLists {
         }
 
         // Phase 0: Collect lazy continuation line fixes (if not allowed)
-        // Map of line_num -> LazyContInfo for applying fixes
-        let mut lazy_fixes: std::collections::BTreeMap<usize, LazyContInfo> = std::collections::BTreeMap::new();
+        // Map of line_num -> LazyContLine for applying fixes
+        let mut lazy_fixes: std::collections::BTreeMap<usize, LazyContLine> = std::collections::BTreeMap::new();
         if !self.config.allow_lazy_continuation {
-            let lazy_lines = Self::detect_lazy_continuation_lines(ctx);
-            for (line_num, lazy_info) in lazy_lines {
+            let lazy_cont_lines = ctx.lazy_continuation_lines();
+            for lazy_info in lazy_cont_lines.iter() {
+                let line_num = lazy_info.line_num;
                 // Only fix lines within a list block
                 let is_within_block = list_blocks
                     .iter()
@@ -992,7 +868,7 @@ impl MD032BlanksAroundLists {
                 if !Self::should_apply_lazy_fix(ctx, line_num) {
                     continue;
                 }
-                lazy_fixes.insert(line_num, lazy_info);
+                lazy_fixes.insert(line_num, lazy_info.clone());
             }
         }
 

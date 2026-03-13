@@ -91,6 +91,7 @@ pub struct LintContext<'a> {
     code_span_byte_ranges: Vec<(usize, usize)>, // Pre-computed code span byte ranges from pulldown-cmark
     inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
+    lazy_cont_lines_cache: OnceLock<Arc<Vec<LazyContLine>>>, // Lazy-loaded lazy continuation lines
 }
 
 impl<'a> LintContext<'a> {
@@ -568,6 +569,7 @@ impl<'a> LintContext<'a> {
             code_span_byte_ranges: code_span_ranges,
             inline_config,
             obsidian_comment_ranges,
+            lazy_cont_lines_cache: OnceLock::new(),
         }
     }
 
@@ -717,6 +719,17 @@ impl<'a> LintContext<'a> {
                 self.content,
                 &self.lines,
                 &self.code_blocks,
+            ))
+        }))
+    }
+
+    /// Get lazy continuation lines - computed lazily on first access
+    pub fn lazy_continuation_lines(&self) -> Arc<Vec<LazyContLine>> {
+        Arc::clone(self.lazy_cont_lines_cache.get_or_init(|| {
+            Arc::new(element_parsers::detect_lazy_continuation_lines(
+                self.content,
+                &self.lines,
+                &self.line_offsets,
             ))
         }))
     }

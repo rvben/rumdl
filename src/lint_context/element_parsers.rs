@@ -3,7 +3,7 @@ use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
-use pulldown_cmark::{Event, Options, Parser};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -514,4 +514,111 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
     }
 
     bare_urls
+}
+
+/// Detect lazy continuation lines within list items using pulldown-cmark's SoftBreak events.
+///
+/// Lazy continuation occurs when text continues a list item paragraph but with less
+/// indentation than expected. pulldown-cmark identifies this via SoftBreak followed by Text
+/// within a list Item, where the Text starts at a column less than the item's content column.
+pub(super) fn detect_lazy_continuation_lines(
+    content: &str,
+    lines: &[LineInfo],
+    line_offsets: &[usize],
+) -> Vec<LazyContLine> {
+    use crate::utils::blockquote::effective_indent_in_blockquote;
+
+    let mut lazy_lines = Vec::new();
+    let parser = Parser::new_ext(content, Options::all());
+
+    // Stack of (expected_indent_within_context, blockquote_level) for nested items
+    let mut item_stack: Vec<(usize, usize)> = vec![];
+    let mut after_soft_break = false;
+
+    for (event, range) in parser.into_offset_iter() {
+        match event {
+            Event::Start(Tag::Item) => {
+                let line_num = byte_to_line(line_offsets, range.start);
+                let line_info = lines.get(line_num.saturating_sub(1));
+                let line_content = line_info.map(|li| li.content(content)).unwrap_or("");
+
+                // Determine blockquote level from the line content
+                let bq_level = line_content
+                    .chars()
+                    .take_while(|c| *c == '>' || c.is_whitespace())
+                    .filter(|&c| c == '>')
+                    .count();
+
+                // Calculate expected indent relative to blockquote context
+                let expected_indent = if bq_level > 0 {
+                    // For blockquote lists, expected indent is the marker width
+                    line_info
+                        .and_then(|li| li.list_item.as_ref())
+                        .map(|item| item.content_column.saturating_sub(item.marker_column))
+                        .unwrap_or(2)
+                } else {
+                    // For regular lists, use content_column directly
+                    line_info
+                        .and_then(|li| li.list_item.as_ref())
+                        .map(|item| item.content_column)
+                        .unwrap_or(0)
+                };
+
+                item_stack.push((expected_indent, bq_level));
+                after_soft_break = false;
+            }
+            Event::End(TagEnd::Item) => {
+                item_stack.pop();
+                after_soft_break = false;
+            }
+            Event::SoftBreak if !item_stack.is_empty() => {
+                after_soft_break = true;
+            }
+            // Detect content starting after a soft break - text, code, or inline formatting
+            Event::Text(_)
+            | Event::Code(_)
+            | Event::Start(Tag::Emphasis)
+            | Event::Start(Tag::Strong)
+            | Event::Start(Tag::Strikethrough)
+            | Event::Start(Tag::Subscript)
+            | Event::Start(Tag::Superscript)
+            | Event::Start(Tag::Link { .. })
+            | Event::Start(Tag::Image { .. })
+                if after_soft_break =>
+            {
+                if let Some(&(expected_indent, expected_bq_level)) = item_stack.last() {
+                    let line_num = byte_to_line(line_offsets, range.start);
+                    let line_info = lines.get(line_num.saturating_sub(1));
+                    let line_content = line_info.map(|li| li.content(content)).unwrap_or("");
+                    let fallback_indent = line_info.map(|li| li.indent).unwrap_or(0);
+
+                    let actual_indent =
+                        effective_indent_in_blockquote(line_content, expected_bq_level, fallback_indent);
+
+                    if actual_indent < expected_indent {
+                        lazy_lines.push(LazyContLine {
+                            line_num,
+                            expected_indent,
+                            current_indent: actual_indent,
+                            blockquote_level: expected_bq_level,
+                        });
+                    }
+                }
+                after_soft_break = false;
+            }
+            _ => {
+                after_soft_break = false;
+            }
+        }
+    }
+
+    lazy_lines
+}
+
+/// Convert a byte offset to a 1-indexed line number
+fn byte_to_line(line_offsets: &[usize], byte_offset: usize) -> usize {
+    match line_offsets.binary_search(&byte_offset) {
+        Ok(idx) => idx + 1,
+        Err(idx) => idx.max(1),
+    }
 }

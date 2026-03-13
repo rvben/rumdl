@@ -479,6 +479,22 @@ pub struct BareUrl {
     pub url_type: String,
 }
 
+/// A lazy continuation line detected by pulldown-cmark.
+///
+/// Lazy continuation occurs when text continues a list item paragraph but with less
+/// indentation than expected.
+#[derive(Debug, Clone)]
+pub struct LazyContLine {
+    /// 1-indexed line number
+    pub line_num: usize,
+    /// Expected indentation
+    pub expected_indent: usize,
+    /// Current indentation
+    pub current_indent: usize,
+    /// Blockquote nesting level
+    pub blockquote_level: usize,
+}
+
 /// Check if a line is a horizontal rule (---, ***, ___) per CommonMark spec.
 /// CommonMark rules for thematic breaks (horizontal rules):
 /// - May have 0-3 spaces of leading indentation (but NOT tabs)
