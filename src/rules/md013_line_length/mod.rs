@@ -1133,8 +1133,14 @@ impl MD013LineLength {
                         }
 
                         // Nested list items are always processed independently
-                        // by the outer loop, so break when we encounter one
+                        // by the outer loop, so break when we encounter one.
+                        // If a blank line was collected before this, uncollect it
+                        // so the outer loop preserves the blank between parent and nested.
                         if is_list_item(trimmed) && indent >= marker_len {
+                            if matches!(list_item_lines.last(), Some(LineType::Empty)) {
+                                list_item_lines.pop();
+                                i -= 1;
+                            }
                             break;
                         }
 
