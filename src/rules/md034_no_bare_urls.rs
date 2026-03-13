@@ -153,50 +153,53 @@ impl MD034NoBareUrls {
 
         // Clear and reuse buffers instead of allocating new ones
         buffers.markdown_link_ranges.clear();
-        for cap in MARKDOWN_LINK_REGEX.captures_iter(line) {
-            if let Some(mat) = cap.get(0) {
+        buffers.image_ranges.clear();
+
+        let has_bracket = line.contains('[');
+        let has_angle = line.contains('<');
+        let has_bang = line.contains('!');
+
+        if has_bracket {
+            for mat in MARKDOWN_LINK_REGEX.find_iter(line) {
                 buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
-        }
 
-        // Also include empty link patterns like [text]() and [text][]
-        for mat in MARKDOWN_EMPTY_LINK_REGEX.find_iter(line) {
-            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-        }
-
-        for mat in MARKDOWN_EMPTY_REF_REGEX.find_iter(line) {
-            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
-        }
-
-        // Also exclude shortcut reference links like [URL] - even if no definition exists,
-        // the brackets indicate user intent to use markdown formatting
-        for mat in SHORTCUT_REF_REGEX.find_iter(line) {
-            let end = mat.end();
-            // Equivalent to negative lookahead (?!\s*[\[(]): skip if followed by whitespace then ( or [
-            let next_non_ws = line[end..].bytes().find(|b| !b.is_ascii_whitespace());
-            if next_non_ws == Some(b'(') || next_non_ws == Some(b'[') {
-                continue;
+            // Also include empty link patterns like [text]() and [text][]
+            for mat in MARKDOWN_EMPTY_LINK_REGEX.find_iter(line) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
-            buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+
+            for mat in MARKDOWN_EMPTY_REF_REGEX.find_iter(line) {
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+            }
+
+            // Also exclude shortcut reference links like [URL]
+            for mat in SHORTCUT_REF_REGEX.find_iter(line) {
+                let end = mat.end();
+                let next_non_ws = line[end..].bytes().find(|b| !b.is_ascii_whitespace());
+                if next_non_ws == Some(b'(') || next_non_ws == Some(b'[') {
+                    continue;
+                }
+                buffers.markdown_link_ranges.push((mat.start(), mat.end()));
+            }
+
+            // Check if this line contains only a badge link (common pattern)
+            if has_bang && BADGE_LINK_LINE_REGEX.is_match(line) {
+                return warnings;
+            }
         }
 
-        for cap in ANGLE_LINK_REGEX.captures_iter(line) {
-            if let Some(mat) = cap.get(0) {
+        if has_angle {
+            for mat in ANGLE_LINK_REGEX.find_iter(line) {
                 buffers.markdown_link_ranges.push((mat.start(), mat.end()));
             }
         }
 
         // Find all markdown images for exclusion
-        buffers.image_ranges.clear();
-        for cap in MARKDOWN_IMAGE_REGEX.captures_iter(line) {
-            if let Some(mat) = cap.get(0) {
+        if has_bang && has_bracket {
+            for mat in MARKDOWN_IMAGE_REGEX.find_iter(line) {
                 buffers.image_ranges.push((mat.start(), mat.end()));
             }
-        }
-
-        // Check if this line contains only a badge link (common pattern)
-        if BADGE_LINK_LINE_REGEX.is_match(line) {
-            return warnings;
         }
 
         // Find bare URLs
