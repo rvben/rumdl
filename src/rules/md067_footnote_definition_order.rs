@@ -23,7 +23,9 @@
 //! ```
 
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::md066_footnote_validation::{FOOTNOTE_DEF_PATTERN, FOOTNOTE_REF_PATTERN, strip_blockquote_prefix};
+use crate::rules::md066_footnote_validation::{
+    FOOTNOTE_DEF_PATTERN, FOOTNOTE_REF_PATTERN, footnote_def_position, strip_blockquote_prefix,
+};
 use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone)]
@@ -140,12 +142,17 @@ impl Rule for MD067FootnoteDefinitionOrder {
                     // Find what was expected
                     if expected_idx < reference_order.len() {
                         let expected_id = &reference_order[expected_idx];
+                        let (col, end_col) = ctx
+                            .lines
+                            .get(*def_line - 1)
+                            .map(|li| footnote_def_position(li.content(ctx.content)))
+                            .unwrap_or((1, 1));
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: *def_line,
-                            column: 1,
+                            column: col,
                             end_line: *def_line,
-                            end_column: 1,
+                            end_column: end_col,
                             message: format!(
                                 "Footnote definition '[^{def_id}]' is out of order; expected '[^{expected_id}]' next (based on reference order)"
                             ),
@@ -329,5 +336,28 @@ mod tests {
         let rule = MD067FootnoteDefinitionOrder::default();
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Correct order should pass: {result:?}");
+    }
+
+    // ==================== Warning position tests ====================
+
+    #[test]
+    fn test_out_of_order_column_position() {
+        let content = "Text with [^1] and [^2].\n\n[^2]: Second definition\n[^1]: First definition\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+        assert_eq!(warnings[0].column, 1, "Definition at start of line");
+        // "[^2]:" is 5 chars
+        assert_eq!(warnings[0].end_column, 6);
+    }
+
+    #[test]
+    fn test_out_of_order_blockquote_column_position() {
+        let content = "Text with [^1] and [^2].\n\n> [^2]: Second in blockquote\n> [^1]: First in blockquote\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+        // After "> " prefix (2 chars), definition starts at column 3
+        assert_eq!(warnings[0].column, 3, "Should point past blockquote prefix");
     }
 }

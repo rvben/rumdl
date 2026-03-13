@@ -165,8 +165,44 @@ impl MD074MkDocsNav {
         path.starts_with('/')
     }
 
+    /// Find the 1-indexed line number in the raw YAML content where a nav path appears.
+    /// Checks for the path as a YAML value (after `:` or `- `), not just substring.
+    /// Returns None if not found.
+    /// Strip surrounding YAML quotes (single or double) from a value
+    fn strip_yaml_quotes(s: &str) -> &str {
+        if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+            &s[1..s.len() - 1]
+        } else {
+            s
+        }
+    }
+
+    fn find_nav_line_in_yaml(yaml_content: &str, file_path: &str) -> Option<usize> {
+        for (idx, line) in yaml_content.lines().enumerate() {
+            let trimmed = line.trim();
+            // Skip comments
+            if trimmed.starts_with('#') {
+                continue;
+            }
+            // Match "- path.md" or "- 'path.md'" (bare list item)
+            if let Some(rest) = trimmed.strip_prefix("- ") {
+                if Self::strip_yaml_quotes(rest.trim()) == file_path {
+                    return Some(idx + 1);
+                }
+            }
+            // Match "Title: path.md" or "- Title: 'path.md'" (named nav entry)
+            if let Some(colon_pos) = trimmed.find(": ") {
+                let value = trimmed[colon_pos + 2..].trim();
+                if Self::strip_yaml_quotes(value) == file_path {
+                    return Some(idx + 1);
+                }
+            }
+        }
+        None
+    }
+
     /// Perform the actual validation of mkdocs.yml nav entries
-    fn validate_nav(&self, mkdocs_path: &Path, mkdocs_config: &MkDocsConfig) -> Vec<LintWarning> {
+    fn validate_nav(&self, mkdocs_path: &Path, mkdocs_config: &MkDocsConfig, yaml_content: &str) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
         let mkdocs_file = mkdocs_path
             .file_name()
@@ -182,6 +218,8 @@ impl MD074MkDocsNav {
         };
 
         if !docs_dir.exists() {
+            let yaml_line = Self::find_nav_line_in_yaml(yaml_content, &mkdocs_config.docs_dir);
+            let line_info = yaml_line.map_or(String::new(), |l| format!(" (line {l})"));
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 line: 1,
@@ -189,9 +227,10 @@ impl MD074MkDocsNav {
                 end_line: 1,
                 end_column: 1,
                 message: format!(
-                    "docs_dir '{}' does not exist (from {})",
+                    "docs_dir '{}' does not exist (from {}{})",
                     mkdocs_config.docs_dir,
-                    mkdocs_path.display()
+                    mkdocs_path.display(),
+                    line_info,
                 ),
                 severity: Severity::Warning,
                 fix: None,
@@ -215,13 +254,17 @@ impl MD074MkDocsNav {
             // Check for absolute links
             if Self::is_absolute_path(file_path) {
                 if self.config.absolute_links == NavValidation::Warn {
+                    let yaml_line = Self::find_nav_line_in_yaml(yaml_content, file_path);
+                    let line_info = yaml_line.map_or(String::new(), |l| format!(", line {l}"));
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: 1,
                         column: 1,
                         end_line: 1,
                         end_column: 1,
-                        message: format!("Absolute path in nav '{nav_location}': {file_path} (in {mkdocs_file})"),
+                        message: format!(
+                            "Absolute path in nav '{nav_location}': {file_path} (in {mkdocs_file}{line_info})"
+                        ),
                         severity: Severity::Warning,
                         fix: None,
                     });
@@ -260,6 +303,8 @@ impl MD074MkDocsNav {
                     } else {
                         file_path.to_string()
                     };
+                    let yaml_line = Self::find_nav_line_in_yaml(yaml_content, file_path);
+                    let line_info = yaml_line.map_or(String::new(), |l| format!(", line {l}"));
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: 1,
@@ -267,7 +312,7 @@ impl MD074MkDocsNav {
                         end_line: 1,
                         end_column: 1,
                         message: format!(
-                            "Nav entry '{nav_location}' points to non-existent file: {display_path} (in {mkdocs_file})"
+                            "Nav entry '{nav_location}' points to non-existent file: {display_path} (in {mkdocs_file}{line_info})"
                         ),
                         severity: Severity::Warning,
                         fix: None,
@@ -502,7 +547,7 @@ impl Rule for MD074MkDocsNav {
         };
 
         // Perform validation
-        Ok(self.validate_nav(&mkdocs_path, &mkdocs_config))
+        Ok(self.validate_nav(&mkdocs_path, &mkdocs_config, &mkdocs_content))
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
