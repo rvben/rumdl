@@ -241,7 +241,6 @@ impl Rule for MD007ULIndent {
                 }
 
                 // At this point, we know this is an unordered list item
-                // Now stack contains only parent items at this blockquote depth
                 // Count only items at the same blockquote depth for nesting level
                 let nesting_level = list_stack.iter().filter(|item| item.4 == bq_depth).count();
 
