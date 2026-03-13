@@ -6,7 +6,6 @@ pub mod anchor_styles;
 pub mod blockquote;
 pub mod code_block_utils;
 pub mod early_returns;
-pub mod element_cache;
 pub mod emphasis_utils;
 pub mod fix_utils;
 pub mod header_id_utils;
@@ -48,6 +47,28 @@ pub use line_ending::{
 };
 pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, MarkdownElements};
 pub use range_utils::LineIndex;
+
+/// Calculate the visual indentation width of a string, expanding tabs to spaces.
+///
+/// Per CommonMark, tabs expand to the next tab stop (columns 4, 8, 12, ...).
+pub fn calculate_indentation_width(indent_str: &str, tab_width: usize) -> usize {
+    let mut width = 0;
+    for ch in indent_str.chars() {
+        if ch == '\t' {
+            width = ((width / tab_width) + 1) * tab_width;
+        } else if ch == ' ' {
+            width += 1;
+        } else {
+            break;
+        }
+    }
+    width
+}
+
+/// Calculate the visual indentation width using default tab width of 4
+pub fn calculate_indentation_width_default(indent_str: &str) -> usize {
+    calculate_indentation_width(indent_str, 4)
+}
 
 /// Check if a line is a definition list item (Extended Markdown)
 ///

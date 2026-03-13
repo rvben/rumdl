@@ -1,7 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::blockquote::parse_blockquote_prefix;
+use crate::utils::calculate_indentation_width_default;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use crate::utils::element_cache::ElementCache;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 use super::types::*;
@@ -70,7 +70,7 @@ pub(super) fn compute_basic_line_info(
         let byte_offset = line_offsets.get(i).copied().unwrap_or(0);
         let indent = line.len() - line.trim_start().len();
         // Compute visual indent with proper CommonMark tab expansion
-        let visual_indent = ElementCache::calculate_indentation_width_default(line);
+        let visual_indent = calculate_indentation_width_default(line);
 
         // Parse blockquote prefix once and reuse it (avoid redundant parsing)
         let blockquote_parse = parse_blockquote_prefix(line);

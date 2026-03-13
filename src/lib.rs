@@ -41,7 +41,7 @@ pub use rules::*;
 
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
 use crate::rule::{LintResult, Rule, RuleCategory};
-use crate::utils::element_cache::ElementCache;
+use crate::utils::calculate_indentation_width_default;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
@@ -62,7 +62,7 @@ struct ContentCharacteristics {
 /// Check if a line has enough leading whitespace to be an indented code block.
 /// Indented code blocks require 4+ columns of leading whitespace (with proper tab expansion).
 fn has_potential_indented_code_indent(line: &str) -> bool {
-    ElementCache::calculate_indentation_width_default(line) >= 4
+    calculate_indentation_width_default(line) >= 4
 }
 
 impl ContentCharacteristics {

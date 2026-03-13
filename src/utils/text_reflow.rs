@@ -3,7 +3,7 @@
 //! This module implements text wrapping/reflow functionality that preserves
 //! Markdown elements like links, emphasis, code spans, etc.
 
-use crate::utils::element_cache::ElementCache;
+use crate::utils::calculate_indentation_width_default;
 use crate::utils::is_definition_list_item;
 use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list};
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
@@ -396,7 +396,7 @@ fn is_block_boundary(trimmed: &str) -> bool {
 /// (≥4 spaces) and table row detection via `is_potential_table_row`.
 fn is_paragraph_boundary(trimmed: &str, line: &str) -> bool {
     is_block_boundary_core(trimmed)
-        || ElementCache::calculate_indentation_width_default(line) >= 4
+        || calculate_indentation_width_default(line) >= 4
         || crate::utils::table_utils::TableUtils::is_potential_table_row(line)
 }
 
@@ -2074,14 +2074,14 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // Preserve indented code blocks (4+ columns accounting for tab expansion)
-        if ElementCache::calculate_indentation_width_default(line) >= 4 {
+        if calculate_indentation_width_default(line) >= 4 {
             // Collect all consecutive indented lines
             result.push(line.to_string());
             i += 1;
             while i < lines.len() {
                 let next_line = lines[i];
                 // Continue if next line is also indented or empty (empty lines in code blocks are ok)
-                if ElementCache::calculate_indentation_width_default(next_line) >= 4 || next_line.trim().is_empty() {
+                if calculate_indentation_width_default(next_line) >= 4 || next_line.trim().is_empty() {
                     result.push(next_line.to_string());
                     i += 1;
                 } else {

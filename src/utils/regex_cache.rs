@@ -328,9 +328,6 @@ pub static TRAILING_PUNCTUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex:
 // ATX heading patterns for MD051 and other rules
 pub static ATX_HEADING_WITH_CAPTURE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.+?)(?:\s+#*\s*)?$").unwrap());
-pub static SETEXT_HEADING_WITH_CAPTURE: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"^([^\n]+)\n([=\-])\2+\s*$").unwrap());
-
 // List patterns
 pub static UNORDERED_LIST_MARKER_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
 pub static ORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
@@ -347,10 +344,6 @@ pub static INDENTED_CODE_BLOCK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::
 pub static CODE_FENCE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(`{3,}|~{3,})").unwrap());
 
 // Emphasis patterns
-pub static EMPHASIS_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(\s|^)(\*{1,2}|_{1,2})(?=\S)(.+?)(?<=\S)(\2)(\s|$)").unwrap());
-pub static SPACE_IN_EMPHASIS_REGEX: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"(\*|_)(\s+)(.+?)(\s+)(\1)").unwrap());
 
 // MD037 specific emphasis patterns - improved to avoid false positives
 // Only match emphasis with spaces that are actually complete emphasis blocks
@@ -361,13 +354,6 @@ pub static UNDERSCORE_EMPHASIS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:^|[^_])_(\s+[^_]+\s*|\s*[^_]+\s+)_(?:[^_]|$)").unwrap());
 pub static DOUBLE_UNDERSCORE_EMPHASIS: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:^|[^_])__(\s+[^_]+\s*|\s*[^_]+\s+)__(?:[^_]|$)").unwrap());
-pub static DOUBLE_ASTERISK_EMPHASIS: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"\*\*\s+([^*]+?)\s+\*\*").unwrap());
-pub static DOUBLE_ASTERISK_SPACE_START: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"\*\*\s+([^*]+?)\*\*").unwrap());
-pub static DOUBLE_ASTERISK_SPACE_END: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"\*\*([^*]+?)\s+\*\*").unwrap());
-
 // Code block patterns
 pub static FENCED_CODE_BLOCK_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```(?:[^`\r\n]*)$").unwrap());
 pub static FENCED_CODE_BLOCK_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)```\s*$").unwrap());

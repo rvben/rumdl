@@ -1,5 +1,5 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::element_cache::ElementCache;
+use crate::utils::calculate_indentation_width_default;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_tabs;
@@ -44,7 +44,7 @@ impl MD046CodeBlockStyle {
     /// Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
     /// 4+ spaces of indentation makes it an indented code block instead.
     fn has_valid_fence_indent(line: &str) -> bool {
-        ElementCache::calculate_indentation_width_default(line) < 4
+        calculate_indentation_width_default(line) < 4
     }
 
     /// Check if a line is a valid fenced code block start per CommonMark spec
@@ -251,7 +251,7 @@ impl MD046CodeBlockStyle {
         let line = lines[i];
 
         // Check if indented by at least 4 columns (accounting for tab expansion)
-        let indent = ElementCache::calculate_indentation_width_default(line);
+        let indent = calculate_indentation_width_default(line);
         if indent < 4 {
             return false;
         }
@@ -281,7 +281,7 @@ impl MD046CodeBlockStyle {
         // OR if the previous line is also an indented code block (continuation)
         let has_blank_line_before = i == 0 || lines[i - 1].trim().is_empty();
         let prev_is_indented_code = i > 0
-            && ElementCache::calculate_indentation_width_default(lines[i - 1]) >= 4
+            && calculate_indentation_width_default(lines[i - 1]) >= 4
             && !ctx.in_list_context[i - 1]
             && !(is_mkdocs && ctx.in_tab_context[i - 1])
             && !(is_mkdocs && ctx.in_admonition_context[i - 1]);
@@ -313,7 +313,7 @@ impl MD046CodeBlockStyle {
             if let Some(tab_indent) = current_tab_indent {
                 if mkdocs_tabs::is_tab_content(line, tab_indent) {
                     in_tab_context[i] = true;
-                } else if !line.trim().is_empty() && ElementCache::calculate_indentation_width_default(line) < 4 {
+                } else if !line.trim().is_empty() && calculate_indentation_width_default(line) < 4 {
                     // Non-indented, non-empty line ends tab context
                     current_tab_indent = None;
                 } else {
@@ -340,7 +340,7 @@ impl MD046CodeBlockStyle {
         let mut admonition_stack: Vec<usize> = Vec::new();
 
         for (i, line) in lines.iter().enumerate() {
-            let line_indent = ElementCache::calculate_indentation_width_default(line);
+            let line_indent = calculate_indentation_width_default(line);
 
             // Check if this is an admonition marker
             if mkdocs_admonitions::is_admonition_start(line) {

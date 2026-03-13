@@ -3,7 +3,7 @@
 /// See [docs/md031.md](../../docs/md031.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::element_cache::ElementCache;
+use crate::utils::calculate_indentation_width_default;
 use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::quarto_divs;
@@ -103,7 +103,7 @@ impl MD031BlanksAroundFences {
             }
 
             // If this line is indented (3+ columns), it might be a continuation of a list item
-            let is_indented = ElementCache::calculate_indentation_width_default(line) >= 3;
+            let is_indented = calculate_indentation_width_default(line) >= 3;
             if is_indented {
                 continue; // Keep looking backwards for the list marker
             }

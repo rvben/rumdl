@@ -1,6 +1,6 @@
 //! Utilities for position/range conversions
 
-use crate::utils::element_cache::ElementCache;
+use crate::utils::calculate_indentation_width_default;
 use std::collections::HashSet;
 use std::ops::Range;
 
@@ -331,7 +331,7 @@ impl<'a> LineIndex<'a> {
             let indent = line.len() - trimmed.len();
 
             // 1. Detect indented code blocks (4+ columns accounting for tab expansion)
-            if ElementCache::calculate_indentation_width_default(line) >= 4 {
+            if calculate_indentation_width_default(line) >= 4 {
                 code_block_lines.insert(i);
                 continue; // Skip further processing for indented code blocks
             }
