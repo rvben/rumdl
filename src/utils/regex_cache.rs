@@ -434,14 +434,6 @@ pub static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r
 pub static HTML_HEADING_PATTERN: LazyLock<FancyRegex> =
     LazyLock::new(|| FancyRegex::new(r"^\s*<h([1-6])(?:\s[^>]*)?>.*</h\1>\s*$").unwrap());
 
-// Horizontal rule patterns
-pub static HR_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\-{3,}\s*$").unwrap());
-pub static HR_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\*{3,}\s*$").unwrap());
-pub static HR_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^_{3,}\s*$").unwrap());
-pub static HR_SPACED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\-\s+){2,}\-\s*$").unwrap());
-pub static HR_SPACED_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap());
-pub static HR_SPACED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(_\s+){2,}_\s*$").unwrap());
-
 /// Escapes a string to be used in a regex pattern
 pub fn escape_regex(s: &str) -> String {
     let mut result = String::with_capacity(s.len() * 2);

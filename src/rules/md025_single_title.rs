@@ -4,9 +4,7 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::types::HeadingLevel;
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::regex_cache::{
-    HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
-};
+use crate::utils::thematic_break;
 use toml;
 
 mod md025_config;
@@ -141,15 +139,8 @@ impl MD025SingleTitle {
         })
     }
 
-    /// Check if a line is a horizontal rule
     fn is_horizontal_rule(line: &str) -> bool {
-        let trimmed = line.trim();
-        HR_DASH.is_match(trimmed)
-            || HR_ASTERISK.is_match(trimmed)
-            || HR_UNDERSCORE.is_match(trimmed)
-            || HR_SPACED_DASH.is_match(trimmed)
-            || HR_SPACED_ASTERISK.is_match(trimmed)
-            || HR_SPACED_UNDERSCORE.is_match(trimmed)
+        thematic_break::is_thematic_break(line)
     }
 
     /// Build a demoted heading line. Returns the replacement line and whether

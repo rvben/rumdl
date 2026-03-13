@@ -6,9 +6,6 @@
 use crate::utils::range_utils::calculate_line_range;
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
-use crate::utils::regex_cache::{
-    HR_ASTERISK, HR_DASH, HR_SPACED_ASTERISK, HR_SPACED_DASH, HR_SPACED_UNDERSCORE, HR_UNDERSCORE,
-};
 use toml;
 
 mod md035_config;
@@ -31,16 +28,8 @@ impl MD035HRStyle {
         Self { config }
     }
 
-    /// Determines if a line is a horizontal rule
     fn is_horizontal_rule(line: &str) -> bool {
-        let line = line.trim();
-
-        HR_DASH.is_match(line)
-            || HR_ASTERISK.is_match(line)
-            || HR_UNDERSCORE.is_match(line)
-            || HR_SPACED_DASH.is_match(line)
-            || HR_SPACED_ASTERISK.is_match(line)
-            || HR_SPACED_UNDERSCORE.is_match(line)
+        crate::utils::thematic_break::is_thematic_break(line)
     }
 
     /// Check if a line might be a Setext heading underline
@@ -559,6 +548,77 @@ mod tests {
             fixed.contains("    ---"),
             "fix() should preserve --- inside <div markdown> block, got: {fixed}"
         );
+    }
+
+    #[test]
+    fn test_is_horizontal_rule_edge_cases() {
+        // Valid: many dashes/asterisks/underscores
+        assert!(MD035HRStyle::is_horizontal_rule("----------"));
+        assert!(MD035HRStyle::is_horizontal_rule("**********"));
+        assert!(MD035HRStyle::is_horizontal_rule("__________"));
+
+        // Valid: spaced with 4+ markers
+        assert!(MD035HRStyle::is_horizontal_rule("- - - -"));
+        assert!(MD035HRStyle::is_horizontal_rule("* * * * *"));
+        assert!(MD035HRStyle::is_horizontal_rule("_ _ _ _ _ _"));
+
+        // Valid: spaced with multiple spaces between markers
+        assert!(MD035HRStyle::is_horizontal_rule("*   *   *"));
+        assert!(MD035HRStyle::is_horizontal_rule("-    -    -"));
+        assert!(MD035HRStyle::is_horizontal_rule("_  _  _"));
+
+        // Valid: trailing space after compact HR
+        assert!(MD035HRStyle::is_horizontal_rule("--- "));
+        assert!(MD035HRStyle::is_horizontal_rule("*** "));
+        assert!(MD035HRStyle::is_horizontal_rule("___ "));
+
+        // Valid: trailing space after spaced HR
+        assert!(MD035HRStyle::is_horizontal_rule("- - - "));
+        assert!(MD035HRStyle::is_horizontal_rule("* * * "));
+
+        // Invalid: mixed marker characters
+        assert!(!MD035HRStyle::is_horizontal_rule("-*-"));
+        assert!(!MD035HRStyle::is_horizontal_rule("- * -"));
+        assert!(!MD035HRStyle::is_horizontal_rule("_-_"));
+        assert!(!MD035HRStyle::is_horizontal_rule("*_*"));
+
+        // Invalid: text after markers
+        assert!(!MD035HRStyle::is_horizontal_rule("---text"));
+        assert!(!MD035HRStyle::is_horizontal_rule("***text"));
+        assert!(!MD035HRStyle::is_horizontal_rule("- - - text"));
+
+        // Invalid: only two markers (spaced)
+        assert!(!MD035HRStyle::is_horizontal_rule("- -"));
+        assert!(!MD035HRStyle::is_horizontal_rule("* *"));
+        assert!(!MD035HRStyle::is_horizontal_rule("_ _"));
+
+        // Invalid: letters mixed in
+        assert!(!MD035HRStyle::is_horizontal_rule("-a-b-"));
+        assert!(!MD035HRStyle::is_horizontal_rule("*x*x*"));
+
+        // Invalid: single character
+        assert!(!MD035HRStyle::is_horizontal_rule("-"));
+        assert!(!MD035HRStyle::is_horizontal_rule("*"));
+        assert!(!MD035HRStyle::is_horizontal_rule("_"));
+
+        // Valid: tabs count as whitespace in spaced HRs
+        assert!(MD035HRStyle::is_horizontal_rule("*\t*\t*"));
+        assert!(MD035HRStyle::is_horizontal_rule("-\t-\t-"));
+
+        // Valid: very long HR
+        let long_hr = "-".repeat(200);
+        assert!(MD035HRStyle::is_horizontal_rule(&long_hr));
+    }
+
+    #[test]
+    fn test_frontmatter_not_treated_as_hr() {
+        let rule = MD035HRStyle::new("***".to_string());
+        let content = "---\ntitle: Test\n---\n\n***\n\nContent";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only the *** should be checked, not the frontmatter ---
+        assert_eq!(result.len(), 0);
     }
 
     #[test]
