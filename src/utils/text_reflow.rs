@@ -9,9 +9,9 @@ use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list}
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
     DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
-    HUGO_SHORTCODE_REGEX, INLINE_IMAGE_FANCY_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX,
-    LINKED_IMAGE_INLINE_INLINE, LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF,
-    REF_IMAGE_REGEX, REF_LINK_REGEX, SHORTCUT_REF_REGEX, WIKI_LINK_REGEX,
+    HUGO_SHORTCODE_REGEX, INLINE_IMAGE_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, LINKED_IMAGE_INLINE_INLINE,
+    LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF, REF_IMAGE_REGEX, REF_LINK_REGEX,
+    SHORTCUT_REF_REGEX, WIKI_LINK_REGEX,
 };
 use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_quote, is_opening_quote,
@@ -781,75 +781,76 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         // Calculate current byte offset in original text
         let current_offset = text.len() - remaining.len();
         // Find the earliest occurrence of any markdown pattern
-        let mut earliest_match: Option<(usize, &str, fancy_regex::Match)> = None;
+        // Store (start, end, pattern_name) to unify standard Regex and FancyRegex match results
+        let mut earliest_match: Option<(usize, usize, &str)> = None;
 
         // Check for linked images FIRST (all 4 variants)
         // Quick literal check: only run expensive regexes if we might have a linked image
         // Pattern starts with "[!" so check for that first
         if remaining.contains("[!") {
             // Pattern 1: [![alt](img)](link) - inline image in inline link
-            if let Ok(Some(m)) = LINKED_IMAGE_INLINE_INLINE.find(remaining)
+            if let Some(m) = LINKED_IMAGE_INLINE_INLINE.find(remaining)
                 && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
             {
-                earliest_match = Some((m.start(), "linked_image_ii", m));
+                earliest_match = Some((m.start(), m.end(), "linked_image_ii"));
             }
 
             // Pattern 2: [![alt][ref]](link) - reference image in inline link
-            if let Ok(Some(m)) = LINKED_IMAGE_REF_INLINE.find(remaining)
+            if let Some(m) = LINKED_IMAGE_REF_INLINE.find(remaining)
                 && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
             {
-                earliest_match = Some((m.start(), "linked_image_ri", m));
+                earliest_match = Some((m.start(), m.end(), "linked_image_ri"));
             }
 
             // Pattern 3: [![alt](img)][ref] - inline image in reference link
-            if let Ok(Some(m)) = LINKED_IMAGE_INLINE_REF.find(remaining)
+            if let Some(m) = LINKED_IMAGE_INLINE_REF.find(remaining)
                 && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
             {
-                earliest_match = Some((m.start(), "linked_image_ir", m));
+                earliest_match = Some((m.start(), m.end(), "linked_image_ir"));
             }
 
             // Pattern 4: [![alt][ref]][ref] - reference image in reference link
-            if let Ok(Some(m)) = LINKED_IMAGE_REF_REF.find(remaining)
+            if let Some(m) = LINKED_IMAGE_REF_REF.find(remaining)
                 && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
             {
-                earliest_match = Some((m.start(), "linked_image_rr", m));
+                earliest_match = Some((m.start(), m.end(), "linked_image_rr"));
             }
         }
 
         // Check for images (they start with ! so should be detected before links)
         // Inline images - ![alt](url)
-        if let Ok(Some(m)) = INLINE_IMAGE_FANCY_REGEX.find(remaining)
+        if let Some(m) = INLINE_IMAGE_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "inline_image", m));
+            earliest_match = Some((m.start(), m.end(), "inline_image"));
         }
 
         // Reference images - ![alt][ref]
-        if let Ok(Some(m)) = REF_IMAGE_REGEX.find(remaining)
+        if let Some(m) = REF_IMAGE_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "ref_image", m));
+            earliest_match = Some((m.start(), m.end(), "ref_image"));
         }
 
         // Check for footnote references - [^note]
-        if let Ok(Some(m)) = FOOTNOTE_REF_REGEX.find(remaining)
+        if let Some(m) = FOOTNOTE_REF_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "footnote_ref", m));
+            earliest_match = Some((m.start(), m.end(), "footnote_ref"));
         }
 
         // Check for inline links - [text](url)
         if let Ok(Some(m)) = INLINE_LINK_FANCY_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "inline_link", m));
+            earliest_match = Some((m.start(), m.end(), "inline_link"));
         }
 
         // Check for reference links - [text][ref]
         if let Ok(Some(m)) = REF_LINK_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "ref_link", m));
+            earliest_match = Some((m.start(), m.end(), "ref_link"));
         }
 
         // Check for shortcut reference links - [ref]
@@ -857,57 +858,57 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "shortcut_ref", m));
+            earliest_match = Some((m.start(), m.end(), "shortcut_ref"));
         }
 
         // Check for wiki-style links - [[wiki]]
-        if let Ok(Some(m)) = WIKI_LINK_REGEX.find(remaining)
+        if let Some(m) = WIKI_LINK_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "wiki_link", m));
+            earliest_match = Some((m.start(), m.end(), "wiki_link"));
         }
 
         // Check for display math first (before inline) - $$math$$
-        if let Ok(Some(m)) = DISPLAY_MATH_REGEX.find(remaining)
+        if let Some(m) = DISPLAY_MATH_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "display_math", m));
+            earliest_match = Some((m.start(), m.end(), "display_math"));
         }
 
         // Check for inline math - $math$
         if let Ok(Some(m)) = INLINE_MATH_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "inline_math", m));
+            earliest_match = Some((m.start(), m.end(), "inline_math"));
         }
 
         // Note: Strikethrough is now handled by pulldown-cmark in extract_emphasis_spans
 
         // Check for emoji shortcodes - :emoji:
-        if let Ok(Some(m)) = EMOJI_SHORTCODE_REGEX.find(remaining)
+        if let Some(m) = EMOJI_SHORTCODE_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "emoji", m));
+            earliest_match = Some((m.start(), m.end(), "emoji"));
         }
 
         // Check for HTML entities - &nbsp; etc
-        if let Ok(Some(m)) = HTML_ENTITY_REGEX.find(remaining)
+        if let Some(m) = HTML_ENTITY_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "html_entity", m));
+            earliest_match = Some((m.start(), m.end(), "html_entity"));
         }
 
         // Check for Hugo shortcodes - {{< ... >}} or {{% ... %}}
         // Must be checked before other patterns to avoid false sentence breaks
-        if let Ok(Some(m)) = HUGO_SHORTCODE_REGEX.find(remaining)
+        if let Some(m) = HUGO_SHORTCODE_REGEX.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
-            earliest_match = Some((m.start(), "hugo_shortcode", m));
+            earliest_match = Some((m.start(), m.end(), "hugo_shortcode"));
         }
 
         // Check for HTML tags - <tag> </tag> <tag/>
         // But exclude autolinks like <https://...> or <mailto:...> or email autolinks <user@domain.com>
-        if let Ok(Some(m)) = HTML_TAG_PATTERN.find(remaining)
+        if let Some(m) = HTML_TAG_PATTERN.find(remaining)
             && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
         {
             // Check if this is an autolink (starts with protocol or mailto:)
@@ -926,9 +927,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
             };
 
             if is_url_autolink || is_email_autolink {
-                earliest_match = Some((m.start(), "autolink", m));
+                earliest_match = Some((m.start(), m.end(), "autolink"));
             } else {
-                earliest_match = Some((m.start(), "html_tag", m));
+                earliest_match = Some((m.start(), m.end(), "html_tag"));
             }
         }
 
@@ -980,7 +981,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         };
 
         if should_process_markdown_link {
-            let (pos, pattern_type, match_obj) = earliest_match.unwrap();
+            let (pos, match_end, pattern_type) = earliest_match.unwrap();
 
             // Add any text before the match
             if pos > 0 {
@@ -991,7 +992,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
             match pattern_type {
                 // Pattern 1: [![alt](img)](link) - inline image in inline link
                 "linked_image_ii" => {
-                    if let Ok(Some(caps)) = LINKED_IMAGE_INLINE_INLINE.captures(remaining) {
+                    if let Some(caps) = LINKED_IMAGE_INLINE_INLINE.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -1000,7 +1001,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                             img_source: LinkedImageSource::Inline(img_url.to_string()),
                             link_target: LinkedImageTarget::Inline(link_url.to_string()),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
@@ -1008,7 +1009,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 // Pattern 2: [![alt][ref]](link) - reference image in inline link
                 "linked_image_ri" => {
-                    if let Ok(Some(caps)) = LINKED_IMAGE_REF_INLINE.captures(remaining) {
+                    if let Some(caps) = LINKED_IMAGE_REF_INLINE.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -1017,7 +1018,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                             img_source: LinkedImageSource::Reference(img_ref.to_string()),
                             link_target: LinkedImageTarget::Inline(link_url.to_string()),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
@@ -1025,7 +1026,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 // Pattern 3: [![alt](img)][ref] - inline image in reference link
                 "linked_image_ir" => {
-                    if let Ok(Some(caps)) = LINKED_IMAGE_INLINE_REF.captures(remaining) {
+                    if let Some(caps) = LINKED_IMAGE_INLINE_REF.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -1034,7 +1035,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                             img_source: LinkedImageSource::Inline(img_url.to_string()),
                             link_target: LinkedImageTarget::Reference(link_ref.to_string()),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
@@ -1042,7 +1043,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 // Pattern 4: [![alt][ref]][ref] - reference image in reference link
                 "linked_image_rr" => {
-                    if let Ok(Some(caps)) = LINKED_IMAGE_REF_REF.captures(remaining) {
+                    if let Some(caps) = LINKED_IMAGE_REF_REF.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
@@ -1051,28 +1052,28 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                             img_source: LinkedImageSource::Reference(img_ref.to_string()),
                             link_target: LinkedImageTarget::Reference(link_ref.to_string()),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
                     }
                 }
                 "inline_image" => {
-                    if let Ok(Some(caps)) = INLINE_IMAGE_FANCY_REGEX.captures(remaining) {
+                    if let Some(caps) = INLINE_IMAGE_REGEX.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::InlineImage {
                             alt: alt.to_string(),
                             url: url.to_string(),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("!".to_string()));
                         remaining = &remaining[1..];
                     }
                 }
                 "ref_image" => {
-                    if let Ok(Some(caps)) = REF_IMAGE_REGEX.captures(remaining) {
+                    if let Some(caps) = REF_IMAGE_REGEX.captures(remaining) {
                         let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
 
@@ -1084,17 +1085,17 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                                 reference: reference.to_string(),
                             });
                         }
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("!".to_string()));
                         remaining = &remaining[1..];
                     }
                 }
                 "footnote_ref" => {
-                    if let Ok(Some(caps)) = FOOTNOTE_REF_REGEX.captures(remaining) {
+                    if let Some(caps) = FOOTNOTE_REF_REGEX.captures(remaining) {
                         let note = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::FootnoteReference { note: note.to_string() });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[".to_string()));
                         remaining = &remaining[1..];
@@ -1108,7 +1109,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                             text: text.to_string(),
                             url: url.to_string(),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         // Fallback - shouldn't happen
                         elements.push(Element::Text("[".to_string()));
@@ -1130,7 +1131,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                                 reference: reference.to_string(),
                             });
                         }
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         // Fallback - shouldn't happen
                         elements.push(Element::Text("[".to_string()));
@@ -1143,7 +1144,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                         elements.push(Element::ShortcutReference {
                             reference: reference.to_string(),
                         });
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         // Fallback - shouldn't happen
                         elements.push(Element::Text("[".to_string()));
@@ -1151,20 +1152,20 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                     }
                 }
                 "wiki_link" => {
-                    if let Ok(Some(caps)) = WIKI_LINK_REGEX.captures(remaining) {
+                    if let Some(caps) = WIKI_LINK_REGEX.captures(remaining) {
                         let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::WikiLink(content.to_string()));
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("[[".to_string()));
                         remaining = &remaining[2..];
                     }
                 }
                 "display_math" => {
-                    if let Ok(Some(caps)) = DISPLAY_MATH_REGEX.captures(remaining) {
+                    if let Some(caps) = DISPLAY_MATH_REGEX.captures(remaining) {
                         let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::DisplayMath(math.to_string()));
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("$$".to_string()));
                         remaining = &remaining[2..];
@@ -1174,7 +1175,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                     if let Ok(Some(caps)) = INLINE_MATH_REGEX.captures(remaining) {
                         let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::InlineMath(math.to_string()));
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text("$".to_string()));
                         remaining = &remaining[1..];
@@ -1182,34 +1183,34 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 // Note: "strikethrough" case removed - now handled by pulldown-cmark
                 "emoji" => {
-                    if let Ok(Some(caps)) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
+                    if let Some(caps) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
                         let emoji = caps.get(1).map(|m| m.as_str()).unwrap_or("");
                         elements.push(Element::EmojiShortcode(emoji.to_string()));
-                        remaining = &remaining[match_obj.end()..];
+                        remaining = &remaining[match_end..];
                     } else {
                         elements.push(Element::Text(":".to_string()));
                         remaining = &remaining[1..];
                     }
                 }
                 "html_entity" => {
-                    // HTML entities are captured whole - use as_str() to get just the matched content
-                    elements.push(Element::HtmlEntity(match_obj.as_str().to_string()));
-                    remaining = &remaining[match_obj.end()..];
+                    // HTML entities are captured whole
+                    elements.push(Element::HtmlEntity(remaining[pos..match_end].to_string()));
+                    remaining = &remaining[match_end..];
                 }
                 "hugo_shortcode" => {
                     // Hugo shortcodes are atomic elements - preserve them exactly
-                    elements.push(Element::HugoShortcode(match_obj.as_str().to_string()));
-                    remaining = &remaining[match_obj.end()..];
+                    elements.push(Element::HugoShortcode(remaining[pos..match_end].to_string()));
+                    remaining = &remaining[match_end..];
                 }
                 "autolink" => {
                     // Autolinks are atomic elements - preserve them exactly
-                    elements.push(Element::Autolink(match_obj.as_str().to_string()));
-                    remaining = &remaining[match_obj.end()..];
+                    elements.push(Element::Autolink(remaining[pos..match_end].to_string()));
+                    remaining = &remaining[match_end..];
                 }
                 "html_tag" => {
-                    // HTML tags are captured whole - use as_str() to get just the matched content
-                    elements.push(Element::HtmlTag(match_obj.as_str().to_string()));
-                    remaining = &remaining[match_obj.end()..];
+                    // HTML tags are captured whole
+                    elements.push(Element::HtmlTag(remaining[pos..match_end].to_string()));
+                    remaining = &remaining[match_end..];
                 }
                 _ => {
                     // Unknown pattern, treat as text

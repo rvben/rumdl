@@ -508,7 +508,7 @@ impl<'a> LintContext<'a> {
         let shortcode_ranges = profile_section!("Shortcode ranges", profile, {
             use crate::utils::regex_cache::HUGO_SHORTCODE_REGEX;
             let mut ranges = Vec::new();
-            for mat in HUGO_SHORTCODE_REGEX.find_iter(content).flatten() {
+            for mat in HUGO_SHORTCODE_REGEX.find_iter(content) {
                 ranges.push((mat.start(), mat.end()));
             }
             ranges
