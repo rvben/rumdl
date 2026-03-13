@@ -69,6 +69,10 @@ pub struct ReflowOptions {
     /// When false, "word. lowercase" is also treated as a sentence boundary.
     /// Does not affect ! and ? which are always treated as sentence boundaries.
     pub require_sentence_capital: bool,
+    /// Cap list continuation indent to this value when set.
+    /// Used by mkdocs flavor where continuation is always 4 spaces
+    /// regardless of checkbox markers.
+    pub max_list_continuation_indent: Option<usize>,
 }
 
 impl Default for ReflowOptions {
@@ -83,6 +87,7 @@ impl Default for ReflowOptions {
             length_mode: ReflowLengthMode::default(),
             attr_lists: false,
             require_sentence_capital: true,
+            max_list_continuation_indent: None,
         }
     }
 }
@@ -1737,6 +1742,7 @@ fn cascade_split_line(
         length_mode,
         attr_lists,
         require_sentence_capital: true,
+        max_list_continuation_indent: None,
     };
     reflow_elements(&elements, &options)
 }
@@ -2212,7 +2218,13 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
 
             // Calculate the proper indentation for continuation lines
             let trimmed_marker = marker;
-            let continuation_spaces = content_start;
+            let continuation_spaces = if let Some(max_indent) = options.max_list_continuation_indent {
+                // Cap the relative indent (past the nesting level) to max_indent,
+                // then add back the nesting indent so nested items stay correct
+                indent + (content_start - indent).min(max_indent)
+            } else {
+                content_start
+            };
 
             // Adjust line length to account for list marker and space
             let prefix_length = indent + trimmed_marker.len() + 1;

@@ -702,6 +702,11 @@ impl MD013LineLength {
             length_mode: self.reflow_length_mode(),
             attr_lists: ctx.flavor.supports_attr_lists(),
             require_sentence_capital: config.require_sentence_capital,
+            max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                Some(4)
+            } else {
+                None
+            },
         };
 
         let reflowed_with_style =
@@ -959,6 +964,11 @@ impl MD013LineLength {
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
                     require_sentence_capital: config.require_sentence_capital,
+                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                        Some(4)
+                    } else {
+                        None
+                    },
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
@@ -1041,8 +1051,10 @@ impl MD013LineLength {
                 // after a blank line (multi-paragraph list items). For non-blank
                 // continuation (lines directly following the marker line), use
                 // the natural marker width so that 2-space indent is recognized.
+                let item_indent = ctx.lines[i].indent;
                 let min_continuation_indent = if ctx.flavor.requires_strict_list_indent() {
-                    marker_len.max(4)
+                    // Use 4-space relative indent from the list item's nesting level
+                    item_indent + (base_marker_len - item_indent).max(4)
                 } else {
                     marker_len
                 };
@@ -1214,6 +1226,15 @@ impl MD013LineLength {
                             .unwrap_or(min_continuation_indent)
                     }
                     _ => min_continuation_indent,
+                };
+                // For checkbox items in mkdocs flavor, enforce minimum indent so
+                // continuation lines use the structural list indent (4), not the
+                // content-aligned indent (6) which Python-Markdown doesn't support
+                let has_checkbox = base_marker_len < marker_len;
+                let indent_size = if has_checkbox && ctx.flavor.requires_strict_list_indent() {
+                    indent_size.max(min_continuation_indent)
+                } else {
+                    indent_size
                 };
                 let expected_indent = " ".repeat(indent_size);
 
@@ -1849,6 +1870,11 @@ impl MD013LineLength {
                         length_mode: self.reflow_length_mode(),
                         attr_lists: ctx.flavor.supports_attr_lists(),
                         require_sentence_capital: config.require_sentence_capital,
+                        max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                            Some(4)
+                        } else {
+                            None
+                        },
                     };
 
                     let mut result: Vec<String> = Vec::new();
@@ -2153,6 +2179,11 @@ impl MD013LineLength {
                                         length_mode: self.reflow_length_mode(),
                                         attr_lists: ctx.flavor.supports_attr_lists(),
                                         require_sentence_capital: config.require_sentence_capital,
+                                        max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                                            Some(4)
+                                        } else {
+                                            None
+                                        },
                                     };
 
                                     let reflowed =
@@ -2446,6 +2477,11 @@ impl MD013LineLength {
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
                     require_sentence_capital: config.require_sentence_capital,
+                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                        Some(4)
+                    } else {
+                        None
+                    },
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 

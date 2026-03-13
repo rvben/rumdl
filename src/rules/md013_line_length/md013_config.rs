@@ -182,6 +182,7 @@ impl MD013Config {
             length_mode,
             attr_lists: false,
             require_sentence_capital: self.require_sentence_capital,
+            max_list_continuation_indent: None,
         }
     }
 }
