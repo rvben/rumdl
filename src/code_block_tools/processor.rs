@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 use super::config::LanguageToolConfig;
-use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing};
+use super::config::{CodeBlockToolsConfig, NormalizeLanguage, OnError, OnMissing, ToolDefinition};
 use super::executor::{ExecutorError, ToolExecutor, ToolOutput};
 use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
@@ -180,6 +180,12 @@ pub struct FormatOutput {
 }
 
 /// Main processor for code block tools.
+/// Context in which a tool is being used.
+enum ToolContext {
+    Lint,
+    Format,
+}
+
 pub struct CodeBlockToolProcessor<'a> {
     config: &'a CodeBlockToolsConfig,
     flavor: MarkdownFlavor,
@@ -205,6 +211,34 @@ impl<'a> CodeBlockToolProcessor<'a> {
             executor: ToolExecutor::new(config.timeout),
             user_aliases,
         }
+    }
+
+    /// Resolve a tool ID with context awareness.
+    ///
+    /// When a bare tool name (e.g., "tombi") is used in a specific context
+    /// (lint or format), try the context-specific variant first (e.g., "tombi:format"),
+    /// then common alternatives (e.g., "tombi:check"), before falling back to the bare name.
+    fn resolve_tool<'b>(&'b self, tool_id: &str, context: ToolContext) -> Option<&'b ToolDefinition> {
+        // If the tool ID already has a colon suffix, use it directly
+        if tool_id.contains(':') {
+            return self.registry.get(tool_id);
+        }
+
+        // Try context-specific variants first
+        let suffixes = match context {
+            ToolContext::Format => &["format", "fmt"][..],
+            ToolContext::Lint => &["lint", "check"][..],
+        };
+
+        for suffix in suffixes {
+            let qualified = format!("{tool_id}:{suffix}");
+            if let Some(def) = self.registry.get(&qualified) {
+                return Some(def);
+            }
+        }
+
+        // Fall back to bare name
+        self.registry.get(tool_id)
     }
 
     /// Extract all fenced code blocks from content.
@@ -570,7 +604,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let tool_def = match self.registry.get(tool_id) {
+                let tool_def = match self.resolve_tool(tool_id, ToolContext::Lint) {
                     Some(t) => t,
                     None => {
                         log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
@@ -710,7 +744,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let tool_def = match self.registry.get(tool_id) {
+                let tool_def = match self.resolve_tool(tool_id, ToolContext::Format) {
                     Some(t) => t,
                     None => {
                         log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
@@ -744,6 +778,14 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
                 match self.executor.format(tool_def, &formatted, Some(self.config.timeout)) {
                     Ok(output) => {
+                        // Guard against formatters that produce empty output for non-empty input.
+                        // This prevents data loss from misconfigured tools (e.g., a lint tool
+                        // used as a formatter that validates but doesn't output content).
+                        if output.trim().is_empty() && !formatted.trim().is_empty() {
+                            log::warn!("Formatter '{tool_id}' produced empty output for non-empty input, skipping");
+                            continue;
+                        }
+
                         // Ensure trailing newline matches original (unindented)
                         formatted = output;
                         if code_content.ends_with('\n') && !formatted.ends_with('\n') {
@@ -2520,6 +2562,172 @@ console.log('hi');
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].message, "at line 2 column 1");
         assert_eq!(diags[1].message, "some other text");
+    }
+
+    // =========================================================================
+    // Issue #527: formatter that produces empty output should not erase content
+    // =========================================================================
+
+    /// A formatter that produces no stdout (like `tombi lint -` mistakenly used
+    /// as a formatter) should not replace non-empty content with an empty string.
+    /// This test uses `true` which exits 0 with no output, simulating the bug.
+    #[test]
+    fn test_format_empty_output_does_not_erase_content() {
+        use super::super::config::LanguageToolConfig;
+
+        let mut config = default_config();
+        config.languages.insert(
+            "toml".to_string(),
+            LanguageToolConfig {
+                format: vec!["empty-formatter".to_string()],
+                ..Default::default()
+            },
+        );
+        // Define a tool that exits 0 but produces no stdout (simulates `tombi lint -`)
+        config.tools.insert(
+            "empty-formatter".to_string(),
+            super::super::config::ToolDefinition {
+                command: vec!["true".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            },
+        );
+
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let content = "```toml\nkey = \"value\"\n```\n";
+        let result = processor.format(content);
+
+        assert!(result.is_ok(), "Format should not error");
+        let output = result.unwrap();
+
+        // The content must NOT be erased — original content should be preserved
+        assert!(
+            output.content.contains("key = \"value\""),
+            "Empty formatter output should not erase content. Got: {:?}",
+            output.content
+        );
+    }
+
+    /// A formatter that echoes input back (like `cat`) should preserve content.
+    #[test]
+    fn test_format_identity_formatter_preserves_content() {
+        use super::super::config::LanguageToolConfig;
+
+        let mut config = default_config();
+        config.languages.insert(
+            "toml".to_string(),
+            LanguageToolConfig {
+                format: vec!["cat-formatter".to_string()],
+                ..Default::default()
+            },
+        );
+        config.tools.insert(
+            "cat-formatter".to_string(),
+            super::super::config::ToolDefinition {
+                command: vec!["cat".to_string()],
+                stdin: true,
+                stdout: true,
+                lint_args: vec![],
+                format_args: vec![],
+            },
+        );
+
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let content = "```toml\nkey = \"value\"\n```\n";
+        let result = processor.format(content);
+
+        assert!(result.is_ok(), "Format should not error");
+        let output = result.unwrap();
+        assert_eq!(
+            output.content, content,
+            "Identity formatter should preserve content exactly"
+        );
+    }
+
+    /// Verify that the context-aware tool resolution resolves bare "tombi"
+    /// to "tombi:format" in format context and "tombi:lint" in lint context.
+    #[test]
+    fn test_resolve_tool_context_aware_tombi() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // In format context, bare "tombi" should resolve to "tombi:format"
+        let format_def = processor
+            .resolve_tool("tombi", ToolContext::Format)
+            .expect("Should resolve tombi in format context");
+        assert!(
+            format_def.command.iter().any(|arg| arg == "format"),
+            "Bare 'tombi' in format context should resolve to 'tombi format', got: {:?}",
+            format_def.command
+        );
+
+        // In lint context, bare "tombi" should resolve to "tombi:lint"
+        let lint_def = processor
+            .resolve_tool("tombi", ToolContext::Lint)
+            .expect("Should resolve tombi in lint context");
+        assert!(
+            lint_def.command.iter().any(|arg| arg == "lint"),
+            "Bare 'tombi' in lint context should resolve to 'tombi lint', got: {:?}",
+            lint_def.command
+        );
+
+        // Explicit suffix should bypass context-aware resolution
+        let explicit_def = processor
+            .resolve_tool("tombi:lint", ToolContext::Format)
+            .expect("Should resolve explicit tombi:lint even in format context");
+        assert!(
+            explicit_def.command.iter().any(|arg| arg == "lint"),
+            "Explicit 'tombi:lint' should always use lint, got: {:?}",
+            explicit_def.command
+        );
+    }
+
+    /// Verify context-aware resolution for ruff (uses "check" suffix, not "lint").
+    #[test]
+    fn test_resolve_tool_context_aware_ruff() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // In lint context, bare "ruff" should resolve to "ruff:check"
+        let lint_def = processor
+            .resolve_tool("ruff", ToolContext::Lint)
+            .expect("Should resolve ruff in lint context");
+        assert!(
+            lint_def.command.iter().any(|arg| arg == "check"),
+            "Bare 'ruff' in lint context should resolve to 'ruff check', got: {:?}",
+            lint_def.command
+        );
+
+        // In format context, bare "ruff" should resolve to "ruff:format"
+        let format_def = processor
+            .resolve_tool("ruff", ToolContext::Format)
+            .expect("Should resolve ruff in format context");
+        assert!(
+            format_def.command.iter().any(|arg| arg == "format"),
+            "Bare 'ruff' in format context should resolve to 'ruff format', got: {:?}",
+            format_def.command
+        );
+    }
+
+    /// Tools without context-specific variants should still resolve via bare name.
+    #[test]
+    fn test_resolve_tool_bare_name_fallback() {
+        let config = default_config();
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        // "shellcheck" has no :lint or :format variant — should fall back to bare name
+        let def = processor
+            .resolve_tool("shellcheck", ToolContext::Lint)
+            .expect("Should resolve shellcheck via fallback");
+        assert!(
+            def.command.iter().any(|arg| arg == "shellcheck"),
+            "shellcheck should resolve to itself, got: {:?}",
+            def.command
+        );
     }
 
     #[test]

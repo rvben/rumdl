@@ -693,6 +693,13 @@ mod tests {
         let tool = registry.get("tombi:lint").expect("Should find tombi:lint");
         assert!(tool.command.contains(&"lint".to_string()));
 
+        let tool = registry.get("tombi:format").expect("Should find tombi:format");
+        assert!(
+            tool.command.contains(&"format".to_string()),
+            "tombi:format should use 'format' subcommand, got: {:?}",
+            tool.command
+        );
+
         // oxfmt
         let tool = registry.get("oxfmt").expect("Should find oxfmt");
         assert!(tool.command.contains(&"oxfmt".to_string()));
@@ -700,5 +707,63 @@ mod tests {
 
         let tool = registry.get("oxfmt:ts").expect("Should find oxfmt:ts");
         assert!(tool.command.iter().any(|s| s.contains("_.ts")));
+    }
+
+    // =========================================================================
+    // Issue #527: bare "tombi" in format slot resolves to lint command
+    // =========================================================================
+
+    /// The bare "tombi" registry entry defaults to `tombi lint -`.
+    /// The processor's `resolve_tool` method handles context-aware resolution:
+    /// in format context, it resolves "tombi" to "tombi:format" automatically.
+    #[test]
+    fn test_bare_tombi_resolves_to_lint_not_format() {
+        let registry = ToolRegistry::default();
+
+        let bare = registry.get("tombi").expect("Should find bare tombi");
+        let format = registry.get("tombi:format").expect("Should find tombi:format");
+
+        // The bare entry uses `lint` subcommand
+        assert!(
+            bare.command.contains(&"lint".to_string()),
+            "Bare 'tombi' uses lint subcommand: {:?}",
+            bare.command
+        );
+
+        // The format entry uses `format` subcommand
+        assert!(
+            format.command.contains(&"format".to_string()),
+            "tombi:format uses format subcommand: {:?}",
+            format.command
+        );
+
+        // These are different commands — using bare "tombi" in format = [...] is a bug
+        assert_ne!(
+            bare.command, format.command,
+            "Bare 'tombi' and 'tombi:format' should have different commands (this is the root cause of #527)"
+        );
+    }
+
+    /// Tools that have both lint and format variants should have distinct entries.
+    /// The processor resolves bare names to context-specific variants automatically.
+    #[test]
+    fn test_tools_with_lint_format_variants_are_distinct() {
+        let registry = ToolRegistry::default();
+
+        // ruff has both check and format
+        let ruff_check = registry.get("ruff:check").expect("ruff:check");
+        let ruff_format = registry.get("ruff:format").expect("ruff:format");
+        assert_ne!(
+            ruff_check.command, ruff_format.command,
+            "ruff:check and ruff:format should be distinct"
+        );
+
+        // tombi has both lint and format
+        let tombi_lint = registry.get("tombi:lint").expect("tombi:lint");
+        let tombi_format = registry.get("tombi:format").expect("tombi:format");
+        assert_ne!(
+            tombi_lint.command, tombi_format.command,
+            "tombi:lint and tombi:format should be distinct"
+        );
     }
 }
