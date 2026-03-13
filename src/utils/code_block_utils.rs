@@ -26,8 +26,24 @@ pub struct CodeBlockDetail {
     pub info_string: String,
 }
 
-/// Extended return type including per-block details
-pub type CodeRangesWithDetails = (Vec<(usize, usize)>, Vec<(usize, usize)>, Vec<CodeBlockDetail>);
+/// A strong emphasis span captured during parsing
+#[derive(Debug, Clone)]
+pub struct StrongSpanDetail {
+    /// Byte offset where the strong span starts (including **)
+    pub start: usize,
+    /// Byte offset where the strong span ends (including **)
+    pub end: usize,
+    /// Whether this uses asterisk (**) or underscore (__) markers
+    pub is_asterisk: bool,
+}
+
+/// Extended return type including per-block details and strong spans
+pub type CodeRangesWithDetails = (
+    Vec<(usize, usize)>,
+    Vec<(usize, usize)>,
+    Vec<CodeBlockDetail>,
+    Vec<StrongSpanDetail>,
+);
 
 /// Classification of code blocks relative to list contexts
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +70,7 @@ impl CodeBlockUtils {
     ///
     /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
-        let (blocks, _, _) = Self::detect_code_blocks_and_spans(content);
+        let (blocks, _, _, _) = Self::detect_code_blocks_and_spans(content);
         blocks
     }
 
@@ -64,6 +80,7 @@ impl CodeBlockUtils {
         let mut blocks = Vec::new();
         let mut spans = Vec::new();
         let mut details = Vec::new();
+        let mut strong_spans = Vec::new();
         let mut code_block_start: Option<(usize, bool, String)> = None;
 
         // Use pulldown-cmark with all extensions for maximum compatibility
@@ -90,6 +107,21 @@ impl CodeBlockUtils {
                         });
                     }
                 }
+                Event::Start(Tag::Strong) => {
+                    if range.start + 2 <= content.len() {
+                        let is_asterisk = &content[range.start..range.start + 2] == "**";
+                        strong_spans.push(StrongSpanDetail {
+                            start: range.start,
+                            end: 0, // filled in on End event
+                            is_asterisk,
+                        });
+                    }
+                }
+                Event::End(TagEnd::Strong) => {
+                    if let Some(span) = strong_spans.last_mut() {
+                        span.end = range.end;
+                    }
+                }
                 Event::Code(_) => {
                     spans.push((range.start, range.end));
                 }
@@ -113,7 +145,8 @@ impl CodeBlockUtils {
         blocks.sort_by_key(|&(start, _)| start);
         spans.sort_by_key(|&(start, _)| start);
         details.sort_by_key(|d| d.start);
-        (blocks, spans, details)
+        strong_spans.sort_by_key(|s| s.start);
+        (blocks, spans, details, strong_spans)
     }
 
     /// Check if a position is within a code block (for compatibility)

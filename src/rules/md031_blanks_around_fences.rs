@@ -8,7 +8,6 @@ use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::quarto_divs;
 use crate::utils::range_utils::calculate_line_range;
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD031 rule
@@ -134,82 +133,51 @@ impl MD031BlanksAroundFences {
             && ctx.lines.get(line_index).is_some_and(|info| !info.in_front_matter)
     }
 
-    /// Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
+    /// Derive fenced code block line ranges from pre-computed code_block_details.
     ///
     /// Returns a vector of (opening_line_idx, closing_line_idx) for each fenced code block.
     /// The indices are 0-based line numbers.
-    fn detect_fenced_code_blocks_pulldown(
-        content: &str,
-        line_offsets: &[usize],
-        lines: &[&str],
-    ) -> Vec<(usize, usize)> {
-        let mut fenced_blocks = Vec::new();
-        let options = Options::all();
-        let parser = Parser::new_ext(content, options).into_offset_iter();
+    fn fenced_block_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
+        let lines = ctx.raw_lines();
 
-        let mut current_block_start: Option<usize> = None;
+        ctx.code_block_details
+            .iter()
+            .filter(|d| d.is_fenced)
+            .map(|detail| {
+                // Convert start byte offset to line index
+                let start_line = ctx
+                    .line_offsets
+                    .partition_point(|&off| off <= detail.start)
+                    .saturating_sub(1);
 
-        // Helper to convert byte offset to line index
-        let byte_to_line = |byte_offset: usize| -> usize {
-            line_offsets
-                .iter()
-                .enumerate()
-                .rev()
-                .find(|&(_, &offset)| offset <= byte_offset)
-                .map(|(idx, _)| idx)
-                .unwrap_or(0)
-        };
+                // Convert end byte offset to line index
+                let end_byte = if detail.end > 0 { detail.end - 1 } else { 0 };
+                let end_line = ctx
+                    .line_offsets
+                    .partition_point(|&off| off <= end_byte)
+                    .saturating_sub(1);
 
-        for (event, range) in parser {
-            match event {
-                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) => {
-                    let line_idx = byte_to_line(range.start);
-                    current_block_start = Some(line_idx);
+                // Verify this is actually a closing fence line (not just end of content)
+                let end_line_content = lines.get(end_line).unwrap_or(&"");
+                let trimmed = end_line_content.trim();
+                let content_after_bq = if trimmed.starts_with('>') {
+                    trimmed.trim_start_matches(['>', ' ']).trim()
+                } else {
+                    trimmed
+                };
+                let is_closing_fence = (content_after_bq.starts_with("```") || content_after_bq.starts_with("~~~"))
+                    && content_after_bq
+                        .chars()
+                        .skip_while(|&c| c == '`' || c == '~')
+                        .all(|c| c.is_whitespace());
+
+                if is_closing_fence {
+                    (start_line, end_line)
+                } else {
+                    (start_line, lines.len().saturating_sub(1))
                 }
-                Event::End(TagEnd::CodeBlock) => {
-                    if let Some(start_line) = current_block_start.take() {
-                        // Find the closing fence line
-                        // The range.end points just past the closing fence
-                        // We need to find the line that contains the actual closing fence
-                        let end_byte = if range.end > 0 { range.end - 1 } else { 0 };
-                        let end_line = byte_to_line(end_byte);
-
-                        // Verify this is actually a closing fence line (not just end of content)
-                        // For properly closed fences, the end line should contain a fence marker
-                        let end_line_content = lines.get(end_line).unwrap_or(&"");
-                        // Strip blockquote prefix before checking for fence markers
-                        let trimmed = end_line_content.trim();
-                        let content_after_bq = if trimmed.starts_with('>') {
-                            trimmed.trim_start_matches(['>', ' ']).trim()
-                        } else {
-                            trimmed
-                        };
-                        let is_closing_fence = (content_after_bq.starts_with("```")
-                            || content_after_bq.starts_with("~~~"))
-                            && content_after_bq
-                                .chars()
-                                .skip_while(|&c| c == '`' || c == '~')
-                                .all(|c| c.is_whitespace());
-
-                        if is_closing_fence {
-                            fenced_blocks.push((start_line, end_line));
-                        } else {
-                            // Unclosed code block - extends to end of document
-                            // We still record it but the end_line will be the last line
-                            fenced_blocks.push((start_line, lines.len().saturating_sub(1)));
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Handle any unclosed block
-        if let Some(start_line) = current_block_start {
-            fenced_blocks.push((start_line, lines.len().saturating_sub(1)));
-        }
-
-        fenced_blocks
+            })
+            .collect()
     }
 }
 
@@ -223,7 +191,6 @@ impl Rule for MD031BlanksAroundFences {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let content = ctx.content;
         let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
@@ -232,7 +199,7 @@ impl Rule for MD031BlanksAroundFences {
         let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
-        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, lines);
+        let fenced_blocks = Self::fenced_block_line_ranges(ctx);
 
         // Helper to check if a line is a Quarto div marker (opening or closing)
         let is_quarto_div_marker =
@@ -424,7 +391,7 @@ impl Rule for MD031BlanksAroundFences {
             |line: &str| -> bool { is_quarto && (quarto_divs::is_div_open(line) || quarto_divs::is_div_close(line)) };
 
         // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
-        let fenced_blocks = Self::detect_fenced_code_blocks_pulldown(content, &ctx.line_offsets, lines);
+        let fenced_blocks = Self::fenced_block_line_ranges(ctx);
 
         // Collect lines that need blank lines before/after
         let mut needs_blank_before: std::collections::HashSet<usize> = std::collections::HashSet::new();
