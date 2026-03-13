@@ -1,8 +1,9 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use super::types::*;
@@ -39,58 +40,35 @@ static IMAGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 static REF_DEF_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?m)^[ ]{0,3}\[([^\]]+)\]:\s*([^\s]+)(?:\s+(?:"([^"]*)"|'([^']*)'))?$"#).unwrap());
 
-/// Collect byte ranges of all links using pulldown-cmark
-/// This is used to skip heading detection for lines that fall within link syntax
-/// (e.g., multiline links like `[text](url\n#fragment)`)
-pub(super) fn collect_link_byte_ranges(content: &str) -> Vec<(usize, usize)> {
-    let mut link_ranges = Vec::new();
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_WIKILINKS);
-    options.insert(Options::ENABLE_FOOTNOTES);
-
-    let parser = Parser::new_ext(content, options).into_offset_iter();
-    let mut link_stack: Vec<usize> = Vec::new();
-
-    for (event, range) in parser {
-        match event {
-            Event::Start(Tag::Link { .. }) => {
-                link_stack.push(range.start);
-            }
-            Event::End(TagEnd::Link) => {
-                if let Some(start_pos) = link_stack.pop() {
-                    link_ranges.push((start_pos, range.end));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    link_ranges
+/// Intermediate result from the pulldown-cmark parse phase.
+/// Regex fallback and code_span filtering happen in the finalize phase.
+pub(super) struct PulldownParseResult<'a> {
+    pub link_byte_ranges: Vec<(usize, usize)>,
+    pub links: Vec<ParsedLink<'a>>,
+    pub images: Vec<ParsedImage<'a>>,
+    pub broken_links: Vec<BrokenLinkInfo>,
+    pub footnote_refs: Vec<FootnoteRef>,
+    pub link_found_positions: HashSet<usize>,
+    pub image_found_positions: HashSet<usize>,
 }
 
-/// Parse all links and images in the content in a single pulldown-cmark pass
-pub(super) fn parse_links_and_images<'a>(
+/// Phase A: Run a single pulldown-cmark parse to collect link byte ranges,
+/// links, images, broken links, and footnote references.
+/// Does NOT require code_spans (those are computed later).
+pub(super) fn parse_links_images_pulldown<'a>(
     content: &'a str,
     lines: &[LineInfo],
     code_blocks: &[(usize, usize)],
-    code_spans: &[CodeSpan],
     flavor: MarkdownFlavor,
     html_comment_ranges: &[crate::utils::skip_context::ByteRange],
-) -> (
-    Vec<ParsedLink<'a>>,
-    Vec<ParsedImage<'a>>,
-    Vec<BrokenLinkInfo>,
-    Vec<FootnoteRef>,
-) {
+) -> PulldownParseResult<'a> {
     use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
-    use std::collections::HashSet;
 
+    let mut link_byte_ranges = Vec::new();
     let mut links = Vec::with_capacity(content.len() / 500);
     let mut images = Vec::with_capacity(content.len() / 1000);
     let mut broken_links = Vec::new();
     let mut footnote_refs = Vec::new();
-
-    // Track byte positions found by pulldown-cmark (separate sets for links and images)
     let mut link_found_positions = HashSet::new();
     let mut image_found_positions = HashSet::new();
 
@@ -98,7 +76,7 @@ pub(super) fn parse_links_and_images<'a>(
     options.insert(Options::ENABLE_WIKILINKS);
     options.insert(Options::ENABLE_FOOTNOTES);
 
-    let parser = Parser::new_with_broken_link_callback(
+    let parser = pulldown_cmark::Parser::new_with_broken_link_callback(
         content,
         options,
         Some(|link: BrokenLink<'_>| {
@@ -143,6 +121,9 @@ pub(super) fn parse_links_and_images<'a>(
             }
             Event::End(TagEnd::Link) => {
                 if let Some((start_pos, url, link_type, ref_id)) = link_stack.pop() {
+                    // Track link byte range for heading detection
+                    link_byte_ranges.push((start_pos, range.end));
+
                     if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
                         link_text_chunks.clear();
                         continue;
@@ -245,9 +226,8 @@ pub(super) fn parse_links_and_images<'a>(
                         continue;
                     }
 
-                    if super::LintContext::is_offset_in_code_span(code_spans, start_pos) {
-                        continue;
-                    }
+                    // Skip code_span check here; deferred to finalize phase
+                    // where code_spans are available.
 
                     if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
                         continue;
@@ -341,13 +321,47 @@ pub(super) fn parse_links_and_images<'a>(
         }
     }
 
+    PulldownParseResult {
+        link_byte_ranges,
+        links,
+        images,
+        broken_links,
+        footnote_refs,
+        link_found_positions,
+        image_found_positions,
+    }
+}
+
+/// Phase B: Filter images by code_spans, run regex fallbacks, and sort results.
+/// Requires code_spans which are computed after heading detection.
+pub(super) fn finalize_links_and_images<'a>(
+    content: &'a str,
+    lines: &[LineInfo],
+    code_blocks: &[(usize, usize)],
+    code_spans: &[CodeSpan],
+    flavor: MarkdownFlavor,
+    html_comment_ranges: &[crate::utils::skip_context::ByteRange],
+    mut result: PulldownParseResult<'a>,
+) -> (
+    Vec<ParsedLink<'a>>,
+    Vec<ParsedImage<'a>>,
+    Vec<BrokenLinkInfo>,
+    Vec<FootnoteRef>,
+) {
+    use crate::utils::skip_context::{is_in_html_comment_ranges, is_mkdocs_snippet_line};
+
+    // Filter out images that fall inside code spans (deferred from Phase A)
+    result
+        .images
+        .retain(|img| !super::LintContext::is_offset_in_code_span(code_spans, img.byte_offset));
+
     // Regex fallback for links: find undefined references missed by pulldown-cmark
     for cap in LINK_PATTERN.captures_iter(content) {
         let full_match = cap.get(0).unwrap();
         let match_start = full_match.start();
         let match_end = full_match.end();
 
-        if link_found_positions.contains(&match_start) {
+        if result.link_found_positions.contains(&match_start) {
             continue;
         }
 
@@ -389,7 +403,7 @@ pub(super) fn parse_links_and_images<'a>(
                 Cow::Owned(ref_id_str.to_lowercase())
             };
 
-            links.push(ParsedLink {
+            result.links.push(ParsedLink {
                 line: line_num,
                 start_col: col_start,
                 end_col: col_end,
@@ -411,7 +425,7 @@ pub(super) fn parse_links_and_images<'a>(
                 .or_else(|| cap.get(3))
                 .map(|m| m.as_str().trim())
                 .unwrap_or("");
-            links.push(ParsedLink {
+            result.links.push(ParsedLink {
                 line: line_num,
                 start_col: col_start,
                 end_col: col_end,
@@ -432,7 +446,7 @@ pub(super) fn parse_links_and_images<'a>(
         let match_start = full_match.start();
         let match_end = full_match.end();
 
-        if image_found_positions.contains(&match_start) {
+        if result.image_found_positions.contains(&match_start) {
             continue;
         }
 
@@ -459,7 +473,7 @@ pub(super) fn parse_links_and_images<'a>(
                 Cow::Owned(ref_id_str.to_lowercase())
             };
 
-            images.push(ParsedImage {
+            result.images.push(ParsedImage {
                 line: line_num,
                 start_col: col_start,
                 end_col: col_end,
@@ -481,7 +495,7 @@ pub(super) fn parse_links_and_images<'a>(
                 .or_else(|| cap.get(3))
                 .map(|m| m.as_str().trim())
                 .unwrap_or("");
-            images.push(ParsedImage {
+            result.images.push(ParsedImage {
                 line: line_num,
                 start_col: col_start,
                 end_col: col_end,
@@ -497,11 +511,10 @@ pub(super) fn parse_links_and_images<'a>(
     }
 
     // Sort by line number so binary search consumers work correctly.
-    // Regex fallback entries (appended after pulldown-cmark entries) may be on earlier lines.
-    links.sort_by_key(|l| (l.line, l.byte_offset));
-    images.sort_by_key(|i| (i.line, i.byte_offset));
+    result.links.sort_by_key(|l| (l.line, l.byte_offset));
+    result.images.sort_by_key(|i| (i.line, i.byte_offset));
 
-    (links, images, broken_links, footnote_refs)
+    (result.links, result.images, result.broken_links, result.footnote_refs)
 }
 
 /// Parse reference definitions

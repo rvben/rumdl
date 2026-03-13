@@ -317,11 +317,13 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges)
         );
 
-        // Collect link byte ranges early for heading detection (to skip lines inside link syntax)
-        let link_byte_ranges = profile_section!(
-            "Link byte ranges",
+        // Run pulldown-cmark parse for links, images, and link byte ranges in a single pass.
+        // Link byte ranges are needed for heading detection; links/images are finalized later
+        // after code_spans are available.
+        let pulldown_result = profile_section!(
+            "Links, images & link ranges",
             profile,
-            link_parser::collect_link_byte_ranges(content)
+            link_parser::parse_links_images_pulldown(content, &lines, &code_blocks, flavor, &html_comment_ranges)
         );
 
         // Now detect headings and blockquotes
@@ -333,7 +335,7 @@ impl<'a> LintContext<'a> {
                 &mut lines,
                 flavor,
                 &html_comment_ranges,
-                &link_byte_ranges,
+                &pulldown_result.link_byte_ranges,
                 front_matter_end,
             )
         );
@@ -380,17 +382,18 @@ impl<'a> LintContext<'a> {
             }
         }
 
-        // Parse links, images, references, and list blocks
+        // Finalize links and images: filter by code_spans and run regex fallbacks
         let (links, images, broken_links, footnote_refs) = profile_section!(
-            "Links & images",
+            "Links & images finalize",
             profile,
-            link_parser::parse_links_and_images(
+            link_parser::finalize_links_and_images(
                 content,
                 &lines,
                 &code_blocks,
                 &code_spans,
                 flavor,
-                &html_comment_ranges
+                &html_comment_ranges,
+                pulldown_result
             )
         );
 
