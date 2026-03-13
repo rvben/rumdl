@@ -241,6 +241,54 @@ impl<'a> CodeBlockToolProcessor<'a> {
         self.registry.get(tool_id)
     }
 
+    /// Quick check whether any configured language might appear in fenced code blocks.
+    /// Scans for `` ```lang `` or `` ~~~lang `` patterns without full parsing.
+    fn has_potential_matching_blocks(&self, content: &str, lint_mode: bool) -> bool {
+        // Collect languages that have tools configured for the requested mode
+        let configured_langs: Vec<&str> = self
+            .config
+            .languages
+            .iter()
+            .filter(|(_, lc)| {
+                lc.enabled
+                    && if lint_mode {
+                        !lc.lint.is_empty()
+                    } else {
+                        !lc.format.is_empty()
+                    }
+            })
+            .map(|(lang, _)| lang.as_str())
+            .collect();
+
+        if configured_langs.is_empty() {
+            return false;
+        }
+
+        // Scan content line-by-line for fence openers matching configured languages
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            let after_fence = if trimmed.starts_with("```") {
+                &trimmed[3..]
+            } else if trimmed.starts_with("~~~") {
+                &trimmed[3..]
+            } else {
+                continue;
+            };
+
+            let lang = after_fence.split_whitespace().next().unwrap_or("");
+            if lang.is_empty() {
+                continue;
+            }
+            // Check both the raw language and the canonical (normalized) form
+            let canonical = self.resolve_language(lang);
+            if configured_langs.contains(&canonical.as_str()) {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// Extract all fenced code blocks from content.
     pub fn extract_code_blocks(&self, content: &str) -> Vec<FencedCodeBlockInfo> {
         let mut blocks = Vec::new();
@@ -543,6 +591,27 @@ impl<'a> CodeBlockToolProcessor<'a> {
     ///
     /// Returns diagnostics from all configured linters.
     pub fn lint(&self, content: &str) -> Result<Vec<CodeBlockDiagnostic>, ProcessorError> {
+        // Skip the expensive parse when no tools could possibly produce output.
+        // With on_missing=Ignore (default) and no languages with lint tools configured,
+        // every block would be skipped, so the parse is wasted work.
+        if self.config.on_missing_language_definition == OnMissing::Ignore
+            && !self
+                .config
+                .languages
+                .values()
+                .any(|lc| lc.enabled && !lc.lint.is_empty())
+        {
+            return Ok(Vec::new());
+        }
+
+        // Quick content check: skip parsing if no configured language appears in the content.
+        // This avoids the expensive pulldown-cmark parse when there are no matching code blocks.
+        if self.config.on_missing_language_definition == OnMissing::Ignore
+            && !self.has_potential_matching_blocks(content, true)
+        {
+            return Ok(Vec::new());
+        }
+
         let mut all_diagnostics = Vec::new();
         let blocks = self.extract_code_blocks(content);
 
@@ -675,6 +744,30 @@ impl<'a> CodeBlockToolProcessor<'a> {
     /// With `on-missing-*` = `fail`, errors are collected but formatting continues.
     /// With `on-missing-*` = `fail-fast`, returns Err immediately on first error.
     pub fn format(&self, content: &str) -> Result<FormatOutput, ProcessorError> {
+        let no_output = FormatOutput {
+            content: content.to_string(),
+            had_errors: false,
+            error_messages: Vec::new(),
+        };
+
+        // Skip the expensive parse when no tools could produce output
+        if self.config.on_missing_language_definition == OnMissing::Ignore
+            && !self
+                .config
+                .languages
+                .values()
+                .any(|lc| lc.enabled && !lc.format.is_empty())
+        {
+            return Ok(no_output);
+        }
+
+        // Quick content check: skip parsing if no configured language appears in the content
+        if self.config.on_missing_language_definition == OnMissing::Ignore
+            && !self.has_potential_matching_blocks(content, false)
+        {
+            return Ok(no_output);
+        }
+
         let blocks = self.extract_code_blocks(content);
 
         if blocks.is_empty() {
