@@ -134,7 +134,7 @@ impl Rule for MD007ULIndent {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        let mut list_stack: Vec<(usize, usize, bool, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col) for tracking nesting
+        let mut list_stack: Vec<(usize, usize, bool, usize, usize)> = Vec::new(); // Stack of (marker_visual_col, line_num, is_ordered, content_visual_col, blockquote_depth) for tracking nesting
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip if this line is in a code block, front matter, or mkdocstrings
@@ -216,9 +216,16 @@ impl Rule for MD007ULIndent {
                     visual_marker_column
                 };
 
-                // Clean up stack - remove items at same or deeper indentation
-                while let Some(&(indent, _, _, _)) = list_stack.last() {
-                    if indent >= visual_marker_for_nesting {
+                // Determine blockquote depth for this line
+                let bq_depth = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
+
+                // Clean up stack - remove items at same or deeper indentation,
+                // but only consider items at the same blockquote depth
+                while let Some(&(indent, _, _, _, item_bq_depth)) = list_stack.last() {
+                    if item_bq_depth == bq_depth && indent >= visual_marker_for_nesting {
+                        list_stack.pop();
+                    } else if item_bq_depth > bq_depth {
+                        // Pop items from deeper blockquote contexts that we've left
                         list_stack.pop();
                     } else {
                         break;
@@ -229,18 +236,21 @@ impl Rule for MD007ULIndent {
                 if list_item.is_ordered {
                     // For ordered lists, we don't check indentation but we need to track for text-aligned children
                     // Use the actual positions since we don't enforce indentation for ordered lists
-                    list_stack.push((visual_marker_column, line_idx, true, visual_content_column));
+                    list_stack.push((visual_marker_column, line_idx, true, visual_content_column, bq_depth));
                     continue;
                 }
 
                 // At this point, we know this is an unordered list item
-                // Now stack contains only parent items
-                let nesting_level = list_stack.len();
+                // Now stack contains only parent items at this blockquote depth
+                // Count only items at the same blockquote depth for nesting level
+                let nesting_level = list_stack.iter().filter(|item| item.4 == bq_depth).count();
 
-                // Get parent info for per-parent calculation
+                // Get parent info for per-parent calculation (only from same blockquote depth)
                 let parent_info = list_stack
-                    .get(nesting_level.wrapping_sub(1))
-                    .map(|&(_, _, is_ordered, content_col)| (is_ordered, content_col));
+                    .iter()
+                    .rev()
+                    .find(|item| item.4 == bq_depth)
+                    .map(|&(_, _, is_ordered, content_col, _)| (is_ordered, content_col));
 
                 // Calculate expected indent using per-parent logic
                 let mut expected_indent = if self.config.start_indented {
@@ -263,7 +273,8 @@ impl Rule for MD007ULIndent {
                 // Under an ordered list item, Python-Markdown requires at least
                 // marker_column + 4 spaces for continuation content to be recognized.
                 if ctx.flavor == crate::config::MarkdownFlavor::MkDocs
-                    && let Some(&(parent_marker_col, _, true, _)) = list_stack.get(nesting_level.wrapping_sub(1))
+                    && let Some(&(parent_marker_col, _, true, _, _)) =
+                        list_stack.iter().rev().find(|item| item.4 == bq_depth && item.2)
                 {
                     expected_indent = expected_indent.max(parent_marker_col + 4);
                 }
@@ -279,7 +290,13 @@ impl Rule for MD007ULIndent {
                     expected_indent
                 };
                 let expected_content_visual_col = accepted_indent + 2;
-                list_stack.push((visual_marker_column, line_idx, false, expected_content_visual_col));
+                list_stack.push((
+                    visual_marker_column,
+                    line_idx,
+                    false,
+                    expected_content_visual_col,
+                    bq_depth,
+                ));
 
                 // Skip first level check if start_indented is false
                 // BUT always check items with 1 space indent (insufficient for nesting)

@@ -1940,3 +1940,180 @@ fn test_mkdocs_flavor_deeply_nested() {
         "MkDocs should accept 4-space nested lists, got: {result:?}"
     );
 }
+
+// =============================================================================
+// Issue #526: blockquote with list inside ordered list continuation
+// =============================================================================
+
+/// Exact reproduction from issue #526.
+/// A blockquote containing a list, followed by list continuation items,
+/// must not cause MD007 to lose track of the parent ordered list context.
+#[test]
+fn test_blockquote_list_in_ordered_list_continuation_issue_526() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+---
+title: Heading
+---
+
+1. This is a list item:
+
+   > This is a note with a list:
+   >
+   > - List item.
+   > - List item.
+
+   - This is a list item.
+   - This is a list item.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "List continuation after blockquote should not trigger MD007, got: {result:?}"
+    );
+}
+
+/// Minimal reproduction: ordered list → blockquote with list → continuation items.
+#[test]
+fn test_blockquote_list_in_ordered_list_minimal() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+1. Item
+
+   > - Nested in blockquote.
+
+   - After blockquote.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Continuation item after blockquoted list should not be flagged, got: {result:?}"
+    );
+}
+
+/// Blockquote with list inside unordered list continuation.
+#[test]
+fn test_blockquote_list_in_unordered_list_continuation() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+- Parent item
+
+  > - Blockquote list item.
+  > - Another blockquote list item.
+
+  - Continuation item.
+  - Another continuation item.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Continuation after blockquoted list in unordered list should not be flagged, got: {result:?}"
+    );
+}
+
+/// Multiple blockquote sections interleaved with list continuation items.
+#[test]
+fn test_multiple_blockquotes_in_list_continuation() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+1. First item
+
+   > - Note list 1.
+
+   - Continuation 1.
+
+   > - Note list 2.
+
+   - Continuation 2.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Multiple blockquote+continuation cycles should not confuse MD007, got: {result:?}"
+    );
+}
+
+/// Nested ordered list with blockquoted list in inner item.
+#[test]
+fn test_nested_ordered_list_with_blockquote_list() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+1. Outer item
+
+   1. Inner item
+
+      > - Blockquote list.
+
+      - Continuation of inner.
+
+   - Continuation of outer.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Nested ordered list with blockquoted list should not confuse MD007, got: {result:?}"
+    );
+}
+
+/// Blockquote with nested lists should not pollute parent stack.
+#[test]
+fn test_blockquote_with_nested_list_does_not_pollute_parent() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+1. Item
+
+   > - Level 1 in blockquote.
+   >   - Level 2 in blockquote.
+   >     - Level 3 in blockquote.
+
+   - Continuation at proper indent.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Deeply nested blockquote list should not affect parent nesting, got: {result:?}"
+    );
+}
+
+/// Items inside blockquote that ARE incorrectly indented should still be caught.
+#[test]
+fn test_blockquote_list_bad_indent_still_detected() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+> - Item 1
+>    - Item 2
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Bad indent inside blockquote should still be caught, got: {result:?}"
+    );
+    assert_eq!(result[0].line, 2);
+}
+
+/// Blockquote without a list followed by continuation items should work.
+#[test]
+fn test_blockquote_without_list_then_continuation() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+1. Item
+
+   > Just a blockquote, no list.
+
+   - Continuation item.
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Blockquote without list should not affect continuation, got: {result:?}"
+    );
+}
