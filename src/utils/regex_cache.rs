@@ -441,61 +441,6 @@ pub static HR_SPACED_DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\-\
 pub static HR_SPACED_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\*\s+){2,}\*\s*$").unwrap());
 pub static HR_SPACED_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(_\s+){2,}_\s*$").unwrap());
 
-/// Check if content contains any HTML tags (quick check before regex)
-pub fn has_html_tags(content: &str) -> bool {
-    content.contains('<') && (content.contains('>') || content.contains("/>"))
-}
-
-/// Check if content contains any links (quick check before regex)
-pub fn has_link_markers(content: &str) -> bool {
-    (content.contains('[') && content.contains(']'))
-        || content.contains("http://")
-        || content.contains("https://")
-        || content.contains("ftp://")
-}
-
-/// Check if content contains any images (quick check before regex)
-pub fn has_image_markers(content: &str) -> bool {
-    content.contains("![")
-}
-
-/// Optimize URL detection by implementing a character-by-character scanner
-/// that's much faster than regex for cases where we know there's no URL
-pub fn contains_url(content: &str) -> bool {
-    // Fast check - if these substrings aren't present, there's no URL
-    if !content.contains("://") {
-        return false;
-    }
-
-    let chars: Vec<char> = content.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        // Look for the start of a URL protocol
-        if i + 2 < chars.len()
-            && ((chars[i] == 'h' && chars[i + 1] == 't' && chars[i + 2] == 't')
-                || (chars[i] == 'f' && chars[i + 1] == 't' && chars[i + 2] == 'p'))
-        {
-            // Scan forward to find "://"
-            let mut j = i;
-            while j + 2 < chars.len() {
-                if chars[j] == ':' && chars[j + 1] == '/' && chars[j + 2] == '/' {
-                    return true;
-                }
-                j += 1;
-
-                // Don't scan too far ahead for the protocol
-                if j > i + 10 {
-                    break;
-                }
-            }
-        }
-        i += 1;
-    }
-
-    false
-}
-
 /// Escapes a string to be used in a regex pattern
 pub fn escape_regex(s: &str) -> String {
     let mut result = String::with_capacity(s.len() * 2);
@@ -613,60 +558,6 @@ mod tests {
         let re2 = regex_lazy!(r"^start.*finish$");
         assert!(re2.is_match("start and finish"));
         assert!(!re2.is_match("start without end"));
-    }
-
-    #[test]
-    fn test_has_html_tags() {
-        assert!(has_html_tags("<div>content</div>"));
-        assert!(has_html_tags("<br/>"));
-        assert!(has_html_tags("<img src='test.jpg'>"));
-        assert!(!has_html_tags("no html tags"));
-        assert!(!has_html_tags("less than < but no tag"));
-    }
-
-    #[test]
-    fn test_has_link_markers() {
-        assert!(has_link_markers("[text](url)"));
-        assert!(has_link_markers("[reference][1]"));
-        assert!(has_link_markers("http://example.com"));
-        assert!(has_link_markers("https://example.com"));
-        assert!(has_link_markers("ftp://example.com"));
-        assert!(!has_link_markers("no links here"));
-    }
-
-    #[test]
-    fn test_has_image_markers() {
-        assert!(has_image_markers("![alt text](image.png)"));
-        assert!(has_image_markers("![](image.png)"));
-        assert!(!has_image_markers("[link](url)"));
-        assert!(!has_image_markers("no images"));
-    }
-
-    #[test]
-    fn test_contains_url() {
-        assert!(contains_url("http://example.com"));
-        assert!(contains_url("Text with https://example.com link"));
-        assert!(contains_url("ftp://example.com"));
-        assert!(!contains_url("Text without URL"));
-        assert!(!contains_url("http not followed by ://"));
-
-        // Edge cases
-        assert!(!contains_url("http"));
-        assert!(!contains_url("https"));
-        assert!(!contains_url("://"));
-        assert!(contains_url("Visit http://site.com now"));
-        assert!(contains_url("See https://secure.site.com/path"));
-    }
-
-    #[test]
-    fn test_contains_url_performance() {
-        // Test early exit for strings without "://"
-        let long_text = "a".repeat(10000);
-        assert!(!contains_url(&long_text));
-
-        // Test with URL at the end
-        let text_with_url = format!("{long_text}https://example.com");
-        assert!(contains_url(&text_with_url));
     }
 
     #[test]
