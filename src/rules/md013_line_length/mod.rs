@@ -1028,6 +1028,15 @@ impl MD013LineLength {
                 let (marker, first_content) = extract_list_marker_and_content(lines[i]);
                 let marker_len = marker.len();
 
+                // Checkbox ([ ]/[x]/[X]) is inline content, not part of the list marker.
+                // Use the base bullet/number marker width for continuation recognition
+                // so that continuation lines at 2+ spaces are collected for "- [ ] " items.
+                let base_marker_len = if marker.contains("[ ] ") || marker.contains("[x] ") || marker.contains("[X] ") {
+                    marker.find('[').unwrap_or(marker_len)
+                } else {
+                    marker_len
+                };
+
                 // MkDocs flavor requires at least 4 spaces for list continuation
                 // after a blank line (multi-paragraph list items). For non-blank
                 // continuation (lines directly following the marker line), use
@@ -1037,14 +1046,13 @@ impl MD013LineLength {
                 } else {
                     marker_len
                 };
-                let content_continuation_indent = marker_len;
+                let content_continuation_indent = base_marker_len;
 
                 // Track lines and their types (content, code block, fence, nested list)
                 #[derive(Clone)]
                 enum LineType {
                     Content(String),
                     CodeBlock(String, usize),         // content and original indent
-                    NestedListItem(String, usize),    // full line content and original indent
                     SemanticLine(String), // Lines starting with NOTE:, WARNING:, etc that should stay separate
                     SnippetLine(String),  // MkDocs Snippets delimiters (-8<-) that must stay on their own line
                     DivMarker(String),    // Quarto/Pandoc div markers (::: opening or closing)
@@ -1124,33 +1132,10 @@ impl MD013LineLength {
                             break;
                         }
 
-                        // Check if this is a NESTED list item marker
-                        // Nested lists should be processed separately UNLESS they're part of a
-                        // multi-paragraph list item (indicated by a blank line before them OR
-                        // it's a continuation of an already-started nested list)
+                        // Nested list items are always processed independently
+                        // by the outer loop, so break when we encounter one
                         if is_list_item(trimmed) && indent >= marker_len {
-                            // Check if there was a blank line before this (multi-paragraph context)
-                            let has_blank_before = matches!(list_item_lines.last(), Some(LineType::Empty));
-
-                            // Check if we've already seen nested list content (another nested item)
-                            let has_nested_content = list_item_lines.iter().any(|line| {
-                                matches!(line, LineType::Content(c) if is_list_item(c.trim()))
-                                    || matches!(line, LineType::NestedListItem(_, _))
-                            });
-
-                            if !has_blank_before && !has_nested_content {
-                                // Single-paragraph context with no prior nested items: starts a new item
-                                // End parent collection; nested list will be processed next
-                                break;
-                            }
-                            // else: multi-paragraph context or continuation of nested list, keep collecting
-                            // Mark this as a nested list item to preserve its structure
-                            list_item_lines.push(LineType::NestedListItem(
-                                line_info.content(ctx.content)[indent..].to_string(),
-                                indent,
-                            ));
-                            i += 1;
-                            continue;
+                            break;
                         }
 
                         // Normal continuation vs indented code block.
@@ -1234,7 +1219,6 @@ impl MD013LineLength {
                         lines: Vec<(String, usize)>, // (content, indent) pairs
                         has_preceding_blank: bool,   // Whether there was a blank line before this block
                     },
-                    NestedList(Vec<(String, usize)>), // (content, indent) pairs for nested list items
                     SemanticLine(String), // Semantic markers like NOTE:, WARNING: that stay on their own line
                     SnippetLine(String),  // MkDocs Snippets delimiter that stays on its own line without extra spacing
                     DivMarker(String),    // Quarto/Pandoc div marker (::: opening or closing) preserved on its own line
@@ -1341,11 +1325,9 @@ impl MD013LineLength {
                 let mut blocks: Vec<Block> = Vec::new();
                 let mut current_paragraph: Vec<String> = Vec::new();
                 let mut current_code_block: Vec<(String, usize)> = Vec::new();
-                let mut current_nested_list: Vec<(String, usize)> = Vec::new();
                 let mut current_html_block: Vec<String> = Vec::new();
                 let mut html_tag_stack: Vec<String> = Vec::new();
                 let mut in_code = false;
-                let mut in_nested_list = false;
                 let mut in_html_block = false;
                 let mut had_preceding_blank = false; // Track if we just saw an empty line
                 let mut code_block_has_preceding_blank = false; // Track blank before current code block
@@ -1381,8 +1363,6 @@ impl MD013LineLength {
                                 admonition_content.push((String::new(), 0));
                             } else if in_code {
                                 current_code_block.push((String::new(), 0));
-                            } else if in_nested_list {
-                                current_nested_list.push((String::new(), 0));
                             } else if in_html_block {
                                 // Allow blank lines inside HTML blocks
                                 current_html_block.push(String::new());
@@ -1437,10 +1417,6 @@ impl MD013LineLength {
                                         });
                                         current_code_block.clear();
                                         in_code = false;
-                                    } else if in_nested_list {
-                                        blocks.push(Block::NestedList(current_nested_list.clone()));
-                                        current_nested_list.clear();
-                                        in_nested_list = false;
                                     } else if !current_paragraph.is_empty() {
                                         blocks.push(Block::Paragraph(current_paragraph.clone()));
                                         current_paragraph.clear();
@@ -1474,11 +1450,6 @@ impl MD013LineLength {
                                         });
                                         current_code_block.clear();
                                         in_code = false;
-                                    } else if in_nested_list {
-                                        // Switching from nested list to content
-                                        blocks.push(Block::NestedList(current_nested_list.clone()));
-                                        current_nested_list.clear();
-                                        in_nested_list = false;
                                     }
                                     current_paragraph.push(content.clone());
                                 }
@@ -1492,12 +1463,7 @@ impl MD013LineLength {
                                 &mut admonition_header,
                                 &mut admonition_content,
                             );
-                            if in_nested_list {
-                                // Switching from nested list to code
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
-                            } else if in_html_block {
+                            if in_html_block {
                                 // Switching from HTML block to code (shouldn't happen normally, but handle it)
                                 blocks.push(Block::Html {
                                     lines: current_html_block.clone(),
@@ -1520,42 +1486,6 @@ impl MD013LineLength {
                             current_code_block.push((content.clone(), *indent));
                             had_preceding_blank = false; // Reset after code
                         }
-                        LineType::NestedListItem(content, indent) => {
-                            flush_admonition(
-                                &mut blocks,
-                                &mut in_admonition_block,
-                                &mut admonition_header,
-                                &mut admonition_content,
-                            );
-                            if in_code {
-                                // Switching from code to nested list
-                                blocks.push(Block::Code {
-                                    lines: current_code_block.clone(),
-                                    has_preceding_blank: code_block_has_preceding_blank,
-                                });
-                                current_code_block.clear();
-                                in_code = false;
-                            } else if in_html_block {
-                                // Switching from HTML block to nested list (shouldn't happen normally, but handle it)
-                                blocks.push(Block::Html {
-                                    lines: current_html_block.clone(),
-                                    has_preceding_blank: html_block_has_preceding_blank,
-                                });
-                                current_html_block.clear();
-                                html_tag_stack.clear();
-                                in_html_block = false;
-                            }
-                            if !in_nested_list {
-                                // Switching from content to nested list
-                                if !current_paragraph.is_empty() {
-                                    blocks.push(Block::Paragraph(current_paragraph.clone()));
-                                    current_paragraph.clear();
-                                }
-                                in_nested_list = true;
-                            }
-                            current_nested_list.push((content.clone(), *indent));
-                            had_preceding_blank = false; // Reset after nested list
-                        }
                         LineType::SemanticLine(content) => {
                             // Semantic lines are standalone - flush any current block and add as separate block
                             flush_admonition(
@@ -1571,10 +1501,6 @@ impl MD013LineLength {
                                 });
                                 current_code_block.clear();
                                 in_code = false;
-                            } else if in_nested_list {
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
                             } else if in_html_block {
                                 blocks.push(Block::Html {
                                     lines: current_html_block.clone(),
@@ -1607,10 +1533,6 @@ impl MD013LineLength {
                                 });
                                 current_code_block.clear();
                                 in_code = false;
-                            } else if in_nested_list {
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
                             } else if in_html_block {
                                 blocks.push(Block::Html {
                                     lines: current_html_block.clone(),
@@ -1643,10 +1565,6 @@ impl MD013LineLength {
                                 });
                                 current_code_block.clear();
                                 in_code = false;
-                            } else if in_nested_list {
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
                             } else if in_html_block {
                                 blocks.push(Block::Html {
                                     lines: current_html_block.clone(),
@@ -1677,10 +1595,6 @@ impl MD013LineLength {
                                 });
                                 current_code_block.clear();
                                 in_code = false;
-                            } else if in_nested_list {
-                                blocks.push(Block::NestedList(current_nested_list.clone()));
-                                current_nested_list.clear();
-                                in_nested_list = false;
                             } else if in_html_block {
                                 blocks.push(Block::Html {
                                     lines: current_html_block.clone(),
@@ -1725,9 +1639,6 @@ impl MD013LineLength {
                         lines: current_code_block,
                         has_preceding_blank: code_block_has_preceding_blank,
                     });
-                }
-                if in_nested_list && !current_nested_list.is_empty() {
-                    blocks.push(Block::NestedList(current_nested_list));
                 }
                 if in_html_block && !current_html_block.is_empty() {
                     blocks.push(Block::Html {
@@ -1793,7 +1704,6 @@ impl MD013LineLength {
                 let should_normalize = || {
                     // Don't normalize if the list item only contains nested lists, code blocks, or semantic lines
                     // DO normalize if it has plain text content that spans multiple lines
-                    let has_nested_lists = blocks.iter().any(|b| matches!(b, Block::NestedList(_)));
                     let has_code_blocks = blocks.iter().any(|b| matches!(b, Block::Code { .. }));
                     let has_semantic_lines = blocks.iter().any(|b| matches!(b, Block::SemanticLine(_)));
                     let has_snippet_lines = blocks.iter().any(|b| matches!(b, Block::SnippetLine(_)));
@@ -1802,8 +1712,7 @@ impl MD013LineLength {
                     let has_paragraphs = blocks.iter().any(|b| matches!(b, Block::Paragraph(_)));
 
                     // If we have structural blocks but no paragraphs, don't normalize
-                    if (has_nested_lists
-                        || has_code_blocks
+                    if (has_code_blocks
                         || has_semantic_lines
                         || has_snippet_lines
                         || has_div_markers
@@ -2058,47 +1967,6 @@ impl MD013LineLength {
                                         result.push(String::new());
                                     } else {
                                         result.push(format!("{}{}", " ".repeat(*orig_indent), content));
-                                    }
-                                }
-                            }
-                            Block::NestedList(nested_items) => {
-                                // Preserve nested list items as-is with original indentation.
-                                // Only add blank before if not already ending with one (avoids
-                                // double blanks when the preceding block already added one).
-                                if !is_first_block && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true) {
-                                    result.push(String::new());
-                                }
-
-                                for (idx, (content, orig_indent)) in nested_items.iter().enumerate() {
-                                    if is_first_block && idx == 0 {
-                                        // First line of first block gets marker
-                                        result.push(format!(
-                                            "{marker}{}",
-                                            " ".repeat(orig_indent - marker_len) + content
-                                        ));
-                                        is_first_block = false;
-                                    } else if content.is_empty() {
-                                        result.push(String::new());
-                                    } else {
-                                        result.push(format!("{}{}", " ".repeat(*orig_indent), content));
-                                    }
-                                }
-
-                                // Add blank line after nested list if there's a next block.
-                                // Only add if not already ending with one (avoids double blanks
-                                // when the last nested item was already a blank line).
-                                if block_idx < blocks.len() - 1 {
-                                    let next_block = &blocks[block_idx + 1];
-                                    let should_add_blank = match next_block {
-                                        Block::Code {
-                                            has_preceding_blank, ..
-                                        } => *has_preceding_blank,
-                                        Block::SnippetLine(_) | Block::DivMarker(_) => false,
-                                        _ => true, // For all other blocks, add blank line
-                                    };
-                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
-                                    {
-                                        result.push(String::new());
                                     }
                                 }
                             }
