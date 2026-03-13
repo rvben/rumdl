@@ -3,7 +3,7 @@ mod md041_config;
 pub use md041_config::MD041Config;
 
 use crate::lint_context::HeadingStyle;
-use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::mkdocs_attr_list::is_mkdocs_anchor_line;
 use crate::utils::range_utils::calculate_line_range;
@@ -487,10 +487,6 @@ impl Rule for MD041FirstLineHeading {
 
     fn description(&self) -> &'static str {
         "First line in file should be a top level heading"
-    }
-
-    fn category(&self) -> RuleCategory {
-        RuleCategory::Heading
     }
 
     fn fix_capability(&self) -> FixCapability {

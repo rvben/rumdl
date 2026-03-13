@@ -5483,8 +5483,7 @@ fn test_checkbox_multiple_items_each_indented_correctly() {
             let indent = line.len() - line.trim_start().len();
             assert_eq!(
                 indent, 6,
-                "Continuation of {:?} must be indented 6. Got {indent} in: {line:?}",
-                current_marker
+                "Continuation of {current_marker:?} must be indented 6. Got {indent} in: {line:?}",
             );
         }
     }

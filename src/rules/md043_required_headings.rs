@@ -1,4 +1,4 @@
-use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_heading_range;
 use serde::{Deserialize, Serialize};
@@ -309,11 +309,6 @@ impl Rule for MD043RequiredHeadings {
 
         // Return original content unchanged to prevent data loss
         Ok(content.to_string())
-    }
-
-    /// Get the category of this rule for selective processing
-    fn category(&self) -> RuleCategory {
-        RuleCategory::Heading
     }
 
     /// Check if this rule should be skipped

@@ -267,10 +267,10 @@ impl<'a> CodeBlockToolProcessor<'a> {
         // Scan content line-by-line for fence openers matching configured languages
         for line in content.lines() {
             let trimmed = line.trim_start();
-            let after_fence = if trimmed.starts_with("```") {
-                &trimmed[3..]
-            } else if trimmed.starts_with("~~~") {
-                &trimmed[3..]
+            let after_fence = if let Some(rest) = trimmed.strip_prefix("```") {
+                rest
+            } else if let Some(rest) = trimmed.strip_prefix("~~~") {
+                rest
             } else {
                 continue;
             };

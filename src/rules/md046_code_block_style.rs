@@ -1061,12 +1061,13 @@ fn compute_footnote_ranges(content: &str) -> Vec<(usize, usize)> {
             }
             let indent = mkdocs_footnotes::get_footnote_indent(line).unwrap_or(0);
             footnote_start = Some((offset, indent));
-        } else if let Some((_, indent)) = footnote_start {
-            if !line.trim().is_empty() && !mkdocs_footnotes::is_footnote_continuation(line, indent) {
-                // Non-continuation line ends the footnote
-                let (start, _) = footnote_start.take().unwrap();
-                ranges.push((start, offset.saturating_sub(1)));
-            }
+        } else if let Some((_, indent)) = footnote_start
+            && !line.trim().is_empty()
+            && !mkdocs_footnotes::is_footnote_continuation(line, indent)
+        {
+            // Non-continuation line ends the footnote
+            let (start, _) = footnote_start.take().unwrap();
+            ranges.push((start, offset.saturating_sub(1)));
         }
 
         offset = line_end + 1; // +1 for the \n

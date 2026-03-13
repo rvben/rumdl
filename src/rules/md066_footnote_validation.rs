@@ -850,7 +850,7 @@ Regular text[^valid] and[^missing].
     fn test_footnote_ref_at_end_of_file_no_newline() {
         let content = "[^1]: Definition here.\n\nText with[^1]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -862,7 +862,7 @@ Regular text[^valid] and[^missing].
     fn test_orphaned_footnote_ref_at_eof_no_newline() {
         let content = "Text with[^missing]";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert!(
             !result.is_empty(),
@@ -875,7 +875,7 @@ Regular text[^valid] and[^missing].
         // [^note]: mid-line is a reference followed by colon, NOT a definition
         let content = "# Test\n\nI think [^note]: this is relevant.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
@@ -894,7 +894,7 @@ Regular text[^valid] and[^missing].
         // [^note]: mid-line is a reference; [^note]: at line start is the definition
         let content = "# Test\n\nI think [^note]: this is relevant.\n\n[^note]: The actual definition.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -907,7 +907,7 @@ Regular text[^valid] and[^missing].
         // [^note]: at line start IS a definition and should NOT be counted as reference
         let content = "# Test\n\n[^note]: The definition.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         // Should warn about orphaned definition (no reference)
         assert_eq!(result.len(), 1, "Orphaned def should be flagged: {result:?}");
@@ -923,7 +923,7 @@ Regular text[^valid] and[^missing].
         // [^note]: with 1-3 spaces indent is still a definition
         let content = "# Test\n\n   [^note]: Indented definition.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         // Should be treated as an orphaned definition (no reference)
         assert_eq!(result.len(), 1, "Indented def should still be detected: {result:?}");
@@ -939,7 +939,7 @@ Regular text[^valid] and[^missing].
         // Both [^a]: and [^b]: mid-line should be counted as references
         let content = "# Test\n\nText [^a]: and [^b]: more text.\n\n[^a]: Def A.\n[^b]: Def B.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
@@ -952,7 +952,7 @@ Regular text[^valid] and[^missing].
         // > [^note]: inside blockquote is a definition, not a reference
         let content = "# Test\n\n> [^note]: Definition in blockquote.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         // Orphaned definition (no reference uses it)
         assert_eq!(
@@ -972,7 +972,7 @@ Regular text[^valid] and[^missing].
         // - [^note]: inside a list item is a reference, not a definition
         let content = "# Test\n\n- [^note]: list item text.\n\n[^note]: The actual definition.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD066FootnoteValidation::default();
+        let rule = MD066FootnoteValidation;
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),

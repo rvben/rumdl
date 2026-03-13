@@ -322,7 +322,7 @@ mod tests {
         // Mid-line [^a]: should count as a reference for ordering purposes
         let content = "# Test\n\nSecond ref [^b] here.\n\nFirst ref [^a]: and text.\n\n[^a]: First definition.\n[^b]: Second definition.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD067FootnoteDefinitionOrder::default();
+        let rule = MD067FootnoteDefinitionOrder;
         let result = rule.check(&ctx).unwrap();
         // Reference order is [^b] then [^a], but definitions are [^a] then [^b]
         assert!(!result.is_empty(), "Should detect ordering mismatch: {result:?}");
@@ -333,7 +333,7 @@ mod tests {
         // [^a]: at line start is a definition, not a reference
         let content = "# Test\n\n[^a] first ref.\n[^b] second ref.\n\n[^a]: First.\n[^b]: Second.\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let rule = MD067FootnoteDefinitionOrder::default();
+        let rule = MD067FootnoteDefinitionOrder;
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Correct order should pass: {result:?}");
     }

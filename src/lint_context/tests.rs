@@ -1065,10 +1065,9 @@ fn test_is_in_link_title_multiple_ranges_binary_search() {
     if let (Some(end_a), Some(start_b)) = (
         ctx.reference_defs[0].title_byte_end,
         ctx.reference_defs[1].title_byte_start,
-    ) {
-        if end_a + 1 < start_b {
-            assert!(!ctx.is_in_link_title(end_a + 1), "Between titles should return false");
-        }
+    ) && end_a + 1 < start_b
+    {
+        assert!(!ctx.is_in_link_title(end_a + 1), "Between titles should return false");
     }
 
     // Position inside third title should return true

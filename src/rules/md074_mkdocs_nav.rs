@@ -185,10 +185,10 @@ impl MD074MkDocsNav {
                 continue;
             }
             // Match "- path.md" or "- 'path.md'" (bare list item)
-            if let Some(rest) = trimmed.strip_prefix("- ") {
-                if Self::strip_yaml_quotes(rest.trim()) == file_path {
-                    return Some(idx + 1);
-                }
+            if let Some(rest) = trimmed.strip_prefix("- ")
+                && Self::strip_yaml_quotes(rest.trim()) == file_path
+            {
+                return Some(idx + 1);
             }
             // Match "Title: path.md" or "- Title: 'path.md'" (named nav entry)
             if let Some(colon_pos) = trimmed.find(": ") {

@@ -667,7 +667,7 @@ impl MD005ListIndent {
 
         for (item_line, effective_indent, line_info, list_item) in candidate_items {
             // Skip list items that are continuation content
-            if self.is_continuation_content(ctx, &cache, item_line, effective_indent) {
+            if self.is_continuation_content(ctx, cache, item_line, effective_indent) {
                 skipped_lines.insert(item_line);
                 continue;
             }
