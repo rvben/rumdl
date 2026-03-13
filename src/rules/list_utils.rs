@@ -1,4 +1,3 @@
-use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -6,9 +5,10 @@ use std::sync::LazyLock;
 static UNORDERED_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)([*+-])(\s+)").unwrap());
 static ORDERED_LIST_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)(\s+)").unwrap());
 
-// Patterns for lists without proper spacing - now excluding emphasis markers
-static UNORDERED_LIST_NO_SPACE_PATTERN: LazyLock<FancyRegex> =
-    LazyLock::new(|| FancyRegex::new(r"^(\s*)(?:(?<!\*)\*(?!\*)|[+-])([^\s\*])").unwrap());
+// Patterns for lists without proper spacing
+// [^\s*] after the marker excludes emphasis (e.g., **bold**) since * is not matched
+static UNORDERED_LIST_NO_SPACE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(\s*)([*+-])([^\s*])").unwrap());
 static ORDERED_LIST_NO_SPACE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(\s*)(\d+\.)([^\s])").unwrap());
 
 // Patterns for lists with multiple spaces
@@ -190,8 +190,7 @@ impl ListUtils {
             return false;
         }
 
-        // Handle potential regex errors gracefully
-        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line).unwrap_or(false) || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
+        UNORDERED_LIST_NO_SPACE_PATTERN.is_match(line) || ORDERED_LIST_NO_SPACE_PATTERN.is_match(line)
     }
 
     /// Check if a line is a list item with multiple spaces after the marker
@@ -272,19 +271,26 @@ impl ListUtils {
     /// Fix a list item without proper spacing
     pub fn fix_list_item_without_space(line: &str) -> String {
         // Handle unordered list items
-        if let Ok(Some(captures)) = UNORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
+        if let Some(captures) = UNORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
             let indentation = captures.get(1).map_or("", |m| m.as_str());
-            let marker = captures.get(2).map_or("", |m| m.as_str());
-            let content = captures.get(3).map_or("", |m| m.as_str());
-            return format!("{indentation}{marker} {content}");
+            // Group 2 is the marker, group 3 is the first content char (no space)
+            let marker_end = captures.get(2).unwrap().end();
+            let rest = &line[marker_end..];
+            return format!(
+                "{indentation}{} {rest}",
+                &line[captures.get(1).unwrap().end()..marker_end]
+            );
         }
 
         // Handle ordered list items
         if let Some(captures) = ORDERED_LIST_NO_SPACE_PATTERN.captures(line) {
             let indentation = captures.get(1).map_or("", |m| m.as_str());
-            let marker = captures.get(2).map_or("", |m| m.as_str());
-            let content = captures.get(3).map_or("", |m| m.as_str());
-            return format!("{indentation}{marker} {content}");
+            let marker_end = captures.get(2).unwrap().end();
+            let rest = &line[marker_end..];
+            return format!(
+                "{indentation}{} {rest}",
+                &line[captures.get(1).unwrap().end()..marker_end]
+            );
         }
 
         line.to_string()

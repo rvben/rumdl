@@ -1,5 +1,5 @@
 use crate::utils::fast_hash;
-use crate::utils::regex_cache::{escape_regex, get_cached_fancy_regex};
+use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, Severity};
 use std::collections::{HashMap, HashSet};
@@ -237,7 +237,7 @@ impl MD044ProperNames {
 
         // Get the regex from global cache
         let combined_regex = match &self.combined_pattern {
-            Some(pattern) => match get_cached_fancy_regex(pattern) {
+            Some(pattern) => match get_cached_regex(pattern) {
                 Ok(regex) => regex,
                 Err(_) => return Vec::new(),
             },
@@ -305,69 +305,61 @@ impl MD044ProperNames {
             }
 
             // Use the combined regex to find all matches in one pass
-            for cap_result in combined_regex.find_iter(line) {
-                match cap_result {
-                    Ok(cap) => {
-                        let found_name = &line[cap.start()..cap.end()];
+            for cap in combined_regex.find_iter(line) {
+                let found_name = &line[cap.start()..cap.end()];
 
-                        // Check word boundaries manually for Unicode support
-                        let start_pos = cap.start();
-                        let end_pos = cap.end();
+                // Check word boundaries manually for Unicode support
+                let start_pos = cap.start();
+                let end_pos = cap.end();
 
-                        // Skip matches in the key portion of frontmatter lines
-                        if start_pos < fm_value_offset {
-                            continue;
-                        }
+                // Skip matches in the key portion of frontmatter lines
+                if start_pos < fm_value_offset {
+                    continue;
+                }
 
-                        // Skip matches inside HTML tag attributes (handles multi-line tags)
-                        let byte_pos = line_info.byte_offset + start_pos;
-                        if ctx.is_in_html_tag(byte_pos) {
-                            continue;
-                        }
+                // Skip matches inside HTML tag attributes (handles multi-line tags)
+                let byte_pos = line_info.byte_offset + start_pos;
+                if ctx.is_in_html_tag(byte_pos) {
+                    continue;
+                }
 
-                        if !Self::is_at_word_boundary(line, start_pos, true)
-                            || !Self::is_at_word_boundary(line, end_pos, false)
-                        {
-                            continue; // Not at word boundary
-                        }
+                if !Self::is_at_word_boundary(line, start_pos, true) || !Self::is_at_word_boundary(line, end_pos, false)
+                {
+                    continue; // Not at word boundary
+                }
 
-                        // Skip if in inline code when code_blocks is false
-                        if !self.config.code_blocks {
-                            if ctx.is_in_code_block_or_span(byte_pos) {
-                                continue;
-                            }
-                            // pulldown-cmark doesn't parse markdown syntax inside HTML
-                            // comments, HTML blocks, or frontmatter, so backtick-wrapped
-                            // text isn't detected by is_in_code_block_or_span. Check directly.
-                            if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
-                                && Self::is_in_backtick_code_in_line(line, start_pos)
-                            {
-                                continue;
-                            }
-                        }
-
-                        // Skip if in link URL or reference definition
-                        if Self::is_in_link(ctx, byte_pos) {
-                            continue;
-                        }
-
-                        // Skip if inside an angle-bracket URL (e.g., <https://...>)
-                        // The link parser skips autolinks inside HTML comments,
-                        // so we detect them directly in the line text.
-                        if Self::is_in_angle_bracket_url(line, start_pos) {
-                            continue;
-                        }
-
-                        // Find which proper name this matches
-                        if let Some(proper_name) = self.get_proper_name_for(found_name) {
-                            // Only flag if it's not already correct
-                            if found_name != proper_name {
-                                violations.push((line_num, cap.start() + 1, found_name.to_string()));
-                            }
-                        }
+                // Skip if in inline code when code_blocks is false
+                if !self.config.code_blocks {
+                    if ctx.is_in_code_block_or_span(byte_pos) {
+                        continue;
                     }
-                    Err(e) => {
-                        eprintln!("Regex execution error on line {line_num}: {e}");
+                    // pulldown-cmark doesn't parse markdown syntax inside HTML
+                    // comments, HTML blocks, or frontmatter, so backtick-wrapped
+                    // text isn't detected by is_in_code_block_or_span. Check directly.
+                    if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
+                        && Self::is_in_backtick_code_in_line(line, start_pos)
+                    {
+                        continue;
+                    }
+                }
+
+                // Skip if in link URL or reference definition
+                if Self::is_in_link(ctx, byte_pos) {
+                    continue;
+                }
+
+                // Skip if inside an angle-bracket URL (e.g., <https://...>)
+                // The link parser skips autolinks inside HTML comments,
+                // so we detect them directly in the line text.
+                if Self::is_in_angle_bracket_url(line, start_pos) {
+                    continue;
+                }
+
+                // Find which proper name this matches
+                if let Some(proper_name) = self.get_proper_name_for(found_name) {
+                    // Only flag if it's not already correct
+                    if found_name != proper_name {
+                        violations.push((line_num, cap.start() + 1, found_name.to_string()));
                     }
                 }
             }
