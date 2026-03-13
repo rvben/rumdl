@@ -37,12 +37,19 @@ pub struct StrongSpanDetail {
     pub is_asterisk: bool,
 }
 
-/// Extended return type including per-block details and strong spans
+/// Ordered list membership: maps line number (1-indexed) to list ID
+pub type LineToListMap = std::collections::HashMap<usize, usize>;
+/// Ordered list start values: maps list ID to the start value
+pub type ListStartValues = std::collections::HashMap<usize, u64>;
+
+/// Extended return type including per-block details, strong spans, and list membership
 pub type CodeRangesWithDetails = (
     Vec<(usize, usize)>,
     Vec<(usize, usize)>,
     Vec<CodeBlockDetail>,
     Vec<StrongSpanDetail>,
+    LineToListMap,
+    ListStartValues,
 );
 
 /// Classification of code blocks relative to list contexts
@@ -70,7 +77,7 @@ impl CodeBlockUtils {
     ///
     /// Returns a sorted vector of (start, end) byte offset tuples.
     pub fn detect_code_blocks(content: &str) -> Vec<(usize, usize)> {
-        let (blocks, _, _, _) = Self::detect_code_blocks_and_spans(content);
+        let (blocks, _, _, _, _, _) = Self::detect_code_blocks_and_spans(content);
         blocks
     }
 
@@ -82,6 +89,19 @@ impl CodeBlockUtils {
         let mut details = Vec::new();
         let mut strong_spans = Vec::new();
         let mut code_block_start: Option<(usize, bool, String)> = None;
+
+        // List membership tracking for ordered lists
+        let mut line_to_list = LineToListMap::new();
+        let mut list_start_values = ListStartValues::new();
+        let mut list_stack: Vec<(usize, bool, u64)> = Vec::new(); // (list_id, is_ordered, start_value)
+        let mut next_list_id: usize = 0;
+
+        // Pre-compute line start offsets for byte-to-line conversion
+        let line_starts: Vec<usize> = std::iter::once(0)
+            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+
+        let byte_to_line = |byte_offset: usize| -> usize { line_starts.partition_point(|&start| start <= byte_offset) };
 
         // Use pulldown-cmark with all extensions for maximum compatibility
         let options = Options::all();
@@ -112,14 +132,29 @@ impl CodeBlockUtils {
                         let is_asterisk = &content[range.start..range.start + 2] == "**";
                         strong_spans.push(StrongSpanDetail {
                             start: range.start,
-                            end: 0, // filled in on End event
+                            end: range.end,
                             is_asterisk,
                         });
                     }
                 }
-                Event::End(TagEnd::Strong) => {
-                    if let Some(span) = strong_spans.last_mut() {
-                        span.end = range.end;
+                Event::Start(Tag::List(start_num)) => {
+                    let is_ordered = start_num.is_some();
+                    let start_value = start_num.unwrap_or(1);
+                    list_stack.push((next_list_id, is_ordered, start_value));
+                    if is_ordered {
+                        list_start_values.insert(next_list_id, start_value);
+                    }
+                    next_list_id += 1;
+                }
+                Event::End(TagEnd::List(_)) => {
+                    list_stack.pop();
+                }
+                Event::Start(Tag::Item) => {
+                    if let Some(&(list_id, is_ordered, _)) = list_stack.last()
+                        && is_ordered
+                    {
+                        let line_num = byte_to_line(range.start);
+                        line_to_list.insert(line_num, list_id);
                     }
                 }
                 Event::Code(_) => {
@@ -146,7 +181,7 @@ impl CodeBlockUtils {
         spans.sort_by_key(|&(start, _)| start);
         details.sort_by_key(|d| d.start);
         strong_spans.sort_by_key(|s| s.start);
-        (blocks, spans, details, strong_spans)
+        (blocks, spans, details, strong_spans, line_to_list, list_start_values)
     }
 
     /// Check if a position is within a code block (for compatibility)

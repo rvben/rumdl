@@ -4,7 +4,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 use toml;
 
@@ -117,67 +116,6 @@ impl MD029OrderedListPrefix {
         } else {
             ListStyle::Ordered
         }
-    }
-
-    /// Build maps from line number to list ID and list ID to start value using pulldown-cmark's AST.
-    /// This is the authoritative source of truth for list membership and respects CommonMark's
-    /// list start values (e.g., a list that starts at 11 is valid if items are 11, 12, 13...).
-    fn build_commonmark_list_membership(
-        content: &str,
-    ) -> (
-        std::collections::HashMap<usize, usize>,
-        std::collections::HashMap<usize, u64>,
-    ) {
-        let mut line_to_list: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-        let mut list_start_values: std::collections::HashMap<usize, u64> = std::collections::HashMap::new();
-
-        // Pre-compute line start offsets for byte-to-line conversion
-        let line_starts: Vec<usize> = std::iter::once(0)
-            .chain(content.match_indices('\n').map(|(i, _)| i + 1))
-            .collect();
-
-        let byte_to_line = |byte_offset: usize| -> usize {
-            line_starts
-                .iter()
-                .rposition(|&start| start <= byte_offset)
-                .map(|i| i + 1) // 1-indexed
-                .unwrap_or(1)
-        };
-
-        let options = Options::empty();
-        let parser = Parser::new_ext(content, options);
-
-        let mut list_stack: Vec<(usize, bool, u64)> = Vec::new(); // (list_id, is_ordered, start_value)
-        let mut next_list_id = 0;
-
-        for (event, range) in parser.into_offset_iter() {
-            match event {
-                Event::Start(Tag::List(start_num)) => {
-                    let is_ordered = start_num.is_some();
-                    let start_value = start_num.unwrap_or(1);
-                    list_stack.push((next_list_id, is_ordered, start_value));
-                    if is_ordered {
-                        list_start_values.insert(next_list_id, start_value);
-                    }
-                    next_list_id += 1;
-                }
-                Event::End(TagEnd::List(_)) => {
-                    list_stack.pop();
-                }
-                Event::Start(Tag::Item) => {
-                    // Record the line number of this item and its list ID
-                    if let Some(&(list_id, is_ordered, _)) = list_stack.last()
-                        && is_ordered
-                    {
-                        let line_num = byte_to_line(range.start);
-                        line_to_list.insert(line_num, list_id);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        (line_to_list, list_start_values)
     }
 
     /// Group ordered items by their CommonMark list membership.
@@ -383,8 +321,7 @@ impl Rule for MD029OrderedListPrefix {
         // Use pulldown-cmark's AST for authoritative list membership and start values.
         // This respects CommonMark's list start values (e.g., a list starting at 11
         // expects items 11, 12, 13... - no violation there).
-        let (line_to_list, list_start_values) = Self::build_commonmark_list_membership(ctx.content);
-        let list_groups = Self::group_items_by_commonmark_list(ctx, &line_to_list);
+        let list_groups = Self::group_items_by_commonmark_list(ctx, &ctx.line_to_list);
 
         if list_groups.is_empty() {
             return Ok(Vec::new());
@@ -411,7 +348,7 @@ impl Rule for MD029OrderedListPrefix {
 
         // Process each CommonMark-defined list group with its start value
         for (list_id, items) in list_groups {
-            let start_value = list_start_values.get(&list_id).copied().unwrap_or(1);
+            let start_value = ctx.list_start_values.get(&list_id).copied().unwrap_or(1);
             self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style.clone(), start_value);
         }
 

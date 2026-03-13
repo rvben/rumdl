@@ -59,6 +59,8 @@ pub struct LintContext<'a> {
     pub code_blocks: Vec<(usize, usize)>, // Cached code block ranges (not including inline code spans)
     pub code_block_details: Vec<CodeBlockDetail>, // Per-block metadata (fenced/indented, info string)
     pub strong_spans: Vec<crate::utils::code_block_utils::StrongSpanDetail>, // Pre-computed strong emphasis spans
+    pub line_to_list: crate::utils::code_block_utils::LineToListMap, // Ordered list membership by line
+    pub list_start_values: crate::utils::code_block_utils::ListStartValues, // Start values per list ID
     pub lines: Vec<LineInfo>,             // Pre-computed line information
     pub links: Vec<ParsedLink<'a>>,       // Pre-parsed links
     pub images: Vec<ParsedImage<'a>>,     // Pre-parsed images
@@ -115,7 +117,7 @@ impl<'a> LintContext<'a> {
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
         // Detect code blocks and code spans once and cache them
-        let (mut code_blocks, code_span_ranges, code_block_details, strong_spans) = profile_section!(
+        let (mut code_blocks, code_span_ranges, code_block_details, strong_spans, line_to_list, list_start_values) = profile_section!(
             "Code blocks",
             profile,
             CodeBlockUtils::detect_code_blocks_and_spans(content)
@@ -524,6 +526,8 @@ impl<'a> LintContext<'a> {
             code_blocks,
             code_block_details,
             strong_spans,
+            line_to_list,
+            list_start_values,
             lines,
             links,
             images,

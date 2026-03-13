@@ -4,7 +4,7 @@
 //! See [docs/md054.md](../../docs/md054.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintError, LintResult, LintWarning, Rule, Severity};
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::LinkType;
 
 mod md054_config;
 use md054_config::MD054Config;
@@ -111,82 +111,107 @@ impl Rule for MD054LinkImageStyle {
         let content = ctx.content;
         let mut warnings = Vec::new();
 
-        // Enable task lists and footnotes so pulldown-cmark handles them natively
-        // rather than emitting them as broken link references.
-        let mut options = Options::empty();
-        options.insert(Options::ENABLE_TASKLISTS);
-        options.insert(Options::ENABLE_FOOTNOTES);
+        // Process links from pre-parsed data
+        for link in &ctx.links {
+            // Skip broken references (empty URL means unresolved reference)
+            if matches!(
+                link.link_type,
+                LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+            ) && link.url.is_empty()
+            {
+                continue;
+            }
 
-        let parser = Parser::new_ext(content, options).into_offset_iter();
-
-        // Track link/image Start/End pairs as a stack to handle nesting (e.g. [![alt](img)](href))
-        // Each entry: (link_type, dest_url, start_byte_offset, text_collector)
-        let mut link_stack: Vec<(LinkType, String, usize, String)> = Vec::new();
-
-        for (event, range) in parser {
-            match event {
-                Event::Start(Tag::Link {
-                    link_type, dest_url, ..
-                })
-                | Event::Start(Tag::Image {
-                    link_type, dest_url, ..
-                }) => {
-                    link_stack.push((link_type, dest_url.to_string(), range.start, String::new()));
-                }
-                Event::End(TagEnd::Link | TagEnd::Image) => {
-                    if let Some((link_type, dest_url, start_byte, text)) = link_stack.pop() {
-                        let end_byte = range.end;
-
-                        let style = match link_type {
-                            LinkType::Autolink | LinkType::Email => "autolink",
-                            LinkType::Inline => {
-                                if text == dest_url {
-                                    "url-inline"
-                                } else {
-                                    "inline"
-                                }
-                            }
-                            LinkType::Reference => "full",
-                            LinkType::Collapsed => "collapsed",
-                            LinkType::Shortcut => "shortcut",
-                            _ => continue,
-                        };
-
-                        let (start_line, _) = ctx.offset_to_line_col(start_byte);
-
-                        // Filter out links in frontmatter or code blocks
-                        if ctx
-                            .line_info(start_line)
-                            .is_some_and(|info| info.in_front_matter || info.in_code_block)
-                        {
-                            continue;
-                        }
-
-                        if !self.is_style_allowed(style) {
-                            // Compute character-based columns for the warning
-                            let start_col = Self::byte_to_char_col(content, start_byte);
-                            let (end_line, _) = ctx.offset_to_line_col(end_byte);
-                            let end_col = Self::byte_to_char_col(content, end_byte);
-
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: start_line,
-                                column: start_col,
-                                end_line,
-                                end_column: end_col,
-                                message: format!("Link/image style '{style}' is not allowed"),
-                                severity: Severity::Warning,
-                                fix: None,
-                            });
-                        }
+            let style = match link.link_type {
+                LinkType::Autolink | LinkType::Email => "autolink",
+                LinkType::Inline => {
+                    if link.text == link.url {
+                        "url-inline"
+                    } else {
+                        "inline"
                     }
                 }
-                Event::Text(ref t) | Event::Code(ref t) => {
-                    if let Some(entry) = link_stack.last_mut() {
-                        entry.3.push_str(t);
+                LinkType::Reference => "full",
+                LinkType::Collapsed => "collapsed",
+                LinkType::Shortcut => "shortcut",
+                _ => continue,
+            };
+
+            // Filter out links in frontmatter or code blocks
+            if ctx
+                .line_info(link.line)
+                .is_some_and(|info| info.in_front_matter || info.in_code_block)
+            {
+                continue;
+            }
+
+            if !self.is_style_allowed(style) {
+                let start_col = Self::byte_to_char_col(content, link.byte_offset);
+                let (end_line, _) = ctx.offset_to_line_col(link.byte_end);
+                let end_col = Self::byte_to_char_col(content, link.byte_end);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: link.line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Link/image style '{style}' is not allowed"),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
+            }
+        }
+
+        // Process images from pre-parsed data
+        for image in &ctx.images {
+            // Skip broken references (empty URL means unresolved reference)
+            if matches!(
+                image.link_type,
+                LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+            ) && image.url.is_empty()
+            {
+                continue;
+            }
+
+            let style = match image.link_type {
+                LinkType::Autolink | LinkType::Email => "autolink",
+                LinkType::Inline => {
+                    if image.alt_text == image.url {
+                        "url-inline"
+                    } else {
+                        "inline"
                     }
                 }
-                _ => {}
+                LinkType::Reference => "full",
+                LinkType::Collapsed => "collapsed",
+                LinkType::Shortcut => "shortcut",
+                _ => continue,
+            };
+
+            // Filter out images in frontmatter or code blocks
+            if ctx
+                .line_info(image.line)
+                .is_some_and(|info| info.in_front_matter || info.in_code_block)
+            {
+                continue;
+            }
+
+            if !self.is_style_allowed(style) {
+                let start_col = Self::byte_to_char_col(content, image.byte_offset);
+                let (end_line, _) = ctx.offset_to_line_col(image.byte_end);
+                let end_col = Self::byte_to_char_col(content, image.byte_end);
+
+                warnings.push(LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    line: image.line,
+                    column: start_col,
+                    end_line,
+                    end_column: end_col,
+                    message: format!("Link/image style '{style}' is not allowed"),
+                    severity: Severity::Warning,
+                    fix: None,
+                });
             }
         }
 
