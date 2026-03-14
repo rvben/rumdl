@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.50] - 2026-03-14
+
+### Fixed
+
+- **Code block tools**: Error output now uses `file:line:col: [tool] message` format matching rumdl's own lint output, with `<standard input>:N:M:` references translated to absolute file positions and boilerplate stripped ([#521](https://github.com/rvben/rumdl/issues/521))
+
 ## [0.1.49] - 2026-03-14
 
 ### Fixed
 
-- **Code block tools**: Error messages now include file path, line number, and language of the failing code block (#521)
-- **MD076**: Blockquotes in tight lists are now treated as structural content, preventing false positives (#523)
+- **Code block tools**: Error messages now include file path, line number, and language of the failing code block ([#521](https://github.com/rvben/rumdl/issues/521))
+- **MD076**: Blockquotes in tight lists are now treated as structural content, preventing false positives ([#523](https://github.com/rvben/rumdl/issues/523))
 
 ## [0.1.48] - 2026-03-13
 
