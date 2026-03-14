@@ -89,8 +89,8 @@ impl MD076ListItemSpacing {
         }
     }
 
-    /// Check whether a non-blank line is structural content (code block, table, or HTML block)
-    /// whose trailing blank line is required by other rules (MD031, MD058).
+    /// Check whether a non-blank line is structural content (code block, table, HTML block,
+    /// or blockquote) whose trailing blank line is required by other rules (MD031, MD058).
     fn is_structural_content(ctx: &LintContext, line_num: usize) -> bool {
         if let Some(info) = ctx.line_info(line_num) {
             // Inside a code block (includes the closing fence itself)
@@ -99,6 +99,10 @@ impl MD076ListItemSpacing {
             }
             // Inside an HTML block
             if info.in_html_block {
+                return true;
+            }
+            // Inside a blockquote
+            if info.blockquote.is_some() {
                 return true;
             }
             // A table row or separator
@@ -738,6 +742,133 @@ mod tests {
         assert!(
             check(content, ListItemSpacingStyle::Consistent).is_empty(),
             "Structural blank after HTML block should not make item 1 appear loose"
+        );
+    }
+
+    #[test]
+    fn blockquote_in_tight_list_no_false_positive() {
+        // Blank line around a blockquote in a list item is structural, not a separator
+        let content = "\
+- Item 1 with quote:
+
+  > This is a blockquote
+  > with multiple lines.
+
+- Item 2 simple.
+- Item 3 simple.
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Consistent).is_empty(),
+            "Structural blank around blockquote should not make item 1 appear loose"
+        );
+        assert!(
+            check(content, ListItemSpacingStyle::Tight).is_empty(),
+            "Blockquote in tight list should not trigger a violation"
+        );
+    }
+
+    #[test]
+    fn blockquote_multiple_items_with_quotes_tight() {
+        // Multiple items with blockquotes should all be treated as structural
+        let content = "\
+- Item 1:
+
+  > Quote A
+
+- Item 2:
+
+  > Quote B
+
+- Item 3 plain.
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Tight).is_empty(),
+            "Multiple items with blockquotes should remain tight"
+        );
+    }
+
+    #[test]
+    fn blockquote_mixed_with_genuine_loose_gap() {
+        // A blockquote item followed by a genuine loose gap should still be detected
+        let content = "\
+- Item 1:
+
+  > Quote
+
+- Item 2 plain.
+
+- Item 3 plain.
+";
+        let warnings = check(content, ListItemSpacingStyle::Tight);
+        assert!(
+            !warnings.is_empty(),
+            "Genuine loose gap between Item 2 and Item 3 should be flagged"
+        );
+    }
+
+    #[test]
+    fn blockquote_single_line_in_tight_list() {
+        let content = "\
+- Item 1:
+
+  > Single line quote.
+
+- Item 2.
+- Item 3.
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Tight).is_empty(),
+            "Single-line blockquote should be structural"
+        );
+    }
+
+    #[test]
+    fn blockquote_in_ordered_list_tight() {
+        let content = "\
+1. Item 1:
+
+   > Quoted text in ordered list.
+
+1. Item 2.
+1. Item 3.
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Tight).is_empty(),
+            "Blockquote in ordered list should be structural"
+        );
+    }
+
+    #[test]
+    fn nested_blockquote_in_tight_list() {
+        let content = "\
+- Item 1:
+
+  > Outer quote
+  > > Nested quote
+
+- Item 2.
+- Item 3.
+";
+        assert!(
+            check(content, ListItemSpacingStyle::Tight).is_empty(),
+            "Nested blockquote in tight list should be structural"
+        );
+    }
+
+    #[test]
+    fn blockquote_as_entire_item_is_loose() {
+        // When a blockquote IS the item content (not nested within text),
+        // a trailing blank line is a genuine loose gap, not structural.
+        let content = "\
+- > Quote is the entire item content.
+
+- Item 2.
+- Item 3.
+";
+        let warnings = check(content, ListItemSpacingStyle::Tight);
+        assert!(
+            !warnings.is_empty(),
+            "Blank after blockquote-only item is a genuine loose gap"
         );
     }
 
