@@ -31,6 +31,10 @@ pub enum ListItemSpacingStyle {
 #[derive(Debug, Clone, Default)]
 pub struct MD076Config {
     pub style: ListItemSpacingStyle,
+    /// When true, blank lines around continuation paragraphs within a list item
+    /// are permitted even in tight mode. This allows tight inter-item spacing
+    /// while using blank lines to visually separate continuation content.
+    pub allow_loose_continuation: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -48,6 +52,10 @@ enum GapKind {
     /// Blank line required by another rule (MD031, MD058) after structural content.
     /// Excluded from consistency analysis — neither loose nor tight.
     Structural,
+    /// Blank line after continuation content within a list item.
+    /// Treated as `Structural` when `allow_loose_continuation` is enabled,
+    /// or as `Loose` when disabled (default).
+    ContinuationLoose,
 }
 
 /// Per-block analysis result shared by check() and fix().
@@ -65,8 +73,16 @@ struct BlockAnalysis {
 impl MD076ListItemSpacing {
     pub fn new(style: ListItemSpacingStyle) -> Self {
         Self {
-            config: MD076Config { style },
+            config: MD076Config {
+                style,
+                allow_loose_continuation: false,
+            },
         }
+    }
+
+    pub fn with_allow_loose_continuation(mut self, allow: bool) -> Self {
+        self.config.allow_loose_continuation = allow;
+        self
     }
 
     /// Check whether a line is effectively blank, accounting for blockquote markers.
@@ -120,11 +136,29 @@ impl MD076ListItemSpacing {
         false
     }
 
+    /// Check whether a non-blank line is continuation content within a list item
+    /// (indented text that is not itself a list marker).
+    fn is_continuation_content(ctx: &LintContext, line_num: usize) -> bool {
+        if let Some(info) = ctx.line_info(line_num) {
+            // If this line has a list marker, it's an item, not continuation
+            if info.list_item.is_some() {
+                return false;
+            }
+            // Must have non-empty indented content
+            let content = info.content(ctx.content);
+            !content.trim().is_empty() && content.starts_with(' ')
+        } else {
+            false
+        }
+    }
+
     /// Classify the inter-item gap between two consecutive items.
     ///
     /// Returns `Tight` if there is no blank line, `Loose` if there is a genuine
-    /// inter-item separator blank, or `Structural` if the only blank line is
-    /// required by another rule (MD031/MD058) after structural content.
+    /// inter-item separator blank, `Structural` if the only blank line is
+    /// required by another rule (MD031/MD058) after structural content, or
+    /// `ContinuationLoose` if the blank line follows continuation content
+    /// within a list item.
     fn classify_gap(ctx: &LintContext, first: usize, next: usize) -> GapKind {
         if next <= first + 1 {
             return GapKind::Tight;
@@ -142,6 +176,10 @@ impl MD076ListItemSpacing {
         // `scan` is now the last non-blank line before the next item
         if scan > first && Self::is_structural_content(ctx, scan) {
             return GapKind::Structural;
+        }
+        // Check if the last non-blank line is continuation content
+        if scan > first && Self::is_continuation_content(ctx, scan) {
+            return GapKind::ContinuationLoose;
         }
         GapKind::Loose
     }
@@ -175,6 +213,7 @@ impl MD076ListItemSpacing {
         ctx: &LintContext,
         block: &crate::lint_context::types::ListBlock,
         style: &ListItemSpacingStyle,
+        allow_loose_continuation: bool,
     ) -> Option<BlockAnalysis> {
         // Only compare items at this block's own nesting level.
         // item_lines may include nested list items (higher marker_column) that belong
@@ -198,10 +237,13 @@ impl MD076ListItemSpacing {
         // Classify each inter-item gap.
         let gaps: Vec<GapKind> = items.windows(2).map(|w| Self::classify_gap(ctx, w[0], w[1])).collect();
 
-        // Structural gaps are excluded from consistency analysis — they are
-        // required by other rules (MD031, MD058) and should not influence
-        // whether the list is considered loose or tight.
-        let loose_count = gaps.iter().filter(|&&g| g == GapKind::Loose).count();
+        // Structural gaps and (when allowed) continuation gaps are excluded
+        // from consistency analysis — they should not influence whether the
+        // list is considered loose or tight.
+        let loose_count = gaps
+            .iter()
+            .filter(|&&g| g == GapKind::Loose || (g == GapKind::ContinuationLoose && !allow_loose_continuation))
+            .count();
         let tight_count = gaps.iter().filter(|&&g| g == GapKind::Tight).count();
 
         let (warn_loose_gaps, warn_tight_gaps) = match style {
@@ -253,53 +295,51 @@ impl Rule for MD076ListItemSpacing {
 
         let mut warnings = Vec::new();
 
+        let allow_cont = self.config.allow_loose_continuation;
+
         for block in &ctx.list_blocks {
-            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style) else {
+            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style, allow_cont) else {
                 continue;
             };
 
             for (i, &gap) in analysis.gaps.iter().enumerate() {
-                match gap {
-                    GapKind::Structural => {
-                        // Structural gaps are never warned about — they are required
-                        // by other rules (MD031, MD058).
-                    }
-                    GapKind::Loose if analysis.warn_loose_gaps => {
-                        // Warn on the first inter-item blank line in this gap.
-                        let blanks = Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]);
-                        if let Some(&blank_line) = blanks.first() {
-                            let line_content = ctx
-                                .line_info(blank_line)
-                                .map(|li| li.content(ctx.content))
-                                .unwrap_or("");
-                            warnings.push(LintWarning {
-                                rule_name: Some(self.name().to_string()),
-                                line: blank_line,
-                                column: 1,
-                                end_line: blank_line,
-                                end_column: line_content.len() + 1,
-                                message: "Unexpected blank line between list items".to_string(),
-                                severity: Severity::Warning,
-                                fix: None,
-                            });
-                        }
-                    }
-                    GapKind::Tight if analysis.warn_tight_gaps => {
-                        // Warn on the next item line (a blank line should precede it).
-                        let next_item = analysis.items[i + 1];
-                        let line_content = ctx.line_info(next_item).map(|li| li.content(ctx.content)).unwrap_or("");
+                let is_loose_violation = match gap {
+                    GapKind::Loose => analysis.warn_loose_gaps,
+                    GapKind::ContinuationLoose => !allow_cont && analysis.warn_loose_gaps,
+                    _ => false,
+                };
+
+                if is_loose_violation {
+                    let blanks = Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]);
+                    if let Some(&blank_line) = blanks.first() {
+                        let line_content = ctx
+                            .line_info(blank_line)
+                            .map(|li| li.content(ctx.content))
+                            .unwrap_or("");
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
-                            line: next_item,
+                            line: blank_line,
                             column: 1,
-                            end_line: next_item,
+                            end_line: blank_line,
                             end_column: line_content.len() + 1,
-                            message: "Missing blank line between list items".to_string(),
+                            message: "Unexpected blank line between list items".to_string(),
                             severity: Severity::Warning,
                             fix: None,
                         });
                     }
-                    _ => {}
+                } else if gap == GapKind::Tight && analysis.warn_tight_gaps {
+                    let next_item = analysis.items[i + 1];
+                    let line_content = ctx.line_info(next_item).map(|li| li.content(ctx.content)).unwrap_or("");
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: next_item,
+                        column: 1,
+                        end_line: next_item,
+                        end_column: line_content.len() + 1,
+                        message: "Missing blank line between list items".to_string(),
+                        severity: Severity::Warning,
+                        fix: None,
+                    });
                 }
             }
         }
@@ -316,26 +356,26 @@ impl Rule for MD076ListItemSpacing {
         let mut insert_before: std::collections::HashSet<usize> = std::collections::HashSet::new();
         let mut remove_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
+        let allow_cont = self.config.allow_loose_continuation;
+
         for block in &ctx.list_blocks {
-            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style) else {
+            let Some(analysis) = Self::analyze_block(ctx, block, &self.config.style, allow_cont) else {
                 continue;
             };
 
             for (i, &gap) in analysis.gaps.iter().enumerate() {
-                match gap {
-                    GapKind::Structural => {
-                        // Never modify structural blank lines.
+                let is_loose_violation = match gap {
+                    GapKind::Loose => analysis.warn_loose_gaps,
+                    GapKind::ContinuationLoose => !allow_cont && analysis.warn_loose_gaps,
+                    _ => false,
+                };
+
+                if is_loose_violation {
+                    for blank_line in Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]) {
+                        remove_lines.insert(blank_line);
                     }
-                    GapKind::Loose if analysis.warn_loose_gaps => {
-                        // Remove ALL inter-item blank lines in this gap
-                        for blank_line in Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]) {
-                            remove_lines.insert(blank_line);
-                        }
-                    }
-                    GapKind::Tight if analysis.warn_tight_gaps => {
-                        insert_before.insert(analysis.items[i + 1]);
-                    }
-                    _ => {}
+                } else if gap == GapKind::Tight && analysis.warn_tight_gaps {
+                    insert_before.insert(analysis.items[i + 1]);
                 }
             }
         }
@@ -387,6 +427,10 @@ impl Rule for MD076ListItemSpacing {
             ListItemSpacingStyle::Tight => "tight",
         };
         map.insert("style".to_string(), toml::Value::String(style_str.to_string()));
+        map.insert(
+            "allow-loose-continuation".to_string(),
+            toml::Value::Boolean(self.config.allow_loose_continuation),
+        );
         Some((self.name().to_string(), toml::Value::Table(map)))
     }
 
@@ -401,7 +445,11 @@ impl Rule for MD076ListItemSpacing {
             "tight" => ListItemSpacingStyle::Tight,
             _ => ListItemSpacingStyle::Consistent,
         };
-        Box::new(Self::new(style))
+        let allow_loose_continuation =
+            crate::config::get_rule_config_value::<bool>(config, "MD076", "allow-loose-continuation")
+                .or_else(|| crate::config::get_rule_config_value::<bool>(config, "MD076", "allow_loose_continuation"))
+                .unwrap_or(false);
+        Box::new(Self::new(style).with_allow_loose_continuation(allow_loose_continuation))
     }
 }
 
@@ -415,9 +463,25 @@ mod tests {
         rule.check(&ctx).unwrap()
     }
 
+    fn check_with_continuation(
+        content: &str,
+        style: ListItemSpacingStyle,
+        allow_loose_continuation: bool,
+    ) -> Vec<LintWarning> {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD076ListItemSpacing::new(style).with_allow_loose_continuation(allow_loose_continuation);
+        rule.check(&ctx).unwrap()
+    }
+
     fn fix(content: &str, style: ListItemSpacingStyle) -> String {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let rule = MD076ListItemSpacing::new(style);
+        rule.fix(&ctx).unwrap()
+    }
+
+    fn fix_with_continuation(content: &str, style: ListItemSpacingStyle, allow_loose_continuation: bool) -> String {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let rule = MD076ListItemSpacing::new(style).with_allow_loose_continuation(allow_loose_continuation);
         rule.fix(&ctx).unwrap()
     }
 
@@ -1441,6 +1505,150 @@ mod tests {
         );
     }
 
+    // ── allow-loose-continuation ─────────────────────────────────────
+
+    #[test]
+    fn continuation_loose_tight_style_default_warns() {
+        // Default (allow_loose_continuation=false): blank lines around
+        // continuation paragraphs are treated as loose gaps → violation
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+  Continuation paragraph.
+
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, false);
+        assert!(
+            !warnings.is_empty(),
+            "Should warn about loose gaps when allow_loose_continuation is false"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_tight_style_allowed_no_warnings() {
+        // With allow_loose_continuation=true: blank lines around continuation
+        // paragraphs are permitted even in tight mode
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+  Continuation paragraph.
+
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            warnings.is_empty(),
+            "Should not warn when allow_loose_continuation is true, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_mixed_items_warns() {
+        // Even with allow_loose_continuation, genuinely loose inter-item gaps
+        // (blank line between items that have no continuation) should still warn
+        let content = "\
+- Item 1.
+
+- Item 2.
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            !warnings.is_empty(),
+            "Genuine loose gaps should still warn even with allow_loose_continuation"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_consistent_mode() {
+        // In consistent mode with allow_loose_continuation, continuation gaps
+        // should not count toward loose/tight consistency
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Consistent, true);
+        assert!(
+            warnings.is_empty(),
+            "Continuation gaps should not affect consistency when allowed, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_fix_preserves_continuation_blanks() {
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+  Continuation paragraph.
+
+- Item 3.
+";
+        let fixed = fix_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert_eq!(fixed, content, "Fix should preserve continuation blank lines");
+    }
+
+    #[test]
+    fn continuation_loose_fix_removes_genuine_loose_gaps() {
+        let input = "\
+- Item 1.
+
+- Item 2.
+
+- Item 3.
+";
+        let expected = "\
+- Item 1.
+- Item 2.
+- Item 3.
+";
+        let fixed = fix_with_continuation(input, ListItemSpacingStyle::Tight, true);
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn continuation_loose_ordered_list() {
+        let content = "\
+1. Item 1.
+
+   Continuation paragraph.
+
+2. Item 2.
+
+   Continuation paragraph.
+
+3. Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            warnings.is_empty(),
+            "Ordered list continuation should work too, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_disabled_by_default() {
+        // Verify the constructor defaults to false
+        let rule = MD076ListItemSpacing::new(ListItemSpacingStyle::Tight);
+        assert!(!rule.config.allow_loose_continuation);
+    }
+
     // ── Config schema ──────────────────────────────────────────────────
 
     #[test]
@@ -1452,6 +1660,7 @@ mod tests {
         assert_eq!(name, "MD076");
         if let toml::Value::Table(map) = value {
             assert!(map.contains_key("style"));
+            assert!(map.contains_key("allow-loose-continuation"));
         } else {
             panic!("Expected Table value from default_config_section");
         }
