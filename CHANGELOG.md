@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.51] - 2026-03-14
+
+### Fixed
+
+- **Code block tools**: Ignore `BrokenPipe` when writing to tool stdin, fixing intermittent failures with tools that exit before consuming input (e.g., linters that validate without reading fully)
+
+### Changed
+
+- **MD076**: Continuation content detection now verifies indentation matches the parent list item's content column, preventing false exemptions with under-indented text
+
 ## [0.1.50] - 2026-03-14
 
 ### Added
