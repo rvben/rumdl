@@ -853,14 +853,26 @@ impl MD013LineLength {
             }
 
             // Handle footnote definitions: `[^id]: prose text that can be reflowed`
-            if lines[i].trim().starts_with("[^") && lines[i].contains("]:") {
+            // Validate structure: must start with `[^`, contain `]:`, and the ID
+            // must not contain `[` or `]` (prevents false matches on nested brackets)
+            if lines[i].trim().starts_with("[^") && lines[i].contains("]:") && {
+                let after_caret = &lines[i].trim()[2..];
+                // ID is everything up to the first `]:`
+                after_caret
+                    .find("]:")
+                    .is_some_and(|pos| pos > 0 && !after_caret[..pos].contains(['[', ']']))
+            } {
                 let footnote_start = i;
                 let line = lines[i];
 
-                // Extract the prefix `[^id]: ` and the prose content
-                let colon_pos = line.find("]:").unwrap();
+                // Extract the prefix `[^id]:`
+                let Some(colon_pos) = line.find("]:") else {
+                    i += 1;
+                    continue;
+                };
                 let prefix_end = colon_pos + 2;
                 let prefix = &line[..prefix_end];
+
                 // Content starts after `]: ` (with optional space)
                 let content_start = if line[prefix_end..].starts_with(' ') {
                     prefix_end + 1
@@ -868,23 +880,35 @@ impl MD013LineLength {
                     prefix_end
                 };
                 let first_content = &line[content_start..];
-                let continuation_indent = content_start;
-                // Footnotes require minimum 4-space indent for continuation,
-                // regardless of the prefix length
-                let min_continuation_indent = continuation_indent.min(4);
 
-                // Collect continuation lines
+                // Skip footnotes with empty content (deferred body)
+                if first_content.trim().is_empty() {
+                    i += 1;
+                    continue;
+                }
+
+                // CommonMark footnotes use 4-space continuation indent regardless
+                // of the prefix length. Use 4 for both collection and output.
+                const FOOTNOTE_CONTINUATION_INDENT: usize = 4;
+
+                // Collect continuation lines (single paragraph only;
+                // multi-paragraph footnotes are handled in a future enhancement)
+                let mut last_consumed = i;
                 let mut footnote_lines = vec![first_content.to_string()];
                 i += 1;
                 while i < lines.len() {
                     let next = lines[i];
                     let next_trimmed = next.trim();
-                    // Stop at blank lines or non-continuation lines
                     if next_trimmed.is_empty() {
                         break;
                     }
-                    let indent = next.len() - next.trim_start().len();
-                    if indent < min_continuation_indent {
+                    // Tab characters count as 4 spaces for indent purposes
+                    let indent = next
+                        .chars()
+                        .take_while(|c| c.is_whitespace())
+                        .map(|c| if c == '\t' { 4 } else { 1 })
+                        .sum::<usize>();
+                    if indent < FOOTNOTE_CONTINUATION_INDENT {
                         break;
                     }
                     // Stop at structural boundaries
@@ -892,20 +916,34 @@ impl MD013LineLength {
                         || next_trimmed.starts_with("```")
                         || next_trimmed.starts_with("~~~")
                         || is_list_item(next_trimmed)
-                        || (next_trimmed.starts_with('[') && next.contains("]:"))
+                        || crate::utils::mkdocs_footnotes::is_footnote_definition(next_trimmed)
+                        || (next_trimmed.starts_with('[') && next_trimmed.contains("]:"))
+                        || next_trimmed.starts_with('>')
+                        || TableUtils::is_potential_table_row(next_trimmed)
                     {
                         break;
                     }
                     footnote_lines.push(next_trimmed.to_string());
+                    last_consumed = i;
                     i += 1;
                 }
 
                 // Join and reflow the footnote content
                 let paragraph_text = footnote_lines.join(" ").trim().to_string();
+                if paragraph_text.is_empty() {
+                    continue;
+                }
+
+                // Use char count for prefix display width, not byte count
+                let prefix_display_width = prefix.chars().count() + 1; // +1 for space
                 let reflow_line_length = if config.line_length.is_unlimited() {
                     usize::MAX
                 } else {
-                    config.line_length.get().saturating_sub(continuation_indent).max(1)
+                    config
+                        .line_length
+                        .get()
+                        .saturating_sub(FOOTNOTE_CONTINUATION_INDENT.max(prefix_display_width))
+                        .max(20)
                 };
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
                     line_length: reflow_line_length,
@@ -921,8 +959,13 @@ impl MD013LineLength {
                 };
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
-                // Reconstruct with prefix on first line, indent on continuation
-                let indent_str = " ".repeat(continuation_indent);
+                // Guard against empty reflow result
+                if reflowed.is_empty() {
+                    continue;
+                }
+
+                // Reconstruct: prefix on first line, 4-space indent on continuations
+                let indent_str = " ".repeat(FOOTNOTE_CONTINUATION_INDENT);
                 let mut result_lines = Vec::new();
                 for (idx, rline) in reflowed.iter().enumerate() {
                     if idx == 0 {
@@ -933,25 +976,24 @@ impl MD013LineLength {
                 }
                 let reflowed_text = result_lines.join(line_ending);
 
-                // Calculate byte range
+                // Calculate byte range using last_consumed (not collection length)
                 let start_range = line_index.whole_line_range(footnote_start + 1);
-                let end_line = footnote_start + footnote_lines.len() - 1;
-                let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
-                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                let end_range = if last_consumed == lines.len() - 1 && !ctx.content.ends_with('\n') {
+                    line_index.line_text_range(last_consumed + 1, 1, lines[last_consumed].len() + 1)
                 } else {
-                    line_index.whole_line_range(end_line + 1)
+                    line_index.whole_line_range(last_consumed + 1)
                 };
                 let byte_range = start_range.start..end_range.end;
 
-                let replacement = if end_line < lines.len() - 1 || ctx.content.ends_with('\n') {
+                let replacement = if last_consumed < lines.len() - 1 || ctx.content.ends_with('\n') {
                     format!("{reflowed_text}{line_ending}")
                 } else {
                     reflowed_text
                 };
 
                 let original_text = &ctx.content[byte_range.clone()];
-                let max_length = (0..footnote_lines.len())
-                    .map(|idx| self.calculate_effective_length(lines[footnote_start + idx]))
+                let max_length = (footnote_start..=last_consumed)
+                    .map(|idx| self.calculate_effective_length(lines[idx]))
                     .max()
                     .unwrap_or(0);
                 let line_limit = if config.line_length.is_unlimited() {
@@ -969,8 +1011,8 @@ impl MD013LineLength {
                         ),
                         line: footnote_start + 1,
                         column: 1,
-                        end_line: end_line + 1,
-                        end_column: lines[end_line].len() + 1,
+                        end_line: last_consumed + 1,
+                        end_column: lines[last_consumed].len() + 1,
                         severity: Severity::Warning,
                         fix: Some(crate::rule::Fix {
                             range: byte_range,
