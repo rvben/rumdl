@@ -138,7 +138,11 @@ impl MD076ListItemSpacing {
 
     /// Check whether a non-blank line is continuation content within a list item
     /// (indented prose that is not itself a list marker or structural content).
-    fn is_continuation_content(ctx: &LintContext, line_num: usize) -> bool {
+    ///
+    /// `parent_content_col` is the content column of the parent list item marker
+    /// (e.g., 2 for `- item`, 3 for `1. item`). Continuation must be indented
+    /// to at least this column to belong to the parent item.
+    fn is_continuation_content(ctx: &LintContext, line_num: usize, parent_content_col: usize) -> bool {
         let Some(info) = ctx.line_info(line_num) else {
             return false;
         };
@@ -157,8 +161,12 @@ impl MD076ListItemSpacing {
             return false;
         }
         let content = info.content(ctx.content);
-        // Must be indented non-empty text (continuation paragraphs are always indented)
-        !content.trim().is_empty() && content.starts_with(' ')
+        if content.trim().is_empty() {
+            return false;
+        }
+        // Continuation must be indented to at least the parent item's content column
+        let indent = content.len() - content.trim_start().len();
+        indent >= parent_content_col
     }
 
     /// Classify the inter-item gap between two consecutive items.
@@ -186,8 +194,14 @@ impl MD076ListItemSpacing {
         if scan > first && Self::is_structural_content(ctx, scan) {
             return GapKind::Structural;
         }
-        // Check if the last non-blank line is continuation content
-        if scan > first && Self::is_continuation_content(ctx, scan) {
+        // Check if the last non-blank line is continuation content.
+        // Use the first item's content column to verify proper indentation.
+        let parent_content_col = ctx
+            .line_info(first)
+            .and_then(|li| li.list_item.as_ref())
+            .map(|item| item.content_column)
+            .unwrap_or(2);
+        if scan > first && Self::is_continuation_content(ctx, scan, parent_content_col) {
             return GapKind::ContinuationLoose;
         }
         GapKind::Loose
