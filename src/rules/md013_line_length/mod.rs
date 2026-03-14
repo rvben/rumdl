@@ -832,16 +832,152 @@ impl MD013LineLength {
                     || info.in_pymdown_block
             });
 
+            // Skip link reference definitions but NOT footnote definitions.
+            // Footnote definitions (`[^id]: prose`) contain reflowable text,
+            // while link reference definitions (`[ref]: URL`) contain URLs
+            // that cannot be shortened.
+            let is_link_ref_def =
+                lines[i].trim().starts_with('[') && !lines[i].trim().starts_with("[^") && lines[i].contains("]:");
+
             if should_skip_due_to_line_info
                 || lines[i].trim().starts_with('#')
                 || TableUtils::is_potential_table_row(lines[i])
                 || lines[i].trim().is_empty()
                 || is_horizontal_rule(lines[i].trim())
                 || is_template_directive_only(lines[i])
-                || (lines[i].trim().starts_with('[') && lines[i].contains("]:"))
+                || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
             {
                 i += 1;
+                continue;
+            }
+
+            // Handle footnote definitions: `[^id]: prose text that can be reflowed`
+            if lines[i].trim().starts_with("[^") && lines[i].contains("]:") {
+                let footnote_start = i;
+                let line = lines[i];
+
+                // Extract the prefix `[^id]: ` and the prose content
+                let colon_pos = line.find("]:").unwrap();
+                let prefix_end = colon_pos + 2;
+                let prefix = &line[..prefix_end];
+                // Content starts after `]: ` (with optional space)
+                let content_start = if line[prefix_end..].starts_with(' ') {
+                    prefix_end + 1
+                } else {
+                    prefix_end
+                };
+                let first_content = &line[content_start..];
+                let continuation_indent = content_start;
+                // Footnotes require minimum 4-space indent for continuation,
+                // regardless of the prefix length
+                let min_continuation_indent = continuation_indent.min(4);
+
+                // Collect continuation lines
+                let mut footnote_lines = vec![first_content.to_string()];
+                i += 1;
+                while i < lines.len() {
+                    let next = lines[i];
+                    let next_trimmed = next.trim();
+                    // Stop at blank lines or non-continuation lines
+                    if next_trimmed.is_empty() {
+                        break;
+                    }
+                    let indent = next.len() - next.trim_start().len();
+                    if indent < min_continuation_indent {
+                        break;
+                    }
+                    // Stop at structural boundaries
+                    if next_trimmed.starts_with('#')
+                        || next_trimmed.starts_with("```")
+                        || next_trimmed.starts_with("~~~")
+                        || is_list_item(next_trimmed)
+                        || (next_trimmed.starts_with('[') && next.contains("]:"))
+                    {
+                        break;
+                    }
+                    footnote_lines.push(next_trimmed.to_string());
+                    i += 1;
+                }
+
+                // Join and reflow the footnote content
+                let paragraph_text = footnote_lines.join(" ").trim().to_string();
+                let reflow_line_length = if config.line_length.is_unlimited() {
+                    usize::MAX
+                } else {
+                    config.line_length.get().saturating_sub(continuation_indent).max(1)
+                };
+                let reflow_options = crate::utils::text_reflow::ReflowOptions {
+                    line_length: reflow_line_length,
+                    break_on_sentences: true,
+                    preserve_breaks: false,
+                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
+                    abbreviations: config.abbreviations_for_reflow(),
+                    length_mode: self.reflow_length_mode(),
+                    attr_lists: ctx.flavor.supports_attr_lists(),
+                    require_sentence_capital: config.require_sentence_capital,
+                    max_list_continuation_indent: None,
+                };
+                let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+
+                // Reconstruct with prefix on first line, indent on continuation
+                let indent_str = " ".repeat(continuation_indent);
+                let mut result_lines = Vec::new();
+                for (idx, rline) in reflowed.iter().enumerate() {
+                    if idx == 0 {
+                        result_lines.push(format!("{prefix} {rline}"));
+                    } else {
+                        result_lines.push(format!("{indent_str}{rline}"));
+                    }
+                }
+                let reflowed_text = result_lines.join(line_ending);
+
+                // Calculate byte range
+                let start_range = line_index.whole_line_range(footnote_start + 1);
+                let end_line = footnote_start + footnote_lines.len() - 1;
+                let end_range = if end_line == lines.len() - 1 && !ctx.content.ends_with('\n') {
+                    line_index.line_text_range(end_line + 1, 1, lines[end_line].len() + 1)
+                } else {
+                    line_index.whole_line_range(end_line + 1)
+                };
+                let byte_range = start_range.start..end_range.end;
+
+                let replacement = if end_line < lines.len() - 1 || ctx.content.ends_with('\n') {
+                    format!("{reflowed_text}{line_ending}")
+                } else {
+                    reflowed_text
+                };
+
+                let original_text = &ctx.content[byte_range.clone()];
+                let max_length = (0..footnote_lines.len())
+                    .map(|idx| self.calculate_effective_length(lines[footnote_start + idx]))
+                    .max()
+                    .unwrap_or(0);
+                let line_limit = if config.line_length.is_unlimited() {
+                    usize::MAX
+                } else {
+                    config.line_length.get()
+                };
+                if original_text != replacement && max_length > line_limit {
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        message: format!(
+                            "Line length {} exceeds {} characters",
+                            max_length,
+                            config.line_length.get()
+                        ),
+                        line: footnote_start + 1,
+                        column: 1,
+                        end_line: end_line + 1,
+                        end_column: lines[end_line].len() + 1,
+                        severity: Severity::Warning,
+                        fix: Some(crate::rule::Fix {
+                            range: byte_range,
+                            replacement,
+                        }),
+                    });
+                }
                 continue;
             }
 
