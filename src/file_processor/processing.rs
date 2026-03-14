@@ -876,7 +876,7 @@ fn format_tool_error(err: &ProcessorError, display_path: &str) -> String {
         } => match error {
             ExecutorError::ExecutionFailed { tool, message } => {
                 let stripped = strip_exit_code_prefix(message);
-                let (location, cleaned) = extract_stdin_location(&stripped, *fence_line);
+                let (location, cleaned) = extract_stdin_location(stripped, *fence_line);
                 let loc = location.unwrap_or_else(|| format!("{fence_line}"));
                 format!("{display_path}:{loc}: [{tool}] {cleaned}")
             }
@@ -896,10 +896,10 @@ fn format_tool_error(err: &ProcessorError, display_path: &str) -> String {
 
 /// Strip "Exit code N: " prefix from tool error messages.
 fn strip_exit_code_prefix(message: &str) -> &str {
-    if let Some(rest) = message.strip_prefix("Exit code ") {
-        if let Some(colon_pos) = rest.find(": ") {
-            return &rest[colon_pos + 2..];
-        }
+    if let Some(rest) = message.strip_prefix("Exit code ")
+        && let Some(colon_pos) = rest.find(": ")
+    {
+        return &rest[colon_pos + 2..];
     }
     message
 }
