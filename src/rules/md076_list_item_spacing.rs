@@ -137,19 +137,28 @@ impl MD076ListItemSpacing {
     }
 
     /// Check whether a non-blank line is continuation content within a list item
-    /// (indented text that is not itself a list marker).
+    /// (indented prose that is not itself a list marker or structural content).
     fn is_continuation_content(ctx: &LintContext, line_num: usize) -> bool {
-        if let Some(info) = ctx.line_info(line_num) {
-            // If this line has a list marker, it's an item, not continuation
-            if info.list_item.is_some() {
-                return false;
-            }
-            // Must have non-empty indented content
-            let content = info.content(ctx.content);
-            !content.trim().is_empty() && content.starts_with(' ')
-        } else {
-            false
+        let Some(info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        // Lines with a list marker are items, not continuation
+        if info.list_item.is_some() {
+            return false;
         }
+        // Structural content is handled separately by is_structural_content
+        if info.in_code_block
+            || info.in_html_block
+            || info.in_html_comment
+            || info.in_front_matter
+            || info.in_math_block
+            || info.blockquote.is_some()
+        {
+            return false;
+        }
+        let content = info.content(ctx.content);
+        // Must be indented non-empty text (continuation paragraphs are always indented)
+        !content.trim().is_empty() && content.starts_with(' ')
     }
 
     /// Classify the inter-item gap between two consecutive items.
