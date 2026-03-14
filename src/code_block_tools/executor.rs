@@ -206,14 +206,12 @@ impl ToolExecutor {
         // (e.g., `true` or a linter that validates without reading fully).
         if tool_def.stdin
             && let Some(mut stdin) = child.stdin.take()
+            && let Err(e) = stdin.write_all(input.as_bytes())
+            && e.kind() != std::io::ErrorKind::BrokenPipe
         {
-            if let Err(e) = stdin.write_all(input.as_bytes()) {
-                if e.kind() != std::io::ErrorKind::BrokenPipe {
-                    return Err(ExecutorError::IoError {
-                        message: format!("Failed to write to stdin: {e}"),
-                    });
-                }
-            }
+            return Err(ExecutorError::IoError {
+                message: format!("Failed to write to stdin: {e}"),
+            });
         }
 
         // Wait for completion with timeout
