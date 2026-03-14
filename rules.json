@@ -74,7 +74,7 @@
     "name": "no-reversed-links",
     "aliases": [],
     "summary": "Reversed link syntax",
-    "category": "other",
+    "category": "link",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md011/"
@@ -84,7 +84,7 @@
     "name": "no-multiple-blanks",
     "aliases": [],
     "summary": "Multiple consecutive blank lines",
-    "category": "other",
+    "category": "whitespace",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md012/"
@@ -104,7 +104,7 @@
     "name": "commands-show-output",
     "aliases": [],
     "summary": "Commands in code blocks should show output",
-    "category": "other",
+    "category": "code-block",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md014/"
@@ -175,8 +175,8 @@
     "aliases": [],
     "summary": "Multiple headings with the same content",
     "category": "heading",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md024/"
   },
   {
@@ -196,7 +196,7 @@
     "name": "no-trailing-punctuation",
     "aliases": [],
     "summary": "Trailing punctuation in heading",
-    "category": "other",
+    "category": "heading",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md026/"
@@ -206,7 +206,7 @@
     "name": "no-multiple-space-blockquote",
     "aliases": [],
     "summary": "Multiple spaces after quote marker (>)",
-    "category": "other",
+    "category": "blockquote",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md027/"
@@ -286,7 +286,7 @@
     "name": "hr-style",
     "aliases": [],
     "summary": "Horizontal rule style",
-    "category": "other",
+    "category": "whitespace",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md035/"
@@ -296,7 +296,7 @@
     "name": "no-emphasis-as-heading",
     "aliases": [],
     "summary": "Emphasis should not be used instead of a heading",
-    "category": "other",
+    "category": "emphasis",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md036/"
@@ -349,8 +349,8 @@
     ],
     "summary": "First line in file should be a top level heading",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md041/"
   },
   {
@@ -368,9 +368,9 @@
     "name": "required-headings",
     "aliases": [],
     "summary": "Required heading structure",
-    "category": "heading",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md043/"
   },
   {
@@ -388,7 +388,7 @@
     "name": "no-alt-text",
     "aliases": [],
     "summary": "Images should have alternate text (alt text)",
-    "category": "other",
+    "category": "image",
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md045/"
@@ -408,7 +408,7 @@
     "name": "single-trailing-newline",
     "aliases": [],
     "summary": "Files should end with a single newline character",
-    "category": "other",
+    "category": "whitespace",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md047/"
@@ -418,7 +418,7 @@
     "name": "code-fence-style",
     "aliases": [],
     "summary": "Code fence style should be consistent",
-    "category": "other",
+    "category": "code-block",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md048/"
@@ -428,7 +428,7 @@
     "name": "emphasis-style",
     "aliases": [],
     "summary": "Emphasis style should be consistent",
-    "category": "other",
+    "category": "emphasis",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md049/"
@@ -438,7 +438,7 @@
     "name": "strong-style",
     "aliases": [],
     "summary": "Strong emphasis style should be consistent",
-    "category": "other",
+    "category": "emphasis",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md050/"
@@ -449,8 +449,8 @@
     "aliases": [],
     "summary": "Link fragments should reference valid headings",
     "category": "link",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md051/"
   },
   {
@@ -458,9 +458,9 @@
     "name": "reference-links-images",
     "aliases": [],
     "summary": "Reference links and images should use a reference that exists",
-    "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "category": "link",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md052/"
   },
   {
@@ -468,9 +468,9 @@
     "name": "link-image-reference-definitions",
     "aliases": [],
     "summary": "Link and image reference definitions should be needed",
-    "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "category": "link",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md053/"
   },
   {
@@ -478,7 +478,7 @@
     "name": "link-image-style",
     "aliases": [],
     "summary": "Link and image style should be consistent",
-    "category": "other",
+    "category": "link",
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md054/"
@@ -488,7 +488,7 @@
     "name": "table-pipe-style",
     "aliases": [],
     "summary": "Table pipe style should be consistent",
-    "category": "other",
+    "category": "table",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md055/"
@@ -498,7 +498,7 @@
     "name": "table-column-count",
     "aliases": [],
     "summary": "Table column count should be consistent",
-    "category": "other",
+    "category": "table",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md056/"
@@ -518,7 +518,7 @@
     "name": "blanks-around-tables",
     "aliases": [],
     "summary": "Tables should be surrounded by blank lines",
-    "category": "other",
+    "category": "table",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md058/"
@@ -540,7 +540,7 @@
       "table-format"
     ],
     "summary": "Table columns should be consistently aligned",
-    "category": "other",
+    "category": "table",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md060/"
@@ -551,8 +551,8 @@
     "aliases": [],
     "summary": "Forbidden terms",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md061/"
   },
   {
@@ -570,7 +570,7 @@
     "name": "heading-capitalization",
     "aliases": [],
     "summary": "Heading capitalization",
-    "category": "other",
+    "category": "heading",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md063/"
@@ -590,7 +590,7 @@
     "name": "blanks-around-horizontal-rules",
     "aliases": [],
     "summary": "Horizontal rules should be surrounded by blank lines",
-    "category": "other",
+    "category": "whitespace",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md065/"
@@ -601,8 +601,8 @@
     "aliases": [],
     "summary": "Footnote validation",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md066/"
   },
   {
@@ -611,8 +611,8 @@
     "aliases": [],
     "summary": "Footnote definitions should appear in order of first reference",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md067/"
   },
   {
@@ -621,8 +621,8 @@
     "aliases": [],
     "summary": "Footnote definitions should not be empty",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md068/"
   },
   {
@@ -650,7 +650,7 @@
     "name": "blank-line-after-frontmatter",
     "aliases": [],
     "summary": "Blank line after frontmatter",
-    "category": "whitespace",
+    "category": "front-matter",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md071/"
@@ -681,8 +681,8 @@
     "aliases": [],
     "summary": "MkDocs nav entries should point to existing files",
     "category": "other",
-    "fix": "Fix is always available.",
-    "fix_availability": "Always",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
     "url": "https://rumdl.dev/md074/"
   },
   {
@@ -700,7 +700,7 @@
     "name": "list-item-spacing",
     "aliases": [],
     "summary": "List item spacing should be consistent",
-    "category": "other",
+    "category": "list",
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md076/"
