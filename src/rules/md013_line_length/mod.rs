@@ -914,7 +914,7 @@ impl MD013LineLength {
                     let t = s.trim();
                     !t.is_empty()
                         && (t.chars().all(|c| c == '=' || c == ' ') || t.chars().all(|c| c == '-' || c == ' '))
-                        && t.contains(|c: char| c == '=' || c == '-')
+                        && t.contains(['=', '-'])
                 };
 
                 // Deferred body: `[^id]:\n    content` — first line has no content,
