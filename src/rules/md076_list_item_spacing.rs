@@ -1672,6 +1672,133 @@ mod tests {
         assert!(!rule.config.allow_loose_continuation);
     }
 
+    #[test]
+    fn continuation_loose_ordered_under_indented_warns() {
+        // Ordered list: "1. " has content_column=3, so 2-space indent
+        // is under-indented and should NOT be treated as continuation
+        let content = "\
+1. Item 1.
+
+  Under-indented text.
+
+1. Item 2.
+1. Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            !warnings.is_empty(),
+            "Under-indented text should not be treated as continuation, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_mix_continuation_and_genuine_gaps() {
+        // Some items have continuation (allowed), one gap is genuinely loose (not allowed)
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            !warnings.is_empty(),
+            "Genuine loose gap between items 2-3 should warn even with continuation allowed"
+        );
+        // Only the genuine loose gap should warn, not the continuation gap
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Expected exactly one warning for the genuine loose gap"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_fix_mixed_preserves_continuation_removes_genuine() {
+        // Fix should preserve continuation blanks but remove genuine loose gaps
+        let input = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+- Item 3.
+";
+        let expected = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+- Item 3.
+";
+        let fixed = fix_with_continuation(input, ListItemSpacingStyle::Tight, true);
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn continuation_loose_after_code_block() {
+        // Code block is structural, continuation after code block should also work
+        let content = "\
+- Item 1.
+
+  ```python
+  code
+  ```
+
+  Continuation after code.
+
+- Item 2.
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            warnings.is_empty(),
+            "Code block + continuation should both be exempt, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_style_does_not_interfere() {
+        // With style=loose, allow-loose-continuation shouldn't change behavior —
+        // loose style already requires blank lines everywhere
+        let content = "\
+- Item 1.
+
+  Continuation paragraph.
+
+- Item 2.
+
+  Continuation paragraph.
+
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Loose, true);
+        assert!(
+            warnings.is_empty(),
+            "Loose style with continuation should not warn, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn continuation_loose_tight_no_continuation_content() {
+        // All items are simple (no continuation), tight style should work normally
+        let content = "\
+- Item 1.
+- Item 2.
+- Item 3.
+";
+        let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
+        assert!(
+            warnings.is_empty(),
+            "Simple tight list should pass with allow_loose_continuation, got: {warnings:?}"
+        );
+    }
+
     // ── Config schema ──────────────────────────────────────────────────
 
     #[test]
