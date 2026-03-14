@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.50] - 2026-03-14
 
+### Added
+
+- **MD076**: New `allow-loose-continuation` option permits blank lines around continuation paragraphs in tight lists, enabling tight inter-item spacing while visually separating multi-paragraph content within items ([#524](https://github.com/rvben/rumdl/issues/524))
+- **MD013**: Reflow fix now supports footnote definitions (`[^id]: prose text`), reflowing long footnote content with correct continuation indent alignment ([#499](https://github.com/rvben/rumdl/issues/499))
+
 ### Fixed
 
 - **Code block tools**: Error output now uses `file:line:col: [tool] message` format matching rumdl's own lint output, with `<standard input>:N:M:` references translated to absolute file positions and boilerplate stripped ([#521](https://github.com/rvben/rumdl/issues/521))
