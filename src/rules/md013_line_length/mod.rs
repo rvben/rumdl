@@ -901,11 +901,12 @@ impl MD013LineLength {
                         .sum::<usize>()
                 };
 
-                // Helper: check if a trimmed line is a fence marker
+                // Helper: check if a trimmed line is a fence marker (homogeneous chars)
                 let is_fence = |s: &str| -> bool {
                     let t = s.trim();
-                    (t.starts_with("```") || t.starts_with("~~~"))
-                        && t.chars().take_while(|&c| c == '`' || c == '~').count() >= 3
+                    let fence_char = t.chars().next();
+                    matches!(fence_char, Some('`') | Some('~'))
+                        && t.chars().take_while(|&c| c == fence_char.unwrap()).count() >= 3
                 };
 
                 // Helper: check if a trimmed line is a setext underline
@@ -928,6 +929,21 @@ impl MD013LineLength {
                 let mut last_consumed = i;
                 i += 1;
 
+                // Strip only the footnote continuation indent, preserving
+                // internal indentation (e.g., code block body indent)
+                let strip_fn_indent = |s: &str| -> String {
+                    let mut chars = s.chars();
+                    let mut stripped = 0;
+                    while stripped < FN_INDENT {
+                        match chars.next() {
+                            Some('\t') => stripped += 4,
+                            Some(c) if c.is_whitespace() => stripped += 1,
+                            _ => break,
+                        }
+                    }
+                    chars.as_str().to_string()
+                };
+
                 let mut in_fenced_code = false;
                 let mut consecutive_blanks = 0u32;
 
@@ -945,6 +961,7 @@ impl MD013LineLength {
 
                         // Inside a fenced code block, blank lines are part of the code
                         if in_fenced_code {
+                            consecutive_blanks = 0; // Don't count blanks inside code blocks
                             fn_lines.push(FnLineType::Verbatim(String::new(), 0));
                             last_consumed = i;
                             i += 1;
@@ -974,21 +991,6 @@ impl MD013LineLength {
                     if indent < FN_INDENT {
                         break;
                     }
-
-                    // Strip only the footnote continuation indent, preserving
-                    // internal indentation (e.g., code block body indent)
-                    let strip_fn_indent = |s: &str| -> String {
-                        let mut chars = s.chars();
-                        let mut stripped = 0;
-                        while stripped < FN_INDENT {
-                            match chars.next() {
-                                Some('\t') => stripped += 4,
-                                Some(c) if c.is_whitespace() => stripped += 1,
-                                _ => break,
-                            }
-                        }
-                        chars.as_str().to_string()
-                    };
 
                     // Inside a fenced code block: everything is verbatim until closing fence
                     if in_fenced_code {
@@ -1026,7 +1028,6 @@ impl MD013LineLength {
                         || is_setext_underline(next_trimmed)
                         || is_horizontal_rule(next_trimmed)
                         || crate::utils::mkdocs_footnotes::is_footnote_definition(next_trimmed)
-                        || (next_trimmed.starts_with('[') && next_trimmed.contains("]:"))
                     {
                         // Preserve verbatim: blockquotes, tables, lists, setext
                         // underlines, and horizontal rules inside the footnote
@@ -1043,6 +1044,18 @@ impl MD013LineLength {
                         }
                         // Headings, new footnote defs, link refs — end the footnote
                         break;
+                    }
+
+                    // Link reference definitions inside footnotes are not reflowable
+                    if next_trimmed.starts_with('[')
+                        && !next_trimmed.starts_with("[^")
+                        && next_trimmed.contains("]:")
+                        && LINK_REF_PATTERN.is_match(next_trimmed)
+                    {
+                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                        last_consumed = i;
+                        i += 1;
+                        continue;
                     }
 
                     // Regular prose content
@@ -1127,11 +1140,6 @@ impl MD013LineLength {
                 let mut is_first_block = true;
 
                 for block in &blocks {
-                    // Blank line separator between blocks
-                    if !result_lines.is_empty() {
-                        result_lines.push(String::new());
-                    }
-
                     match block {
                         FnBlock::Paragraph(para_lines) => {
                             let paragraph_text = para_lines.join(" ");
@@ -1145,6 +1153,11 @@ impl MD013LineLength {
                                 continue;
                             }
 
+                            // Blank line separator between blocks
+                            if !result_lines.is_empty() {
+                                result_lines.push(String::new());
+                            }
+
                             for (idx, rline) in reflowed.iter().enumerate() {
                                 if is_first_block && idx == 0 {
                                     result_lines.push(format!("{prefix} {rline}"));
@@ -1155,11 +1168,15 @@ impl MD013LineLength {
                             is_first_block = false;
                         }
                         FnBlock::Verbatim(verb_lines) => {
+                            // Blank line separator between blocks
+                            if !result_lines.is_empty() {
+                                result_lines.push(String::new());
+                            }
+
                             if is_first_block {
                                 // Verbatim as first block in a deferred-body footnote
-                                // Output the prefix line, then verbatim content
                                 if deferred_body {
-                                    result_lines.push(format!("{prefix}"));
+                                    result_lines.push(prefix.to_string());
                                 }
                                 is_first_block = false;
                             }
