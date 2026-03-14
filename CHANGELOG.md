@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Code block tools**: Error output now uses `file:line:col: [tool] message` format matching rumdl's own lint output, with `<standard input>:N:M:` references translated to absolute file positions and boilerplate stripped ([#521](https://github.com/rvben/rumdl/issues/521))
 
+### Changed
+
+- Upgrade all GitHub Actions from Node.js 20 to Node.js 24 (Node.js 20 deprecated June 2, 2026)
+
 ## [0.1.49] - 2026-03-14
 
 ### Fixed
