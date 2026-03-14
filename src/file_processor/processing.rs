@@ -228,13 +228,13 @@ pub fn process_file_with_formatter(
                     // Report any errors that occurred during formatting
                     if output.had_errors && !silent {
                         for msg in &output.error_messages {
-                            eprintln!("Warning: {msg}");
+                            eprintln!("Warning: {display_path}: {msg}");
                         }
                     }
                 }
                 Err(e) => {
                     if !silent {
-                        eprintln!("Warning: Code block tool formatting failed: {e}");
+                        eprintln!("Warning: {display_path}: {e}");
                     }
                 }
             }
@@ -294,13 +294,13 @@ pub fn process_file_with_formatter(
                     // Report any errors that occurred during formatting
                     if output.had_errors && !silent {
                         for msg in &output.error_messages {
-                            eprintln!("Warning: {msg}");
+                            eprintln!("Warning: {display_path}: {msg}");
                         }
                     }
                 }
                 Err(e) => {
                     if !silent {
-                        eprintln!("Warning: Code block tool formatting failed: {e}");
+                        eprintln!("Warning: {display_path}: {e}");
                     }
                 }
             }

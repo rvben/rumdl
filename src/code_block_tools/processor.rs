@@ -126,10 +126,20 @@ impl CodeBlockDiagnostic {
 pub enum ProcessorError {
     /// Tool execution failed.
     ToolError(ExecutorError),
+    /// Tool execution failed with code block location context.
+    ToolErrorAt {
+        error: ExecutorError,
+        line: usize,
+        language: String,
+    },
     /// No tools configured for language.
-    NoToolsConfigured { language: String },
+    NoToolsConfigured { language: String, line: usize },
     /// Tool binary not found.
-    ToolBinaryNotFound { tool: String, language: String },
+    ToolBinaryNotFound {
+        tool: String,
+        language: String,
+        line: usize,
+    },
     /// Processing was aborted due to on_error = fail.
     Aborted { message: String },
 }
@@ -138,11 +148,14 @@ impl std::fmt::Display for ProcessorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ToolError(e) => write!(f, "{e}"),
-            Self::NoToolsConfigured { language } => {
-                write!(f, "No tools configured for language '{language}'")
+            Self::ToolErrorAt { error, line, language } => {
+                write!(f, "line {line} ({language}): {error}")
             }
-            Self::ToolBinaryNotFound { tool, language } => {
-                write!(f, "Tool '{tool}' binary not found for language '{language}'")
+            Self::NoToolsConfigured { language, line } => {
+                write!(f, "line {line} ({language}): no tools configured")
+            }
+            Self::ToolBinaryNotFound { tool, language, line } => {
+                write!(f, "line {line} ({language}): tool '{tool}' not found in PATH")
             }
             Self::Aborted { message } => write!(f, "Processing aborted: {message}"),
         }
@@ -652,6 +665,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         OnMissing::FailFast => {
                             return Err(ProcessorError::NoToolsConfigured {
                                 language: canonical_lang,
+                                line: block.start_line + 1,
                             });
                         }
                     }
@@ -704,6 +718,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             return Err(ProcessorError::ToolBinaryNotFound {
                                 tool: tool_name.to_string(),
                                 language: canonical_lang.clone(),
+                                line: block.start_line + 1,
                             });
                         }
                     }
@@ -815,6 +830,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         OnMissing::FailFast => {
                             return Err(ProcessorError::NoToolsConfigured {
                                 language: canonical_lang,
+                                line: block.start_line + 1,
                             });
                         }
                     }
@@ -864,6 +880,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                             return Err(ProcessorError::ToolBinaryNotFound {
                                 tool: tool_name.to_string(),
                                 language: canonical_lang.clone(),
+                                line: block.start_line + 1,
                             });
                         }
                     }
@@ -892,9 +909,15 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     Err(e) => {
                         let on_error = self.get_on_error(&canonical_lang);
                         match on_error {
-                            OnError::Fail => return Err(e.into()),
+                            OnError::Fail => {
+                                return Err(ProcessorError::ToolErrorAt {
+                                    error: e,
+                                    line: block.start_line + 1,
+                                    language: canonical_lang,
+                                });
+                            }
                             OnError::Warn => {
-                                log::warn!("Formatter '{tool_id}' failed: {e}");
+                                error_messages.push(format!("line {} ({}): {e}", block.start_line + 1, canonical_lang));
                             }
                             OnError::Skip => {}
                         }
