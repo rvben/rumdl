@@ -355,6 +355,14 @@ impl MD044ProperNames {
                     continue;
                 }
 
+                // Skip if inside a Markdown inline link URL in contexts where
+                // pulldown-cmark doesn't parse Markdown syntax
+                if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
+                    && Self::is_in_markdown_link_url(line, start_pos)
+                {
+                    continue;
+                }
+
                 // Find which proper name this matches
                 if let Some(proper_name) = self.get_proper_name_for(found_name) {
                     // Only flag if it's not already correct
@@ -479,6 +487,69 @@ impl MD044ProperNames {
                             i = j + 1;
                             continue;
                         }
+                    }
+                }
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Check if a position within a line falls inside a Markdown inline link URL.
+    ///
+    /// pulldown-cmark does not parse Markdown syntax inside HTML comments, HTML
+    /// blocks, or frontmatter, so `ctx.links` won't contain inline links found
+    /// there. This function detects `[text](url)` patterns directly in the line
+    /// text and returns true if `pos` falls within the URL portion `(...)`.
+    fn is_in_markdown_link_url(line: &str, pos: usize) -> bool {
+        let bytes = line.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+
+        while i < len {
+            // Look for unescaped '['
+            if bytes[i] == b'[' && (i == 0 || bytes[i - 1] != b'\\') {
+                // Find matching ']' handling nested brackets
+                let mut depth: u32 = 1;
+                let mut j = i + 1;
+                while j < len && depth > 0 {
+                    match bytes[j] {
+                        b'\\' => {
+                            j += 1; // skip escaped char
+                        }
+                        b'[' => depth += 1,
+                        b']' => depth -= 1,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+
+                // j is now one past the ']'
+                if depth == 0 && j < len && bytes[j] == b'(' {
+                    // Found '[text](' — now find matching ')'
+                    let url_start = j; // position of '('
+                    let mut paren_depth: u32 = 1;
+                    let mut k = j + 1;
+                    while k < len && paren_depth > 0 {
+                        match bytes[k] {
+                            b'\\' => {
+                                k += 1; // skip escaped char
+                            }
+                            b'(' => paren_depth += 1,
+                            b')' => paren_depth -= 1,
+                            _ => {}
+                        }
+                        k += 1;
+                    }
+
+                    if paren_depth == 0 {
+                        // URL spans from url_start to k-1 (inclusive of parens)
+                        // Check if pos falls within the URL portion (between parens)
+                        if pos > url_start && pos < k {
+                            return true;
+                        }
+                        i = k;
+                        continue;
                     }
                 }
             }
