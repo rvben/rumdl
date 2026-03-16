@@ -725,3 +725,35 @@ fn test_frontmatter_link_text_still_flagged() {
         "Should flag improper name in link text within frontmatter. Got: {result:?}",
     );
 }
+
+#[test]
+fn test_html_comments_double_escaped_bracket_link() {
+    // \\[text](url) — the backslash is escaped, so [ starts a real link
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- \\\\[page](test.md) -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in link URLs even with double-escaped preceding backslash. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_block_reference_link_url_skipped() {
+    // Reference link inside an HTML block
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<div>\n[relevant page][test-ref]\n</div>\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in reference link labels in HTML blocks. Got: {result:?}",
+    );
+}

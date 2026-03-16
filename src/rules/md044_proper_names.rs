@@ -509,8 +509,8 @@ impl MD044ProperNames {
         let mut i = 0;
 
         while i < len {
-            // Look for unescaped '['
-            if bytes[i] == b'[' && (i == 0 || bytes[i - 1] != b'\\') {
+            // Look for unescaped '[' (handle double-escaped \\[ as unescaped)
+            if bytes[i] == b'[' && (i == 0 || bytes[i - 1] != b'\\' || (i >= 2 && bytes[i - 2] == b'\\')) {
                 // Find matching ']' handling nested brackets
                 let mut depth: u32 = 1;
                 let mut j = i + 1;

@@ -2027,3 +2027,66 @@ fn test_md032_ordered_list_table_at_exact_continuation_indent() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_md032_wide_ordered_marker_with_table() {
+    // "10. " requires 4-space continuation indent; table at 4 spaces is valid
+    let content =
+        "10. First item\n\n    | Col 1 | Col 2 |\n    |-------|-------|\n    | A     | B     |\n\n11. Second item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Table at 4-space indent under wide ordered marker (10.) should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_wide_ordered_marker_table_at_insufficient_indent() {
+    // "10. " requires 4-space indent; table at 3 spaces is insufficient
+    let content =
+        "10. First item\n\n   | Col 1 | Col 2 |\n   |-------|-------|\n   | A     | B     |\n11. Second item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert!(
+        !warnings.is_empty(),
+        "Table at 3-space indent under wide marker (10.) should trigger MD032",
+    );
+}
+
+#[test]
+fn test_md032_table_without_leading_pipe() {
+    // Tables without leading pipe: "col1 | col2 |" — is_table_line matches via trailing |
+    let content = "- Item 1\n\n  Col 1 | Col 2 |\n  :-----|:------|\n  A     | B     |\n\n- Item 2\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Pipe-less header table indented as list content should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
