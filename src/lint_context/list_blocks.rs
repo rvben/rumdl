@@ -152,7 +152,8 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                 || line_content.starts_with("---")
                 || line_content.starts_with("***")
                 || line_content.starts_with("___")
-                || crate::utils::skip_context::is_table_line(line_content)
+                || (crate::utils::skip_context::is_table_line(line_content)
+                    && line_info.indent < min_continuation_for_tracking)
                 || blockquote_prefix_changes
                 || (line_info.indent > 0 && line_info.indent < min_continuation_for_tracking && !is_lazy_continuation);
 
@@ -552,95 +553,43 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                             && block.blockquote_prefix.trim() == next_blockquote_prefix.trim()
                         {
                             let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
-                            let _has_meaningful_content = (line_idx + 1..check_idx).any(|idx| {
+
+                            // Root-level continuation indent for the list block
+                            let root_cont = if block.is_ordered {
+                                block.nesting_level + block.max_marker_width
+                            } else {
+                                block.nesting_level * 2 + 2
+                            };
+
+                            let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
                                 if let Some(between_line) = lines.get(idx) {
                                     let between_content = between_line.content(content);
                                     let trimmed = between_content.trim();
                                     if trimmed.is_empty() {
                                         return false;
                                     }
-                                    let line_indent = between_content.len() - between_content.trim_start().len();
-
                                     let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
                                         .find(between_content)
                                         .map_or(String::new(), |m| m.as_str().to_string());
                                     let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
                                     let blockquote_level_changed =
                                         trimmed.starts_with(">") && between_bq_level != block_bq_level;
-
-                                    if trimmed.starts_with("```")
+                                    // Tables indented at list continuation level are content, not separators
+                                    let table_breaks = crate::utils::skip_context::is_table_line(trimmed)
+                                        && between_line.indent < root_cont;
+                                    trimmed.starts_with("```")
                                         || trimmed.starts_with("~~~")
                                         || trimmed.starts_with("---")
                                         || trimmed.starts_with("***")
                                         || trimmed.starts_with("___")
                                         || blockquote_level_changed
-                                        || crate::utils::skip_context::is_table_line(trimmed)
+                                        || table_breaks
                                         || between_line.heading.is_some()
-                                    {
-                                        return true;
-                                    }
-
-                                    line_indent >= min_continuation_indent
                                 } else {
                                     false
                                 }
                             });
-
-                            if block.is_ordered {
-                                let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
-                                    if let Some(between_line) = lines.get(idx) {
-                                        let between_content = between_line.content(content);
-                                        let trimmed = between_content.trim();
-                                        if trimmed.is_empty() {
-                                            return false;
-                                        }
-                                        let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
-                                            .find(between_content)
-                                            .map_or(String::new(), |m| m.as_str().to_string());
-                                        let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
-                                        let blockquote_level_changed =
-                                            trimmed.starts_with(">") && between_bq_level != block_bq_level;
-                                        trimmed.starts_with("```")
-                                            || trimmed.starts_with("~~~")
-                                            || trimmed.starts_with("---")
-                                            || trimmed.starts_with("***")
-                                            || trimmed.starts_with("___")
-                                            || blockquote_level_changed
-                                            || crate::utils::skip_context::is_table_line(trimmed)
-                                            || between_line.heading.is_some()
-                                    } else {
-                                        false
-                                    }
-                                });
-                                found_continuation = !has_structural_separators;
-                            } else {
-                                let has_structural_separators = (line_idx + 1..check_idx).any(|idx| {
-                                    if let Some(between_line) = lines.get(idx) {
-                                        let between_content = between_line.content(content);
-                                        let trimmed = between_content.trim();
-                                        if trimmed.is_empty() {
-                                            return false;
-                                        }
-                                        let between_bq_prefix = BLOCKQUOTE_PREFIX_REGEX
-                                            .find(between_content)
-                                            .map_or(String::new(), |m| m.as_str().to_string());
-                                        let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
-                                        let blockquote_level_changed =
-                                            trimmed.starts_with(">") && between_bq_level != block_bq_level;
-                                        trimmed.starts_with("```")
-                                            || trimmed.starts_with("~~~")
-                                            || trimmed.starts_with("---")
-                                            || trimmed.starts_with("***")
-                                            || trimmed.starts_with("___")
-                                            || blockquote_level_changed
-                                            || crate::utils::skip_context::is_table_line(trimmed)
-                                            || between_line.heading.is_some()
-                                    } else {
-                                        false
-                                    }
-                                });
-                                found_continuation = !has_structural_separators;
-                            }
+                            found_continuation = !has_structural_separators;
                         }
                     }
                 }
@@ -695,7 +644,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     || line_content.starts_with("***")
                     || line_content.starts_with("___")
                     || blockquote_level_changed
-                    || looks_like_table;
+                    || (looks_like_table && effective_indent < min_required_indent);
 
                 let is_lazy_continuation = !is_structural_separator
                     && !line_info.is_blank
@@ -898,9 +847,16 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
                 return true;
             }
 
-            // Tables separate lists
+            // Tables separate lists (unless properly indented as list content)
             if crate::utils::skip_context::is_table_line(trimmed) {
-                return true;
+                let min_continuation_indent = if current.is_ordered {
+                    current.nesting_level + current.max_marker_width
+                } else {
+                    current.nesting_level + 2
+                };
+                if line_info.indent < min_continuation_indent {
+                    return true;
+                }
             }
 
             // Blockquotes separate lists

@@ -1734,3 +1734,153 @@ fn test_md032_mixed_ordered_parent_unordered_nested_continuation() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_md032_indented_table_in_unordered_list_with_nested_item() {
+    // Issue #533: indented table as list continuation content should not break list detection
+    let content = r#"---
+title: Level 1 heading
+---
+
+- List item 1.
+  - Nested list item
+
+  | Table col 1 | Table col 2 |
+  |:------------|:------------|
+  | Table row 1 | Table row 1 |
+
+- List item 2.
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Indented table within list continuation should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_top_level_table_breaks_list_no_blank_line() {
+    // A non-indented table directly after a list item (no blank line) SHOULD trigger MD032
+    let content = r#"- Item 1
+| Col1 | Col2 |
+|------|------|
+| A    | B    |
+
+- Item 2
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert!(
+        !warnings.is_empty(),
+        "List without blank line before table should trigger MD032"
+    );
+}
+
+#[test]
+fn test_md032_top_level_table_between_lists_with_blanks() {
+    // A non-indented table between list items WITH blank lines should NOT trigger
+    // Each sub-list is properly surrounded by blank lines
+    let content = r#"- Item 1
+
+| Col1 | Col2 |
+|------|------|
+| A    | B    |
+
+- Item 2
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Top-level table between lists with blank lines should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_indented_table_under_top_level_list_item() {
+    // Table indented under a top-level (non-nested) list item
+    let content = r#"- Item 1
+
+  | Col1 | Col2 |
+  |------|------|
+  | A    | B    |
+
+- Item 2
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Indented table under top-level list item should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_multiple_tables_in_list() {
+    let content = r#"- Item 1
+
+  | A | B |
+  |---|---|
+  | 1 | 2 |
+
+- Item 2
+
+  | C | D |
+  |---|---|
+  | 3 | 4 |
+
+- Item 3
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Multiple indented tables in list items should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
