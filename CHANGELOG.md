@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.52] - 2026-03-16
+
+### Added
+
+- **MD013**: New `blockquotes` config option to control line length checking inside blockquotes, and fix `paragraphs=false` to correctly skip paragraph content
+
+### Fixed
+
+- **MD044**: No longer flags proper names inside Markdown inline link URLs (`[text](url)`) or reference link labels (`[text][ref]`) within HTML comments, HTML blocks, and frontmatter where pulldown-cmark doesn't parse Markdown syntax ([#532](https://github.com/rvben/rumdl/issues/532))
+- **MD044**: Handle double-escaped brackets (`\\[`) correctly in link URL detection
+- **MD032**: Indented tables within list items are now treated as list continuation content instead of incorrectly triggering "list should be followed by blank line" ([#533](https://github.com/rvben/rumdl/issues/533))
+- **MD032**: Use permissive indent threshold for ordered list table continuation, matching markdownlint-cli behavior and avoiding false positives on common patterns (e.g., 2-space indent under `1.`)
+
 ## [0.1.51] - 2026-03-14
 
 ### Fixed
