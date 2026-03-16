@@ -845,7 +845,7 @@ impl MD013LineLength {
                     // A lazy continuation is a non-blank line without `>` that follows
                     // a blockquote line and isn't a structural element.
                     let mut saw_explicit_bq = false;
-                    while i < lines.len() && i + 1 <= ctx.lines.len() {
+                    while i < lines.len() && i < ctx.lines.len() {
                         if ctx.lines[i].blockquote.is_some() {
                             saw_explicit_bq = true;
                             i += 1;
