@@ -51,7 +51,8 @@ impl MD013LineLength {
                 code_blocks,
                 tables,
                 headings,
-                paragraphs: true, // Default to true for backwards compatibility
+                paragraphs: true,  // Default to true for backwards compatibility
+                blockquotes: true, // Default to true for backwards compatibility
                 strict,
                 reflow: false,
                 reflow_mode: ReflowMode::default(),
@@ -177,6 +178,9 @@ impl Rule for MD013LineLength {
                 if let Some(headings) = obj.get("headings").and_then(|v| v.as_bool()) {
                     config.headings = headings;
                 }
+                if let Some(blockquotes) = obj.get("blockquotes").and_then(|v| v.as_bool()) {
+                    config.blockquotes = blockquotes;
+                }
                 if let Some(strict) = obj.get("strict").and_then(|v| v.as_bool()) {
                     config.strict = strict;
                 }
@@ -269,7 +273,7 @@ impl Rule for MD013LineLength {
         }
 
         // Process candidate lines for line length checks
-        for &line_idx in &candidate_lines {
+        'line_loop: for &line_idx in &candidate_lines {
             let line_number = line_idx + 1;
             let line = lines[line_idx];
 
@@ -369,11 +373,12 @@ impl Rule for MD013LineLength {
 
                 // Check if this is a paragraph/regular text line
                 // If paragraphs = false, skip lines that are NOT in special blocks
+                // Blockquote content is treated as paragraph text, so it's not
+                // included in the special blocks list here.
                 if !effective_config.paragraphs {
                     let is_special_block = heading_lines_set.contains(&line_number)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_code_block)
                         || table_lines_set.contains(&line_number)
-                        || ctx.lines[line_number - 1].blockquote.is_some()
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
@@ -387,6 +392,31 @@ impl Rule for MD013LineLength {
                     // Skip regular paragraph text when paragraphs = false
                     if !is_special_block {
                         continue;
+                    }
+                }
+
+                // Skip blockquote lines when blockquotes = false.
+                // Also skip lazy continuation lines that belong to a blockquote
+                // (lines without `>` prefix that follow a blockquote line).
+                if !effective_config.blockquotes {
+                    if ctx.lines[line_number - 1].blockquote.is_some() {
+                        continue;
+                    }
+                    // Check for lazy continuation: scan backwards through
+                    // non-blank lines to find if this paragraph started with
+                    // a blockquote marker
+                    if !line.trim().is_empty() {
+                        let mut scan = line_number.saturating_sub(2);
+                        loop {
+                            if ctx.lines[scan].blockquote.is_some() {
+                                // Found a blockquote ancestor — this is a lazy continuation
+                                continue 'line_loop;
+                            }
+                            if lines[scan].trim().is_empty() || scan == 0 {
+                                break;
+                            }
+                            scan -= 1;
+                        }
                     }
                 }
 
@@ -808,7 +838,30 @@ impl MD013LineLength {
             let line_num = i + 1;
 
             // Handle blockquote paragraphs with style-preserving reflow.
+            // Skip blockquotes when blockquotes=false or paragraphs=false
             if line_num > 0 && line_num <= ctx.lines.len() && ctx.lines[line_num - 1].blockquote.is_some() {
+                if !config.blockquotes || !config.paragraphs {
+                    // Skip past all blockquote lines (explicit and lazy continuations).
+                    // A lazy continuation is a non-blank line without `>` that follows
+                    // a blockquote line and isn't a structural element.
+                    let mut saw_explicit_bq = false;
+                    while i < lines.len() && i + 1 <= ctx.lines.len() {
+                        if ctx.lines[i].blockquote.is_some() {
+                            saw_explicit_bq = true;
+                            i += 1;
+                        } else if saw_explicit_bq
+                            && !lines[i].trim().is_empty()
+                            && !lines[i].trim_start().starts_with('#')
+                            && !lines[i].trim_start().starts_with('>')
+                        {
+                            // Lazy continuation of preceding blockquote
+                            i += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    continue;
+                }
                 let (warning, next_idx) =
                     self.generate_blockquote_paragraph_fix(ctx, config, lines, &line_index, i, line_ending);
                 if let Some(warning) = warning {

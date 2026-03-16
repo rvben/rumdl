@@ -70,6 +70,13 @@ pub struct MD013Config {
     #[serde(default = "default_paragraphs")]
     pub paragraphs: bool,
 
+    /// Check blockquote content for line length (default: true)
+    /// When false, blockquote lines are not checked for line length.
+    /// When paragraphs = false, blockquote content is also skipped
+    /// since blockquote content is paragraph text.
+    #[serde(default = "default_blockquotes")]
+    pub blockquotes: bool,
+
     /// Strict mode - disables exceptions for URLs, etc. (default: false)
     #[serde(default)]
     pub strict: bool,
@@ -129,6 +136,10 @@ fn default_paragraphs() -> bool {
     true
 }
 
+fn default_blockquotes() -> bool {
+    true
+}
+
 fn default_require_sentence_capital() -> bool {
     true
 }
@@ -141,6 +152,7 @@ impl Default for MD013Config {
             tables: default_tables(),
             headings: default_headings(),
             paragraphs: default_paragraphs(),
+            blockquotes: default_blockquotes(),
             strict: false,
             reflow: false,
             reflow_mode: ReflowMode::default(),
@@ -276,6 +288,7 @@ mod tests {
             tables: true,
             headings: true,
             paragraphs: true,
+            blockquotes: true,
             strict: false,
             reflow: true,
             reflow_mode: ReflowMode::SentencePerLine,

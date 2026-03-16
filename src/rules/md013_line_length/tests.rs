@@ -2464,6 +2464,7 @@ fn test_paragraphs_false_skips_regular_text() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(50),
         paragraphs: false, // Don't check paragraphs
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2495,6 +2496,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(50),
         paragraphs: false, // Don't check paragraphs
+        blockquotes: true,
         code_blocks: true, // But DO check code blocks
         tables: true,
         headings: true,
@@ -2527,6 +2529,7 @@ fn test_paragraphs_false_still_checks_headings() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(50),
         paragraphs: false, // Don't check paragraphs
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true, // But DO check headings
@@ -2557,6 +2560,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: false,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: false,
@@ -2587,6 +2591,7 @@ fn test_paragraphs_true_checks_regular_text() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(50),
         paragraphs: true, // Default: DO check paragraphs
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2617,6 +2622,7 @@ fn test_line_length_zero_disables_all_checks() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(0), // 0 = no limit
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2647,6 +2653,7 @@ fn test_line_length_zero_with_headings() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(0), // 0 = no limit
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true, // Even with headings enabled
@@ -2677,6 +2684,7 @@ fn test_line_length_zero_with_code_blocks() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(0), // 0 = no limit
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true, // Even with code_blocks enabled
         tables: true,
         headings: true,
@@ -2707,6 +2715,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(0), // 0 = no limit
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2768,6 +2777,7 @@ Final paragraph.
         tables: true,
         headings: true,
         paragraphs: true,
+        blockquotes: true,
         strict: false,
         reflow: true,
         reflow_mode: ReflowMode::SentencePerLine,
@@ -2827,6 +2837,7 @@ fn test_reflow_preserves_mkdocstrings_autodoc_block() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2855,6 +2866,7 @@ fn test_reflow_preserves_mkdocstrings_with_identifier() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2884,6 +2896,7 @@ fn test_reflow_preserves_mkdocstrings_surrounded_by_paragraphs() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(40),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2916,6 +2929,7 @@ fn test_reflow_mkdocstrings_not_detected_in_standard_flavor() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -2941,6 +2955,7 @@ fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4182,6 +4197,7 @@ fn test_reflow_admonition_in_list_item_basic() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4240,6 +4256,7 @@ fn test_reflow_collapsible_admonition_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4290,6 +4307,7 @@ fn test_reflow_multiple_admonitions_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4362,6 +4380,7 @@ fn test_reflow_admonition_short_content_preserved() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4403,6 +4422,7 @@ fn test_reflow_admonition_with_multiple_paragraphs() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4466,6 +4486,7 @@ fn test_reflow_admonition_not_in_standard_flavor() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4509,6 +4530,7 @@ fn test_reflow_admonition_idempotent() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4557,6 +4579,7 @@ fn test_reflow_admonition_only_in_list_no_long_text() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4610,6 +4633,7 @@ fn test_reflow_content_after_admonition_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4668,6 +4692,7 @@ fn test_reflow_content_after_admonition_short_lines() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4710,6 +4735,7 @@ fn test_reflow_multiple_blocks_after_admonition() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4760,6 +4786,7 @@ fn test_reflow_admonition_empty_body() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4804,6 +4831,7 @@ fn test_reflow_admonition_no_blank_line_before_body() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4852,6 +4880,7 @@ fn test_reflow_admonition_body_indent_preserved() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4906,6 +4935,7 @@ fn test_reflow_admonition_with_code_block_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(88),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -4965,6 +4995,7 @@ fn test_reflow_admonition_with_tilde_fence_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(88),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -5018,6 +5049,7 @@ fn test_reflow_admonition_with_multiple_code_blocks_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(88),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -5079,6 +5111,7 @@ fn test_reflow_admonition_code_block_idempotent() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(88),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -5125,6 +5158,7 @@ fn test_reflow_tab_container_in_list_item() {
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         paragraphs: true,
+        blockquotes: true,
         code_blocks: true,
         tables: true,
         headings: true,
@@ -5755,4 +5789,418 @@ fn test_reflow_mixed_checkbox_and_regular_mkdocs() {
             );
         }
     }
+}
+
+#[test]
+fn test_paragraphs_false_skips_blockquote_content() {
+    // When paragraphs=false, blockquote content should also be skipped
+    // because blockquote content IS paragraph text
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: false,
+        blockquotes: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "> This is a very long blockquote line that exceeds fifty characters and should not trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about long blockquote text when paragraphs=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_skips_blockquote_content() {
+    // When blockquotes=false, blockquote lines should be skipped
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "> This is a very long blockquote line that exceeds fifty characters and should not trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about long blockquote text when blockquotes=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_true_paragraphs_true_checks_blockquotes() {
+    // Default behavior: both true, blockquotes should be checked
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a very long blockquote line that exceeds fifty characters and should trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Should warn about long blockquote text when both blockquotes and paragraphs are true"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_still_checks_regular_paragraphs() {
+    // blockquotes=false should only skip blockquotes, not regular paragraphs
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "This is a very long paragraph line that exceeds fifty characters and should trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Should still warn about long regular paragraph text when only blockquotes=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_paragraphs_false_skips_blockquotes() {
+    // Both false: blockquotes should definitely be skipped
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: false,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "> This is a very long blockquote line that exceeds fifty characters and should not trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about long blockquote text when both paragraphs and blockquotes are false"
+    );
+}
+
+#[test]
+fn test_blockquotes_default_is_true() {
+    let config = MD013Config::default();
+    assert!(config.blockquotes, "blockquotes should default to true");
+}
+
+#[test]
+fn test_blockquotes_deserialization() {
+    let toml_str = r#"
+        blockquotes = false
+    "#;
+    let config: MD013Config = toml::from_str(toml_str).unwrap();
+    assert!(!config.blockquotes);
+}
+
+#[test]
+fn test_nested_blockquote_skipped_when_blockquotes_false() {
+    // Nested blockquotes should also be skipped
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = ">> This is a very long nested blockquote line that exceeds fifty characters and should not trigger.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about long nested blockquote text when blockquotes=false"
+    );
+}
+
+#[test]
+fn test_paragraphs_false_skips_nested_blockquote() {
+    // Nested blockquotes should also be skipped when paragraphs=false
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: false,
+        blockquotes: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = ">> This is a very long nested blockquote line that exceeds fifty characters and should not trigger.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about long nested blockquote text when paragraphs=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_skips_reflow_warnings() {
+    // When blockquotes=false and reflow is enabled, reflow should NOT generate
+    // warnings for blockquote content
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a long blockquote with multiple sentences. This second sentence makes the line exceed the limit significantly.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Reflow should not generate warnings for blockquotes when blockquotes=false"
+    );
+}
+
+#[test]
+fn test_paragraphs_false_skips_blockquote_reflow_warnings() {
+    // When paragraphs=false and reflow is enabled, reflow should NOT generate
+    // warnings for blockquote content
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: false,
+        blockquotes: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a long blockquote with multiple sentences. This second sentence makes the line exceed the limit significantly.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Reflow should not generate warnings for blockquotes when paragraphs=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_true_with_reflow_still_warns() {
+    // When blockquotes=true (default) and reflow is enabled, blockquote
+    // reflow warnings should still be generated
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        blockquotes: true,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a long blockquote with multiple sentences. This second sentence makes the line exceed the limit significantly.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        !result.is_empty(),
+        "Reflow should generate warnings for blockquotes when both blockquotes and paragraphs are true"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_skips_lazy_continuation() {
+    // Lazy continuations (lines without `>` prefix that belong to a blockquote)
+    // should also be skipped when blockquotes=false
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a blockquote that starts with an explicit marker.\nThis lazy continuation also exceeds fifty characters and should not trigger a warning.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should not warn about lazy continuation lines when blockquotes=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_reflow_skips_lazy_continuation() {
+    // Reflow path should also skip lazy continuations when blockquotes=false
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is sentence one in a blockquote. This is sentence two that makes it long.\nThis lazy continuation also has two sentences. It should be skipped when blockquotes is false.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Reflow should not warn about lazy continuation in blockquote when blockquotes=false"
+    );
+}
+
+#[test]
+fn test_blockquotes_false_paragraph_after_blockquote_still_warns() {
+    // Regular paragraphs after a blockquote (separated by blank line)
+    // should still be checked when blockquotes=false
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(50),
+        paragraphs: true,
+        blockquotes: false,
+        code_blocks: true,
+        tables: true,
+        headings: true,
+        strict: false,
+        reflow: false,
+        reflow_mode: ReflowMode::default(),
+        length_mode: LengthMode::default(),
+        abbreviations: Vec::new(),
+        require_sentence_capital: true,
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "> Short blockquote.\n\nThis regular paragraph exceeds the fifty character line length limit and should warn.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Regular paragraph after blockquote should still warn when blockquotes=false"
+    );
 }
