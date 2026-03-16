@@ -693,3 +693,35 @@ fn test_html_comments_mixed_link_styles() {
         "Should skip names in both inline and reference link URLs. Got: {result:?}",
     );
 }
+
+#[test]
+fn test_frontmatter_inline_link_url_skipped() {
+    // YAML frontmatter can contain markdown-like link syntax in values
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "---\ndescription: See [relevant page](test.md) for details\n---\n\n# Heading\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in link URLs within frontmatter. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_frontmatter_link_text_still_flagged() {
+    // Link text in frontmatter IS prose and should be checked
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "---\ndescription: See [test page](example.md) for details\n---\n\n# Heading\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag improper name in link text within frontmatter. Got: {result:?}",
+    );
+}

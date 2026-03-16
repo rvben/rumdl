@@ -570,7 +570,7 @@ impl MD044ProperNames {
                         }
 
                         if ref_depth == 0 {
-                            if pos >= ref_start && pos < k {
+                            if pos > ref_start && pos < k {
                                 return true;
                             }
                             i = k;

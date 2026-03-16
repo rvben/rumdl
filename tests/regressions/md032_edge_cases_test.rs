@@ -1985,3 +1985,45 @@ fn test_md032_k8s_real_world_ordered_list_with_table() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_md032_ordered_list_table_at_insufficient_indent() {
+    // Table at 2-space indent under ordered list requires 3-space indent (for "1. ")
+    // The table breaks the list, and "2. Second item" starts a new list without blank line
+    let content = "1. First item\n\n  | Col 1 | Col 2 |\n  |-------|-------|\n  | A     | B     |\n2. Second item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert!(
+        !warnings.is_empty(),
+        "Table at 2-space indent under ordered list (needs 3) should trigger MD032",
+    );
+}
+
+#[test]
+fn test_md032_ordered_list_table_at_exact_continuation_indent() {
+    // Table at exactly 3-space indent under ordered list (matching "1. " content column)
+    // This table IS properly indented as continuation content
+    let content =
+        "1. First item\n\n   | Col 1 | Col 2 |\n   |-------|-------|\n   | A     | B     |\n\n2. Second item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Table at 3-space indent under ordered list should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}

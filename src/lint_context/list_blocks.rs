@@ -402,7 +402,11 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                     blockquote_prefix,
                     item_lines: vec![line_num],
                     nesting_level: nesting,
-                    max_marker_width: list_item.marker.len(),
+                    max_marker_width: if list_item.is_ordered {
+                        list_item.marker.len() + 1
+                    } else {
+                        list_item.marker.len()
+                    },
                 });
 
                 // Initialize tracked state for new block

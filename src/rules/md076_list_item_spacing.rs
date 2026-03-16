@@ -1675,7 +1675,8 @@ mod tests {
     #[test]
     fn continuation_loose_ordered_under_indented_warns() {
         // Ordered list: "1. " has content_column=3, so 2-space indent
-        // is under-indented and should NOT be treated as continuation
+        // is under-indented and breaks the list into two separate blocks.
+        // MD076 sees two separate tight lists, so no warnings.
         let content = "\
 1. Item 1.
 
@@ -1686,8 +1687,8 @@ mod tests {
 ";
         let warnings = check_with_continuation(content, ListItemSpacingStyle::Tight, true);
         assert!(
-            !warnings.is_empty(),
-            "Under-indented text should not be treated as continuation, got: {warnings:?}"
+            warnings.is_empty(),
+            "Under-indented text breaks list into separate blocks, no spacing issue: {warnings:?}"
         );
     }
 
