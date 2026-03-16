@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.53] - 2026-03-16
+
+### Fixed
+
+- **MD013**: Fixed reflow dedenting paragraph after code block out of admonition inside list item ([#509](https://github.com/rvben/rumdl/issues/509))
+  - Code block lines inside admonitions with 4-space list markers had both `in_admonition` and `in_code_block` flags set; the code block check ran first, prematurely flushing the admonition context
+  - Admonition body reconstruction now correctly segments code blocks (preserved verbatim) from text paragraphs (reflowed)
+  - CommonMark-correct fence matching: closing fences must match opening fence character type and minimum length, and cannot have info strings
+
 ## [0.1.52] - 2026-03-16
 
 ### Added
