@@ -1884,3 +1884,104 @@ fn test_md032_multiple_tables_in_list() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_md032_ordered_list_with_indented_table() {
+    // Ordered list variant of issue #533
+    let content = r#"1. First item
+
+   | Col1 | Col2 |
+   |------|------|
+   | A    | B    |
+
+2. Second item
+
+   | Col3 | Col4 |
+   |------|------|
+   | C    | D    |
+
+3. Third item
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Ordered list with indented tables should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_deeply_nested_list_with_table() {
+    let content = r#"- Level 1
+  - Level 2
+    - Level 3
+
+    | A | B |
+    |---|---|
+    | 1 | 2 |
+
+    - Level 3 again
+
+- Level 1 again
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Deeply nested list with indented table should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_k8s_real_world_ordered_list_with_table() {
+    // Real-world pattern found in kubernetes/website (for-approvers.md)
+    let content = r#"1. Close the issue if stale.
+
+2. Add a priority label
+
+   Label | Description
+   :------------|:------------------
+   `critical` | Do this right now.
+   `important` | Do this within 3 months.
+
+   At your discretion, take ownership of an issue.
+
+3. Do other things.
+"#;
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "K8s-style ordered list with indented table should not trigger MD032. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
