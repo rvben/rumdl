@@ -1231,3 +1231,316 @@ fn test_list_item_admonition_code_block_short_lines_no_change() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "Fix should not change content when all lines are short");
 }
+
+#[test]
+fn test_issue_509_exact_repro_4space_list_admonition_code_block() {
+    // Exact reproduction from issue #509 reporter: 4-space list marker ("1.  ")
+    // with admonition containing a code block followed by a paragraph.
+    // The 4-space indent triggers in_code_block in the context pre-computation,
+    // which differs from the 3-space case tested above.
+    let content = "\
+# Test
+
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        hello: world
+        ```
+
+        Lorem ipsum dolor sit amet.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = "\
+# Test
+
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        hello: world
+        ```
+
+        Lorem ipsum dolor sit amet.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Only the overlong line should be reflowed; admonition content must be preserved exactly"
+    );
+}
+
+#[test]
+fn test_issue_509_unordered_list_variant() {
+    // Issue #509 also affects unordered lists per the reporter
+    let content = "\
+-   Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        hello: world
+        ```
+
+        Lorem ipsum dolor sit amet.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = "\
+- Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        hello: world
+        ```
+
+        Lorem ipsum dolor sit amet.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Unordered list: only overlong line should be reflowed; admonition content must be preserved"
+    );
+}
+
+#[test]
+fn test_issue_509_admonition_code_block_long_text_after_4space() {
+    // 4-space list marker with long text AFTER code block inside admonition.
+    // Both the first line and the post-code-block text need reflow.
+    let content = "\
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        key: value
+        ```
+
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```yaml
+        key: value
+        ```
+
+        Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+        tempor incididunt ut labore.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Both overlong lines should be reflowed; code block and admonition indent must be preserved"
+    );
+}
+
+#[test]
+fn test_issue_509_short_lines_4space_no_change() {
+    // 4-space marker, all lines short — nothing should change
+    let content = "\
+1.  Short intro.
+
+    !!! note
+
+        ```yaml
+        key: value
+        ```
+
+        Short text.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    // MD030 will flag the "1.  " marker, but MD013 should not warn
+    let warnings: Vec<_> = rule
+        .check(&ctx)
+        .unwrap()
+        .into_iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "Short lines should produce no MD013 warnings, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_issue_509_code_block_with_blank_lines_and_deep_indent() {
+    // Code blocks inside admonitions can have:
+    // - blank lines separating sections
+    // - lines indented deeper than the fence (internal code indentation)
+    // Both must be preserved exactly.
+    let content = "\
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```python
+        def hello():
+            print(\"world\")
+
+        def goodbye():
+            for i in range(10):
+                print(i)
+        ```
+
+        Text after code block with blank lines.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // MD030 normalizes "1.  " to "1. " — only the overlong line and
+    // marker spacing should change, everything else verbatim.
+    let expected = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```python
+        def hello():
+            print(\"world\")
+
+        def goodbye():
+            for i in range(10):
+                print(i)
+        ```
+
+        Text after code block with blank lines.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Code block internal indentation, blank lines, and post-block text must all be preserved"
+    );
+}
+
+#[test]
+fn test_issue_509_mixed_fence_types_not_confused() {
+    // Backtick fences should not be closed by tilde fences and vice versa.
+    // Inner ~~~ must not close outer ```.
+    let content = "\
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```markdown
+        Here is a tilde code block inside:
+        ~~~
+        nested content
+        ~~~
+        End of outer block.
+        ```
+
+        Text after code block.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ```markdown
+        Here is a tilde code block inside:
+        ~~~
+        nested content
+        ~~~
+        End of outer block.
+        ```
+
+        Text after code block.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Tilde fences inside backtick block must not close it; entire code block must be preserved"
+    );
+}
+
+#[test]
+fn test_issue_509_info_string_not_treated_as_closing_fence() {
+    // A line like ```python inside a code block is content, not a closing fence.
+    // CommonMark closing fences must contain ONLY fence characters + optional spaces.
+    // Use ```` (4 backticks) as outer fence so the inner ``` doesn't close it.
+    let content = "\
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ````markdown
+        ```python
+        print(\"hello\")
+        ```
+        The above shows Python syntax.
+        ````
+
+        Text after code block.
+";
+
+    let config = create_mkdocs_config_with_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = "\
+1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+    tempor incididunt ut labore et dolore magna aliqua.
+
+    !!! note
+
+        ````markdown
+        ```python
+        print(\"hello\")
+        ```
+        The above shows Python syntax.
+        ````
+
+        Text after code block.
+";
+
+    assert_eq!(
+        fixed, expected,
+        "Inner ``` must not close outer ```` fence; closing fence needs >= 4 backticks"
+    );
+}

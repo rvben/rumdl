@@ -1556,22 +1556,11 @@ impl MD013LineLength {
                     if indent >= content_continuation_indent {
                         let trimmed = line_info.content(ctx.content).trim();
 
-                        // Use pre-computed in_code_block from ctx
-                        if line_info.in_code_block {
-                            list_item_lines.push(LineType::CodeBlock(
-                                line_info.content(ctx.content)[indent..].to_string(),
-                                indent,
-                            ));
-                            i += 1;
-                            continue;
-                        }
-
-                        // Check for MkDocs admonition lines inside list items.
-                        // The flavor detection marks these with in_admonition, so we
-                        // can classify them as admonition header or body content.
-                        // All lines within an admonition (including code fence markers
-                        // and code block content) stay as AdmonitionContent to preserve
-                        // the admonition structure through the block builder.
+                        // Check for MkDocs admonition lines inside list items BEFORE
+                        // checking in_code_block. Lines inside code blocks within
+                        // admonitions have both in_admonition and in_code_block set;
+                        // admonition membership takes priority so the entire admonition
+                        // structure (including embedded code blocks) is preserved.
                         if line_info.in_admonition {
                             let raw_content = line_info.content(ctx.content);
                             if mkdocs_admonitions::is_admonition_start(raw_content) {
@@ -1581,6 +1570,16 @@ impl MD013LineLength {
                                 let body_text = raw_content[indent..].trim_end().to_string();
                                 list_item_lines.push(LineType::AdmonitionContent(body_text, indent));
                             }
+                            i += 1;
+                            continue;
+                        }
+
+                        // Use pre-computed in_code_block from ctx
+                        if line_info.in_code_block {
+                            list_item_lines.push(LineType::CodeBlock(
+                                line_info.content(ctx.content)[indent..].to_string(),
+                                indent,
+                            ));
                             i += 1;
                             continue;
                         }
@@ -2583,62 +2582,141 @@ impl MD013LineLength {
                                     .unwrap_or(header_indent + 4);
                                 let body_indent_str = " ".repeat(body_indent);
 
-                                // Collect body content into paragraphs separated by blank lines
-                                let mut body_paragraphs: Vec<Vec<String>> = Vec::new();
-                                let mut current_para: Vec<String> = Vec::new();
+                                // Segment body content into code blocks (verbatim) and
+                                // text paragraphs (reflowable), separated by blank lines.
+                                // Code lines store (content, orig_indent) to reconstruct
+                                // internal indentation relative to body_indent.
+                                enum AdmonSegment {
+                                    Text(Vec<String>),
+                                    Code(Vec<(String, usize)>),
+                                }
 
-                                for (content, _orig_indent) in admon_lines {
-                                    if content.is_empty() {
-                                        if !current_para.is_empty() {
-                                            body_paragraphs.push(current_para.clone());
-                                            current_para.clear();
+                                let mut segments: Vec<AdmonSegment> = Vec::new();
+                                let mut current_text: Vec<String> = Vec::new();
+                                let mut current_code: Vec<(String, usize)> = Vec::new();
+                                let mut in_admon_code = false;
+                                // Track the opening fence character so closing fences
+                                // must match (backticks close backticks, tildes close tildes)
+                                let mut fence_char: char = '`';
+
+                                // Opening fences: ``` or ~~~ followed by optional info string
+                                let get_opening_fence = |s: &str| -> Option<(char, usize)> {
+                                    let t = s.trim_start();
+                                    if t.starts_with("```") {
+                                        Some(('`', t.bytes().take_while(|&b| b == b'`').count()))
+                                    } else if t.starts_with("~~~") {
+                                        Some(('~', t.bytes().take_while(|&b| b == b'~').count()))
+                                    } else {
+                                        None
+                                    }
+                                };
+                                // Closing fences: ONLY fence chars + optional trailing spaces
+                                let get_closing_fence = |s: &str| -> Option<(char, usize)> {
+                                    let t = s.trim();
+                                    if t.starts_with("```") && t.bytes().all(|b| b == b'`') {
+                                        Some(('`', t.len()))
+                                    } else if t.starts_with("~~~") && t.bytes().all(|b| b == b'~') {
+                                        Some(('~', t.len()))
+                                    } else {
+                                        None
+                                    }
+                                };
+                                let mut fence_len: usize = 3;
+
+                                for (content, orig_indent) in admon_lines {
+                                    if in_admon_code {
+                                        // Closing fence must use the same character, be
+                                        // at least as long, and have no info string
+                                        if let Some((ch, len)) = get_closing_fence(content)
+                                            && ch == fence_char
+                                            && len >= fence_len
+                                        {
+                                            current_code.push((content.clone(), *orig_indent));
+                                            in_admon_code = false;
+                                            segments.push(AdmonSegment::Code(std::mem::take(&mut current_code)));
+                                            continue;
+                                        }
+                                        current_code.push((content.clone(), *orig_indent));
+                                    } else if let Some((ch, len)) = get_opening_fence(content) {
+                                        if !current_text.is_empty() {
+                                            segments.push(AdmonSegment::Text(std::mem::take(&mut current_text)));
+                                        }
+                                        in_admon_code = true;
+                                        fence_char = ch;
+                                        fence_len = len;
+                                        current_code.push((content.clone(), *orig_indent));
+                                    } else if content.is_empty() {
+                                        if !current_text.is_empty() {
+                                            segments.push(AdmonSegment::Text(std::mem::take(&mut current_text)));
                                         }
                                     } else {
-                                        current_para.push(content.clone());
+                                        current_text.push(content.clone());
                                     }
                                 }
-                                if !current_para.is_empty() {
-                                    body_paragraphs.push(current_para);
+                                if in_admon_code && !current_code.is_empty() {
+                                    segments.push(AdmonSegment::Code(std::mem::take(&mut current_code)));
+                                }
+                                if !current_text.is_empty() {
+                                    segments.push(AdmonSegment::Text(std::mem::take(&mut current_text)));
                                 }
 
-                                // Reflow each paragraph in the body
-                                for paragraph in &body_paragraphs {
-                                    // Add blank line before each paragraph (including the first, after the header)
+                                // Build reflow options once for all text segments
+                                let admon_reflow_length = if config.line_length.is_unlimited() {
+                                    usize::MAX
+                                } else {
+                                    config.line_length.get().saturating_sub(body_indent).max(1)
+                                };
+
+                                let admon_reflow_options = crate::utils::text_reflow::ReflowOptions {
+                                    line_length: admon_reflow_length,
+                                    break_on_sentences: true,
+                                    preserve_breaks: false,
+                                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+                                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
+                                    abbreviations: config.abbreviations_for_reflow(),
+                                    length_mode: self.reflow_length_mode(),
+                                    attr_lists: ctx.flavor.supports_attr_lists(),
+                                    require_sentence_capital: config.require_sentence_capital,
+                                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                                        Some(4)
+                                    } else {
+                                        None
+                                    },
+                                };
+
+                                // Output each segment
+                                for segment in &segments {
+                                    // Blank line before each segment (after the header or previous segment)
                                     result.push(String::new());
 
-                                    let paragraph_text = paragraph.join(" ").trim().to_string();
-                                    if paragraph_text.is_empty() {
-                                        continue;
-                                    }
-
-                                    // Reflow with adjusted line length
-                                    let admon_reflow_length = if config.line_length.is_unlimited() {
-                                        usize::MAX
-                                    } else {
-                                        config.line_length.get().saturating_sub(body_indent).max(1)
-                                    };
-
-                                    let admon_reflow_options = crate::utils::text_reflow::ReflowOptions {
-                                        line_length: admon_reflow_length,
-                                        break_on_sentences: true,
-                                        preserve_breaks: false,
-                                        sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                                        semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                                        abbreviations: config.abbreviations_for_reflow(),
-                                        length_mode: self.reflow_length_mode(),
-                                        attr_lists: ctx.flavor.supports_attr_lists(),
-                                        require_sentence_capital: config.require_sentence_capital,
-                                        max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                                            Some(4)
-                                        } else {
-                                            None
-                                        },
-                                    };
-
-                                    let reflowed =
-                                        crate::utils::text_reflow::reflow_line(&paragraph_text, &admon_reflow_options);
-                                    for line in &reflowed {
-                                        result.push(format!("{body_indent_str}{line}"));
+                                    match segment {
+                                        AdmonSegment::Code(lines) => {
+                                            for (line, orig_indent) in lines {
+                                                if line.is_empty() {
+                                                    // Preserve blank lines inside code blocks
+                                                    result.push(String::new());
+                                                } else {
+                                                    // Reconstruct with body_indent + any extra
+                                                    // indentation the line had beyond body_indent
+                                                    let extra = orig_indent.saturating_sub(body_indent);
+                                                    let indent_str = " ".repeat(body_indent + extra);
+                                                    result.push(format!("{indent_str}{line}"));
+                                                }
+                                            }
+                                        }
+                                        AdmonSegment::Text(lines) => {
+                                            let paragraph_text = lines.join(" ").trim().to_string();
+                                            if paragraph_text.is_empty() {
+                                                continue;
+                                            }
+                                            let reflowed = crate::utils::text_reflow::reflow_line(
+                                                &paragraph_text,
+                                                &admon_reflow_options,
+                                            );
+                                            for line in &reflowed {
+                                                result.push(format!("{body_indent_str}{line}"));
+                                            }
+                                        }
                                     }
                                 }
 
