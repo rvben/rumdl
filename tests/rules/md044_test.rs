@@ -583,3 +583,65 @@ fn test_html_comments_inline_link_autofix() {
     // "test" in link text should be fixed; "test" in URL should remain
     assert_eq!(fixed, "# Heading\n\n<!-- See the [Test page](test.md) -->",);
 }
+
+#[test]
+fn test_html_comments_image_link_url_skipped() {
+    // Image URLs in HTML comments should also be skipped
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- ![screenshot](test-screenshot.png) -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in image URLs in HTML comments. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_comments_multiline_with_link() {
+    // Multi-line HTML comment with inline link
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!--\nFor details, see [the guide](test.md).\n-->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in link URLs in multi-line HTML comments. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_comments_link_with_nested_brackets() {
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- [see [this] page](test.md) -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should handle nested brackets in link text and skip URL. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_comments_link_with_balanced_parens_in_url() {
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- [page](https://example.com/test_(section)) -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should handle balanced parentheses in URLs. Got: {result:?}",
+    );
+}
