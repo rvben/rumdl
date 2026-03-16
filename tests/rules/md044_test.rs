@@ -645,3 +645,51 @@ fn test_html_comments_link_with_balanced_parens_in_url() {
         "Should handle balanced parentheses in URLs. Got: {result:?}",
     );
 }
+
+#[test]
+fn test_html_comments_reference_link_skipped() {
+    // Reference-style links [text][ref] in HTML comments: ref portion should be skipped
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- See the [relevant page][test-ref] for details -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in reference link labels in HTML comments. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_comments_reference_link_text_still_flagged() {
+    // Reference link text IS prose and should be checked
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- See the [test page][ref] for details -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Should flag improper name in reference link text. Got: {result:?}",
+    );
+}
+
+#[test]
+fn test_html_comments_mixed_link_styles() {
+    // Both inline and reference links in one comment
+    let names = vec!["Test".to_string()];
+    let rule = MD044ProperNames::new(names, false);
+    let content = "# Heading\n\n<!-- [page](test.md) and [other][test-ref] -->";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        0,
+        "Should skip names in both inline and reference link URLs. Got: {result:?}",
+    );
+}

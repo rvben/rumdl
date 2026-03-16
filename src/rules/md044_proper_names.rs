@@ -495,12 +495,14 @@ impl MD044ProperNames {
         false
     }
 
-    /// Check if a position within a line falls inside a Markdown inline link URL.
+    /// Check if a position within a line falls inside a Markdown link's
+    /// non-text portion (URL or reference label).
     ///
     /// pulldown-cmark does not parse Markdown syntax inside HTML comments, HTML
-    /// blocks, or frontmatter, so `ctx.links` won't contain inline links found
-    /// there. This function detects `[text](url)` patterns directly in the line
-    /// text and returns true if `pos` falls within the URL portion `(...)`.
+    /// blocks, or frontmatter, so `ctx.links` won't contain links found there.
+    /// This function detects link patterns directly in the line text:
+    /// - `[text](url)` — returns true if `pos` is within `(...)`
+    /// - `[text][ref]` — returns true if `pos` is within the second `[...]`
     fn is_in_markdown_link_url(line: &str, pos: usize) -> bool {
         let bytes = line.as_bytes();
         let len = bytes.len();
@@ -525,31 +527,55 @@ impl MD044ProperNames {
                 }
 
                 // j is now one past the ']'
-                if depth == 0 && j < len && bytes[j] == b'(' {
-                    // Found '[text](' — now find matching ')'
-                    let url_start = j; // position of '('
-                    let mut paren_depth: u32 = 1;
-                    let mut k = j + 1;
-                    while k < len && paren_depth > 0 {
-                        match bytes[k] {
-                            b'\\' => {
-                                k += 1; // skip escaped char
+                if depth == 0 && j < len {
+                    if bytes[j] == b'(' {
+                        // Inline link: [text](url)
+                        let url_start = j;
+                        let mut paren_depth: u32 = 1;
+                        let mut k = j + 1;
+                        while k < len && paren_depth > 0 {
+                            match bytes[k] {
+                                b'\\' => {
+                                    k += 1; // skip escaped char
+                                }
+                                b'(' => paren_depth += 1,
+                                b')' => paren_depth -= 1,
+                                _ => {}
                             }
-                            b'(' => paren_depth += 1,
-                            b')' => paren_depth -= 1,
-                            _ => {}
+                            k += 1;
                         }
-                        k += 1;
-                    }
 
-                    if paren_depth == 0 {
-                        // URL spans from url_start to k-1 (inclusive of parens)
-                        // Check if pos falls within the URL portion (between parens)
-                        if pos > url_start && pos < k {
-                            return true;
+                        if paren_depth == 0 {
+                            if pos > url_start && pos < k {
+                                return true;
+                            }
+                            i = k;
+                            continue;
                         }
-                        i = k;
-                        continue;
+                    } else if bytes[j] == b'[' {
+                        // Reference link: [text][ref]
+                        let ref_start = j;
+                        let mut ref_depth: u32 = 1;
+                        let mut k = j + 1;
+                        while k < len && ref_depth > 0 {
+                            match bytes[k] {
+                                b'\\' => {
+                                    k += 1;
+                                }
+                                b'[' => ref_depth += 1,
+                                b']' => ref_depth -= 1,
+                                _ => {}
+                            }
+                            k += 1;
+                        }
+
+                        if ref_depth == 0 {
+                            if pos >= ref_start && pos < k {
+                                return true;
+                            }
+                            i = k;
+                            continue;
+                        }
                     }
                 }
             }
