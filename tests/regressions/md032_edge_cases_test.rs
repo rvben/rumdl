@@ -1987,10 +1987,11 @@ fn test_md032_k8s_real_world_ordered_list_with_table() {
 }
 
 #[test]
-fn test_md032_ordered_list_table_at_insufficient_indent() {
-    // Table at 2-space indent under ordered list requires 3-space indent (for "1. ")
-    // The table breaks the list, and "2. Second item" starts a new list without blank line
-    let content = "1. First item\n\n  | Col 1 | Col 2 |\n  |-------|-------|\n  | A     | B     |\n2. Second item\n";
+fn test_md032_ordered_list_table_at_2space_indent_is_continuation() {
+    // Table at 2-space indent under ordered list with "1. " marker.
+    // While CommonMark content column is 3, the permissive merge threshold
+    // treats 2-space indent as continuation (matching markdownlint-cli behavior).
+    let content = "1. First item\n\n  | Col 1 | Col 2 |\n  |-------|-------|\n  | A     | B     |\n\n2. Second item\n";
 
     let config = Config::default();
     let all_rules = rules::all_rules(&config);
@@ -1998,9 +1999,14 @@ fn test_md032_ordered_list_table_at_insufficient_indent() {
 
     let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
 
-    assert!(
-        !warnings.is_empty(),
-        "Table at 2-space indent under ordered list (needs 3) should trigger MD032",
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Table at 2-space indent under ordered list should be treated as continuation. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -2052,10 +2058,32 @@ fn test_md032_wide_ordered_marker_with_table() {
 }
 
 #[test]
-fn test_md032_wide_ordered_marker_table_at_insufficient_indent() {
-    // "10. " requires 4-space indent; table at 3 spaces is insufficient
+fn test_md032_wide_ordered_marker_table_at_3space_indent_is_continuation() {
+    // "10. " marker has len=3; permissive threshold treats 3-space indent as continuation
     let content =
-        "10. First item\n\n   | Col 1 | Col 2 |\n   |-------|-------|\n   | A     | B     |\n11. Second item\n";
+        "10. First item\n\n   | Col 1 | Col 2 |\n   |-------|-------|\n   | A     | B     |\n\n11. Second item\n";
+
+    let config = Config::default();
+    let all_rules = rules::all_rules(&config);
+    let md032_rules: Vec<_> = all_rules.into_iter().filter(|r| r.name() == "MD032").collect();
+
+    let warnings = rumdl_lib::lint(content, &md032_rules, false, MarkdownFlavor::Standard, None, None).unwrap();
+
+    assert_eq!(
+        warnings.len(),
+        0,
+        "Table at 3-space indent under wide marker (10.) should be treated as continuation. Found: {:?}",
+        warnings
+            .iter()
+            .map(|w| format!("Line {}: {}", w.line, w.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_md032_wide_ordered_marker_table_at_1space_indent_breaks_list() {
+    // Table at 1-space indent is clearly not continuation content for "10."
+    let content = "10. First item\n\n | Col 1 | Col 2 |\n |-------|-------|\n | A     | B     |\n11. Second item\n";
 
     let config = Config::default();
     let all_rules = rules::all_rules(&config);
@@ -2065,7 +2093,7 @@ fn test_md032_wide_ordered_marker_table_at_insufficient_indent() {
 
     assert!(
         !warnings.is_empty(),
-        "Table at 3-space indent under wide marker (10.) should trigger MD032",
+        "Table at 1-space indent under wide marker (10.) should trigger MD032",
     );
 }
 
