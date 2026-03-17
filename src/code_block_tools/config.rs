@@ -175,6 +175,13 @@ pub struct ToolDefinition {
     /// Additional arguments for format mode (appended to command)
     #[serde(default)]
     pub format_args: Vec<String>,
+
+    /// If set, write input to a temp file with this extension and pass the path
+    /// as the last argument instead of using stdin.
+    ///
+    /// Use this for tools that require a real file path (e.g. `buf format`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temp_file_extension: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -189,6 +196,7 @@ impl Default for ToolDefinition {
             stdout: true,
             lint_args: Vec::new(),
             format_args: Vec::new(),
+            temp_file_extension: None,
         }
     }
 }

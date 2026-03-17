@@ -131,14 +131,8 @@ impl ToolExecutor {
 
     /// Execute a tool with the given input.
     ///
-    /// # Arguments
-    /// * `tool_def` - Tool definition with command and arguments
-    /// * `input` - Content to pass via stdin
-    /// * `is_format_mode` - Whether to use format_args (true) or lint_args (false)
-    /// * `timeout_ms` - Optional timeout override
-    ///
-    /// # Returns
-    /// Tool output on success, or an error.
+    /// If `tool_def.temp_file_extension` is set, the input is written to a temp file and
+    /// its path is appended as the last argument instead of being passed via stdin.
     pub fn execute(
         &self,
         tool_def: &ToolDefinition,
@@ -162,31 +156,52 @@ impl ToolExecutor {
             });
         }
 
-        // Build command
+        // Build command with base arguments and mode-specific flags
         let mut cmd = Command::new(tool_name);
-
-        // Add base arguments
         if tool_def.command.len() > 1 {
             cmd.args(&tool_def.command[1..]);
         }
-
-        // Add mode-specific arguments
-        let extra_args = if is_format_mode {
-            &tool_def.format_args
-        } else {
-            &tool_def.lint_args
-        };
+        let extra_args = if is_format_mode { &tool_def.format_args } else { &tool_def.lint_args };
         if !extra_args.is_empty() {
             cmd.args(extra_args);
         }
 
-        // Configure stdin/stdout
-        if tool_def.stdin {
-            cmd.stdin(Stdio::piped());
-        }
+        // For tools that need a real file path, write input to a temp file and pass its path.
+        // Otherwise configure stdin so the caller can pipe input through it.
+        let temp_path = if let Some(ext) = &tool_def.temp_file_extension {
+            let path = std::env::temp_dir().join(format!("rumdl_cbt_{}.{ext}", std::process::id()));
+            std::fs::write(&path, input.as_bytes()).map_err(|e| ExecutorError::IoError {
+                message: format!("Failed to write temp file: {e}"),
+            })?;
+            cmd.arg(&path);
+            Some(path)
+        } else {
+            if tool_def.stdin {
+                cmd.stdin(Stdio::piped());
+            }
+            None
+        };
+
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
+        let result = self.run_child(cmd, tool_def.stdin.then_some(input), tool_name, timeout_ms);
+
+        if let Some(path) = temp_path {
+            let _ = std::fs::remove_file(path);
+        }
+
+        result
+    }
+
+    /// Spawn `cmd`, optionally write `stdin_input`, wait with timeout, and collect output.
+    fn run_child(
+        &self,
+        mut cmd: Command,
+        stdin_input: Option<&str>,
+        tool_name: &str,
+        timeout_ms: Option<u64>,
+    ) -> Result<ToolOutput, ExecutorError> {
         // Spawn process
         let mut child = cmd.spawn().map_err(|e| ExecutorError::IoError {
             message: format!("Failed to spawn '{tool_name}': {e}"),
@@ -204,7 +219,7 @@ impl ToolExecutor {
         // Write stdin if required.
         // BrokenPipe is ignored: the tool may exit before consuming all input
         // (e.g., `true` or a linter that validates without reading fully).
-        if tool_def.stdin
+        if let Some(input) = stdin_input
             && let Some(mut stdin) = child.stdin.take()
             && let Err(e) = stdin.write_all(input.as_bytes())
             && e.kind() != std::io::ErrorKind::BrokenPipe
@@ -234,7 +249,7 @@ impl ToolExecutor {
                     let _ = join_reader(stdout_handle.take());
                     let _ = join_reader(stderr_handle.take());
                     return Err(ExecutorError::Timeout {
-                        tool: tool_name.clone(),
+                        tool: tool_name.to_string(),
                         timeout_ms: timeout.as_millis() as u64,
                     });
                 }
@@ -334,6 +349,7 @@ mod tests {
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         };
 
         let result = executor.execute(&tool_def, "test", false, None);
@@ -349,6 +365,7 @@ mod tests {
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         };
 
         let result = executor.execute(&tool_def, "test", false, None);
@@ -368,6 +385,7 @@ mod tests {
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         };
 
         let result = executor.execute(&tool_def, "hello world", false, None);
@@ -387,9 +405,49 @@ mod tests {
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         };
 
         let result = executor.execute(&tool_def, "", false, Some(5));
         assert!(matches!(result, Err(ExecutorError::Timeout { .. })));
+    }
+
+    /// Verify that `temp_file_extension` causes content to be written to a file and passed as an
+    /// argument. We use `cat` (which accepts a file path) to echo the content back to stdout.
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "requires 'cat' to be available"]
+    fn test_execute_with_temp_file() {
+        let executor = ToolExecutor::default();
+        let tool_def = ToolDefinition {
+            command: vec!["cat".to_string()],
+            stdin: false,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+            temp_file_extension: Some("txt".to_string()),
+        };
+
+        let result = executor.execute(&tool_def, "hello from temp file", false, None);
+        let output = result.expect("cat via temp file should succeed");
+        assert!(output.success);
+        assert_eq!(output.stdout.trim(), "hello from temp file");
+    }
+
+    /// Verify that `temp_file_extension` + a nonexistent binary returns `ToolNotFound`.
+    #[test]
+    fn test_temp_file_tool_not_found() {
+        let executor = ToolExecutor::default();
+        let tool_def = ToolDefinition {
+            command: vec!["nonexistent-tool-xyz123".to_string()],
+            stdin: false,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+            temp_file_extension: Some("proto".to_string()),
+        };
+
+        let result = executor.execute(&tool_def, "syntax = \"proto3\";", false, None);
+        assert!(matches!(result, Err(ExecutorError::ToolNotFound { .. })));
     }
 }

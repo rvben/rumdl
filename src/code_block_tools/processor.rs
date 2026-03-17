@@ -2708,6 +2708,7 @@ console.log('hi');
                 stdout: true,
                 lint_args: vec![],
                 format_args: vec![],
+                ..Default::default()
             },
         );
 
@@ -2748,6 +2749,7 @@ console.log('hi');
                 stdout: true,
                 lint_args: vec![],
                 format_args: vec![],
+                ..Default::default()
             },
         );
 

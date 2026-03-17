@@ -71,6 +71,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -87,6 +88,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -99,6 +101,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -111,6 +114,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -122,6 +126,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -133,6 +138,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -144,6 +150,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -155,6 +162,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -166,6 +174,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -182,6 +191,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec!["--fix-dry-run".to_string()],
+            ..Default::default()
         },
     );
 
@@ -194,6 +204,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -206,6 +217,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["-d".to_string()], // diff mode for lint
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -218,6 +230,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -230,6 +243,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["-d".to_string()], // diff mode for lint
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -242,6 +256,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["-d".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -254,6 +269,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--dry-run".to_string(), "--Werror".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -266,6 +282,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -277,6 +294,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -289,6 +307,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -301,6 +320,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["-dry".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -313,6 +333,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -325,6 +346,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["-check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -337,6 +359,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -349,6 +372,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -361,6 +385,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec!["--autocorrect".to_string()],
+            ..Default::default()
         },
     );
 
@@ -373,6 +398,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check-idempotence".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -385,6 +411,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--validate".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -397,6 +424,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -409,6 +437,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--output=none".to_string(), "--set-exit-if-changed".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -421,6 +450,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["lint".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -433,6 +463,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--dry-run".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -445,6 +476,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec!["--reformat".to_string()],
+            ..Default::default()
         },
     );
 
@@ -456,6 +488,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -467,6 +500,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -479,6 +513,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -491,6 +526,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -502,6 +538,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -513,6 +550,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec![],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -525,6 +563,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -536,6 +575,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -547,6 +587,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -558,6 +599,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -569,6 +611,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -580,6 +623,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
         },
     );
 
@@ -591,6 +635,35 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
             stdout: true,
             lint_args: vec!["--check".to_string()],
             format_args: vec![],
+            ..Default::default()
+        },
+    );
+
+    // Protobuf - buf
+    // buf format/lint require a real file path; stdin is not supported.
+    m.insert(
+        "buf:format",
+        ToolDefinition {
+            command: vec!["buf".to_string(), "format".to_string()],
+            stdin: false,
+            stdout: true,
+            // In lint mode, --exit-code makes buf format exit non-zero when
+            // the file is not already formatted.
+            lint_args: vec!["--exit-code".to_string()],
+            format_args: vec![],
+            temp_file_extension: Some("proto".to_string()),
+        },
+    );
+
+    m.insert(
+        "buf:lint",
+        ToolDefinition {
+            command: vec!["buf".to_string(), "lint".to_string()],
+            stdin: false,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+            temp_file_extension: Some("proto".to_string()),
         },
     );
 
@@ -625,6 +698,7 @@ mod tests {
                 stdout: false,
                 lint_args: vec![],
                 format_args: vec![],
+            ..Default::default()
             },
         );
 
@@ -707,6 +781,23 @@ mod tests {
 
         let tool = registry.get("oxfmt:ts").expect("Should find oxfmt:ts");
         assert!(tool.command.iter().any(|s| s.contains("_.ts")));
+
+        // buf
+        let tool = registry.get("buf:format").expect("Should find buf:format");
+        assert_eq!(tool.command, vec!["buf", "format"]);
+        assert!(!tool.stdin);
+        assert!(tool.stdout);
+        assert_eq!(tool.temp_file_extension.as_deref(), Some("proto"));
+        assert_eq!(tool.lint_args, vec!["--exit-code"]);
+        assert!(tool.format_args.is_empty());
+
+        let tool = registry.get("buf:lint").expect("Should find buf:lint");
+        assert_eq!(tool.command, vec!["buf", "lint"]);
+        assert!(!tool.stdin);
+        assert!(tool.stdout);
+        assert_eq!(tool.temp_file_extension.as_deref(), Some("proto"));
+        assert!(tool.lint_args.is_empty());
+        assert!(tool.format_args.is_empty());
     }
 
     // =========================================================================
