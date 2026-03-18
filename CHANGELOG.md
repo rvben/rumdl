@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.54] - 2026-03-18
+
+### Fixed
+
+- **MD013**: Lines consisting entirely of inline HTML (e.g., badge links `<a href="..."><img .../></a>`) are no longer flagged when `strict = false` ([#535](https://github.com/rvben/rumdl/issues/535))
+  - Two-tier detection: lines where all content is inside HTML tags, and lines that start/end with tags containing URL attributes (`href`, `src`, `srcset`, `poster`)
+  - HTML-only lines are also treated as paragraph boundaries in reflow mode, preventing them from being merged into adjacent prose
+
 ## [0.1.53] - 2026-03-16
 
 ### Fixed
