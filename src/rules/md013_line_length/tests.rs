@@ -6204,3 +6204,237 @@ fn test_blockquotes_false_paragraph_after_blockquote_still_warns() {
         "Regular paragraph after blockquote should still warn when blockquotes=false"
     );
 }
+
+// --- HTML-only line exemption tests (issue #535) ---
+
+#[test]
+fn test_html_only_badge_line_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"# Demo
+
+<a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only badge line should be exempt in non-strict mode, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_img_with_attributes_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"<img src="https://example.com/very-long-path/to/image.png" alt="screenshot of the application" width="1286" height="185"/>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only img tag should be exempt in non-strict mode, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_multiple_badges_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"<a href="https://example.com/first"><img src="https://img.shields.io/badge/first-blue"/></a> <a href="https://example.com/second"><img src="https://img.shields.io/badge/second-green"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Multiple HTML badge tags on one line should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_not_exempt_in_strict_mode() {
+    let rule = MD013LineLength::new(80, false, false, false, true);
+    let content = r#"<a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "HTML-only lines should NOT be exempt in strict mode"
+    );
+}
+
+#[test]
+fn test_html_with_text_outside_tags_not_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"Check out this badge: <a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Lines with text outside HTML tags should still be flagged"
+    );
+}
+
+#[test]
+fn test_html_link_with_text_exempt_like_markdown_link() {
+    // <a href="url">text</a> is functionally identical to [text](url)
+    // which is already exempt — HTML links should be exempt too
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = r#"<a href="https://example.com/very-long-path">Click here for more information about this topic and read the docs</a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML link with text should be exempt (consistent with markdown link exemption), got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_formatting_tags_without_urls_not_exempt() {
+    // <b>, <p>, <em> etc. without URL attributes should still be flagged
+    let rule = MD013LineLength::new(30, false, false, false, false);
+    let content = r#"<b>This is very long bold text that definitely exceeds the thirty char limit easily</b>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Formatting tags without URL attributes should still be flagged"
+    );
+}
+
+#[test]
+fn test_html_link_with_target_blank_exempt() {
+    // HTML used because markdown can't do target="_blank"
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content =
+        r#"<a href="https://example.com/very-long-path/to/documentation/page" target="_blank">Documentation</a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML link with target=_blank should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_in_list_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"- <a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only line in list item should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_in_blockquote_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"> <a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only line in blockquote should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_media_elements_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"<video src="https://example.com/very-long-path/to/video.mp4" poster="https://example.com/very-long-path/thumb.jpg" controls></video>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only media element should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_with_quoted_angle_brackets_exempt() {
+    let rule = MD013LineLength::new(80, false, false, false, false);
+    let content = r#"<img alt="comparison: value_a > value_b shows the difference clearly in this long alt text" src="https://example.com/image.png"/>"#;
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML tag with > in quoted attribute should be exempt, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_reflow_mode_not_merged_into_paragraph() {
+    // With reflow enabled, HTML-only lines should NOT be merged into adjacent paragraphs.
+    // This was the actual bug: the reflow path didn't recognize HTML-only lines as
+    // paragraph boundaries, causing them to be absorbed and flagged.
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "Some paragraph text.\n\n<a href=\"https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook\"><img alt=\"badge\" src=\"https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield\"/></a>";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML-only line should not generate warnings in reflow mode, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_reflow_mode_preserves_html_line() {
+    // Fix mode should not modify HTML-only lines
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "Some paragraph text.\n\n<a href=\"https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook\"><img alt=\"badge\" src=\"https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield\"/></a>\n\nMore text after.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains(r#"<a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#),
+        "Fix should preserve HTML-only line unchanged, got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_html_link_with_text_reflow_mode_exempt() {
+    // <a href="url">text</a> should also be exempt in reflow mode
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "<a href=\"https://example.com/very-long-path/to/documentation/page\" target=\"_blank\">Click here for documentation</a>";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "HTML link with text should be exempt in reflow mode, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_html_only_adjacent_to_paragraph_not_absorbed() {
+    // An HTML-only line adjacent to a long paragraph should not be merged
+    // into that paragraph during reflow
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "This is paragraph text that is quite long and exceeds the eighty character limit set for this test case.\n<a href=\"https://example.com\"><img src=\"https://example.com/badge.svg\" alt=\"badge\"/></a>";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The paragraph should be reflowed but the HTML line should be preserved
+    assert!(
+        fixed.contains(r#"<a href="https://example.com"><img src="https://example.com/badge.svg" alt="badge"/></a>"#),
+        "HTML-only line should be preserved during adjacent paragraph reflow, got:\n{fixed}"
+    );
+}

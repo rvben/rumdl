@@ -22,8 +22,8 @@ mod helpers;
 pub mod md013_config;
 use crate::utils::is_template_directive_only;
 use helpers::{
-    extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_list_item,
-    is_standalone_link_or_image_line, split_into_segments, trim_preserving_hard_break,
+    extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
+    is_list_item, is_standalone_link_or_image_line, split_into_segments, trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{LengthMode, ReflowMode};
@@ -348,6 +348,13 @@ impl Rule for MD013LineLength {
                     continue;
                 }
 
+                // Lines consisting entirely of HTML tags are exempt.
+                // Badge lines, images with attributes, and similar inline HTML
+                // are long due to URLs in attributes and can't be meaningfully shortened.
+                if is_html_only_line(line) {
+                    continue;
+                }
+
                 // Skip setext heading underlines
                 if !line.trim().is_empty() && line.trim().chars().all(|c| c == '=' || c == '-') {
                     continue;
@@ -596,6 +603,7 @@ impl MD013LineLength {
             || is_standalone_attr_list(content)
             || is_snippet_block_delimiter(content)
             || is_github_alert_marker(trimmed)
+            || is_html_only_line(content)
     }
 
     fn generate_blockquote_paragraph_fix(
@@ -900,6 +908,7 @@ impl MD013LineLength {
                 || is_template_directive_only(lines[i])
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
+                || is_html_only_line(lines[i])
             {
                 i += 1;
                 continue;
@@ -1105,6 +1114,14 @@ impl MD013LineLength {
                         && next_trimmed.contains("]:")
                         && LINK_REF_PATTERN.is_match(next_trimmed)
                     {
+                        fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
+                        last_consumed = i;
+                        i += 1;
+                        continue;
+                    }
+
+                    // HTML-only lines inside footnotes are not reflowable
+                    if is_html_only_line(next_trimmed) {
                         fn_lines.push(FnLineType::Verbatim(strip_fn_indent(next), indent));
                         last_consumed = i;
                         i += 1;
@@ -1329,11 +1346,12 @@ impl MD013LineLength {
                         break;
                     }
 
-                    // Skip list items, code blocks, headings within containers
+                    // Skip list items, code blocks, headings, HTML-only lines within containers
                     if is_list_item(line.trim())
                         || line.trim().starts_with("```")
                         || line.trim().starts_with("~~~")
                         || line.trim().starts_with('#')
+                        || is_html_only_line(line)
                     {
                         break;
                     }
@@ -2151,6 +2169,10 @@ impl MD013LineLength {
                     if !config.strict && is_standalone_link_or_image_line(raw_line) {
                         return true;
                     }
+                    // HTML-only lines: exempt when not strict
+                    if !config.strict && is_html_only_line(raw_line) {
+                        return true;
+                    }
                     false
                 };
 
@@ -2872,6 +2894,7 @@ impl MD013LineLength {
                     || is_standalone_attr_list(next_line)
                     || is_snippet_block_delimiter(next_line)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
+                    || is_html_only_line(next_line)
                 {
                     break;
                 }

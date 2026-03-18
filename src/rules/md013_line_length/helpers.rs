@@ -243,6 +243,107 @@ pub(crate) fn is_standalone_link_or_image_line(line: &str) -> bool {
     is_link_with_optional_emphasis(s)
 }
 
+/// Check if a line consists entirely of HTML structure that cannot be
+/// meaningfully shortened. Used to exempt HTML-only lines from MD013 in
+/// non-strict mode.
+///
+/// After stripping blockquote and list markers, a line is exempt if either:
+///
+/// 1. All non-whitespace content is inside `<...>` tags (e.g., badges,
+///    self-closing images, nested tags with no text between them).
+/// 2. The line starts with `<` and ends with `>` AND contains URL-bearing
+///    attributes (`href=`, `src=`, `srcset=`, `poster=`). This handles
+///    `<a href="url">text</a>` — functionally identical to `[text](url)`
+///    which is already exempt as a standalone link.
+///
+/// Handles quoted attribute values that may contain `>` characters.
+///
+/// Examples that return true:
+/// - `<a href="..."><img alt="badge" src="..."/></a>` (all content in tags)
+/// - `<img src="..." alt="..." width="..." height="..."/>` (self-closing)
+/// - `<a href="...">link text</a>` (HTML link, consistent with markdown link exemption)
+/// - `<video src="..." poster="..." controls></video>` (media with URL attrs)
+///
+/// Examples that return false:
+/// - `Some text <a href="...">link</a>` (text before tags)
+/// - `<b>very long bold text</b>` (formatting tag without URL attributes)
+/// - `Plain text without any HTML`
+pub(crate) fn is_html_only_line(line: &str) -> bool {
+    let mut s = line.trim_start();
+
+    // Strip blockquote markers
+    while let Some(rest) = s.strip_prefix('>') {
+        s = rest.trim_start();
+    }
+
+    // Strip list markers
+    if is_list_item(s) {
+        let (_, content) = extract_list_marker_and_content(s);
+        return is_html_only_content(&content);
+    }
+
+    is_html_only_content(s)
+}
+
+/// Combined check for HTML-only content.
+fn is_html_only_content(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() || !s.starts_with('<') {
+        return false;
+    }
+
+    // Check 1: All non-whitespace content is inside HTML tags.
+    // Covers badges, self-closing images, nested tags with no text between them.
+    if is_content_all_html_tags(s) {
+        return true;
+    }
+
+    // Check 2: Line is entirely wrapped in HTML (starts with <, ends with >)
+    // and contains URL-bearing attributes. This makes <a href="url">text</a>
+    // consistent with the existing [text](url) standalone link exemption.
+    if s.ends_with('>') && (s.contains("href=") || s.contains("src=") || s.contains("srcset=") || s.contains("poster="))
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Returns true if all non-whitespace content is inside `<...>` delimiters.
+fn is_content_all_html_tags(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() || !s.starts_with('<') {
+        return false;
+    }
+
+    let mut in_tag = false;
+    let mut quote_char: Option<char> = None;
+    let mut found_complete_tag = false;
+
+    for c in s.chars() {
+        if let Some(q) = quote_char {
+            if c == q {
+                quote_char = None;
+            }
+        } else if in_tag {
+            match c {
+                '"' | '\'' => quote_char = Some(c),
+                '>' => {
+                    in_tag = false;
+                    found_complete_tag = true;
+                }
+                _ => {}
+            }
+        } else if c == '<' {
+            in_tag = true;
+        } else if !c.is_whitespace() {
+            return false;
+        }
+    }
+
+    found_complete_tag
+}
+
 /// Check if content (after stripping list/blockquote markers) is a standalone link,
 /// optionally wrapped in emphasis.
 fn is_link_with_optional_emphasis(s: &str) -> bool {
@@ -490,5 +591,166 @@ mod tests {
         assert!(!is_standalone_link_or_image_line("[link1](url1) [link2](url2)"));
         // Link followed by text
         assert!(!is_standalone_link_or_image_line("[link](url) extra text"));
+    }
+
+    // --- is_html_only_line tests ---
+
+    #[test]
+    fn test_html_only_badge_line() {
+        // The reported case: badge with nested <a> and <img>
+        assert!(is_html_only_line(
+            r#"<a href="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook"><img alt="badge" src="https://dotfyle.com/plugins/chrisgrieser/nvim-rulebook/shield"/></a>"#
+        ));
+    }
+
+    #[test]
+    fn test_html_only_self_closing_tags() {
+        assert!(is_html_only_line(
+            r#"<img src="https://example.com/image.png" alt="screenshot" width="800" height="600"/>"#
+        ));
+        assert!(is_html_only_line(r#"<br/>"#));
+        assert!(is_html_only_line(r#"<hr />"#));
+    }
+
+    #[test]
+    fn test_html_only_multiple_tags() {
+        // Multiple adjacent tags with no text between them
+        assert!(is_html_only_line(r#"<img src="a.png"/><img src="b.png"/>"#));
+        assert!(is_html_only_line(r#"<br/><br/><br/>"#));
+    }
+
+    #[test]
+    fn test_html_only_empty_element() {
+        // Tags with no content between opening and closing
+        assert!(is_html_only_line(r#"<video src="long-url.mp4" controls></video>"#));
+        assert!(is_html_only_line(r#"<div></div>"#));
+    }
+
+    #[test]
+    fn test_html_only_with_whitespace_between_tags() {
+        assert!(is_html_only_line(r#"<img src="a.png"/> <img src="b.png"/>"#));
+    }
+
+    #[test]
+    fn test_html_only_quoted_angle_brackets() {
+        // Attribute value containing > should not break parsing
+        assert!(is_html_only_line(r#"<img alt="a > b" src="test.png"/>"#));
+        assert!(is_html_only_line(r#"<img alt='a > b' src="test.png"/>"#));
+    }
+
+    #[test]
+    fn test_html_only_in_blockquote() {
+        assert!(is_html_only_line(r#"> <img src="long-url.png" alt="screenshot"/>"#));
+        assert!(is_html_only_line(r#">> <a href="url"><img src="img"/></a>"#));
+    }
+
+    #[test]
+    fn test_html_only_in_list() {
+        assert!(is_html_only_line(r#"- <img src="long-url.png" alt="screenshot"/>"#));
+        assert!(is_html_only_line(r#"1. <a href="url"><img src="img"/></a>"#));
+        assert!(is_html_only_line(r#"  - <img src="long-url.png"/>"#));
+    }
+
+    #[test]
+    fn test_html_only_link_with_text_and_url() {
+        // <a href="url">text</a> is functionally identical to [text](url)
+        // which is already exempt — so this should also be exempt
+        assert!(is_html_only_line(
+            r#"<a href="https://example.com/very-long-path">Click here for details</a>"#
+        ));
+        // With target attribute (reason to use HTML over markdown)
+        assert!(is_html_only_line(
+            r#"<a href="https://example.com/very-long-path" target="_blank">Click here for details</a>"#
+        ));
+        // Multiple URL attributes
+        assert!(is_html_only_line(
+            r#"<a href="https://example.com/path"><img src="https://example.com/badge.svg" alt="status"/></a>"#
+        ));
+    }
+
+    #[test]
+    fn test_not_html_only_text_before_tags() {
+        assert!(!is_html_only_line(r#"Click here: <a href="url">link</a>"#));
+        assert!(!is_html_only_line(r#"See <img src="url"/> for details"#));
+    }
+
+    #[test]
+    fn test_not_html_only_text_after_tags() {
+        assert!(!is_html_only_line(r#"<a href="url">link</a> - click above"#));
+        assert!(!is_html_only_line(r#"<img src="url"/> is an image"#));
+    }
+
+    #[test]
+    fn test_not_html_only_formatting_tags_without_urls() {
+        // Formatting tags without URL attributes should NOT be exempt —
+        // the line is long because of text content, not URLs
+        assert!(!is_html_only_line(
+            r#"<b>This is very long bold text that exceeds the line length limit</b>"#
+        ));
+        assert!(!is_html_only_line(
+            r#"<p>This is a very long paragraph written in HTML tags for some reason</p>"#
+        ));
+        assert!(!is_html_only_line(
+            r#"<span style="color:red">Some styled text that is quite long</span>"#
+        ));
+        assert!(!is_html_only_line(
+            r#"<em>Emphasized text that goes on and on and on</em>"#
+        ));
+        // Multiple formatting tags with text between them
+        assert!(!is_html_only_line(r#"<b>bold</b> and <i>italic</i>"#));
+    }
+
+    #[test]
+    fn test_not_html_only_plain_text() {
+        assert!(!is_html_only_line("Just some long text without any HTML"));
+        assert!(!is_html_only_line(""));
+        assert!(!is_html_only_line("   "));
+    }
+
+    #[test]
+    fn test_not_html_only_incomplete_tag() {
+        // Unclosed tag with no complete tag
+        assert!(!is_html_only_line("<unclosed"));
+        // Doesn't end with > (unclosed outer element)
+        assert!(!is_html_only_line(r#"<a href="url">text"#));
+    }
+
+    #[test]
+    fn test_html_only_comment() {
+        // Simple HTML comments (no > inside) are detected as all-inside-tags
+        assert!(is_html_only_line(
+            "<!-- this is a long HTML comment that spans many characters -->"
+        ));
+    }
+
+    #[test]
+    fn test_html_only_media_elements() {
+        assert!(is_html_only_line(
+            r#"<video src="https://example.com/very-long-path/video.mp4" poster="https://example.com/thumb.jpg" controls></video>"#
+        ));
+        assert!(is_html_only_line(
+            r#"<audio src="https://example.com/very-long-path/audio.mp3" controls></audio>"#
+        ));
+        assert!(is_html_only_line(
+            r#"<source srcset="https://example.com/image-large.webp" media="(min-width: 800px)"/>"#
+        ));
+        assert!(is_html_only_line(
+            r#"<picture><source srcset="large.webp"/><img src="fallback.png"/></picture>"#
+        ));
+    }
+
+    #[test]
+    fn test_html_only_in_list_with_url_text() {
+        // List item containing an HTML link with text — should be exempt
+        assert!(is_html_only_line(
+            r#"- <a href="https://example.com/very-long-path">documentation link</a>"#
+        ));
+    }
+
+    #[test]
+    fn test_html_only_in_blockquote_with_url_text() {
+        assert!(is_html_only_line(
+            r#"> <a href="https://example.com/very-long-path">documentation link</a>"#
+        ));
     }
 }
