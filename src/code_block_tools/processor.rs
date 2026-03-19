@@ -11,7 +11,8 @@ use super::linguist::LinguistResolver;
 use super::registry::ToolRegistry;
 use crate::config::MarkdownFlavor;
 use crate::rule::{LintWarning, Severity};
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use crate::utils::rumdl_parser_options;
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 /// Special built-in tool name for rumdl's own markdown linting.
 /// When this tool is configured for markdown blocks, the processor skips
@@ -307,7 +308,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
         let mut blocks = Vec::new();
         let mut current_block: Option<FencedCodeBlockBuilder> = None;
 
-        let options = Options::all();
+        let options = rumdl_parser_options();
         let parser = Parser::new_ext(content, options).into_offset_iter();
 
         let lines: Vec<&str> = content.lines().collect();

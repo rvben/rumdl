@@ -8,7 +8,9 @@
 //! - Mixed fence types (tilde fence contains backticks as content)
 //! - Indented code blocks with proper list context handling
 
-use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+use super::parser_options::rumdl_parser_options;
 
 /// Type alias for code block and span ranges: (code_blocks, code_spans)
 pub type CodeRanges = (Vec<(usize, usize)>, Vec<(usize, usize)>);
@@ -108,8 +110,7 @@ impl CodeBlockUtils {
 
         let byte_to_line = |byte_offset: usize| -> usize { line_starts.partition_point(|&start| start <= byte_offset) };
 
-        // Use pulldown-cmark with all extensions for maximum compatibility
-        let options = Options::all();
+        let options = rumdl_parser_options();
         let parser = Parser::new_ext(content, options).into_offset_iter();
 
         for (event, range) in parser {
@@ -325,12 +326,12 @@ impl CodeBlockUtils {
     /// Only detects fenced code blocks (``` or ~~~), not indented code blocks,
     /// since indented blocks don't have a language tag.
     pub fn detect_markdown_code_blocks(content: &str) -> Vec<MarkdownCodeBlock> {
-        use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
+        use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
         let mut blocks = Vec::new();
         let mut current_block: Option<MarkdownCodeBlockBuilder> = None;
 
-        let options = Options::all();
+        let options = rumdl_parser_options();
         let parser = Parser::new_ext(content, options).into_offset_iter();
 
         for (event, range) in parser {

@@ -3,6 +3,7 @@ use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
+use crate::utils::rumdl_parser_options;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -569,7 +570,7 @@ pub(super) fn detect_lazy_continuation_lines(
     use crate::utils::blockquote::effective_indent_in_blockquote;
 
     let mut lazy_lines = Vec::new();
-    let parser = Parser::new_ext(content, Options::all());
+    let parser = Parser::new_ext(content, rumdl_parser_options());
 
     // Stack of (expected_indent_within_context, blockquote_level) for nested items
     let mut item_stack: Vec<(usize, usize)> = vec![];

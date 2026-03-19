@@ -29,6 +29,7 @@ pub mod mkdocs_snippets;
 pub mod mkdocs_tabs;
 pub mod mkdocs_test_utils;
 pub mod mkdocstrings_refs;
+pub mod parser_options;
 pub mod pymdown_blocks;
 pub mod quarto_divs;
 pub mod range_utils;
@@ -47,6 +48,7 @@ pub use line_ending::{
     normalize_line_ending,
 };
 pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, MarkdownElements};
+pub use parser_options::rumdl_parser_options;
 pub use range_utils::LineIndex;
 
 /// Calculate the visual indentation width of a string, expanding tabs to spaces.
