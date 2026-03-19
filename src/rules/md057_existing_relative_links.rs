@@ -308,13 +308,11 @@ impl MD057ExistingRelativeLinks {
         let mut paths = Vec::new();
 
         // Auto-detect Obsidian attachment folder
-        if flavor == crate::config::MarkdownFlavor::Obsidian {
-            if let Some(attachment_dir) = resolve_attachment_folder(source_file.unwrap_or(base_path), base_path) {
-                // Only add if different from the base path
-                if attachment_dir != *base_path {
-                    paths.push(attachment_dir);
-                }
-            }
+        if flavor == crate::config::MarkdownFlavor::Obsidian
+            && let Some(attachment_dir) = resolve_attachment_folder(source_file.unwrap_or(base_path), base_path)
+            && attachment_dir != *base_path
+        {
+            paths.push(attachment_dir);
         }
 
         // Add explicitly configured search paths

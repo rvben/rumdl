@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.56] - 2026-03-19
+
+### Added
+
+- **MD057**: Obsidian attachment folder auto-detection when `flavor = "obsidian"` is set — supports all 4 Obsidian attachment modes (vault root, named folder, same as file, subfolder under file) ([#537](https://github.com/rvben/rumdl/issues/537))
+- **MD057**: New `search-paths` config option for specifying additional directories to search when resolving relative links
+
 ## [0.1.55] - 2026-03-19
 
 ### Fixed

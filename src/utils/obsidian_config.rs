@@ -72,19 +72,19 @@ pub fn resolve_attachment_folder(start_path: &Path, file_dir: &Path) -> Option<P
     let vault_root = find_obsidian_vault(start_path)?;
 
     // Check cache first
-    if let Ok(cache) = ATTACHMENT_DIR_CACHE.lock() {
-        if let Some(resolution) = cache.get(&vault_root) {
-            return Some(match resolution {
-                AttachmentResolution::Fixed(path) => path.clone(),
-                AttachmentResolution::RelativeToFile(subfolder) => {
-                    if subfolder.is_empty() {
-                        file_dir.to_path_buf()
-                    } else {
-                        file_dir.join(subfolder)
-                    }
+    if let Ok(cache) = ATTACHMENT_DIR_CACHE.lock()
+        && let Some(resolution) = cache.get(&vault_root)
+    {
+        return Some(match resolution {
+            AttachmentResolution::Fixed(path) => path.clone(),
+            AttachmentResolution::RelativeToFile(subfolder) => {
+                if subfolder.is_empty() {
+                    file_dir.to_path_buf()
+                } else {
+                    file_dir.join(subfolder)
                 }
-            });
-        }
+            }
+        });
     }
 
     // Parse .obsidian/app.json

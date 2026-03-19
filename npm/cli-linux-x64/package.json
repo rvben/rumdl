@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-linux-x64",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "description": "rumdl binary for Linux x64 (glibc)",
   "license": "MIT",
   "repository": {
