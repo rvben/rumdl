@@ -29,6 +29,7 @@ pub mod mkdocs_snippets;
 pub mod mkdocs_tabs;
 pub mod mkdocs_test_utils;
 pub mod mkdocstrings_refs;
+pub mod obsidian_config;
 pub mod parser_options;
 pub mod pymdown_blocks;
 pub mod quarto_divs;

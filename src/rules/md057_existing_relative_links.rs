@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 mod md057_config;
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::mkdocs_config::resolve_docs_dir;
+use crate::utils::obsidian_config::resolve_attachment_folder;
 pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
@@ -115,6 +116,8 @@ pub struct MD057ExistingRelativeLinks {
     base_path: Arc<Mutex<Option<PathBuf>>>,
     /// Configuration for the rule
     config: MD057Config,
+    /// Markdown flavor (used for Obsidian attachment folder auto-detection)
+    flavor: crate::config::MarkdownFlavor,
 }
 
 impl Default for MD057ExistingRelativeLinks {
@@ -122,6 +125,7 @@ impl Default for MD057ExistingRelativeLinks {
         Self {
             base_path: Arc::new(Mutex::new(None)),
             config: MD057Config::default(),
+            flavor: crate::config::MarkdownFlavor::default(),
         }
     }
 }
@@ -151,7 +155,15 @@ impl MD057ExistingRelativeLinks {
         Self {
             base_path: Arc::new(Mutex::new(None)),
             config,
+            flavor: crate::config::MarkdownFlavor::default(),
         }
+    }
+
+    /// Set the markdown flavor for Obsidian attachment auto-detection
+    #[cfg(test)]
+    fn with_flavor(mut self, flavor: crate::config::MarkdownFlavor) -> Self {
+        self.flavor = flavor;
+        self
     }
 
     /// Check if a URL is external or should be skipped for validation.
@@ -281,6 +293,52 @@ impl MD057ExistingRelativeLinks {
     /// Resolve a relative link against a provided base path
     fn resolve_link_path_with_base(link: &str, base_path: &Path) -> PathBuf {
         base_path.join(link)
+    }
+
+    /// Compute additional search paths for fallback link resolution.
+    ///
+    /// Combines Obsidian attachment folder auto-detection (when flavor is Obsidian)
+    /// with explicitly configured `search-paths`.
+    fn compute_search_paths(
+        &self,
+        flavor: crate::config::MarkdownFlavor,
+        source_file: Option<&Path>,
+        base_path: &Path,
+    ) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        // Auto-detect Obsidian attachment folder
+        if flavor == crate::config::MarkdownFlavor::Obsidian {
+            if let Some(attachment_dir) = resolve_attachment_folder(source_file.unwrap_or(base_path), base_path) {
+                // Only add if different from the base path
+                if attachment_dir != *base_path {
+                    paths.push(attachment_dir);
+                }
+            }
+        }
+
+        // Add explicitly configured search paths
+        for search_path in &self.config.search_paths {
+            let resolved = if Path::new(search_path).is_absolute() {
+                PathBuf::from(search_path)
+            } else {
+                // Resolve relative to CWD (project root)
+                CURRENT_DIR.join(search_path)
+            };
+            if resolved != *base_path && !paths.contains(&resolved) {
+                paths.push(resolved);
+            }
+        }
+
+        paths
+    }
+
+    /// Check if a link target exists in any of the additional search paths.
+    fn exists_in_search_paths(decoded_path: &str, search_paths: &[PathBuf]) -> bool {
+        search_paths.iter().any(|dir| {
+            let candidate = dir.join(decoded_path);
+            file_exists_or_markdown_extension(&candidate)
+        })
     }
 
     /// Check if a relative link can be compacted and return the simplified form.
@@ -438,6 +496,9 @@ impl Rule for MD057ExistingRelativeLinks {
         let Some(base_path) = base_path else {
             return Ok(warnings);
         };
+
+        // Compute additional search paths for fallback link resolution
+        let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file.as_deref(), &base_path);
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
@@ -626,6 +687,11 @@ impl Rule for MD057ExistingRelativeLinks {
                             continue; // Markdown source exists, link is valid
                         }
 
+                        // Try additional search paths (Obsidian attachment folder, configured paths)
+                        if Self::exists_in_search_paths(&decoded_path, &extra_search_paths) {
+                            continue;
+                        }
+
                         // File doesn't exist and no source file found
                         // Use actual URL position from regex capture group
                         // Note: capture group positions are absolute within the line string
@@ -762,6 +828,11 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue; // Markdown source exists, link is valid
             }
 
+            // Try additional search paths (Obsidian attachment folder, configured paths)
+            if Self::exists_in_search_paths(&decoded_path, &extra_search_paths) {
+                continue;
+            }
+
             // File doesn't exist and no source file found
             // Images already have correct position from parser
             warnings.push(LintWarning {
@@ -889,6 +960,11 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue; // Markdown source exists, link is valid
             }
 
+            // Try additional search paths (Obsidian attachment folder, configured paths)
+            if Self::exists_in_search_paths(&decoded_path, &extra_search_paths) {
+                continue;
+            }
+
             // File doesn't exist and no source file found
             // Calculate column position: find URL within the line
             let line_idx = ref_def.line - 1;
@@ -968,7 +1044,9 @@ impl Rule for MD057ExistingRelativeLinks {
         Self: Sized,
     {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD057Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
+        let mut rule = Self::from_config_struct(rule_config);
+        rule.flavor = config.global.flavor;
+        Box::new(rule)
     }
 
     fn cross_file_scope(&self) -> CrossFileScope {
@@ -993,6 +1071,10 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Get the directory containing this file for resolving relative links
         let file_dir = file_path.parent();
+
+        // Compute additional search paths for fallback link resolution
+        let base_path = file_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| CURRENT_DIR.clone());
+        let extra_search_paths = self.compute_search_paths(self.flavor, Some(file_path), &base_path);
 
         for cross_link in &file_index.cross_file_links {
             // URL-decode the path for filesystem operations
@@ -1036,7 +1118,7 @@ impl Rule for MD057ExistingRelativeLinks {
                     false
                 };
 
-                if !has_md_source {
+                if !has_md_source && !Self::exists_in_search_paths(&decoded_target, &extra_search_paths) {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: cross_link.line,
@@ -2881,6 +2963,439 @@ See the [docs][ref].
         assert!(
             result[0].message.contains("/docs/reference.md"),
             "Warning should include the reference path"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_inline_link() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create an "assets" directory with an image
+        let assets_dir = base_path.join("assets");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::write(assets_dir.join("photo.png"), "fake image").unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![assets_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\n[Photo](photo.png)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should find photo.png via search-paths. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_image() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let assets_dir = base_path.join("attachments");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::write(assets_dir.join("diagram.svg"), "<svg/>").unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![assets_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\n![Diagram](diagram.svg)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should find diagram.svg via search-paths. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_reference_definition() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let assets_dir = base_path.join("images");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::write(assets_dir.join("logo.png"), "fake").unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![assets_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\nSee [logo][ref].\n\n[ref]: logo.png\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should find logo.png via search-paths in reference definition. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_still_warns_when_truly_missing() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let assets_dir = base_path.join("assets");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![assets_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\n![Missing](nonexistent.png)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should still warn when file doesn't exist in any search path. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_nonexistent_directory() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let config = MD057Config {
+            search_paths: vec!["/nonexistent/path/that/does/not/exist".to_string()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\n![Missing](photo.png)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Nonexistent search path should not cause errors, just not find the file. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_attachment_folder_named() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("Attachments")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        std::fs::write(
+            vault.join(".obsidian/app.json"),
+            r#"{"attachmentFolderPath": "Attachments"}"#,
+        )
+        .unwrap();
+        std::fs::write(vault.join("Attachments/photo.png"), "fake").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "# Test\n\n![Photo](photo.png)\n").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(&notes_dir);
+
+        let content = "# Test\n\n![Photo](photo.png)\n";
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Obsidian attachment folder should resolve photo.png. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_attachment_same_folder_as_file() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-rf");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        std::fs::write(vault.join(".obsidian/app.json"), r#"{"attachmentFolderPath": "./"}"#).unwrap();
+
+        // Image in the same directory as the file — default behavior, no extra search needed
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "placeholder").unwrap();
+        std::fs::write(notes_dir.join("photo.png"), "fake").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(&notes_dir);
+
+        let content = "# Test\n\n![Photo](photo.png)\n";
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "'./' attachment mode resolves to same folder — should work by default. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_not_triggered_without_obsidian_flavor() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-nf");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("Attachments")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        std::fs::write(
+            vault.join(".obsidian/app.json"),
+            r#"{"attachmentFolderPath": "Attachments"}"#,
+        )
+        .unwrap();
+        std::fs::write(vault.join("Attachments/photo.png"), "fake").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "placeholder").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(&notes_dir);
+
+        let content = "# Test\n\n![Photo](photo.png)\n";
+        // Standard flavor — NOT Obsidian
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Without Obsidian flavor, attachment folder should not be auto-detected. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_combined_with_obsidian() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-combo");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("Attachments")).unwrap();
+        std::fs::create_dir_all(vault.join("extra-assets")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        std::fs::write(
+            vault.join(".obsidian/app.json"),
+            r#"{"attachmentFolderPath": "Attachments"}"#,
+        )
+        .unwrap();
+        std::fs::write(vault.join("Attachments/photo.png"), "fake").unwrap();
+        std::fs::write(vault.join("extra-assets/diagram.svg"), "fake").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "placeholder").unwrap();
+
+        let extra_assets_dir = vault.join("extra-assets");
+        let config = MD057Config {
+            search_paths: vec![extra_assets_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&notes_dir);
+
+        // Both links should resolve: photo.png via Obsidian, diagram.svg via search-paths
+        let content = "# Test\n\n![Photo](photo.png)\n\n![Diagram](diagram.svg)\n";
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Both Obsidian attachment and search-paths should resolve. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_attachment_subfolder_under_file() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-sub");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("notes/assets")).unwrap();
+
+        std::fs::write(
+            vault.join(".obsidian/app.json"),
+            r#"{"attachmentFolderPath": "./assets"}"#,
+        )
+        .unwrap();
+        std::fs::write(vault.join("notes/assets/photo.png"), "fake").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "placeholder").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(&notes_dir);
+
+        let content = "# Test\n\n![Photo](photo.png)\n";
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Obsidian './assets' mode should find photo.png in <file-dir>/assets/. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_obsidian_attachment_vault_root() {
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-root");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        // Empty string = vault root
+        std::fs::write(vault.join(".obsidian/app.json"), r#"{"attachmentFolderPath": ""}"#).unwrap();
+        std::fs::write(vault.join("photo.png"), "fake").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let source_file = notes_dir.join("test.md");
+        std::fs::write(&source_file, "placeholder").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default()).with_path(&notes_dir);
+
+        let content = "# Test\n\n![Photo](photo.png)\n";
+        let ctx =
+            crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, Some(source_file));
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Obsidian vault-root mode should find photo.png at vault root. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_search_paths_multiple_directories() {
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        let dir_a = base_path.join("dir-a");
+        let dir_b = base_path.join("dir-b");
+        std::fs::create_dir_all(&dir_a).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        std::fs::write(dir_a.join("alpha.png"), "fake").unwrap();
+        std::fs::write(dir_b.join("beta.png"), "fake").unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![
+                dir_a.to_string_lossy().into_owned(),
+                dir_b.to_string_lossy().into_owned(),
+            ],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let content = "# Test\n\n![A](alpha.png)\n\n![B](beta.png)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Should find files across multiple search paths. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_file_check_with_search_paths() {
+        use crate::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
+
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Create docs directory with a markdown target in a search path
+        let docs_dir = base_path.join("docs");
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        std::fs::write(docs_dir.join("guide.md"), "# Guide\n").unwrap();
+
+        let config = MD057Config {
+            search_paths: vec![docs_dir.to_string_lossy().into_owned()],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+
+        let file_path = base_path.join("README.md");
+        std::fs::write(&file_path, "# Readme\n").unwrap();
+
+        let mut file_index = FileIndex::default();
+        file_index.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: String::new(),
+            line: 3,
+            column: 1,
+        });
+
+        let workspace_index = WorkspaceIndex::new();
+
+        let result = rule
+            .cross_file_check(&file_path, &file_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            result.is_empty(),
+            "cross_file_check should find guide.md via search-paths. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_file_check_with_obsidian_flavor() {
+        use crate::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
+
+        let temp_dir = tempdir().unwrap();
+        let vault = temp_dir.path().join("vault-xf");
+        std::fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(vault.join("Attachments")).unwrap();
+        std::fs::create_dir_all(vault.join("notes")).unwrap();
+
+        std::fs::write(
+            vault.join(".obsidian/app.json"),
+            r#"{"attachmentFolderPath": "Attachments"}"#,
+        )
+        .unwrap();
+        std::fs::write(vault.join("Attachments/ref.md"), "# Reference\n").unwrap();
+
+        let notes_dir = vault.join("notes");
+        let file_path = notes_dir.join("test.md");
+        std::fs::write(&file_path, "placeholder").unwrap();
+
+        let rule = MD057ExistingRelativeLinks::from_config_struct(MD057Config::default())
+            .with_path(&notes_dir)
+            .with_flavor(crate::config::MarkdownFlavor::Obsidian);
+
+        let mut file_index = FileIndex::default();
+        file_index.cross_file_links.push(CrossFileLinkIndex {
+            target_path: "ref.md".to_string(),
+            fragment: String::new(),
+            line: 3,
+            column: 1,
+        });
+
+        let workspace_index = WorkspaceIndex::new();
+
+        let result = rule
+            .cross_file_check(&file_path, &file_index, &workspace_index)
+            .unwrap();
+
+        assert!(
+            result.is_empty(),
+            "cross_file_check should find ref.md via Obsidian attachment folder. Got: {result:?}"
         );
     }
 }

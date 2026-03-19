@@ -32,6 +32,24 @@ pub struct MD057Config {
     /// and suggests the shorter equivalent `file.md`.
     #[serde(alias = "compact_paths")]
     pub compact_paths: bool,
+
+    /// Additional directories to search when a relative link is not found
+    /// relative to the file's directory.
+    ///
+    /// Paths are resolved relative to the project root (where `.rumdl.toml` or
+    /// `pyproject.toml` is found), or relative to the current working directory.
+    ///
+    /// For Obsidian users: the attachment folder is auto-detected from
+    /// `.obsidian/app.json` when `flavor = "obsidian"` is set, so this option
+    /// is typically not needed. Use it for custom setups or non-Obsidian tools.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD057]
+    /// search-paths = ["assets", "images", "attachments"]
+    /// ```
+    #[serde(alias = "search_paths")]
+    pub search_paths: Vec<String>,
 }
 
 impl RuleConfig for MD057Config {
