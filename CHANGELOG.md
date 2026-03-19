@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.55] - 2026-03-19
+
+### Fixed
+
+- **MD064**: Fixed false positives inside indented fenced code blocks when `---` horizontal rules appear later in the document ([#536](https://github.com/rvben/rumdl/issues/536))
+  - Replaced `Options::all()` with an explicit pulldown-cmark option allowlist, excluding `ENABLE_YAML_STYLE_METADATA_BLOCKS` which misinterprets `---` horizontal rules as YAML metadata delimiters (works around [pulldown-cmark#1000](https://github.com/pulldown-cmark/pulldown-cmark/issues/1000))
+  - rumdl handles front matter detection independently and correctly (requires `---` at line 1, not anywhere in the document)
+
 ## [0.1.54] - 2026-03-18
 
 ### Fixed
