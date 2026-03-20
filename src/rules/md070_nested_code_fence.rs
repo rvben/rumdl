@@ -252,7 +252,10 @@ impl Rule for MD070NestedCodeFence {
         while i < lines.len() {
             // Skip lines in contexts that shouldn't be processed
             if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter || line_info.in_html_comment || line_info.in_html_block)
+                && (line_info.in_front_matter
+                    || line_info.in_html_comment
+                    || line_info.in_mdx_comment
+                    || line_info.in_html_block)
             {
                 i += 1;
                 continue;
@@ -393,7 +396,10 @@ impl Rule for MD070NestedCodeFence {
 
             // Skip lines in contexts that shouldn't be processed
             if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter || line_info.in_html_comment || line_info.in_html_block)
+                && (line_info.in_front_matter
+                    || line_info.in_html_comment
+                    || line_info.in_mdx_comment
+                    || line_info.in_html_block)
             {
                 result.push_str(lines[i]);
                 result.push('\n');

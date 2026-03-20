@@ -1050,7 +1050,7 @@ impl Rule for MD033NoInlineHtml {
             }
 
             // Skip HTML tags inside HTML comments
-            if ctx.is_in_html_comment(tag_byte_start) {
+            if ctx.is_in_html_comment(tag_byte_start) || ctx.is_in_mdx_comment(tag_byte_start) {
                 continue;
             }
 

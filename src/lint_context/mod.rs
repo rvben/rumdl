@@ -758,6 +758,7 @@ impl<'a> LintContext<'a> {
                 || line_info.in_front_matter
                 || line_info.in_mkdocstrings
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_esm_block
             {
                 continue;

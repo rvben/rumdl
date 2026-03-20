@@ -160,6 +160,7 @@ impl Rule for MD030ListMarkerSpace {
                 && (line_info.in_code_block
                     || line_info.in_front_matter
                     || line_info.in_html_comment
+                    || line_info.in_mdx_comment
                     || line_info.in_math_block
                     || line_info.in_pymdown_block
                     || line_info.in_mkdocs_html_markdown)
@@ -245,7 +246,10 @@ impl Rule for MD030ListMarkerSpace {
 
             // Skip lines in code blocks, front matter, or HTML comments
             if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block || line_info.in_front_matter || line_info.in_html_comment)
+                && (line_info.in_code_block
+                    || line_info.in_front_matter
+                    || line_info.in_html_comment
+                    || line_info.in_mdx_comment)
             {
                 result_lines.push(line.to_string());
                 continue;

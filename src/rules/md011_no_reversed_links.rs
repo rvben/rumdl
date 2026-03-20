@@ -169,6 +169,7 @@ impl Rule for MD011NoReversedLinks {
                 // Skip if in code block, inline code, HTML comments, math contexts, or Jinja templates
                 if ctx.is_in_code_block_or_span(match_byte_pos)
                     || ctx.is_in_html_comment(match_byte_pos)
+                    || ctx.is_in_mdx_comment(match_byte_pos)
                     || is_in_math_context(ctx, match_byte_pos)
                     || ctx.is_in_jinja_range(match_byte_pos)
                 {

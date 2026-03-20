@@ -69,7 +69,7 @@ impl MD028NoBlanksBlockquote {
     #[inline]
     fn is_in_skip_context(line_infos: &[LineInfo], idx: usize) -> bool {
         if let Some(li) = line_infos.get(idx) {
-            li.in_html_comment || li.in_code_block || li.in_html_block || li.in_front_matter
+            li.in_html_comment || li.in_mdx_comment || li.in_code_block || li.in_html_block || li.in_front_matter
         } else {
             false
         }
@@ -416,7 +416,8 @@ impl Rule for MD028NoBlanksBlockquote {
             // Skip lines in non-markdown content contexts
             if line_idx < ctx.lines.len() {
                 let li = &ctx.lines[line_idx];
-                if li.in_code_block || li.in_html_comment || li.in_html_block || li.in_front_matter {
+                if li.in_code_block || li.in_html_comment || li.in_mdx_comment || li.in_html_block || li.in_front_matter
+                {
                     continue;
                 }
             }
@@ -478,7 +479,8 @@ impl Rule for MD028NoBlanksBlockquote {
             // Skip lines in non-markdown content contexts
             if line_idx < ctx.lines.len() {
                 let li = &ctx.lines[line_idx];
-                if li.in_code_block || li.in_html_comment || li.in_html_block || li.in_front_matter {
+                if li.in_code_block || li.in_html_comment || li.in_mdx_comment || li.in_html_block || li.in_front_matter
+                {
                     result.push(line.to_string());
                     continue;
                 }

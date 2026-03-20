@@ -141,7 +141,11 @@ impl Rule for MD066FootnoteValidation {
         for footnote_ref in &ctx.footnote_refs {
             // Skip if in code block, frontmatter, HTML comment, or HTML block
             if ctx.line_info(footnote_ref.line).is_some_and(|info| {
-                info.in_code_block || info.in_front_matter || info.in_html_comment || info.in_html_block
+                info.in_code_block
+                    || info.in_front_matter
+                    || info.in_html_comment
+                    || info.in_mdx_comment
+                    || info.in_html_block
             }) {
                 continue;
             }
@@ -157,6 +161,7 @@ impl Rule for MD066FootnoteValidation {
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
             {
                 continue;
@@ -208,6 +213,7 @@ impl Rule for MD066FootnoteValidation {
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
             {
                 continue;

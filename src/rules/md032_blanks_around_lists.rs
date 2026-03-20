@@ -174,7 +174,7 @@ impl MD032BlanksAroundLists {
     fn should_apply_lazy_fix(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
         ctx.lines
             .get(line_num.saturating_sub(1))
-            .map(|li| !li.in_code_block && !li.in_front_matter && !li.in_html_comment)
+            .map(|li| !li.in_code_block && !li.in_front_matter && !li.in_html_comment && !li.in_mdx_comment)
             .unwrap_or(false)
     }
 
@@ -251,8 +251,8 @@ impl MD032BlanksAroundLists {
         for line_num in (1..before_line).rev() {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
-                // Skip HTML comment lines - they're transparent
-                if info.in_html_comment {
+                // Skip HTML/MDX comment lines - they're transparent
+                if info.in_html_comment || info.in_mdx_comment {
                     continue;
                 }
                 // Skip Quarto div markers in Quarto flavor - they're transparent
@@ -281,8 +281,8 @@ impl MD032BlanksAroundLists {
         for line_num in (after_line + 1)..=num_lines {
             let idx = line_num - 1;
             if let Some(info) = ctx.lines.get(idx) {
-                // Skip HTML comment lines - they're transparent
-                if info.in_html_comment {
+                // Skip HTML/MDX comment lines - they're transparent
+                if info.in_html_comment || info.in_mdx_comment {
                     continue;
                 }
                 // Skip Quarto div markers in Quarto flavor - they're transparent
@@ -483,8 +483,11 @@ impl MD032BlanksAroundLists {
         // Filter out lists entirely inside HTML comments
         blocks.retain(|(start, end, _)| {
             // Check if ALL lines of this block are inside HTML comments
-            let all_in_comment =
-                (*start..=*end).all(|line_num| ctx.lines.get(line_num - 1).is_some_and(|info| info.in_html_comment));
+            let all_in_comment = (*start..=*end).all(|line_num| {
+                ctx.lines
+                    .get(line_num - 1)
+                    .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+            });
             !all_in_comment
         });
 
@@ -519,6 +522,7 @@ impl MD032BlanksAroundLists {
                 info.in_code_block
                     || info.in_front_matter
                     || info.in_html_comment
+                    || info.in_mdx_comment
                     || info.in_html_block
                     || info.in_jsx_block
             }) {
@@ -614,8 +618,11 @@ impl MD032BlanksAroundLists {
         }
 
         for &(start_line, end_line, ref prefix) in list_blocks {
-            // Skip lists that start inside HTML comments
-            if ctx.line_info(start_line).is_some_and(|info| info.in_html_comment) {
+            // Skip lists that start inside HTML/MDX comments
+            if ctx
+                .line_info(start_line)
+                .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+            {
                 continue;
             }
 
@@ -881,8 +888,11 @@ impl MD032BlanksAroundLists {
                 continue;
             }
 
-            // Skip lists that start inside HTML comments
-            if ctx.line_info(start_line).is_some_and(|info| info.in_html_comment) {
+            // Skip lists that start inside HTML/MDX comments
+            if ctx
+                .line_info(start_line)
+                .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+            {
                 continue;
             }
 

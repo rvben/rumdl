@@ -140,7 +140,11 @@ impl MD036NoEmphasisAsHeading {
         if LIST_MARKER.is_match(line)
             || BLOCKQUOTE_MARKER.is_match(line)
             || ctx.line_info(line_num + 1).is_some_and(|info| {
-                info.in_code_block || info.in_html_comment || info.in_pymdown_block || info.in_mkdocstrings
+                info.in_code_block
+                    || info.in_html_comment
+                    || info.in_mdx_comment
+                    || info.in_pymdown_block
+                    || info.in_mkdocstrings
             })
         {
             return None;

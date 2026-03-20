@@ -54,6 +54,7 @@ impl MD077ListContinuationIndent {
         info.in_front_matter
             || info.in_html_block
             || info.in_html_comment
+            || info.in_mdx_comment
             || info.in_mkdocstrings
             || info.in_esm_block
             || info.in_math_block

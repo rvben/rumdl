@@ -340,7 +340,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip links inside HTML comments (uses pre-computed ranges)
-            if ctx.is_in_html_comment(link.byte_offset) {
+            if ctx.is_in_html_comment(link.byte_offset) || ctx.is_in_mdx_comment(link.byte_offset) {
                 continue;
             }
 
@@ -447,7 +447,7 @@ impl MD052ReferenceLinkImages {
             }
 
             // Skip images inside HTML comments (uses pre-computed ranges)
-            if ctx.is_in_html_comment(image.byte_offset) {
+            if ctx.is_in_html_comment(image.byte_offset) || ctx.is_in_mdx_comment(image.byte_offset) {
                 continue;
             }
 
@@ -727,7 +727,7 @@ impl MD052ReferenceLinkImages {
                             }
 
                             // Skip if inside HTML comment (uses pre-computed ranges)
-                            if ctx.is_in_html_comment(byte_pos) {
+                            if ctx.is_in_html_comment(byte_pos) || ctx.is_in_mdx_comment(byte_pos) {
                                 continue;
                             }
 

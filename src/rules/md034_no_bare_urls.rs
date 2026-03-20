@@ -313,7 +313,7 @@ impl MD034NoBareUrls {
             }
 
             // Check if we're inside an HTML comment
-            if ctx.is_in_html_comment(absolute_pos) {
+            if ctx.is_in_html_comment(absolute_pos) || ctx.is_in_mdx_comment(absolute_pos) {
                 continue;
             }
 

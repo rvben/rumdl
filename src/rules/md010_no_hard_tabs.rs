@@ -148,6 +148,7 @@ impl Rule for MD010NoHardTabs {
             // Skip HTML comments, HTML blocks, PyMdown blocks, mkdocstrings, ESM blocks
             if ctx.line_info(line_num + 1).is_some_and(|info| {
                 info.in_html_comment
+                    || info.in_mdx_comment
                     || info.in_html_block
                     || info.in_pymdown_block
                     || info.in_mkdocstrings
@@ -241,6 +242,7 @@ impl Rule for MD010NoHardTabs {
             let should_skip = fenced_lines[i]
                 || ctx.line_info(i + 1).is_some_and(|info| {
                     info.in_html_comment
+                        || info.in_mdx_comment
                         || info.in_html_block
                         || info.in_pymdown_block
                         || info.in_mkdocstrings

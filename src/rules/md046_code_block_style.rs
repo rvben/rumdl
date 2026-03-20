@@ -555,7 +555,11 @@ impl MD046CodeBlockStyle {
 
             if !has_closing_fence {
                 // Skip if inside HTML comment
-                if ctx.lines.get(opening_line_idx).is_some_and(|info| info.in_html_comment) {
+                if ctx
+                    .lines
+                    .get(opening_line_idx)
+                    .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+                {
                     continue;
                 }
 
@@ -720,7 +724,11 @@ impl Rule for MD046CodeBlockStyle {
                 if target_style == CodeBlockStyle::Indented {
                     let line = lines.get(start_line_idx).unwrap_or(&"");
 
-                    if ctx.lines.get(start_line_idx).is_some_and(|info| info.in_html_comment) {
+                    if ctx
+                        .lines
+                        .get(start_line_idx)
+                        .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+                    {
                         continue;
                     }
 
@@ -744,6 +752,7 @@ impl Rule for MD046CodeBlockStyle {
                     // Skip blocks in contexts that aren't real indented code blocks
                     if ctx.lines.get(start_line_idx).is_some_and(|info| {
                         info.in_html_comment
+                            || info.in_mdx_comment
                             || info.in_html_block
                             || info.in_jsx_block
                             || info.in_mkdocstrings

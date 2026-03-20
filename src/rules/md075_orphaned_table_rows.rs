@@ -55,6 +55,7 @@ impl MD075OrphanedTableRows {
                 || line_info.in_code_block
                 || line_info.in_html_block
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_esm_block
                 || line_info.in_mkdocstrings
         } else {

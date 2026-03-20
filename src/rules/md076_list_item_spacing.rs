@@ -154,6 +154,7 @@ impl MD076ListItemSpacing {
         if info.in_code_block
             || info.in_html_block
             || info.in_html_comment
+            || info.in_mdx_comment
             || info.in_front_matter
             || info.in_math_block
             || info.blockquote.is_some()

@@ -130,7 +130,7 @@ impl MD022BlanksAroundHeadings {
                 } else {
                     // HTML comments and blank lines are "transparent" - they don't count as content
                     // that would prevent a heading from being "at document start"
-                    if !line.is_blank && !line.in_html_comment {
+                    if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
                         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
@@ -355,7 +355,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 } else {
                     // HTML comments and blank lines are "transparent" - they don't count as content
                     // that would prevent a heading from being "at document start"
-                    if !line.is_blank && !line.in_html_comment {
+                    if !line.is_blank && !line.in_html_comment && !line.in_mdx_comment {
                         let trimmed = line.content(ctx.content).trim();
                         // Check for single-line HTML comments too
                         if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
@@ -421,7 +421,9 @@ impl Rule for MD022BlanksAroundHeadings {
                     let trimmed = line_content.trim();
                     if ctx.lines[j].is_blank {
                         blank_lines_above += 1;
-                    } else if ctx.lines[j].in_html_comment || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
+                    } else if ctx.lines[j].in_html_comment
+                        || ctx.lines[j].in_mdx_comment
+                        || (trimmed.starts_with("<!--") && trimmed.ends_with("-->"))
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         continue;
@@ -481,6 +483,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     if check_line.is_blank {
                         next_non_blank_idx += 1;
                     } else if check_line.in_html_comment
+                        || check_line.in_mdx_comment
                         || (check_trimmed.starts_with("<!--") && check_trimmed.ends_with("-->"))
                     {
                         // Skip HTML comments - they are transparent for blank line counting

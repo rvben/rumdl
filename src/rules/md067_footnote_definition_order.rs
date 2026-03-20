@@ -74,6 +74,7 @@ impl Rule for MD067FootnoteDefinitionOrder {
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
             {
                 continue;
@@ -115,6 +116,7 @@ impl Rule for MD067FootnoteDefinitionOrder {
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
             {
                 continue;

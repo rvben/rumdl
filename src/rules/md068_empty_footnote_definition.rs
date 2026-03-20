@@ -46,7 +46,11 @@ impl MD068EmptyFootnoteDefinition {
         for next_idx in (def_line_idx + 1)..ctx.lines.len() {
             if let Some(next_line_info) = ctx.lines.get(next_idx) {
                 // Skip frontmatter, HTML comments, and HTML blocks
-                if next_line_info.in_front_matter || next_line_info.in_html_comment || next_line_info.in_html_block {
+                if next_line_info.in_front_matter
+                    || next_line_info.in_html_comment
+                    || next_line_info.in_mdx_comment
+                    || next_line_info.in_html_block
+                {
                     continue;
                 }
 
@@ -116,6 +120,7 @@ impl Rule for MD068EmptyFootnoteDefinition {
             if line_info.in_code_block
                 || line_info.in_front_matter
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
             {
                 continue;

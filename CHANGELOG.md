@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.58] - 2026-03-20
+
+### Fixed
+
+- **MDX support**: 9 additional rules now skip MDX comments (`{/* ... */}`) alongside HTML comments — MD010, MD018, MD030, MD032, MD036, MD046, MD066, MD070, MD075
+
 ## [0.1.57] - 2026-03-20
 
 ### Fixed

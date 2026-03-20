@@ -141,7 +141,11 @@ impl Rule for MD069NoDuplicateListMarkers {
 
             // Check if this line should be skipped (structural contexts)
             let should_skip = ctx.lines.get(i).is_some_and(|info| {
-                info.in_front_matter || info.in_code_block || info.in_html_block || info.in_html_comment
+                info.in_front_matter
+                    || info.in_code_block
+                    || info.in_html_block
+                    || info.in_html_comment
+                    || info.in_mdx_comment
             });
 
             // Also check if rule is disabled via inline config comments
