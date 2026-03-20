@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.57] - 2026-03-20
+
+### Fixed
+
+- **MD041**: MDX-style inline disable comments (`{/* <!-- rumdl-disable MD041 --> */}`) now correctly suppress MD041 ([#538](https://github.com/rvben/rumdl/issues/538))
+- **MD041**: Extracted shared `first_content_line_idx()` helper to prevent check/fix path inconsistencies
+
 ## [0.1.56] - 2026-03-19
 
 ### Added
