@@ -127,6 +127,37 @@ impl MD041FirstLineHeading {
         false
     }
 
+    /// Find the first content line index (0-indexed) in the document.
+    ///
+    /// Skips front matter, blank lines, HTML/MDX comments, ESM blocks,
+    /// kramdown extensions, MkDocs anchors, reference definitions, and badges.
+    /// Used by both check() and fix() to ensure consistent behavior.
+    fn first_content_line_idx(ctx: &crate::lint_context::LintContext) -> Option<usize> {
+        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
+
+        for (idx, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.in_front_matter
+                || line_info.is_blank
+                || line_info.in_esm_block
+                || line_info.in_html_comment
+                || line_info.in_mdx_comment
+                || line_info.in_kramdown_extension_block
+                || line_info.is_kramdown_block_ial
+            {
+                continue;
+            }
+            let line_content = line_info.content(ctx.content);
+            if is_mkdocs && is_mkdocs_anchor_line(line_content) {
+                continue;
+            }
+            if Self::is_non_content_line(line_content) {
+                continue;
+            }
+            return Some(idx);
+        }
+        None
+    }
+
     /// Check if a line consists only of badge/shield images
     /// Common patterns:
     /// - `![badge](url)`
@@ -385,6 +416,7 @@ impl MD041FirstLineHeading {
             // Preamble: invisible/structural tokens that don't count as content
             let is_preamble = trimmed.is_empty()
                 || line_info.in_html_comment
+                || line_info.in_mdx_comment
                 || line_info.in_html_block
                 || Self::is_non_content_line(line_content)
                 || (is_mkdocs && is_mkdocs_anchor_line(line_content))
@@ -501,53 +533,9 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
 
-        // Find the first non-blank line after front matter using cached info
-        let mut first_content_line_num = None;
-        let mut skip_lines = 0;
-
-        // Skip front matter (YAML, TOML, JSON, malformed)
-        for line_info in &ctx.lines {
-            if line_info.in_front_matter {
-                skip_lines += 1;
-            } else {
-                break;
-            }
-        }
-
-        // Check if we're in MkDocs flavor
-        let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
-
-        for (line_num, line_info) in ctx.lines.iter().enumerate().skip(skip_lines) {
-            let line_content = line_info.content(ctx.content);
-            let trimmed = line_content.trim();
-            // Skip ESM blocks in MDX files (import/export statements)
-            if line_info.in_esm_block {
-                continue;
-            }
-            // Skip HTML comments - they are non-visible and should not affect MD041
-            if line_info.in_html_comment {
-                continue;
-            }
-            // Skip MkDocs anchor lines (empty link with attr_list) when in MkDocs flavor
-            if is_mkdocs && is_mkdocs_anchor_line(line_content) {
-                continue;
-            }
-            // Skip kramdown extension blocks and block IALs (preamble detection)
-            if line_info.in_kramdown_extension_block || line_info.is_kramdown_block_ial {
-                continue;
-            }
-            if !trimmed.is_empty() && !Self::is_non_content_line(line_content) {
-                first_content_line_num = Some(line_num);
-                break;
-            }
-        }
-
-        if first_content_line_num.is_none() {
-            // No non-blank lines after front matter
+        let Some(first_line_idx) = Self::first_content_line_idx(ctx) else {
             return Ok(warnings);
-        }
-
-        let first_line_idx = first_content_line_num.unwrap();
+        };
 
         // Check if the first non-blank line is a heading of the required level
         let first_line_info = &ctx.lines[first_line_idx];
@@ -642,13 +630,10 @@ impl Rule for MD041FirstLineHeading {
             return Ok(ctx.content.to_string());
         }
 
-        // Respect inline disable comments
-        let first_content_line = ctx
-            .lines
-            .iter()
-            .enumerate()
-            .find(|(_, li)| !li.in_front_matter && !li.is_blank)
-            .map(|(i, _)| i + 1) // 1-indexed
+        // Respect inline disable comments — use the same first-content-line
+        // logic as check() so both paths agree on which line to check.
+        let first_content_line = Self::first_content_line_idx(ctx)
+            .map(|i| i + 1) // 1-indexed
             .unwrap_or(1);
         if ctx.inline_config().is_rule_disabled(self.name(), first_content_line) {
             return Ok(ctx.content.to_string());
@@ -2437,5 +2422,105 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
 
         assert_eq!(patched, fixed, "Applying Fix directly should match fix() output");
+    }
+
+    #[test]
+    fn test_mdx_disable_on_line_1_no_heading() {
+        // The exact user scenario from issue #538:
+        // MDX disable comment on line 1, NO heading anywhere.
+        // The disable is the ONLY reason MD041 should not fire.
+        let content = "{/* <!-- rumdl-disable MD041 MD034 --> */}\n<Note>\nThis documentation is linted with http://rumdl.dev/\n</Note>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+
+        // check() should produce a warning on line 2 (<Note> is the first content line)
+        let rule = MD041FirstLineHeading::default();
+        let warnings = rule.check(&ctx).unwrap();
+        // The rule itself produces a warning, but the engine filters it via inline config.
+        // MD041's check() doesn't filter inline config itself — the engine does.
+        // What matters is that the warning is on line 2 (not line 1), so the engine
+        // can see the disable is active at line 2 and suppress it.
+        if !warnings.is_empty() {
+            assert_eq!(
+                warnings[0].line, 2,
+                "Warning must be on line 2 (first content line after MDX comment), not line 1"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mdx_disable_fix_returns_unchanged() {
+        // fix() should return content unchanged when MDX disable is active
+        let content = "{/* <!-- rumdl-disable MD041 --> */}\n<Note>\nContent\n</Note>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let rule = MD041FirstLineHeading {
+            fix_enabled: true,
+            ..MD041FirstLineHeading::default()
+        };
+        let result = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            result, content,
+            "fix() should not modify content when MD041 is disabled via MDX comment"
+        );
+    }
+
+    #[test]
+    fn test_mdx_comment_without_disable_heading_on_next_line() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MDX comment (not a disable directive) on line 1, heading on line 2
+        let content = "{/* Some MDX comment */}\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MDX comment is preamble; heading on next line should satisfy MD041"
+        );
+    }
+
+    #[test]
+    fn test_mdx_comment_without_heading_triggers_warning() {
+        let rule = MD041FirstLineHeading::default();
+
+        // MDX comment on line 1, non-heading content on line 2
+        let content = "{/* Some MDX comment */}\nThis is not a heading\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "MDX comment followed by non-heading should trigger MD041"
+        );
+        assert_eq!(
+            result[0].line, 2,
+            "Warning should be on line 2 (the first content line after MDX comment)"
+        );
+    }
+
+    #[test]
+    fn test_multiline_mdx_comment_followed_by_heading() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Multi-line MDX comment followed by heading
+        let content = "{/*\nSome multi-line\nMDX comment\n*/}\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multi-line MDX comment should be preamble; heading after it satisfies MD041"
+        );
+    }
+
+    #[test]
+    fn test_html_comment_still_works_as_preamble_regression() {
+        let rule = MD041FirstLineHeading::default();
+
+        // Plain HTML comment on line 1, heading on line 2
+        let content = "<!-- Some comment -->\n# My Document\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "HTML comment should still be treated as preamble (regression test)"
+        );
     }
 }
