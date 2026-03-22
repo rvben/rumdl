@@ -1032,4 +1032,49 @@ This has * real spaced emphasis * that should be flagged."#;
         );
         assert_eq!(result4[0].column, 6);
     }
+
+    #[test]
+    fn test_spaced_bold_metadata_pattern_detected() {
+        let rule = MD037NoSpaceInEmphasis;
+
+        // Broken bold metadata — leading space after opening **
+        let content = "# Test\n\n** Explicit Import**: Convert markdownlint configs to rumdl format:";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should flag '** Explicit Import**' as spaced emphasis. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 3);
+
+        // Trailing space before closing **
+        let content2 = "# Test\n\n**trailing only **: some text";
+        let ctx2 = LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert_eq!(
+            result2.len(),
+            1,
+            "Should flag '**trailing only **' as spaced emphasis. Got: {result2:?}"
+        );
+
+        // Both leading and trailing spaces with colon
+        let content3 = "# Test\n\n** both spaces **: some text";
+        let ctx3 = LintContext::new(content3, crate::config::MarkdownFlavor::Standard, None);
+        let result3 = rule.check(&ctx3).unwrap();
+        assert_eq!(
+            result3.len(),
+            1,
+            "Should flag '** both spaces **' as spaced emphasis. Got: {result3:?}"
+        );
+
+        // Valid bold metadata — should NOT be flagged
+        let content4 = "# Test\n\n**Key**: value";
+        let ctx4 = LintContext::new(content4, crate::config::MarkdownFlavor::Standard, None);
+        let result4 = rule.check(&ctx4).unwrap();
+        assert!(
+            result4.is_empty(),
+            "Should not flag valid bold metadata '**Key**: value'. Got: {result4:?}"
+        );
+    }
 }

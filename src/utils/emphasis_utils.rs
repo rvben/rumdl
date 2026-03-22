@@ -428,4 +428,22 @@ mod tests {
         // Only opening brace without closing should not match
         assert!(!has_doc_patterns("{* incomplete"));
     }
+
+    #[test]
+    fn test_doc_pattern_rejects_spaced_bold_metadata() {
+        // Valid bold metadata — should be treated as doc pattern (skip MD037)
+        assert!(has_doc_patterns("**Key**: value"));
+        assert!(has_doc_patterns("**Name**: another value"));
+        assert!(has_doc_patterns("**X**: single char"));
+        assert!(has_doc_patterns("* **Key**: list item with bold key"));
+
+        // Broken bold with internal spaces — should NOT be treated as doc pattern
+        // so MD037 can flag the spacing issue
+        assert!(!has_doc_patterns("** Key**: value"));
+        assert!(!has_doc_patterns("**Key **: value"));
+        assert!(!has_doc_patterns("** Key **: value"));
+        assert!(!has_doc_patterns(
+            "** Explicit Import**: Convert markdownlint configs to rumdl format:"
+        ));
+    }
 }
