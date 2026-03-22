@@ -821,7 +821,7 @@ rumdl provides seamless compatibility with existing markdownlint configurations:
 
 This means you can place a `.markdownlint.yaml` at your project root and run rumdl from any subdirectory - it will find and use the config automatically.
 
-** Explicit Import**: Convert markdownlint configs to rumdl format:
+**Explicit Import**: Convert markdownlint configs to rumdl format:
 
 ```bash
 # Convert to .rumdl.toml
