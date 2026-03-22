@@ -12,7 +12,8 @@ static INLINE_MATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\$[^$]*\$\
 static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[*+-]\s+").unwrap());
 
 // Documentation style patterns
-static DOC_METADATA_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\*?\s*\*\*[^*]+\*\*\s*:").unwrap());
+static DOC_METADATA_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\*?\s*\*\*(?:[^*\s][^*]*[^*\s]|[^*\s])\*\*\s*:").unwrap());
 
 // Bold text pattern (for preserving bold text in documentation) - only match valid bold without spaces
 static BOLD_TEXT_PATTERN: LazyLock<Regex> =
