@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.58] - 2026-03-20
+## [0.1.58] - 2026-03-22
 
 ### Fixed
 
+- **MD037**: Detect spacing issues in bold metadata patterns like `** Key**: value` — the doc pattern exemption was too broad, suppressing valid MD037 warnings when `**` was followed by `:` (thanks @vEnhance in [#539](https://github.com/rvben/rumdl/pull/539))
 - **MDX support**: All rules now skip MDX comments (`{/* ... */}`) alongside HTML comments — MD010, MD011, MD018, MD022, MD028, MD030, MD032, MD033, MD034, MD036, MD046, MD052, MD066, MD067, MD068, MD069, MD070, MD075, MD076, MD077
 
 ## [0.1.57] - 2026-03-20
