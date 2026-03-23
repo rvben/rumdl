@@ -88,6 +88,15 @@ impl FromStr for OutputFormat {
 }
 
 impl OutputFormat {
+    /// Whether this format produces machine-readable output that should not
+    /// be mixed with human-readable summary lines.
+    pub fn is_machine_readable(&self) -> bool {
+        !matches!(
+            self,
+            OutputFormat::Text | OutputFormat::Full | OutputFormat::Concise | OutputFormat::Grouped
+        )
+    }
+
     /// Create a formatter instance for this format
     pub fn create_formatter(&self) -> Box<dyn OutputFormatter> {
         match self {
@@ -437,5 +446,24 @@ mod tests {
                 "Format {format:?} should handle warnings without rule names"
             );
         }
+    }
+
+    #[test]
+    fn test_is_machine_readable() {
+        // Human-readable formats
+        assert!(!OutputFormat::Text.is_machine_readable());
+        assert!(!OutputFormat::Full.is_machine_readable());
+        assert!(!OutputFormat::Concise.is_machine_readable());
+        assert!(!OutputFormat::Grouped.is_machine_readable());
+
+        // Machine-readable formats
+        assert!(OutputFormat::Json.is_machine_readable());
+        assert!(OutputFormat::JsonLines.is_machine_readable());
+        assert!(OutputFormat::GitHub.is_machine_readable());
+        assert!(OutputFormat::GitLab.is_machine_readable());
+        assert!(OutputFormat::Pylint.is_machine_readable());
+        assert!(OutputFormat::Azure.is_machine_readable());
+        assert!(OutputFormat::Sarif.is_machine_readable());
+        assert!(OutputFormat::Junit.is_machine_readable());
     }
 }

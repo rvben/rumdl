@@ -531,7 +531,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
     // Print results summary if not in quiet or silent mode
     // Skip for batch formats to keep stdout as pure structured output
-    if !quiet && !args.silent && !needs_collection {
+    if !quiet && !args.silent && !needs_collection && !output_format.is_machine_readable() {
         formatter::print_results_from_checkargs(formatter::PrintResultsArgs {
             args,
             has_issues,
@@ -546,7 +546,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     }
 
     // Print statistics if enabled and not in quiet or silent mode
-    if args.statistics && !quiet && !args.silent && !needs_collection && !all_warnings_for_stats.is_empty() {
+    if args.statistics
+        && !quiet
+        && !args.silent
+        && !needs_collection
+        && !output_format.is_machine_readable()
+        && !all_warnings_for_stats.is_empty()
+    {
         formatter::print_statistics(&all_warnings_for_stats);
     }
 
