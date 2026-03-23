@@ -111,11 +111,15 @@ pub(super) fn parse_links_images_pulldown<'a>(
                 ..
             }) => {
                 image_stack.push((range.start, dest_url, link_type, id));
+                link_text_chunks.clear();
             }
-            Event::Text(text) if !link_stack.is_empty() => {
+            // Shared between links and images. Safe because markdown does not
+            // allow nesting images inside links at the same depth, and each
+            // Start handler clears the chunks.
+            Event::Text(text) if !link_stack.is_empty() || !image_stack.is_empty() => {
                 link_text_chunks.push((text.to_string(), range.start, range.end));
             }
-            Event::Code(code) if !link_stack.is_empty() => {
+            Event::Code(code) if !link_stack.is_empty() || !image_stack.is_empty() => {
                 let code_text = format!("`{code}`");
                 link_text_chunks.push((code_text, range.start, range.end));
             }
@@ -223,6 +227,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
             Event::End(TagEnd::Image) => {
                 if let Some((start_pos, url, link_type, ref_id)) = image_stack.pop() {
                     if CodeBlockUtils::is_in_code_block(code_blocks, start_pos) {
+                        link_text_chunks.clear();
                         continue;
                     }
 
@@ -230,6 +235,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     // where code_spans are available.
 
                     if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
+                        link_text_chunks.clear();
                         continue;
                     }
 
@@ -241,7 +247,22 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
                     );
 
-                    let alt_text = if start_pos < content.len() {
+                    let alt_text = if matches!(link_type, LinkType::WikiLink { has_pothole: true }) {
+                        // ![[file.png|alt text]] — pulldown-cmark emits the alt
+                        // text after the pipe as Text events
+                        if !link_text_chunks.is_empty() {
+                            let text: String = link_text_chunks.iter().map(|(t, _, _)| t.as_str()).collect();
+                            // pulldown-cmark may emit trailing "]]" as part of the text
+                            let text = text.strip_suffix("]]").unwrap_or(&text).to_string();
+                            Cow::Owned(text)
+                        } else {
+                            Cow::Borrowed("")
+                        }
+                    } else if matches!(link_type, LinkType::WikiLink { has_pothole: false }) {
+                        // ![[file.png]] — no pipe means no alt text; the text
+                        // events just contain the filename, not actual alt text
+                        Cow::Borrowed("")
+                    } else if start_pos < content.len() {
                         let image_bytes = &content.as_bytes()[start_pos..range.end.min(content.len())];
 
                         let mut close_pos = None;
@@ -281,6 +302,8 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         Cow::Borrowed("")
                     };
 
+                    let url = Cow::Owned(url.to_string());
+
                     let reference_id = if is_reference && !ref_id.is_empty() {
                         Some(Cow::Owned(ref_id.to_lowercase()))
                     } else if is_reference {
@@ -297,11 +320,13 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         byte_offset: start_pos,
                         byte_end: range.end,
                         alt_text,
-                        url: Cow::Owned(url.to_string()),
+                        url,
                         is_reference,
                         reference_id,
                         link_type,
                     });
+
+                    link_text_chunks.clear();
                 }
             }
             Event::FootnoteReference(footnote_id) => {
