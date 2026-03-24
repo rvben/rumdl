@@ -432,3 +432,26 @@ fn test_inconsistency_within_same_type_detected() {
         "MD005 should flag inconsistent bullets (same type, different indents). Got: {md005_warnings:?}"
     );
 }
+
+/// List items inside footnote definitions should not trigger MD005.
+/// The 4-space indentation is required by footnote syntax, not a list indent issue.
+#[test]
+fn test_list_in_footnote_definition_not_flagged() {
+    let md005 = MD005ListIndent::default();
+    let content = "\
+# Test
+
+Text.[^note]
+
+[^note]:
+    - First item
+    - Second item
+      - Nested item
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = md005.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD005 should not flag list items inside footnote definitions: {warnings:?}"
+    );
+}

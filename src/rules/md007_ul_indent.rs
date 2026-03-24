@@ -138,7 +138,11 @@ impl Rule for MD007ULIndent {
 
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             // Skip if this line is in a code block, front matter, or mkdocstrings
-            if line_info.in_code_block || line_info.in_front_matter || line_info.in_mkdocstrings {
+            if line_info.in_code_block
+                || line_info.in_front_matter
+                || line_info.in_mkdocstrings
+                || line_info.in_footnote_definition
+            {
                 continue;
             }
 

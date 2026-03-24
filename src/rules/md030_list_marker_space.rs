@@ -79,6 +79,7 @@ impl Rule for MD030ListMarkerSpace {
                 && !line_info.in_math_block
                 && !line_info.in_pymdown_block
                 && !line_info.in_mkdocs_html_markdown
+                && !line_info.in_footnote_definition
             {
                 let line_num_1based = line_num + 1;
                 processed_lines.insert(line_num_1based);
@@ -163,7 +164,8 @@ impl Rule for MD030ListMarkerSpace {
                     || line_info.in_mdx_comment
                     || line_info.in_math_block
                     || line_info.in_pymdown_block
-                    || line_info.in_mkdocs_html_markdown)
+                    || line_info.in_mkdocs_html_markdown
+                    || line_info.in_footnote_definition)
             {
                 continue;
             }
@@ -244,12 +246,13 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
 
-            // Skip lines in code blocks, front matter, or HTML comments
+            // Skip lines in code blocks, front matter, HTML comments, or footnote definitions
             if let Some(line_info) = ctx.lines.get(line_idx)
                 && (line_info.in_code_block
                     || line_info.in_front_matter
                     || line_info.in_html_comment
-                    || line_info.in_mdx_comment)
+                    || line_info.in_mdx_comment
+                    || line_info.in_footnote_definition)
             {
                 result_lines.push(line.to_string());
                 continue;

@@ -2117,3 +2117,25 @@ fn test_blockquote_without_list_then_continuation() {
         "Blockquote without list should not affect continuation, got: {result:?}"
     );
 }
+
+/// List items inside footnote definitions should not trigger MD007.
+#[test]
+fn test_list_in_footnote_definition_not_flagged() {
+    let rule = MD007ULIndent::default();
+    let content = "\
+# Test
+
+Text.[^note]
+
+[^note]:
+    - First item
+    - Second item
+      - Nested item
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD007 should not flag list items inside footnote definitions: {result:?}"
+    );
+}

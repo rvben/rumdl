@@ -1716,4 +1716,25 @@ $$
         let content = ">  2.Item";
         assert_idempotent(content);
     }
+
+    /// List items inside footnote definitions should not trigger MD030.
+    #[test]
+    fn test_list_in_footnote_definition_not_flagged() {
+        let rule = MD030ListMarkerSpace::default();
+        let content = "\
+# Test
+
+Text.[^note]
+
+[^note]:
+    - First item
+    - Second item
+";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD030 should not flag list items inside footnote definitions: {result:?}"
+        );
+    }
 }

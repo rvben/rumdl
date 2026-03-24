@@ -304,6 +304,14 @@ impl MD032BlanksAroundLists {
         let mut blocks: Vec<(usize, usize, String)> = Vec::new();
 
         for block in &ctx.list_blocks {
+            // Skip list blocks inside footnote definitions
+            if ctx
+                .line_info(block.start_line)
+                .is_some_and(|info| info.in_footnote_definition)
+            {
+                continue;
+            }
+
             // For MD032, we need to check if there are code blocks that should
             // split the list into separate segments
 

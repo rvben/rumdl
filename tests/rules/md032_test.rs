@@ -818,3 +818,28 @@ fn test_blockquote_list_still_flags_real_violations() {
         "Blockquote list without blank lines should still be flagged"
     );
 }
+
+/// Lists inside footnote definitions should not trigger MD032.
+#[test]
+fn test_list_in_footnote_definition_not_flagged() {
+    let rule = MD032BlanksAroundLists::default();
+    let content = "\
+# Test
+
+Text.[^note]
+
+[^note]:
+    This footnote has:
+
+    - A list
+    - With items
+
+    And more text.
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD032 should not flag lists inside footnote definitions: {result:?}"
+    );
+}
