@@ -1,7 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::mkdocs_admonitions;
-use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_tabs;
 use crate::utils::range_utils::calculate_line_range;
 use toml;
@@ -698,15 +697,6 @@ impl Rule for MD046CodeBlockStyle {
             _ => self.config.style,
         };
 
-        // Pre-compute footnote definition ranges once (O(n)) for O(log n) lookups
-        // Only needed when checking indented blocks
-        let footnote_ranges =
-            if target_style == CodeBlockStyle::Fenced && ctx.code_block_details.iter().any(|d| !d.is_fenced) {
-                compute_footnote_ranges(ctx.content)
-            } else {
-                Vec::new()
-            };
-
         // Iterate code_block_details directly (O(k) where k is number of blocks)
         let mut reported_indented_lines: std::collections::HashSet<usize> = std::collections::HashSet::new();
 
@@ -727,7 +717,7 @@ impl Rule for MD046CodeBlockStyle {
                     if ctx
                         .lines
                         .get(start_line_idx)
-                        .is_some_and(|info| info.in_html_comment || info.in_mdx_comment)
+                        .is_some_and(|info| info.in_html_comment || info.in_mdx_comment || info.in_footnote_definition)
                     {
                         continue;
                     }
@@ -756,13 +746,9 @@ impl Rule for MD046CodeBlockStyle {
                             || info.in_html_block
                             || info.in_jsx_block
                             || info.in_mkdocstrings
+                            || info.in_footnote_definition
                             || info.blockquote.is_some()
                     }) {
-                        continue;
-                    }
-
-                    // Skip if inside a footnote definition (O(log n) lookup)
-                    if is_in_footnote_range(&footnote_ranges, detail.start) {
                         continue;
                     }
 
@@ -1051,49 +1037,6 @@ impl Rule for MD046CodeBlockStyle {
         let rule_config = crate::rule_config_serde::load_rule_config::<MD046Config>(config);
         Box::new(Self::from_config_struct(rule_config))
     }
-}
-
-/// Compute byte ranges of footnote definitions in a single O(n) pass.
-/// Returns sorted, non-overlapping (start, end) byte ranges.
-fn compute_footnote_ranges(content: &str) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut footnote_start: Option<(usize, usize)> = None; // (byte_start, indent)
-
-    let mut offset = 0;
-    for line in content.split('\n') {
-        let line_end = offset + line.len();
-
-        if mkdocs_footnotes::is_footnote_definition(line) {
-            // Close previous footnote if any
-            if let Some((start, _)) = footnote_start.take() {
-                ranges.push((start, offset.saturating_sub(1)));
-            }
-            let indent = mkdocs_footnotes::get_footnote_indent(line).unwrap_or(0);
-            footnote_start = Some((offset, indent));
-        } else if let Some((_, indent)) = footnote_start
-            && !line.trim().is_empty()
-            && !mkdocs_footnotes::is_footnote_continuation(line, indent)
-        {
-            // Non-continuation line ends the footnote
-            let (start, _) = footnote_start.take().unwrap();
-            ranges.push((start, offset.saturating_sub(1)));
-        }
-
-        offset = line_end + 1; // +1 for the \n
-    }
-
-    // Close final footnote
-    if let Some((start, _)) = footnote_start {
-        ranges.push((start, content.len()));
-    }
-
-    ranges
-}
-
-/// Check if a byte position falls within any footnote range using binary search.
-fn is_in_footnote_range(ranges: &[(usize, usize)], pos: usize) -> bool {
-    let idx = ranges.partition_point(|&(start, _)| start <= pos);
-    idx > 0 && pos < ranges[idx - 1].1
 }
 
 #[cfg(test)]

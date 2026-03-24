@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Root cause: `ENABLE_OLD_FOOTNOTES` parser option caused footnote continuation lines to be misidentified as indented code blocks, hiding reference usages from MD053
   - Switched to `ENABLE_FOOTNOTES` and unified all pulldown-cmark parser option sets across the codebase
   - Added `in_footnote_definition` field to `LineInfo` for proper footnote body detection
-- **MD005, MD007, MD030, MD032**: Skip footnote definition body content to prevent false positives on list indentation and spacing within footnotes
+- **MD005, MD007, MD030, MD032, MD046**: Skip footnote definition body content to prevent false positives on list indentation, spacing, and code block style within footnotes
 - **MD045**: Recognize Obsidian wikilink image alt text (`![[image|alt text]]`) as valid
 - **Output**: Suppress summary text in machine-readable output formats (JSON, SARIF, etc.)
 
