@@ -148,10 +148,9 @@ fn detect_full_link_target(text: &str, position: Position) -> Option<FullLinkTar
 /// Uses pulldown-cmark to parse the document, which natively skips code blocks
 /// and code spans, eliminating false positives from literal `](#...)` text.
 fn find_same_file_fragment_links(content: &str, uri: &Url, anchor: &str) -> Vec<Location> {
-    use pulldown_cmark::{Event, Options, Parser, Tag};
+    use pulldown_cmark::{Event, Parser, Tag};
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_FOOTNOTES);
+    let options = crate::utils::rumdl_parser_options();
 
     let parser = Parser::new_ext(content, options).into_offset_iter();
 
@@ -1181,10 +1180,9 @@ fn collect_same_file_anchor_edits(
     new_anchor: &str,
     changes: &mut HashMap<Url, Vec<TextEdit>>,
 ) {
-    use pulldown_cmark::{Event, Options, Parser, Tag};
+    use pulldown_cmark::{Event, Parser, Tag};
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_FOOTNOTES);
+    let options = crate::utils::rumdl_parser_options();
 
     let parser = Parser::new_ext(content, options).into_offset_iter();
 

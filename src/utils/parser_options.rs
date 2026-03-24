@@ -13,7 +13,7 @@ use pulldown_cmark::Options;
 pub fn rumdl_parser_options() -> Options {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_OLD_FOOTNOTES);
+    options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_SMART_PUNCTUATION);

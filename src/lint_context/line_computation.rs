@@ -152,6 +152,7 @@ pub(super) fn compute_basic_line_info(
             in_kramdown_extension_block: false,
             is_kramdown_block_ial: false,
             in_jsx_block: false,
+            in_footnote_definition: false,
         });
     }
 

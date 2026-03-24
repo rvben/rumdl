@@ -71,6 +71,8 @@ pub struct LineInfo {
     pub is_kramdown_block_ial: bool,
     /// Whether this line is inside a JSX component block (MDX only, e.g. `<Tabs>...</Tabs>`)
     pub in_jsx_block: bool,
+    /// Whether this line is inside a footnote definition body (continuation lines)
+    pub in_footnote_definition: bool,
 }
 
 impl LineInfo {

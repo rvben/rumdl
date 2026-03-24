@@ -1,6 +1,7 @@
 use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
-use pulldown_cmark::{BrokenLink, Event, LinkType, Options, Tag, TagEnd};
+use crate::utils::rumdl_parser_options;
+use pulldown_cmark::{BrokenLink, Event, LinkType, Tag, TagEnd};
 use regex::Regex;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -72,9 +73,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
     let mut link_found_positions = HashSet::new();
     let mut image_found_positions = HashSet::new();
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_WIKILINKS);
-    options.insert(Options::ENABLE_FOOTNOTES);
+    let options = rumdl_parser_options();
 
     let parser = pulldown_cmark::Parser::new_with_broken_link_callback(
         content,

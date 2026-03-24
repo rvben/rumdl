@@ -666,6 +666,11 @@ impl MD005ListIndent {
         )> = Vec::new();
 
         for (item_line, effective_indent, line_info, list_item) in candidate_items {
+            // Skip list items inside footnote definitions
+            if line_info.in_footnote_definition {
+                skipped_lines.insert(item_line);
+                continue;
+            }
             // Skip list items that are continuation content
             if self.is_continuation_content(ctx, cache, item_line, effective_indent) {
                 skipped_lines.insert(item_line);

@@ -1247,4 +1247,174 @@ Some text using [ref1] here.
             "[ref] at end of line should be recognized as usage: {result:?}"
         );
     }
+
+    #[test]
+    fn test_reference_in_multiline_footnote_not_false_positive() {
+        // Issue #540: reference link inside multi-line footnote body
+        // was falsely reported as unused because the 4-space-indented
+        // footnote continuation was misidentified as an indented code block
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+# Greetings
+
+This is a paragraph that has a footnote.[^footnote]
+
+[^footnote]:
+    This footnote is long enough that it doesn't fit on just one line.
+    Here is my [website][web].
+
+[web]: https://web.evanchen.cc
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference used inside multi-line footnote should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reference_in_single_line_footnote() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+# Greetings
+
+This is a paragraph that has a footnote.[^footnote]
+
+[^footnote]: Here is my [website][web].
+
+[web]: https://web.evanchen.cc
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference used inside single-line footnote should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_shortcut_reference_in_multiline_footnote() {
+        // Shortcut reference [web] (not full [text][web]) inside footnote
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+Text with footnote.[^note]
+
+[^note]:
+    See [web] for details.
+
+[web]: https://example.com
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Shortcut reference inside multi-line footnote should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_unused_reference_not_in_footnote_still_flagged() {
+        // Ensure we don't accidentally suppress real unused references
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+# Greetings
+
+This is a paragraph that has a footnote.[^footnote]
+
+[^footnote]:
+    This footnote is long enough.
+
+[unused]: https://example.com
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("unused"));
+    }
+
+    #[test]
+    fn test_image_reference_in_multiline_footnote() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+Text with footnote.[^note]
+
+[^note]:
+    Here is a diagram:
+    ![diagram][img]
+
+[img]: https://example.com/diagram.png
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Image reference inside multi-line footnote should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_multiple_references_in_one_footnote() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+Text.[^note]
+
+[^note]:
+    See [link1][ref1] and [link2][ref2] for details.
+
+[ref1]: https://example.com
+[ref2]: https://example.org
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Multiple references inside one footnote should all be recognized: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reference_in_code_block_inside_footnote_not_counted() {
+        // Fenced code blocks within footnotes should still be treated as code.
+        // A [ref] pattern inside a fenced code block is not a usage.
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+Text.[^code]
+
+[^code]:
+    ```python
+    x = [ref_like_syntax]
+    ```
+
+[ref_like_syntax]: https://example.com
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Reference inside fenced code block within footnote should still be unused: {result:?}"
+        );
+        assert!(result[0].message.contains("ref_like_syntax"));
+    }
+
+    #[test]
+    fn test_nested_list_in_footnote_with_reference() {
+        let rule = MD053LinkImageReferenceDefinitions::new();
+        let content = "\
+Text.[^deep]
+
+[^deep]:
+    - List item
+        - Nested with [link text][deep-ref]
+
+[deep-ref]: https://example.com
+";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference in nested list inside footnote should not be flagged: {result:?}"
+        );
+    }
 }

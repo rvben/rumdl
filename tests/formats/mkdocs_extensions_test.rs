@@ -676,7 +676,7 @@ Paragraph with many attributes.
 Term with **bold**
 :   Definition with *italic* and `code`.
 
-    Second paragraph with [link](url).
+    Second paragraph with [definition list documentation](https://example.com).
 
 Another Term
 :   - List item 1

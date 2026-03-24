@@ -221,6 +221,48 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_mkdocs_line_info(&content_lines, &mut lines, flavor)
         );
 
+        // Detect footnote definitions and correct false code block detection.
+        // With ENABLE_FOOTNOTES, pulldown-cmark correctly parses multi-line
+        // footnotes, but the code block detector may still mark 4-space-indented
+        // footnote continuation lines as indented code blocks.
+        profile_section!(
+            "Footnote definitions",
+            profile,
+            detect_footnote_definitions(content, &mut lines, &line_offsets)
+        );
+
+        // Filter code_blocks to remove false positives from footnote continuation content.
+        // Same pattern as MkDocs/JSX corrections below.
+        {
+            let mut new_code_blocks = Vec::with_capacity(code_blocks.len());
+            for &(start, end) in &code_blocks {
+                let start_line = line_offsets
+                    .partition_point(|&offset| offset <= start)
+                    .saturating_sub(1);
+                let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
+
+                let mut sub_start: Option<usize> = None;
+                for (i, &offset) in line_offsets[start_line..end_line]
+                    .iter()
+                    .enumerate()
+                    .map(|(j, o)| (j + start_line, o))
+                {
+                    let is_real_code = lines.get(i).is_some_and(|info| info.in_code_block);
+                    if is_real_code && sub_start.is_none() {
+                        let byte_start = if i == start_line { start } else { offset };
+                        sub_start = Some(byte_start);
+                    } else if !is_real_code && sub_start.is_some() {
+                        new_code_blocks.push((sub_start.unwrap(), offset));
+                        sub_start = None;
+                    }
+                }
+                if let Some(s) = sub_start {
+                    new_code_blocks.push((s, end));
+                }
+            }
+            code_blocks = new_code_blocks;
+        }
+
         // Filter code_blocks to remove false positives from MkDocs admonition/tab content.
         // pulldown-cmark treats 4-space-indented content as indented code blocks, but inside
         // MkDocs admonitions and content tabs this is regular markdown content.
@@ -1235,5 +1277,68 @@ impl<'a> LintContext<'a> {
         self.lines
             .iter()
             .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
+    }
+}
+
+/// Detect footnote definitions and mark their continuation lines.
+///
+/// Uses pulldown-cmark to find footnote definition ranges and fenced code
+/// blocks within them, then:
+/// 1. Sets `in_footnote_definition = true` on all lines within
+/// 2. Clears `in_code_block = false` on continuation lines that were
+///    misidentified as indented code blocks (but preserves real fenced
+///    code blocks within footnotes)
+fn detect_footnote_definitions(content: &str, lines: &mut [types::LineInfo], line_offsets: &[usize]) {
+    use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
+
+    let options = crate::utils::rumdl_parser_options();
+    let parser = Parser::new_ext(content, options).into_offset_iter();
+
+    // Collect footnote ranges and fenced code block ranges within them
+    let mut footnote_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut fenced_code_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut in_footnote = false;
+
+    for (event, range) in parser {
+        match event {
+            Event::Start(Tag::FootnoteDefinition(_)) => {
+                in_footnote = true;
+                footnote_ranges.push((range.start, range.end));
+            }
+            Event::End(TagEnd::FootnoteDefinition) => {
+                in_footnote = false;
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(_))) if in_footnote => {
+                fenced_code_ranges.push((range.start, range.end));
+            }
+            _ => {}
+        }
+    }
+
+    let byte_to_line = |byte_offset: usize| -> usize {
+        line_offsets
+            .partition_point(|&offset| offset <= byte_offset)
+            .saturating_sub(1)
+    };
+
+    // Mark footnote definition lines
+    for &(start, end) in &footnote_ranges {
+        let start_line = byte_to_line(start);
+        let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
+
+        for line in &mut lines[start_line..end_line] {
+            line.in_footnote_definition = true;
+            line.in_code_block = false;
+        }
+    }
+
+    // Restore in_code_block for fenced code blocks within footnotes
+    for &(start, end) in &fenced_code_ranges {
+        let start_line = byte_to_line(start);
+        let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
+
+        for line in &mut lines[start_line..end_line] {
+            line.in_code_block = true;
+        }
     }
 }
