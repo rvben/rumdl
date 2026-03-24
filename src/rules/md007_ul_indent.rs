@@ -4,7 +4,7 @@
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 
-mod md007_config;
+pub mod md007_config;
 use md007_config::MD007Config;
 
 #[derive(Debug, Clone, Default)]
@@ -256,8 +256,12 @@ impl Rule for MD007ULIndent {
                     .map(|&(_, _, is_ordered, content_col, _)| (is_ordered, content_col));
 
                 // Calculate expected indent using per-parent logic
-                let mut expected_indent = if self.config.start_indented {
-                    self.config.start_indent.get() as usize + (nesting_level * self.config.indent.get() as usize)
+                // When start_indented is true, only depth-0 items use the start_indent value.
+                // For nested items (depth >= 1), the parent's actual position in the stack
+                // already reflects the start_indent shift, so calculate_expected_indent
+                // naturally produces the correct result.
+                let mut expected_indent = if self.config.start_indented && nesting_level == 0 {
+                    self.config.start_indent.get() as usize
                 } else {
                     self.calculate_expected_indent(nesting_level, parent_info)
                 };

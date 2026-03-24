@@ -2139,3 +2139,195 @@ Text.[^note]
         "MD007 should not flag list items inside footnote definitions: {result:?}"
     );
 }
+
+// =============================================================================
+// Issue #541: start_indented + mixed OL/UL lists
+// =============================================================================
+
+mod issue541_start_indented_mixed_lists {
+    use rumdl_lib::lint_context::LintContext;
+    use rumdl_lib::rule::Rule;
+    use rumdl_lib::rules::MD007ULIndent;
+    use rumdl_lib::rules::md007_ul_indent::md007_config::{IndentStyle, MD007Config};
+    use rumdl_lib::types::IndentSize;
+
+    fn start_indented_rule() -> MD007ULIndent {
+        MD007ULIndent::from_config_struct(MD007Config {
+            indent: IndentSize::from_const(2),
+            start_indented: true,
+            start_indent: IndentSize::from_const(2),
+            style: IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: false,
+        })
+    }
+
+    /// Exact reproduction from issue #541: UL nested under OL with start_indented
+    #[test]
+    fn test_ul_under_ol_with_start_indented() {
+        let rule = start_indented_rule();
+        // "  1. First thing" → marker at col 2, content at col 5 (after "1. ")
+        // "     * Sub thing" → marker at col 5, text-aligned with "First thing"
+        let content = "\
+# Le Title
+
+  1. First thing
+     * Sub thing
+";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "UL at col 5 under OL '1. ' content col should not trigger MD007.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// Auto-fix must not break the document (the destructive fix from the bug report)
+    #[test]
+    fn test_fix_does_not_break_ol_ul_nesting() {
+        let rule = start_indented_rule();
+        let content = "\
+# Le Title
+
+  1. First thing
+     * Sub thing
+";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Fix must not alter already-correct text-aligned nesting"
+        );
+    }
+
+    /// Pure UL with start_indented must not regress (levels at 2, 4, 6)
+    #[test]
+    fn test_pure_ul_start_indented_no_regression() {
+        let rule = start_indented_rule();
+        let content = "  * Level 0 (2 spaces)\n    * Level 1 (4 spaces)\n      * Level 2 (6 spaces)\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Pure UL with start_indented should accept 2/4/6 spacing.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// OL > UL > UL deeply nested with start_indented
+    #[test]
+    fn test_deeply_nested_ol_ul_ul_start_indented() {
+        let rule = start_indented_rule();
+        // OL "  1. " at col 2, content at col 5
+        // UL "     * " at col 5, content at col 7
+        // UL "       * " at col 7, text-aligned with parent UL content
+        let content = "  1. First\n     * Sub\n       * SubSub\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Deeply nested OL > UL > UL with text-aligned indentation should be valid.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// Multi-digit OL > UL with start_indented
+    #[test]
+    fn test_multi_digit_ol_ul_start_indented() {
+        let rule = start_indented_rule();
+        // "  10. Item" → marker at col 2, content at col 6 (after "10. ")
+        // "      * Sub" → marker at col 6, text-aligned
+        let content = "  10. Ten\n      * Sub\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Multi-digit OL with start_indented should use text-aligned indent.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// UL > OL > UL mixed nesting with start_indented
+    #[test]
+    fn test_ul_ol_ul_mixed_start_indented() {
+        let rule = start_indented_rule();
+        // UL "  * Parent" at col 2, content at col 4
+        // OL "    1. Ordered" at col 4, content at col 7
+        // UL "       * Deep" at col 7, text-aligned with OL content
+        let content = "  * Parent\n    1. Ordered child\n       * Grandchild\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "UL > OL > UL mixed nesting with start_indented should be valid.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// Fix idempotency: running fix twice should produce identical output
+    #[test]
+    fn test_fix_idempotency_start_indented() {
+        let rule = start_indented_rule();
+        let content = "  1. First thing\n     * Sub thing\n       * Deep thing\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed1 = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(
+            fixed1, fixed2,
+            "Fix must be idempotent (second run should produce no changes)"
+        );
+    }
+
+    /// Test with start_indent=4, indent=2 to distinguish the two code paths
+    #[test]
+    fn test_start_indent_differs_from_indent() {
+        let rule = MD007ULIndent::from_config_struct(MD007Config {
+            indent: IndentSize::from_const(2),
+            start_indented: true,
+            start_indent: IndentSize::from_const(4),
+            style: IndentStyle::TextAligned,
+            style_explicit: false,
+            indent_explicit: false,
+        });
+        // Depth 0 UL: 4 spaces (start_indent)
+        // OL "    1. Item" at col 4, content at col 7
+        // UL "       * Sub" at col 7, text-aligned with OL content
+        let content = "    1. Item\n       * Sub\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "With start_indent=4, indent=2: UL at col 7 text-aligned under OL should be valid.\n\
+             Got {} warnings: {:?}",
+            warnings.len(),
+            warnings
+        );
+    }
+
+    /// Negative test: wrong indentation under OL with start_indented should still warn
+    #[test]
+    fn test_wrong_indent_under_ol_still_warns() {
+        let rule = start_indented_rule();
+        // OL "  1. First" content at col 5
+        // UL "   * Sub" at col 3 — wrong, should be at col 5 (text-aligned)
+        let content = "  1. First\n   * Sub\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "UL at col 3 under OL content col 5 should trigger MD007 with start_indented"
+        );
+    }
+}

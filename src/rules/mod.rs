@@ -9,7 +9,7 @@ mod md001_heading_increment;
 mod md003_heading_style;
 pub mod md004_unordered_list_style;
 mod md005_list_indent;
-mod md007_ul_indent;
+pub mod md007_ul_indent;
 mod md009_trailing_spaces;
 mod md010_no_hard_tabs;
 mod md011_no_reversed_links;
