@@ -260,10 +260,12 @@ version-major:
 	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
-	@git commit -m "Bump version to $(NEW_TAG)"
-	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
-	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
+	@scripts/update-npm-versions.sh
+	@sed -i.bak -E 's/mise use rumdl@[0-9.]+/mise use rumdl@$(VERSION_NO_V)/g' README.md && rm -f README.md.bak
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh npm/
+	@git commit -m "chore(release): prepare $(NEW_TAG)"
+	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
+	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
 
 version-minor:
 	@echo "Creating new minor version tag..."
@@ -278,10 +280,12 @@ version-minor:
 	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
-	@git commit -m "Bump version to $(NEW_TAG)"
-	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
-	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
+	@scripts/update-npm-versions.sh
+	@sed -i.bak -E 's/mise use rumdl@[0-9.]+/mise use rumdl@$(VERSION_NO_V)/g' README.md && rm -f README.md.bak
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh npm/
+	@git commit -m "chore(release): prepare $(NEW_TAG)"
+	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
+	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
 
 version-patch:
 	@echo "Creating new patch version tag..."
@@ -297,10 +301,12 @@ version-patch:
 	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
 	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh
-	@git commit -m "Bump version to $(NEW_TAG)"
-	@git tag -a $(NEW_TAG) -m "Release $(NEW_TAG)"
-	@echo "Version $(NEW_TAG) created and committed. Run 'git push && git push origin $(NEW_TAG)' to trigger release workflow."
+	@scripts/update-npm-versions.sh
+	@sed -i.bak -E 's/mise use rumdl@[0-9.]+/mise use rumdl@$(VERSION_NO_V)/g' README.md && rm -f README.md.bak
+	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh npm/
+	@git commit -m "chore(release): prepare $(NEW_TAG)"
+	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
+	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
 
 # Target to push the new tag and changes automatically
 version-push:
