@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long
+.PHONY: build test clean fmt check doc version-major version-minor version-patch build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version pre-release build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema changelog-draft changelog-latest changelog-all changelog-help benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long check-links
 
 # Development environment setup
 setup-mise:
@@ -440,6 +440,10 @@ benchmark-run:
 benchmark-chart:
 	@echo "Generating benchmark chart..."
 	@uv run --with matplotlib python3 scripts/generate_benchmark_chart.py
+
+check-links:
+	@echo "Checking links in markdown files..."
+	mise exec -- lychee --no-progress --config .lychee.toml 'README.md' 'docs/**/*.md'
 
 # Documentation validation
 test-doc-completeness:

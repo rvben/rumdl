@@ -29,6 +29,7 @@ zig = "0.13"
 # Additional Rust development tools for dependency management
 "cargo:cargo-edit" = "latest"     # For cargo add/rm/upgrade commands
 "cargo:cargo-outdated" = "latest" # Check for outdated dependencies
+"cargo:lychee" = "latest"         # Link checker for markdown files
 # Optional: Security and dependency tools
 # "cargo:cargo-audit" = "latest"    # Security audit dependencies
 # "cargo:cargo-deny" = "latest"     # Lint dependencies

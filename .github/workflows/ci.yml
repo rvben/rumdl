@@ -71,10 +71,32 @@ jobs:
       - name: Run tests
         run: make test-ci
 
+  check-links:
+    name: Check Links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install mise tools
+        run: |
+          for attempt in 1 2 3; do
+            mise install cargo:lychee --yes && break
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Check links
+        run: make check-links
+
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, check-links]
     if: always()
     steps:
       - name: Verify all checks passed
