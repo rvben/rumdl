@@ -77,18 +77,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: jdx/mise-action@v4
-        with:
-          experimental: true
-          install: false
-
-      - name: Install mise tools
+      - name: Install lychee
         run: |
-          for attempt in 1 2 3; do
-            mise install cargo:lychee --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
-            sleep 10
-          done
+          curl -sLO "https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-gnu.tar.gz"
+          tar xzf lychee-x86_64-unknown-linux-gnu.tar.gz
+          install lychee /usr/local/bin/
 
       - name: Check links
         run: make check-links

@@ -1,2 +1,3 @@
 /RULES  /rules  301
 /RULES/ /rules/ 301
+/RULES/* /rules/:splat 301

@@ -248,14 +248,7 @@ changelog-help:
 	@echo ""
 	@echo "Configuration: cliff.toml"
 
-version-major:
-	@echo "Creating new major version tag..."
-	$(eval CURRENT := $(shell git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0))
-	$(eval MAJOR := $(shell echo $(CURRENT) | sed -E 's/v([0-9]+)\.[0-9]+\.[0-9]+/\1/'))
-	$(eval NEW_MAJOR := $(shell echo $$(( $(MAJOR) + 1 ))))
-	$(eval NEW_TAG := v$(NEW_MAJOR).0.0)
-	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
-	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
+_version-bump:
 	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
 	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
@@ -267,6 +260,16 @@ version-major:
 	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
 	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
 
+version-major:
+	@echo "Creating new major version tag..."
+	$(eval CURRENT := $(shell git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0))
+	$(eval MAJOR := $(shell echo $(CURRENT) | sed -E 's/v([0-9]+)\.[0-9]+\.[0-9]+/\1/'))
+	$(eval NEW_MAJOR := $(shell echo $$(( $(MAJOR) + 1 ))))
+	$(eval NEW_TAG := v$(NEW_MAJOR).0.0)
+	$(eval VERSION_NO_V := $(NEW_MAJOR).0.0)
+	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
+	@$(MAKE) _version-bump NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
+
 version-minor:
 	@echo "Creating new minor version tag..."
 	$(eval CURRENT := $(shell git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0))
@@ -276,16 +279,7 @@ version-minor:
 	$(eval NEW_TAG := v$(MAJOR).$(NEW_MINOR).0)
 	$(eval VERSION_NO_V := $(MAJOR).$(NEW_MINOR).0)
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
-	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
-	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
-	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@scripts/update-npm-versions.sh
-	@sed -i.bak -E 's/mise use rumdl@[0-9.]+/mise use rumdl@$(VERSION_NO_V)/g' README.md && rm -f README.md.bak
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh npm/
-	@git commit -m "chore(release): prepare $(NEW_TAG)"
-	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
-	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
+	@$(MAKE) _version-bump NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
 
 version-patch:
 	@echo "Creating new patch version tag..."
@@ -297,16 +291,7 @@ version-patch:
 	$(eval NEW_TAG := v$(MAJOR).$(MINOR).$(NEW_PATCH))
 	$(eval VERSION_NO_V := $(MAJOR).$(MINOR).$(NEW_PATCH))
 	@echo "Current: $(CURRENT) -> New: $(NEW_TAG)"
-	@$(MAKE) update-cargo-version VERSION_NO_V=$(VERSION_NO_V)
-	@$(MAKE) update-github-action-version VERSION_NO_V=$(VERSION_NO_V)
-	@$(MAKE) update-all-docs-version NEW_TAG=$(NEW_TAG)
-	@$(MAKE) update-changelog NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
-	@scripts/update-npm-versions.sh
-	@sed -i.bak -E 's/mise use rumdl@[0-9.]+/mise use rumdl@$(VERSION_NO_V)/g' README.md && rm -f README.md.bak
-	@git add Cargo.toml Cargo.lock README.md docs/global-settings.md CHANGELOG.md scripts/rumdl-action.sh npm/
-	@git commit -m "chore(release): prepare $(NEW_TAG)"
-	@git tag -a $(NEW_TAG) -m "$(NEW_TAG)"
-	@echo "Version $(NEW_TAG) created and committed. Run 'git push origin main $(NEW_TAG)' to trigger release workflow."
+	@$(MAKE) _version-bump NEW_TAG=$(NEW_TAG) VERSION_NO_V=$(VERSION_NO_V) CURRENT=$(CURRENT)
 
 # Target to push the new tag and changes automatically
 version-push:
@@ -447,9 +432,11 @@ benchmark-chart:
 	@echo "Generating benchmark chart..."
 	@uv run --with matplotlib python3 scripts/generate_benchmark_chart.py
 
+LYCHEE := $(shell command -v lychee 2>/dev/null || echo "mise exec -- lychee")
+
 check-links:
 	@echo "Checking links in markdown files..."
-	mise exec -- lychee --no-progress --config .lychee.toml --remap 'https://rumdl.dev/([^/]+)/? file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
+	$(LYCHEE) --no-progress --config .lychee.toml --remap 'https://rumdl.dev/([^/]+)/? file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
 
 # Documentation validation
 test-doc-completeness:
