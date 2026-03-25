@@ -87,6 +87,17 @@ repos:
         pass_filenames: true
         require_serial: true
 
+  # Link checking
+  - repo: local
+    hooks:
+      - id: check-links
+        name: check links
+        entry: make check-links
+        language: system
+        files: \.md$
+        pass_filenames: false
+        stages: [pre-push]
+
   # Pre-push hooks for comprehensive validation
   - repo: local
     hooks:

@@ -71,25 +71,10 @@ jobs:
       - name: Run tests
         run: make test-ci
 
-  check-links:
-    name: Check Links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install lychee
-        run: |
-          curl -sLO "https://github.com/lycheeverse/lychee/releases/download/lychee-v0.23.0/lychee-x86_64-unknown-linux-gnu.tar.gz"
-          tar xzf lychee-x86_64-unknown-linux-gnu.tar.gz
-          install lychee /usr/local/bin/
-
-      - name: Check links
-        run: make check-links
-
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test, check-links]
+    needs: [lint, test]
     if: always()
     steps:
       - name: Verify all checks passed
