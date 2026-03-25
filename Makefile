@@ -443,7 +443,7 @@ benchmark-chart:
 
 check-links:
 	@echo "Checking links in markdown files..."
-	mise exec -- lychee --no-progress --config .lychee.toml 'README.md' 'docs/**/*.md'
+	mise exec -- lychee --no-progress --config .lychee.toml --remap 'https://rumdl.dev/([^/]+)/? file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
 
 # Documentation validation
 test-doc-completeness:

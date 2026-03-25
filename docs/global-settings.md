@@ -1008,7 +1008,7 @@ When running `rumdl check .` from the project root, rumdl discovers and applies
 configuration files on a per-directory basis. Files in a subdirectory with their
 own `.rumdl.toml` will use that config instead of the root config.
 
-This follows the same model as [Ruff's per-directory configuration](https://docs.astral.sh/ruff/configuration/config-file/#config-file-discovery).
+This follows the same model as [Ruff's per-directory configuration](https://docs.astral.sh/ruff/configuration/#config-file-discovery).
 
 ### How it works
 

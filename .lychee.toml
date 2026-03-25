@@ -1,17 +1,6 @@
 # Lychee link checker configuration
 # https://lychee.cli.rs/configuration/
 
-# Exclude URLs that are known to be valid but return errors
-exclude = [
-    # VS Code marketplace returns 404 for extensions not yet published
-    "https://marketplace.visualstudio.com/items\\?itemName=rumdl\\.rumdl",
-    # Deprecated rules that no longer have documentation pages
-    "md002\\.md",
-    "md006\\.md",
-    # External links that are intermittently broken
-    "https://docs.astral.sh/ruff/.*",
-]
-
 # Paths to exclude from checking
 exclude_path = [
     "test_tmp",

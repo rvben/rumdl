@@ -247,7 +247,7 @@ Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 
 | Editor                              | Install                                                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| VS Code / Cursor / Windsurf         | `rumdl vscode` or [Marketplace](https://marketplace.visualstudio.com/items?itemName=rumdl.rumdl) |
+| VS Code / Cursor / Windsurf         | `rumdl vscode` or [Marketplace](https://marketplace.visualstudio.com/items?itemName=rvben.rumdl) |
 | JetBrains (PyCharm, IntelliJ, etc.) | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/29943-rumdl)                        |
 
 All plugins provide real-time linting, formatting on save, hover documentation, and automatic configuration discovery.
