@@ -23,6 +23,8 @@ uv.lock
 .cursor/
 .idea/
 site/
+docs/superpowers/
+docs/design/
 
 # npm platform package binaries
 npm/cli-*/rumdl
