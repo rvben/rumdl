@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.60] - 2026-03-25
+
+## [0.1.60] - 2026-03-25
+
+### Fixed
+
+- **MD007**: Fix `start_indented` not respecting text-aligned indentation for unordered lists nested under ordered lists ([#541](https://github.com/rvben/rumdl/issues/541))
+
+### Changed
+
+- Normalize documentation URLs to lowercase for consistent paths
+- Fix broken links: VS Code marketplace publisher ID, Ruff docs URL, deprecated rule references
+- Add Cloudflare Pages redirects for backward compatibility
+- Add lychee link checker to CI for pre-deploy link validation (thanks @sglre6355 in [#542](https://github.com/rvben/rumdl/pull/542))
+
 ## [0.1.59] - 2026-03-24
 
 ### Fixed
@@ -5069,7 +5084,8 @@ markdownlint-cli2 on real-world repositories.
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.0.200...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.1.60...HEAD
+[0.1.60]: https://github.com/rvben/rumdl/compare/v0.1.59...v0.1.60
 [0.0.200]: https://github.com/rvben/rumdl/compare/v0.0.199...v0.0.200
 [0.0.163]: https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163
 [0.0.162]: https://github.com/rvben/rumdl/compare/v0.0.161...v0.0.162
