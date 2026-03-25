@@ -4,7 +4,7 @@ contact_links:
     url: https://github.com/rvben/rumdl/tree/main/docs
     about: Check the documentation for rule details and configuration options
   - name: Rule Reference
-    url: https://github.com/rvben/rumdl/blob/main/docs/RULES.md
+    url: https://github.com/rvben/rumdl/blob/main/docs/rules.md
     about: Browse all available lint rules
   - name: Question or Discussion
     url: https://github.com/rvben/rumdl/discussions

@@ -206,12 +206,12 @@ while read -r DOCS_COUNT; do
     fi
 done < <(grep -oE '[0-9]+ lint(ing)? rules' docs/index.md | grep -oE '[0-9]+')
 
-# Check docs/RULES.md
+# Check docs/rules.md
 while read -r DOCS_COUNT; do
     if [[ "$DOCS_COUNT" != "$ACTUAL_RULE_COUNT" ]]; then
-        DOCS_MISMATCHES="${DOCS_MISMATCHES}docs/RULES.md says $DOCS_COUNT, "
+        DOCS_MISMATCHES="${DOCS_MISMATCHES}docs/rules.md says $DOCS_COUNT, "
     fi
-done < <(grep -oE 'implements [0-9]+ rules' docs/RULES.md | grep -oE '[0-9]+')
+done < <(grep -oE 'implements [0-9]+ rules' docs/rules.md | grep -oE '[0-9]+')
 
 # Check README.md
 while read -r DOCS_COUNT; do
@@ -230,8 +230,8 @@ if [[ -z "$DOCS_MISMATCHES" ]]; then
 elif $FIX_MODE; then
     # Fix docs/index.md: replace any "N lint rules" or "N linting rules"
     sed -i '' -E "s/[0-9]+ lint(ing)? rules/$ACTUAL_RULE_COUNT lint rules/g" docs/index.md
-    # Fix docs/RULES.md: replace "implements N rules"
-    sed -i '' -E "s/implements [0-9]+ rules/implements $ACTUAL_RULE_COUNT rules/g" docs/RULES.md
+    # Fix docs/rules.md: replace "implements N rules"
+    sed -i '' -E "s/implements [0-9]+ rules/implements $ACTUAL_RULE_COUNT rules/g" docs/rules.md
     # Fix README.md: replace "N lint rules" and "implements N lint rules"
     sed -i '' -E "s/[0-9]+ lint(ing)? rules/$ACTUAL_RULE_COUNT lint rules/g" README.md
     echo -e "${GREEN}✓${NC} (fixed to $ACTUAL_RULE_COUNT rules)"
@@ -312,12 +312,12 @@ OPT_IN_COMMENT=$(grep -rl "default: false.*opt-in\|opt-in.*default.*false" src/r
 
 OPT_IN_RULES=$(echo -e "$OPT_IN_EXPLICIT\n$OPT_IN_FN\n$OPT_IN_COMMENT" | sort -u | grep -v "^$")
 
-# Check which are documented in RULES.md opt-in table
+# Check which are documented in rules.md opt-in table
 MISSING_DOCS=""
 for RULE in $OPT_IN_RULES; do
-    if ! grep -q "\[${RULE}\]" docs/RULES.md | grep -A20 "## Opt-in Rules" &>/dev/null; then
+    if ! grep -q "\[${RULE}\]" docs/rules.md | grep -A20 "## Opt-in Rules" &>/dev/null; then
         # More precise check: look in the opt-in section specifically
-        OPT_IN_SECTION=$(sed -n '/## Opt-in Rules/,/## /p' docs/RULES.md | head -20)
+        OPT_IN_SECTION=$(sed -n '/## Opt-in Rules/,/## /p' docs/rules.md | head -20)
         if ! echo "$OPT_IN_SECTION" | grep -qi "\[${RULE}\]"; then
             MISSING_DOCS="${MISSING_DOCS}${RULE} "
         fi
@@ -328,9 +328,9 @@ if [[ -z "$MISSING_DOCS" ]]; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗${NC}"
-    echo -e "${RED}ERROR: Opt-in rules missing from docs/RULES.md opt-in table:${NC}"
+    echo -e "${RED}ERROR: Opt-in rules missing from docs/rules.md opt-in table:${NC}"
     echo "  $MISSING_DOCS"
-    echo "Add them to the '## Opt-in Rules' section in docs/RULES.md"
+    echo "Add them to the '## Opt-in Rules' section in docs/rules.md"
     ((ERRORS++))
 fi
 
