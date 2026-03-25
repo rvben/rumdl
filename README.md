@@ -436,7 +436,7 @@ rumdl implements 71 lint rules for Markdown files. Here are some key rule catego
 | **Images**     | Image alt text and references            | MD045, MD052        |
 | **Style**      | Consistent style across document         | MD031, MD032, MD035 |
 
-For a complete list of rules and their descriptions, see our [documentation](https://rumdl.dev/RULES/) or run:
+For a complete list of rules and their descriptions, see our [documentation](https://rumdl.dev/rules/) or run:
 
 ```bash
 rumdl rule

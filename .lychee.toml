@@ -7,6 +7,9 @@ exclude_path = [
     "benchmark",
     "__tests__",
     "CHANGELOG.md",
+    "docs/superpowers",
+    "docs/design",
+    ".claude",
 ]
 
 # Don't check mail addresses
