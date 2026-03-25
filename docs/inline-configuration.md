@@ -216,7 +216,7 @@ Both formats are case-insensitive and work identically:
 <!-- rumdl-disable MD001 line-length no-inline-html -->
 ````
 
-Each rule's alias is listed at the top of its documentation page. See the [Rules Reference](RULES.md) for a complete list of available rules and their aliases.
+Each rule's alias is listed at the top of its documentation page. See the [Rules Reference](rules.md) for a complete list of available rules and their aliases.
 
 ## Comparison with Global Configuration
 
@@ -263,5 +263,5 @@ Regular content continues here.
 ## See Also
 
 - [Global Settings Reference](global-settings.md) - Configure rules globally
-- [Rules Reference](RULES.md) - Complete list of available rules
+- [Rules Reference](rules.md) - Complete list of available rules
 - [Configuration Guide](../README.md#configuration) - General configuration documentation

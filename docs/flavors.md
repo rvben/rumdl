@@ -70,12 +70,12 @@ If you encounter a pattern that rumdl doesn't handle correctly for your document
 1. Check if the pattern is already supported in the flavor documentation
 2. Try configuring the relevant rule to allow the pattern
 3. Open an issue with:
-   - The Markdown content that triggers a false positive
-   - The documentation system and version you're using
-   - The expected behavior
+    - The Markdown content that triggers a false positive
+    - The documentation system and version you're using
+    - The expected behavior
 
 ## See Also
 
 - [Global Settings](global-settings.md) - Configure flavor globally
 - [Per-File Configuration](global-settings.md#per-file-flavor) - Override flavor per file
-- [Rules Reference](RULES.md) - Complete rule documentation
+- [Rules Reference](rules.md) - Complete rule documentation

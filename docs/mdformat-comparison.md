@@ -55,7 +55,7 @@ rumdl provides 68 linting rules that mdformat does not have:
 - **Style enforcement** (MD003, MD004, MD049, MD050)
 - **Error detection** (MD011 - reversed links, MD042 - empty links)
 
-See the [Rules Reference](RULES.md) for the complete list.
+See the [Rules Reference](rules.md) for the complete list.
 
 ### Extended Syntax Support
 
@@ -279,5 +279,5 @@ Some teams use mdformat for formatting and a separate linter. With rumdl, you ca
 - [mdformat documentation](https://mdformat.readthedocs.io/)
 - [mdformat GitHub](https://github.com/executablebooks/mdformat)
 - [rumdl GitHub](https://github.com/rvben/rumdl)
-- [rumdl rules documentation](RULES.md)
+- [rumdl rules documentation](rules.md)
 - [rumdl flavors documentation](flavors.md)

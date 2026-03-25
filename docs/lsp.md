@@ -213,5 +213,5 @@ You should see a JSON response with server capabilities.
 ## See also
 
 - [Configuration guide](global-settings.md)
-- [Rules reference](RULES.md)
+- [Rules reference](rules.md)
 - [VS Code extension](https://marketplace.visualstudio.com/items?itemName=rvben.rumdl)

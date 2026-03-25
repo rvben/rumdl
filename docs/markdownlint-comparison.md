@@ -19,7 +19,7 @@ rumdl is **fully compatible** with markdownlint while offering significant perfo
 
 rumdl implements **68 rules total**: all 53 markdownlint rules plus 15 unique rules.
 
-**Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](RULES.md) for the complete list.
+**Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 
 **Note:** Rule numbers MD001-MD060 have gaps (MD002, MD006, MD008, MD015-MD017 were never implemented in markdownlint). rumdl maintains these gaps for compatibility.
 
@@ -416,5 +416,5 @@ If you find a compatibility issue with markdownlint:
 - [markdownlint documentation](https://github.com/DavidAnson/markdownlint)
 - [CommonMark specification](https://spec.commonmark.org/)
 - [rumdl GitHub repository](https://github.com/rvben/rumdl)
-- [rumdl rules documentation](RULES.md)
+- [rumdl rules documentation](rules.md)
 - [rumdl flavors documentation](flavors.md)

@@ -135,5 +135,5 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 - [Comparison with markdownlint](markdownlint-comparison.md) — detailed rule-by-rule comparison and migration guide
 - [Comparison with mdformat](mdformat-comparison.md) — formatting feature comparison and migration guide
-- [Rules Reference](RULES.md) — complete list of rumdl's 71 rules
+- [Rules Reference](rules.md) — complete list of rumdl's 71 rules
 - [Markdown Flavors](flavors.md) — flavor configuration and per-rule adjustments

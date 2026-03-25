@@ -22,7 +22,7 @@ icon: lucide/file-check
 
     Comprehensive coverage of common Markdown issues with detailed error messages.
 
-    [:octicons-arrow-right-24: View rules](RULES.md)
+    [:octicons-arrow-right-24: View rules](rules.md)
 
 -   :wrench:{ .lg .middle } **Auto-formatting**
 
@@ -98,7 +98,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
     Get up and running with rumdl in minutes.
 
--   [:octicons-book-24: **Rules Reference**](RULES.md)
+-   [:octicons-book-24: **Rules Reference**](rules.md)
 
     Explore all 71 linting rules with examples.
 
