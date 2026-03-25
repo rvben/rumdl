@@ -1346,7 +1346,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 ## See Also
 
 - [Configuration Guide](../README.md#configuration) - Basic configuration setup
-- [Rules Reference](RULES.md) - Complete list of available rules
+- [Rules Reference](rules.md) - Complete list of available rules
 - [CLI Reference](../README.md#command-line-interface) - Command-line options
 - [Rule-specific Configuration](../README.md#configuration-file-example) - Configuring individual rules
 - [Code Block Tools](code-block-tools.md) - External linters/formatters for code blocks [preview]
