@@ -33,7 +33,7 @@ nav = [
     { "Inline Configuration" = "inline-configuration.md" },
     { "Markdown Flavors" = "flavors.md" },
   ]},
-  { "Rules" = "RULES.md" },
+  { "Rules" = "rules.md" },
   { "Integrations" = [
     { "LSP Server" = "lsp.md" },
     { "VS Code" = "vscode-extension.md" },

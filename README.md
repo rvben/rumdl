@@ -16,7 +16,7 @@
 ## A modern Markdown linter and formatter, built for speed with Rust
 
 | [**Docs**](https://rumdl.dev)
-| [**Rules**](https://rumdl.dev/RULES)
+| [**Rules**](https://rumdl.dev/rules)
 | [**Configuration**](https://rumdl.dev/global-settings)
 | [**Markdown Flavors**](https://rumdl.dev/flavors)
 | [**vs markdownlint**](https://rumdl.dev/markdownlint-comparison) |
