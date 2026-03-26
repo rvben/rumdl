@@ -261,7 +261,8 @@ impl Rule for MD042NoEmptyLinks {
             // Check for empty destination (URL) only
             // MD042 is about links that "do not lead anywhere" - focusing on empty destinations
             // Empty text with valid URL is NOT flagged (that's an accessibility concern, not "empty link")
-            if effective_url.trim().is_empty() {
+            let trimmed_url = effective_url.trim();
+            if trimmed_url.is_empty() || trimmed_url == "#" {
                 // In MkDocs mode, check if this is an attribute anchor: []() followed by { #anchor }
                 if mkdocs_mode
                     && link.text.trim().is_empty()
@@ -652,6 +653,68 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].message, "Empty link found: []()");
+    }
+
+    #[test]
+    fn test_bare_hash_treated_as_empty_url() {
+        let rule = MD042NoEmptyLinks::new();
+
+        // [](#) - bare fragment marker with no name is an empty/meaningless URL
+        let ctx = LintContext::new("# Title\n\n[](#)\n", crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "[](#) should be flagged as empty link. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("[](#)"));
+
+        // [text](#) - text with bare # URL
+        let ctx = LintContext::new("# Title\n\n[text](#)\n", crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "[text](#) should be flagged as empty link. Got: {result:?}"
+        );
+        assert!(result[0].message.contains("[text](#)"));
+
+        // [text]( # ) - bare # with surrounding whitespace
+        let ctx = LintContext::new(
+            "# Title\n\n[text]( # )\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "[text]( # ) should be flagged as empty link. Got: {result:?}"
+        );
+
+        // [text](#foo) - actual fragment should NOT be flagged
+        let ctx = LintContext::new(
+            "# Title\n\n[text](#foo)\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "[text](#foo) has a real fragment, should NOT be flagged. Got: {result:?}"
+        );
+
+        // [](#section) - empty text but valid fragment URL should NOT be flagged
+        let ctx = LintContext::new(
+            "# Title\n\n[](#section)\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "[](#section) has a real URL, should NOT be flagged. Got: {result:?}"
+        );
     }
 
     #[test]
