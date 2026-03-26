@@ -123,15 +123,15 @@ fn compute_inline_code_mask(text: &str) -> Vec<bool> {
                     }
                     if close_count == backtick_count {
                         // Mark the content between the delimiters (not the backticks themselves)
-                        for j in content_start..close_start {
-                            mask[j] = true;
+                        for item in mask.iter_mut().take(close_start).skip(content_start) {
+                            *item = true;
                         }
                         // Also mark the opening and closing backticks
-                        for j in open_start..content_start {
-                            mask[j] = true;
+                        for item in mask.iter_mut().take(content_start).skip(open_start) {
+                            *item = true;
                         }
-                        for j in close_start..i {
-                            mask[j] = true;
+                        for item in mask.iter_mut().take(i).skip(close_start) {
+                            *item = true;
                         }
                         found_close = true;
                         break;

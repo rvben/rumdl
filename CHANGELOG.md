@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.60] - 2026-03-25
+## [0.1.61] - 2026-03-26
+
+### Fixed
+
+- **MD042**: Treat bare `#` URL as empty link ([#546](https://github.com/rvben/rumdl/issues/546))
+- **MD013**: Ignore punctuation inside inline code for sentence splitting ([#545](https://github.com/rvben/rumdl/issues/545))
+- **MD063**: Skip invalid headings like Obsidian-style tags ([#544](https://github.com/rvben/rumdl/issues/544))
 
 ## [0.1.60] - 2026-03-25
 
