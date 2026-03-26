@@ -11,6 +11,22 @@ pub struct MD018Config {
     /// Default: false (all patterns are flagged)
     #[serde(default)]
     pub magiclink: bool,
+
+    /// Recognize `#word` patterns as tags instead of malformed headings.
+    /// When true, single-hash patterns like `#tag`, `#project/active` are
+    /// skipped. When null/unset, defaults to true for Obsidian flavor
+    /// and false otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<bool>,
+}
+
+impl MD018Config {
+    /// Whether tags mode is enabled, considering the flavor default.
+    /// Explicit config takes precedence; otherwise Obsidian flavor enables tags.
+    pub fn tags_enabled(&self, flavor: crate::config::MarkdownFlavor) -> bool {
+        self.tags
+            .unwrap_or(matches!(flavor, crate::config::MarkdownFlavor::Obsidian))
+    }
 }
 
 impl RuleConfig for MD018Config {
@@ -50,6 +66,28 @@ mod tests {
         let toml_str = "";
         let config: MD018Config = toml::from_str(toml_str).unwrap();
         assert!(!config.magiclink);
+        assert!(config.tags.is_none());
+    }
+
+    #[test]
+    fn test_tags_enabled() {
+        let config: MD018Config = toml::from_str("tags = true").unwrap();
+        assert_eq!(config.tags, Some(true));
+        assert!(config.tags_enabled(crate::config::MarkdownFlavor::Standard));
+    }
+
+    #[test]
+    fn test_tags_disabled() {
+        let config: MD018Config = toml::from_str("tags = false").unwrap();
+        assert_eq!(config.tags, Some(false));
+        assert!(!config.tags_enabled(crate::config::MarkdownFlavor::Obsidian));
+    }
+
+    #[test]
+    fn test_tags_default_follows_flavor() {
+        let config = MD018Config::default();
+        assert!(!config.tags_enabled(crate::config::MarkdownFlavor::Standard));
+        assert!(config.tags_enabled(crate::config::MarkdownFlavor::Obsidian));
     }
 
     #[test]

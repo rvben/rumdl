@@ -428,6 +428,118 @@ magiclink = true
     );
 }
 
+/// End-to-end test: MD018 tags config enables tag recognition without Obsidian flavor
+#[test]
+fn test_md018_tags_config_standard_flavor() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with tags enabled (no Obsidian flavor)
+    let config_content = r#"
+[MD018]
+tags = true
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // Create markdown with tag patterns and malformed headings
+    let md_content = r#"# Real Heading
+
+#todo this is a tag
+
+#project/active nested tag
+
+##Introduction
+
+#123
+"#;
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // Run with tags config - should skip tags, flag ##Introduction and #123
+    let (success, stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "test.md"]);
+    assert!(!success, "Should find issues (##Introduction, #123)");
+
+    let md018_count = stdout.matches("MD018").count();
+    assert_eq!(
+        md018_count, 2,
+        "With tags=true, should flag exactly 2 MD018 issues (##Introduction, #123). Found {md018_count}. stdout: {stdout}"
+    );
+
+    // Tags should NOT be flagged
+    assert!(
+        !stdout.contains("test.md:3:"),
+        "#todo (line 3) should NOT be flagged with tags=true. stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("test.md:5:"),
+        "#project/active (line 5) should NOT be flagged with tags=true. stdout: {stdout}"
+    );
+}
+
+/// End-to-end test: MD018 tags=false overrides Obsidian flavor default
+#[test]
+fn test_md018_tags_config_override_obsidian() {
+    let temp_dir = tempdir().unwrap();
+
+    // Create config with Obsidian flavor but tags explicitly disabled
+    let config_content = r#"
+[global]
+flavor = "obsidian"
+
+[MD018]
+tags = false
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    let md_content = r#"# Real Heading
+
+#todo
+
+#project/active
+"#;
+    fs::write(temp_dir.path().join("test.md"), md_content).unwrap();
+
+    // With tags=false, should flag tag patterns even in Obsidian flavor
+    let (success, stdout, _stderr) = run_rumdl(temp_dir.path(), &["check", "test.md"]);
+    assert!(!success, "Should find issues with tags=false");
+
+    let md018_count = stdout.matches("MD018").count();
+    assert_eq!(
+        md018_count, 2,
+        "With tags=false in Obsidian flavor, should flag tag patterns. Found {md018_count}. stdout: {stdout}"
+    );
+}
+
+/// End-to-end test: MD018 tags config fix preserves tags
+#[test]
+fn test_md018_tags_config_fix_preserves_tags() {
+    let temp_dir = tempdir().unwrap();
+
+    let config_content = r#"
+[MD018]
+tags = true
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    let md_content = "#todo\n\n#Summary\n";
+    let md_path = temp_dir.path().join("test.md");
+    fs::write(&md_path, md_content).unwrap();
+
+    let (success, _stdout, stderr) = run_rumdl(temp_dir.path(), &["check", "--fix", "test.md"]);
+    assert!(success, "Fix command should succeed. stderr: {stderr}");
+
+    let fixed_content = fs::read_to_string(&md_path).expect("Should read fixed file");
+
+    // Both #todo and #Summary match the tag pattern (# + non-digit non-space),
+    // so neither should be modified
+    assert!(
+        fixed_content.contains("#todo"),
+        "#todo should be preserved with tags=true. Fixed content: {fixed_content}"
+    );
+    assert!(
+        fixed_content.contains("#Summary"),
+        "#Summary should be preserved with tags=true (matches tag pattern). Fixed content: {fixed_content}"
+    );
+}
+
 /// Regression test: Fix coordination must respect per-file-flavor configuration.
 ///
 /// Bug: FixCoordinator used config.markdown_flavor() (global) instead of

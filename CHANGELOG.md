@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.61] - 2026-03-26
 
+### Added
+
+- **MD018**: Add `tags` config option to recognize `#word` patterns as tags independently of flavor ([#544](https://github.com/rvben/rumdl/issues/544))
+
 ### Fixed
 
 - **MD042**: Treat bare `#` URL as empty link ([#546](https://github.com/rvben/rumdl/issues/546))

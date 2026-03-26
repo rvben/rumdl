@@ -19,11 +19,11 @@ const UNICODE_HASHTAG_PATTERN_STR: &str = r"^#[\u{FE0F}\u{20E3}]";
 // whitespace, or punctuation (not alphanumeric continuation)
 const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
 
-// Obsidian tag pattern: #tagname, #project/active, #my-tag_2023, etc.
-// Obsidian tags start with # followed by a non-digit, non-space character,
+// Tag pattern: #tagname, #project/active, #my-tag_2023, etc.
+// Tags start with # followed by a non-digit, non-space character,
 // then any combination of word characters, hyphens, underscores, and slashes.
 // Tags cannot start with a number.
-const OBSIDIAN_TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
+const TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx {
@@ -53,10 +53,14 @@ impl MD018NoMissingSpaceAtx {
         get_cached_regex(MAGICLINK_REF_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
     }
 
-    /// Check if a line is an Obsidian tag (e.g., #tagname, #project/active)
-    /// Used by Obsidian flavor to skip tag syntax
-    fn is_obsidian_tag(line: &str) -> bool {
-        get_cached_regex(OBSIDIAN_TAG_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
+    /// Check if a line is a tag (e.g., #tagname, #project/active)
+    fn is_tag(line: &str) -> bool {
+        get_cached_regex(TAG_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
+    }
+
+    /// Whether tag patterns should be recognized for the given flavor
+    fn tags_enabled(&self, flavor: MarkdownFlavor) -> bool {
+        self.config.tags_enabled(flavor)
     }
 
     /// Check if an ATX heading line is missing space after the marker
@@ -133,9 +137,9 @@ impl MD018NoMissingSpaceAtx {
                 return None;
             }
 
-            // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
-            // Obsidian tags only use single #
-            if flavor == MarkdownFlavor::Obsidian && hash_count == 1 && Self::is_obsidian_tag(line) {
+            // Tags mode: skip tag syntax (#tagname, #project/active, etc.)
+            // Tags only use single #
+            if self.tags_enabled(flavor) && hash_count == 1 && Self::is_tag(line) {
                 return None;
             }
 
@@ -225,8 +229,8 @@ impl Rule for MD018NoMissingSpaceAtx {
                         continue;
                     }
 
-                    // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
-                    if ctx.flavor == MarkdownFlavor::Obsidian && heading.level == 1 && Self::is_obsidian_tag(line) {
+                    // Tags mode: skip tag syntax (#tagname, #project/active, etc.)
+                    if self.tags_enabled(ctx.flavor) && heading.level == 1 && Self::is_tag(line) {
                         continue;
                     }
 
@@ -332,17 +336,11 @@ impl Rule for MD018NoMissingSpaceAtx {
                     // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
                     let is_magiclink = self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line);
 
-                    // Obsidian flavor: skip tag syntax (#tagname, #project/active, etc.)
-                    let is_obsidian_tag =
-                        ctx.flavor == MarkdownFlavor::Obsidian && heading.level == 1 && Self::is_obsidian_tag(line);
+                    // Tags mode: skip tag syntax (#tagname, #project/active, etc.)
+                    let is_tag = self.tags_enabled(ctx.flavor) && heading.level == 1 && Self::is_tag(line);
 
                     // Only attempt fix if not a special pattern
-                    if !is_emoji
-                        && !is_unicode
-                        && !is_magiclink
-                        && !is_obsidian_tag
-                        && trimmed.len() > heading.marker.len()
-                    {
+                    if !is_emoji && !is_unicode && !is_magiclink && !is_tag && trimmed.len() > heading.marker.len() {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
@@ -1008,7 +1006,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_skips_numeric_refs() {
         // With magiclink config enabled, should skip MagicLink-style issue/PR refs (#123, #10, etc.)
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         // These numeric patterns should be SKIPPED with magiclink enabled
         assert!(
@@ -1033,7 +1034,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_still_flags_non_numeric() {
         // With magiclink config enabled, should still flag non-numeric patterns
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         // Non-numeric patterns should still be flagged even with magiclink enabled
         assert!(
@@ -1056,7 +1060,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_only_single_hash() {
         // MagicLink only uses single #, so ##10 should still be flagged
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         assert!(
             rule.check_atx_heading_line("##10", MarkdownFlavor::Standard).is_some(),
@@ -1087,7 +1094,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_full_check() {
         // Integration test: verify magiclink config skips MagicLink refs through full check() flow
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         let content = r#"# PRs that are helpful for context
 
@@ -1120,7 +1130,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_fix_exact_output() {
         // Verify fix() produces exact expected output with magiclink config
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         let content = "#10 discusses the issue.\n\n#Summary";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -1137,7 +1150,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_edge_cases() {
         // Test various edge cases for MagicLink pattern matching
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         // These should all be SKIPPED with magiclink config (valid MagicLink refs)
         // Note: #1 alone is skipped due to content length < 2, not MagicLink
@@ -1185,7 +1201,10 @@ More content.
     fn test_mkdocs_magiclink_hyphenated_continuation() {
         // Hyphenated patterns like #10-related should still be flagged
         // because they're likely malformed headings, not MagicLink refs
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         // Hyphen is not alphanumeric, so #10- would match as MagicLink
         // But #10-related has alphanumeric after the hyphen
@@ -1200,7 +1219,10 @@ More content.
     #[test]
     fn test_mkdocs_magiclink_standalone_number() {
         // #10 alone on a line (common in changelogs)
-        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
 
         let content = "See issue:\n\n#10\n\nFor details.";
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
@@ -1246,7 +1268,10 @@ More content.
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
         // With magiclink: preserves #10, fixes #Summary
-        let rule_magiclink = MD018NoMissingSpaceAtx::from_config_struct(MD018Config { magiclink: true });
+        let rule_magiclink = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: true,
+            ..Default::default()
+        });
         let fixed_magiclink = rule_magiclink.fix(&ctx).unwrap();
         assert_eq!(fixed_magiclink, "#10 is an issue\n# Summary");
 
@@ -1254,6 +1279,78 @@ More content.
         let rule_default = MD018NoMissingSpaceAtx::new();
         let fixed_default = rule_default.fix(&ctx).unwrap();
         assert_eq!(fixed_default, "# 10 is an issue\n# Summary");
+    }
+
+    // ==================== Tags config tests ====================
+
+    #[test]
+    fn test_tags_config_standard_flavor() {
+        // tags = true with standard flavor should skip tag patterns
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: false,
+            tags: Some(true),
+        });
+
+        let content = "#tag\n\n#project/active\n\n##Introduction";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        let flagged_lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+        assert!(!flagged_lines.contains(&1), "#tag should be skipped with tags = true");
+        assert!(
+            !flagged_lines.contains(&3),
+            "#project/active should be skipped with tags = true"
+        );
+        assert!(flagged_lines.contains(&5), "##Introduction should still be flagged");
+    }
+
+    #[test]
+    fn test_tags_config_fix_standard_flavor() {
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: false,
+            tags: Some(true),
+        });
+
+        let content = "#tag\n\n##Introduction";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "#tag\n\n## Introduction");
+    }
+
+    #[test]
+    fn test_tags_config_disabled_obsidian_flavor() {
+        // tags = false with Obsidian flavor should flag tag patterns
+        let rule = MD018NoMissingSpaceAtx::from_config_struct(MD018Config {
+            magiclink: false,
+            tags: Some(false),
+        });
+
+        let content = "#tag\n\n#project/active";
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            2,
+            "tags = false should flag tag patterns even in Obsidian"
+        );
+    }
+
+    #[test]
+    fn test_tags_config_default_follows_flavor() {
+        // Unset tags should default based on flavor
+        let rule = MD018NoMissingSpaceAtx::new(); // tags: None
+
+        // Standard: should flag
+        let content = "#tag";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(!result.is_empty(), "Default standard should flag #tag");
+
+        // Obsidian: should skip
+        let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Default Obsidian should skip #tag");
     }
 
     // ==================== Obsidian flavor tests ====================
