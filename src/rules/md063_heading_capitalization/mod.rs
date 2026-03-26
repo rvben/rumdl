@@ -939,6 +939,11 @@ impl Rule for MD063HeadingCapitalization {
                     continue;
                 }
 
+                // Skip invalid headings (e.g., `#tag` which lacks required space after #)
+                if !heading.is_valid {
+                    continue;
+                }
+
                 // Apply capitalization and compare
                 let original_text = &heading.raw_text;
                 let fixed_text = self.apply_capitalization(original_text);
@@ -998,6 +1003,11 @@ impl Rule for MD063HeadingCapitalization {
 
                 // Skip headings in code blocks
                 if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                    continue;
+                }
+
+                // Skip invalid headings (e.g., `#tag` which lacks required space after #)
+                if !heading.is_valid {
                     continue;
                 }
 
@@ -1252,6 +1262,46 @@ mod tests {
     }
 
     // Acronym preservation tests
+    #[test]
+    fn test_skip_obsidian_tags_not_headings() {
+        let rule = create_rule();
+
+        // #tag (no space after #) is an Obsidian tag, not a heading
+        let content = "# H1\n\n#tag\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty() || result.iter().all(|w| w.line != 3),
+            "Obsidian tag #tag should not be treated as a heading: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_skip_invalid_atx_headings_no_space() {
+        let rule = create_rule();
+
+        // #NoSpace is not a valid ATX heading (requires space after #)
+        let content = "#notaheading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Invalid ATX heading without space should not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_skips_obsidian_tags() {
+        let rule = create_rule();
+
+        let content = "# hello world\n\n#tag\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Obsidian, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Should fix the real heading but leave the tag alone
+        assert!(fixed.contains("#tag"), "Fix should not modify Obsidian tag #tag");
+        assert!(fixed.contains("# Hello World"), "Fix should still fix real headings");
+    }
+
     #[test]
     fn test_preserve_all_caps_acronyms() {
         let rule = create_rule();
