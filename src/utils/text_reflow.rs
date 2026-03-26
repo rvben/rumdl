@@ -92,6 +92,67 @@ impl Default for ReflowOptions {
     }
 }
 
+/// Build a boolean mask indicating which character positions are inside inline code spans.
+/// Handles single, double, and triple backtick delimiters.
+fn compute_inline_code_mask(text: &str) -> Vec<bool> {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut mask = vec![false; len];
+    let mut i = 0;
+
+    while i < len {
+        if chars[i] == '`' {
+            // Count opening backticks
+            let open_start = i;
+            let mut backtick_count = 0;
+            while i < len && chars[i] == '`' {
+                backtick_count += 1;
+                i += 1;
+            }
+
+            // Find matching closing backticks (same count)
+            let mut found_close = false;
+            let content_start = i;
+            while i < len {
+                if chars[i] == '`' {
+                    let close_start = i;
+                    let mut close_count = 0;
+                    while i < len && chars[i] == '`' {
+                        close_count += 1;
+                        i += 1;
+                    }
+                    if close_count == backtick_count {
+                        // Mark the content between the delimiters (not the backticks themselves)
+                        for j in content_start..close_start {
+                            mask[j] = true;
+                        }
+                        // Also mark the opening and closing backticks
+                        for j in open_start..content_start {
+                            mask[j] = true;
+                        }
+                        for j in close_start..i {
+                            mask[j] = true;
+                        }
+                        found_close = true;
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+
+            if !found_close {
+                // No matching close — backticks are literal, not code span
+                i = open_start + backtick_count;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    mask
+}
+
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
@@ -275,6 +336,9 @@ fn split_into_sentences_with_set(
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> Vec<String> {
+    // Pre-compute which character positions are inside inline code spans
+    let in_code = compute_inline_code_mask(text);
+
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
     let mut chars = text.chars().peekable();
@@ -283,7 +347,7 @@ fn split_into_sentences_with_set(
     while let Some(c) = chars.next() {
         current_sentence.push(c);
 
-        if is_sentence_boundary(text, pos, abbreviations, require_sentence_capital) {
+        if !in_code[pos] && is_sentence_boundary(text, pos, abbreviations, require_sentence_capital) {
             // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
             while let Some(&next) = chars.peek() {
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {

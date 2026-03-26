@@ -47,6 +47,51 @@ fn test_single_sentence_no_warning() {
 }
 
 #[test]
+fn test_inline_code_punctuation_not_sentence_boundary() {
+    let rule = create_sentence_per_line_rule();
+
+    // Punctuation inside inline code should not be treated as a sentence boundary
+    let content = "Rust macros look like `foo! {}` with the exclamation mark.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Punctuation inside inline code should not split sentences: {result:?}"
+    );
+}
+
+#[test]
+fn test_inline_code_with_period_not_sentence_boundary() {
+    let rule = create_sentence_per_line_rule();
+
+    // Period inside inline code should not be treated as a sentence boundary
+    let content = "Use `file.txt` as the input file for testing.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Period inside inline code should not split sentences: {result:?}"
+    );
+}
+
+#[test]
+fn test_inline_code_with_question_mark_not_sentence_boundary() {
+    let rule = create_sentence_per_line_rule();
+
+    // Question mark inside inline code should not be treated as a sentence boundary
+    let content = "The regex `is_valid?` matches optional characters.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Question mark inside inline code should not split sentences: {result:?}"
+    );
+}
+
+#[test]
 fn test_abbreviations_not_split() {
     let rule = create_sentence_per_line_rule();
     let content = "Mr. Smith met Dr. Jones at 3.14 PM.";
