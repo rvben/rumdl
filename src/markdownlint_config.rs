@@ -11,19 +11,37 @@ use std::fs;
 #[derive(Debug, Deserialize)]
 pub struct MarkdownlintConfig(pub HashMap<String, serde_yml::Value>);
 
-/// Load a markdownlint config file (JSON or YAML) from the given path
+/// Load a markdownlint config file (JSON or YAML) from the given path.
+/// Supports both flat markdownlint format and markdownlint-cli2 format
+/// where rules are nested under a top-level `config:` key.
 pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String> {
     let content = fs::read_to_string(path).map_err(|e| format!("Failed to read config file {path}: {e}"))?;
 
-    if path.ends_with(".json") || path.ends_with(".jsonc") {
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {e}"))
+    let config: MarkdownlintConfig = if path.ends_with(".json") || path.ends_with(".jsonc") {
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {e}"))?
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
-        serde_yml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))
+        serde_yml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))?
     } else {
         serde_json::from_str(&content)
             .or_else(|_| serde_yml::from_str(&content))
-            .map_err(|e| format!("Failed to parse config as JSON or YAML: {e}"))
+            .map_err(|e| format!("Failed to parse config as JSON or YAML: {e}"))?
+    };
+
+    Ok(unwrap_cli2_config(config))
+}
+
+/// If the parsed config contains a top-level `config` key whose value is a mapping,
+/// extract that mapping as the rule configuration. This supports the markdownlint-cli2
+/// format where rules are nested under `config:`.
+fn unwrap_cli2_config(config: MarkdownlintConfig) -> MarkdownlintConfig {
+    if let Some(mapping) = config.0.get("config").and_then(|v| v.as_mapping()) {
+        let inner_map: HashMap<String, serde_yml::Value> = mapping
+            .iter()
+            .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v.clone())))
+            .collect();
+        return MarkdownlintConfig(inner_map);
     }
+    config
 }
 
 /// Mapping table from markdownlint rule keys/aliases to rumdl rule keys
@@ -1173,6 +1191,143 @@ ul-style:
         // Underscores in the original key are normalized to kebab-case
         assert_eq!(fragment.rule_display_names.get("MD034").unwrap(), "no-bare-urls");
         assert!(fragment.global.disable.value.contains(&"no-bare-urls".to_string()));
+    }
+
+    #[test]
+    fn test_load_markdownlint_cli2_yaml_with_config_key() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            r#"config:
+  MD013:
+    line_length: 120
+  MD025: true
+  MD026: false
+  ul-style:
+    style: dash"#
+        )
+        .unwrap();
+
+        let path = temp_file.path().with_extension("yaml");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.0.len(), 4);
+        assert!(config.0.contains_key("MD013"));
+        assert!(config.0.contains_key("MD025"));
+        assert!(config.0.contains_key("MD026"));
+        assert!(config.0.contains_key("ul-style"));
+    }
+
+    #[test]
+    fn test_load_markdownlint_cli2_json_with_config_key() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            r#"{{
+            "config": {{
+                "MD049": {{ "style": "asterisk" }},
+                "MD013": {{ "line_length": 100 }}
+            }}
+        }}"#
+        )
+        .unwrap();
+
+        let path = temp_file.path().with_extension("json");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.0.len(), 2);
+        assert!(config.0.contains_key("MD049"));
+        assert!(config.0.contains_key("MD013"));
+    }
+
+    #[test]
+    fn test_load_markdownlint_cli2_with_config_and_other_keys() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            r#"globs:
+  - "**/*.md"
+ignores:
+  - "vendor/**"
+config:
+  MD013:
+    line_length: 80
+  MD049:
+    style: underscore"#
+        )
+        .unwrap();
+
+        let path = temp_file.path().with_extension("yaml");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        // Only rules from the config: key should be present, not globs/ignores
+        assert_eq!(config.0.len(), 2);
+        assert!(config.0.contains_key("MD013"));
+        assert!(config.0.contains_key("MD049"));
+        assert!(!config.0.contains_key("globs"));
+        assert!(!config.0.contains_key("ignores"));
+    }
+
+    #[test]
+    fn test_flat_format_still_works_with_config_as_rule() {
+        // Flat format without a config: wrapper should continue to work
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            r#"MD013:
+  line_length: 100
+MD049:
+  style: asterisk"#
+        )
+        .unwrap();
+
+        let path = temp_file.path().with_extension("yaml");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(config.0.len(), 2);
+        assert!(config.0.contains_key("MD013"));
+        assert!(config.0.contains_key("MD049"));
+    }
+
+    #[test]
+    fn test_load_markdownlint_cli2_empty_config_mapping() {
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "config: {{}}").unwrap();
+
+        let path = temp_file.path().with_extension("yaml");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        assert!(
+            config.0.is_empty(),
+            "Empty config: mapping should produce empty rule set"
+        );
+    }
+
+    #[test]
+    fn test_scalar_config_key_not_treated_as_cli2_wrapper() {
+        // A scalar `config: true` should NOT be treated as a cli2 wrapper
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(
+            temp_file,
+            r#"config: true
+MD013:
+  line_length: 100"#
+        )
+        .unwrap();
+
+        let path = temp_file.path().with_extension("yaml");
+        std::fs::rename(temp_file.path(), &path).unwrap();
+
+        let config = load_markdownlint_config(path.to_str().unwrap()).unwrap();
+        // Both keys preserved — scalar "config" is not unwrapped
+        assert_eq!(config.0.len(), 2);
+        assert!(config.0.contains_key("config"));
+        assert!(config.0.contains_key("MD013"));
     }
 
     #[test]
