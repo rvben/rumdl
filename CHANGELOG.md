@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.62] - 2026-03-27
 
+### Added
+
+- **config**: Support markdownlint-cli2 configuration format — the `config:` wrapper key is automatically detected and unwrapped ([#547](https://github.com/rvben/rumdl/issues/547))
+- **config**: Auto-discover `.markdownlint-cli2.jsonc`, `.markdownlint-cli2.yaml`, and `.markdownlint-cli2.yml` config files with correct precedence over plain `.markdownlint.*` files
+
+### Fixed
+
+- **MD057**: Reset file existence cache in `cross_file_check()` to prevent stale LSP diagnostics after fixing broken links ([#548](https://github.com/rvben/rumdl/issues/548))
+
 ## [0.1.61] - 2026-03-26
 
 ### Added
