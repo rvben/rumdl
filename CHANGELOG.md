@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.62] - 2026-03-27
+
 ## [0.1.61] - 2026-03-26
 
 ### Added
@@ -5094,7 +5096,8 @@ markdownlint-cli2 on real-world repositories.
 
 - Initial implementation of remaining rules for markdownlint parity
 
-[Unreleased]: https://github.com/rvben/rumdl/compare/v0.1.60...HEAD
+[Unreleased]: https://github.com/rvben/rumdl/compare/v0.1.62...HEAD
+[0.1.62]: https://github.com/rvben/rumdl/compare/v0.1.61...v0.1.62
 [0.1.60]: https://github.com/rvben/rumdl/compare/v0.1.59...v0.1.60
 [0.0.200]: https://github.com/rvben/rumdl/compare/v0.0.199...v0.0.200
 [0.0.163]: https://github.com/rvben/rumdl/compare/v0.0.162...v0.0.163

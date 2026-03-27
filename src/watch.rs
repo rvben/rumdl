@@ -29,12 +29,11 @@ pub fn change_detected(event: &Event) -> Option<ChangeKind> {
     let mut source_file = false;
     for path in &event.paths {
         // Check if this is a configuration file
-        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            if matches!(file_name, ".rumdl.toml" | "rumdl.toml" | "pyproject.toml")
-                || MARKDOWNLINT_CONFIG_FILES.contains(&file_name)
-            {
-                return Some(ChangeKind::Configuration);
-            }
+        if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+            && (matches!(file_name, ".rumdl.toml" | "rumdl.toml" | "pyproject.toml")
+                || MARKDOWNLINT_CONFIG_FILES.contains(&file_name))
+        {
+            return Some(ChangeKind::Configuration);
         }
 
         // Check for markdown files
