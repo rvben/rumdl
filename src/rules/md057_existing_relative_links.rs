@@ -1065,6 +1065,9 @@ impl Rule for MD057ExistingRelativeLinks {
         file_index: &FileIndex,
         workspace_index: &crate::workspace_index::WorkspaceIndex,
     ) -> LintResult {
+        // Reset the file existence cache for a fresh run
+        reset_file_existence_cache();
+
         let mut warnings = Vec::new();
 
         // Get the directory containing this file for resolving relative links
@@ -3394,6 +3397,85 @@ See the [docs][ref].
         assert!(
             result.is_empty(),
             "cross_file_check should find ref.md via Obsidian attachment folder. Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_cross_file_check_clears_stale_cache() {
+        // Verify that cross_file_check() resets the file existence cache so stale
+        // entries from a previous lint cycle do not affect results.
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Seed the cache with a stale entry: pretend "docs/phantom.md" exists on disk.
+        // In reality, neither the filesystem nor the workspace index has this file.
+        {
+            let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+            cache.insert(PathBuf::from("docs/phantom.md"), true);
+        }
+
+        let workspace_index = WorkspaceIndex::new();
+
+        let mut file_index = FileIndex::new();
+        file_index.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "phantom.md".to_string(),
+            fragment: "".to_string(),
+            line: 1,
+            column: 1,
+        });
+
+        let warnings = rule
+            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
+            .unwrap();
+
+        // With cache reset, cross_file_check must detect that phantom.md does not exist
+        assert_eq!(
+            warnings.len(),
+            1,
+            "cross_file_check should report missing file after clearing stale cache. Got: {warnings:?}"
+        );
+        assert!(warnings[0].message.contains("phantom.md"));
+    }
+
+    #[test]
+    fn test_cross_file_check_does_not_carry_over_cache_between_runs() {
+        // Two consecutive cross_file_check() calls should each start with a fresh cache.
+        use crate::workspace_index::WorkspaceIndex;
+
+        let rule = MD057ExistingRelativeLinks::new();
+        let workspace_index = WorkspaceIndex::new();
+
+        // First run: link to a file that doesn't exist
+        let mut file_index_1 = FileIndex::new();
+        file_index_1.add_cross_file_link(CrossFileLinkIndex {
+            target_path: "nonexistent.md".to_string(),
+            fragment: "".to_string(),
+            line: 1,
+            column: 1,
+        });
+
+        let warnings_1 = rule
+            .cross_file_check(Path::new("docs/a.md"), &file_index_1, &workspace_index)
+            .unwrap();
+        assert_eq!(warnings_1.len(), 1, "First run should detect missing file");
+
+        // Between runs, inject a stale "exists = true" entry for the same resolved path
+        {
+            let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
+            cache.insert(PathBuf::from("docs/nonexistent.md"), true);
+        }
+
+        // Second run: same link, but now cache says file exists (stale data)
+        let warnings_2 = rule
+            .cross_file_check(Path::new("docs/a.md"), &file_index_1, &workspace_index)
+            .unwrap();
+
+        // The second run must also detect the missing file because the cache should be reset
+        assert_eq!(
+            warnings_2.len(),
+            1,
+            "Second run should still detect missing file after cache reset. Got: {warnings_2:?}"
         );
     }
 }
