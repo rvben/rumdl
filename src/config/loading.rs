@@ -643,7 +643,14 @@ impl SourcedConfig<ConfigLoaded> {
         }
 
         // Known markdownlint config files
-        const MARKDOWNLINT_FILENAMES: &[&str] = &[".markdownlint.json", ".markdownlint.yaml", ".markdownlint.yml"];
+        const MARKDOWNLINT_FILENAMES: &[&str] = &[
+            ".markdownlint-cli2.jsonc",
+            ".markdownlint-cli2.yaml",
+            ".markdownlint-cli2.yml",
+            ".markdownlint.json",
+            ".markdownlint.yaml",
+            ".markdownlint.yml",
+        ];
 
         if filename == "pyproject.toml" || filename == ".rumdl.toml" || filename == "rumdl.toml" {
             // Use extends-aware loading for rumdl TOML configs

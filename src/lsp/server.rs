@@ -355,6 +355,8 @@ impl LanguageServer for RumdlLanguageServer {
             "**/rumdl.toml",
             "**/pyproject.toml",
             "**/.markdownlint.json",
+            "**/.markdownlint-cli2.yaml",
+            "**/.markdownlint-cli2.jsonc",
         ];
         let watchers: Vec<_> = markdown_patterns
             .iter()
@@ -836,7 +838,15 @@ impl LanguageServer for RumdlLanguageServer {
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         // Check if any of the changed files are config files
-        const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+        const CONFIG_FILES: &[&str] = &[
+            ".rumdl.toml",
+            "rumdl.toml",
+            "pyproject.toml",
+            ".markdownlint.json",
+            ".markdownlint-cli2.jsonc",
+            ".markdownlint-cli2.yaml",
+            ".markdownlint-cli2.yml",
+        ];
 
         let mut config_changed = false;
 

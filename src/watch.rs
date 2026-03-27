@@ -5,6 +5,7 @@ use chrono::Local;
 use colored::*;
 use notify::{Config as NotifyConfig, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rumdl_lib::config as rumdl_config;
+use rumdl_lib::config::MARKDOWNLINT_CONFIG_FILES;
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::mpsc::channel;
@@ -29,21 +30,9 @@ pub fn change_detected(event: &Event) -> Option<ChangeKind> {
     for path in &event.paths {
         // Check if this is a configuration file
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-            // Check for rumdl-specific config files
-            if matches!(
-                file_name,
-                ".rumdl.toml"
-                    | "rumdl.toml"
-                    | "pyproject.toml"
-                    | ".markdownlint.json"
-                    | ".markdownlint.jsonc"
-                    | ".markdownlint.yaml"
-                    | ".markdownlint.yml"
-                    | "markdownlint.json"
-                    | "markdownlint.jsonc"
-                    | "markdownlint.yaml"
-                    | "markdownlint.yml"
-            ) {
+            if matches!(file_name, ".rumdl.toml" | "rumdl.toml" | "pyproject.toml")
+                || MARKDOWNLINT_CONFIG_FILES.contains(&file_name)
+            {
                 return Some(ChangeKind::Configuration);
             }
         }

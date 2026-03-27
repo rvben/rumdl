@@ -342,8 +342,15 @@ impl RumdlLanguageServer {
                 // has since been created in the directory. If so, treat as a cache miss
                 // so we pick up the new config file.
                 if entry.from_global_fallback {
-                    const CONFIG_FILES: &[&str] =
-                        &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
+                    const CONFIG_FILES: &[&str] = &[
+                        ".rumdl.toml",
+                        "rumdl.toml",
+                        "pyproject.toml",
+                        ".markdownlint.json",
+                        ".markdownlint-cli2.jsonc",
+                        ".markdownlint-cli2.yaml",
+                        ".markdownlint-cli2.yml",
+                    ];
                     let config_now_exists = CONFIG_FILES.iter().any(|name| search_dir.join(name).exists());
                     if config_now_exists {
                         log::debug!(
