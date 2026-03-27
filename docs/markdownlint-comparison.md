@@ -110,14 +110,19 @@ Both tools support auto-fixing, but with different philosophies:
 
 **Automatic Discovery:**
 
-rumdl automatically discovers and loads markdownlint config files:
+rumdl automatically discovers and loads both markdownlint and markdownlint-cli2 config files:
 
 ```bash
-# rumdl automatically finds and uses these:
+# rumdl automatically finds and uses these (in precedence order):
+.markdownlint-cli2.jsonc
+.markdownlint-cli2.yaml
+.markdownlint-cli2.yml
 .markdownlint.json
 .markdownlint.yaml
 markdownlint.json
 ```
+
+For markdownlint-cli2 files, rumdl extracts rule configuration from the `config:` key and ignores cli2-specific keys like `globs` and `ignores`.
 
 **Conversion Tool:**
 
@@ -181,13 +186,21 @@ markdownlint does not have built-in flavor support; users must configure individ
 
 ### Markdownlint Config Auto-Detection
 
-rumdl automatically discovers and loads markdownlint configurations:
+rumdl automatically discovers and loads markdownlint and markdownlint-cli2 configurations:
 
 ```yaml
 # .markdownlint.yaml (automatically loaded)
 MD013: false
 MD033:
   allowed_elements: ['br', 'img']
+```
+
+```yaml
+# .markdownlint-cli2.yaml (also automatically loaded)
+config:
+  MD013: false
+  MD033:
+    allowed_elements: ['br', 'img']
 ```
 
 ### Equivalent rumdl Configuration
@@ -355,7 +368,7 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | **Core Functionality**   |                    |                             |
 | Rule count               | 53 implemented     | 68 (53 compatible + 15 new) |
 | Auto-fix                 | ✅                 | ✅                          |
-| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML           |
+| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML/cli2      |
 | Inline config            | ✅                 | ✅ (compatible)             |
 | Custom rules             | ✅ (JavaScript)    | ❌                          |
 | Markdown flavors         | ❌                 | ✅ 6 flavors                |
@@ -401,10 +414,10 @@ If you find a compatibility issue with markdownlint:
 1. Check [existing issues](https://github.com/rvben/rumdl/issues?q=is%3Aissue+label%3Acompatibility)
 2. Verify with both tools: `markdownlint file.md` and `rumdl check file.md`
 3. [File an issue](https://github.com/rvben/rumdl/issues/new) with:
-   - Markdown sample
-   - Expected behavior (markdownlint output)
-   - Actual behavior (rumdl output)
-   - Versions of both tools
+    - Markdown sample
+    - Expected behavior (markdownlint output)
+    - Actual behavior (rumdl output)
+    - Versions of both tools
 
 ## See Also
 
