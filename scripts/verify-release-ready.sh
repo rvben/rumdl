@@ -69,14 +69,24 @@ else
     ((ERRORS++))
 fi
 
-# Check 4: Verify CHANGELOG.md has entry for current version
+# Check 4: Verify CHANGELOG.md has entry for current version with actual content
 echo -n "Checking CHANGELOG.md for v$CARGO_VERSION... "
 if grep -q "## \[${CARGO_VERSION}\]" CHANGELOG.md; then
-    echo -e "${GREEN}✓${NC}"
+    # Verify the section has content (not just an empty header)
+    SECTION_CONTENT=$(sed -n "/## \[${CARGO_VERSION}\]/,/## \[/p" CHANGELOG.md | sed '1d;$d' | grep -v '^$' || true)
+    if [[ -n "$SECTION_CONTENT" ]]; then
+        echo -e "${GREEN}✓${NC}"
+    else
+        echo -e "${RED}✗${NC}"
+        echo -e "${RED}ERROR: CHANGELOG entry for v${CARGO_VERSION} is empty${NC}"
+        echo "Add release notes under the ## [${CARGO_VERSION}] header before releasing"
+        ((ERRORS++))
+    fi
 else
-    echo -e "${YELLOW}⚠${NC}"
-    echo -e "${YELLOW}WARNING: No CHANGELOG entry found for v${CARGO_VERSION}${NC}"
-    echo "Consider adding a CHANGELOG entry before releasing"
+    echo -e "${RED}✗${NC}"
+    echo -e "${RED}ERROR: No CHANGELOG entry found for v${CARGO_VERSION}${NC}"
+    echo "Add a ## [${CARGO_VERSION}] section to CHANGELOG.md before releasing"
+    ((ERRORS++))
 fi
 
 # Check 5: Verify README.md has correct pre-commit version
