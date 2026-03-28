@@ -1,43 +1,47 @@
-# vership.toml — optional configuration for vership
-# All settings below show their defaults. Uncomment to override.
+[project]
+branch = "main"
 
-# [project]
-# type = "rust"        # Override auto-detection: "rust", "rust-maturin", "node", "go", "python"
-# branch = "main"      # Branch to release from
+[changelog]
+unconventional = "exclude"
 
-# [changelog]
-# unconventional = "exclude"   # "exclude", "include", or "strict"
-# exclude_types = []           # Additional commit types to exclude
+[[version_files]]
+glob = "README.md"
+search = "rev: v{prev}"
+replace = "rev: v{version}"
 
-# [hooks]
-# pre-bump = ""
-# post-bump = ""
-# pre-push = ""
-# post-push = ""
+[[version_files]]
+glob = "README.md"
+search = "mise use rumdl@{prev}"
+replace = "mise use rumdl@{version}"
+
+[[version_files]]
+glob = "docs/global-settings.md"
+search = "rev: v{prev}"
+replace = "rev: v{version}"
+
+[[version_files]]
+glob = "npm/cli-*/package.json"
+field = "version"
+
+[[version_files]]
+glob = "npm/rumdl/package.json"
+field = "version"
+
+[[version_files]]
+glob = "npm/rumdl/package.json"
+field = "optionalDependencies.*"
+
+[[artifacts]]
+command = "cargo run --release --bin rumdl -- rule -o json"
+output = "rules.json"
+
+[[artifacts]]
+command = "cargo run --release --bin rumdl -- schema generate"
+files = ["rumdl.schema.json"]
+
+[hooks]
+post-push = "gh api repos/rvben/rumdl-pre-commit/dispatches -f event_type=pypi_release"
 
 [checks]
-# Use the dev profile which excludes flaky timing-based perf tests
-test_command = "cargo nextest run --profile dev"
-
-# Update version references in extra files during bump
-# [[version_files]]
-# glob = "README.md"
-# search = "v{prev}"             # Text mode: {prev} = old version
-# replace = "v{version}"         # Text mode: {version} = new version
-#
-# [[version_files]]
-# glob = "npm/*/package.json"
-# field = "version"              # Field mode: update JSON field directly
-#
-# [[version_files]]
-# glob = "package.json"
-# field = "optionalDependencies.*"  # Wildcard: update all values in object
-
-# Regenerate files from commands during bump
-# [[artifacts]]
-# command = "cargo run -- schema generate"
-# output = "schema.json"         # Capture stdout to file
-#
-# [[artifacts]]
-# command = "make generate"
-# files = ["generated.json"]     # Files the command produces
+lint = false
+tests = false
