@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long check-links
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long check-links release-patch release-minor release-major
 
 # Development environment setup
 setup-mise:
@@ -280,3 +280,12 @@ check-links:
 # Documentation validation
 test-doc-completeness:
 	cargo test --test config_documentation_completeness -- --nocapture
+
+release-patch:
+	vership bump patch
+
+release-minor:
+	vership bump minor
+
+release-major:
+	vership bump major
