@@ -6101,17 +6101,31 @@ fn test_slb_paren_inside_code_span_not_split_point() {
 
 #[test]
 fn test_slb_short_paren_abbreviations_not_split() {
-    // Common abbreviation-style parentheticals like "(e.g.)", "(i.e.)", "(2024)"
-    // have no spaces inside and must never trigger a parenthetical split.
+    // Zero-or-one-word parentheticals have no space inside and must never
+    // trigger a parenthetical split (the ≥2-word threshold is not met).
     let options = semantic_slb(50);
-    for abbr in &["(e.g.)", "(i.e.)", "(2024)", "(see above)", "(optional)"] {
+    for abbr in &["(e.g.)", "(i.e.)", "(2024)", "(optional)"] {
         let input = format!("This feature is useful {abbr} for processing large amounts of data efficiently.");
         let result = reflow_line(&input, &options);
         assert!(
             !result.iter().any(|l| l.trim() == *abbr),
-            "Short/single-word paren {abbr:?} must not be isolated. Got:\n{result:#?}"
+            "Single-word paren {abbr:?} must not be isolated. Got:\n{result:#?}"
         );
     }
+}
+
+#[test]
+fn test_slb_two_word_paren_is_valid_semantic_unit() {
+    // "(see above)" has two words and qualifies as a multi-word parenthetical —
+    // isolating it on its own line is correct semantic-line-breaks behaviour.
+    let options = semantic_slb(50);
+    let input = "This feature is useful (see above) for processing large amounts of data efficiently.";
+    let result = reflow_line(input, &options);
+    // The parenthetical must appear intact (not split mid-paren).
+    assert!(
+        result.iter().any(|l| l.trim() == "(see above)"),
+        "(see above) must be kept as an intact semantic unit. Got:\n{result:#?}"
+    );
 }
 
 #[test]
@@ -6169,5 +6183,63 @@ fn test_slb_multiple_parentheticals_last_valid_used() {
     assert!(
         result.iter().all(|l| l.len() < input.len()),
         "Must actually split. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_break_word_inside_paren_not_split_point() {
+    // Conjunctions like "and" inside a parenthetical must not trigger a
+    // break-word split even when the parenthetical itself exceeds line_length
+    // and falls through to that cascade stage.
+    let options = semantic_slb(40);
+    // The parenthetical "(foo and bar and baz)" spans 21 chars and the full
+    // line exceeds 40.  split_at_parenthetical will split before '(' (the
+    // preceding "Text with" is 9 chars, too short for MIN_SPLIT_RATIO=0.3*40=12).
+    // The cascade falls to split_at_break_word, which must skip the "and"
+    // inside the parens and only use the "and" OUTSIDE if it fits.
+    let input = "Text with a clause (foo and bar and baz) then more text here.";
+    let result = reflow_line(input, &options);
+
+    // The parenthetical group must never be broken mid-way — all three
+    // occurrences of its content must appear on the same line.
+    let lines_with_foo: Vec<&String> = result.iter().filter(|l| l.contains("foo")).collect();
+    assert!(
+        !lines_with_foo.is_empty(),
+        "Parenthetical content must appear in output. Got:\n{result:#?}"
+    );
+    for line in lines_with_foo {
+        assert!(
+            line.contains("foo") && line.contains("baz"),
+            "foo and baz must be on the same line (paren not split). Got line: {line:?}\nFull:\n{result:#?}"
+        );
+    }
+}
+
+#[test]
+fn test_slb_standalone_paren_not_merged_back() {
+    // A multi-word parenthetical placed on its own line by split_at_parenthetical
+    // must not be collapsed back into the previous line by the Step 3 merge
+    // even when the combined length would fit.
+    //
+    // At line_length=80 the merge threshold is 24 chars.  A 30-char
+    // parenthetical like "(see Section 5.2 for details)" is below the
+    // threshold but must stay isolated.
+    let options = semantic_slb(80);
+    let input = "Configuration is described elsewhere \
+                 (see Section 5.2 for details) and applies globally.";
+    let result = reflow_line(input, &options);
+
+    // The parenthetical must be on its own line (not merged back).
+    assert!(
+        result.iter().any(|l| l.trim().starts_with("(see Section")),
+        "Multi-word parenthetical must not be merged back into prior line. Got:\n{result:#?}"
+    );
+    // No line must contain both the text before and the full parenthetical
+    // merged together (which would indicate the merge happened).
+    assert!(
+        !result
+            .iter()
+            .any(|l| l.contains("elsewhere") && l.contains("(see Section")),
+        "Parenthetical must be on its own line, not merged with 'elsewhere'. Got:\n{result:#?}"
     );
 }

@@ -1845,6 +1845,70 @@ fn split_at_clause_punctuation(
     Some((first, rest))
 }
 
+/// Compute plain-text paren-depth at each byte offset in `text`.
+///
+/// Returns a `Vec<i32>` of length `text.len()` where entry `i` is the
+/// nesting depth at byte `i` — counting only `(` and `)` that fall
+/// outside markdown element spans.  This lets callers quickly check
+/// whether a byte position lies inside a plain-text parenthetical group.
+fn paren_depth_map(text: &str, element_spans: &[(usize, usize)]) -> Vec<i32> {
+    let mut map = vec![0i32; text.len()];
+    let mut depth = 0i32;
+    for (byte, c) in text.char_indices() {
+        if !is_inside_element(byte, element_spans) {
+            match c {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        // Fill the depth value for every byte of this (possibly multi-byte) char.
+        let end = (byte + c.len_utf8()).min(map.len());
+        for slot in &mut map[byte..end] {
+            *slot = depth;
+        }
+    }
+    map
+}
+
+/// Return `true` if `line` is a complete, balanced, multi-word parenthetical
+/// group — i.e. it starts with `(`, ends with `)` (possibly followed by
+/// clause punctuation), has balanced parens throughout, and the inner content
+/// contains at least one space (matching the ≥2-word threshold used by
+/// `split_at_parenthetical` when deciding to split).
+///
+/// Used to prevent the short-line merge step from collapsing intentional
+/// parenthetical splits back into the previous line.
+fn is_standalone_parenthetical(line: &str) -> bool {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('(') {
+        return false;
+    }
+    // Strip optional trailing clause punctuation to find the real end.
+    let core = trimmed.trim_end_matches(|c: char| is_clause_punctuation(c));
+    if !core.ends_with(')') {
+        return false;
+    }
+    // Inner content must span multiple words (same threshold as split_at_parenthetical).
+    let inner = &core[1..core.len() - 1];
+    if !inner.contains(' ') {
+        return false;
+    }
+    // Verify the parens are balanced (depth returns to 0 at the last ')').
+    let mut depth = 0i32;
+    for c in core.chars() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        if depth < 0 {
+            return false;
+        }
+    }
+    depth == 0
+}
+
 /// Split a line before the latest break-word that keeps the first part
 /// within `line_length`. Returns None if no valid split point exists or if
 /// the split would create an unreasonably short first line.
@@ -1857,6 +1921,10 @@ fn split_at_break_word(
     let lower = text.to_lowercase();
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
     let mut best_split: Option<(usize, usize)> = None; // (byte_start, word_len_bytes)
+
+    // Build a paren-depth map so we can skip break-words inside plain-text
+    // parenthetical groups (matching the protection added to split_at_clause_punctuation).
+    let depth_map = paren_depth_map(text, element_spans);
 
     for &word in BREAK_WORDS {
         let mut search_start = 0;
@@ -1872,9 +1940,13 @@ fn split_at_break_word(
                 let first_part = text[..abs_pos].trim_end();
                 let first_part_len = display_len(first_part, length_mode);
 
+                // Skip break-words inside plain-text parenthetical groups.
+                let inside_paren = depth_map.get(abs_pos).is_some_and(|&d| d > 0);
+
                 if first_part_len >= min_first_len
                     && first_part_len <= line_length
                     && !is_inside_element(abs_pos, element_spans)
+                    && !inside_paren
                 {
                     // Prefer the latest valid split point
                     if best_split.is_none_or(|(prev_pos, _)| abs_pos > prev_pos) {
@@ -2007,6 +2079,13 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
     let mut merged: Vec<String> = Vec::with_capacity(result.len());
     for line in result {
         if !merged.is_empty() && display_len(&line, length_mode) < min_line_len && !line.trim().is_empty() {
+            // Don't merge a line that is itself a standalone parenthetical group —
+            // it was placed on its own line intentionally by split_at_parenthetical.
+            if is_standalone_parenthetical(&line) {
+                merged.push(line);
+                continue;
+            }
+
             // Don't merge across sentence boundaries — sentence splits are intentional
             let prev_ends_at_sentence = {
                 let trimmed = merged.last().unwrap().trim_end();
