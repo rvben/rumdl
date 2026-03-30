@@ -5870,3 +5870,280 @@ fn test_reflow_markdown_nested_checkbox_with_max_list_indent() {
         }
     }
 }
+
+// =============================================================================
+// Parenthetical boundary splitting in semantic line breaks (issue #549)
+// =============================================================================
+
+/// Options for semantic line breaks at the given line length, matching a
+/// typical user configuration.
+fn semantic_slb(line_length: usize) -> ReflowOptions {
+    ReflowOptions {
+        line_length,
+        semantic_line_breaks: true,
+        require_sentence_capital: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_slb_parenthetical_exact_example_from_issue() {
+    // The example from issue #549.  The second sentence is 175 chars; with
+    // line_length=120 the critical requirement is that the split happens at the
+    // parenthetical boundary (before the `(`), not at the comma inside
+    // "(traefik, ...)".  At line_length=120 the rest "(traefik, see
+    // `docker-compose.yml`) and the app…deployed:" is 119 chars and fits on
+    // one line, so no further split is needed — but the parenthetical must be
+    // intact, not broken at its internal comma.
+    let options = semantic_slb(120);
+    let input = "You can also run the whole stack in docker-compose. \
+                 This has the advantage that the app runs behind a proxy \
+                 (traefik, see `docker-compose.yml`) and the app will be \
+                 available under a host and path prefix, similar as if deployed:";
+    let result = reflow_line(input, &options);
+
+    // First sentence on its own line.
+    assert!(
+        result[0].contains("docker-compose."),
+        "First sentence must be first line. Got:\n{result:#?}"
+    );
+    // No line must contain a mid-paren split (e.g. ending at "proxy (traefik,").
+    for line in &result {
+        assert!(
+            !line.ends_with("(traefik,"),
+            "Must not split inside the parenthetical at the comma. Got line: {line:?}"
+        );
+    }
+    // The full parenthetical group must appear on one line somewhere.
+    assert!(
+        result.iter().any(|l| l.contains("(traefik, see `docker-compose.yml`)")),
+        "The parenthetical must be intact on a single line. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_parenthetical_full_isolation_shorter_limit() {
+    // At line_length=90 the continuation after the closing ')' also exceeds
+    // the limit, so Strategy 1 fires and isolates the parenthetical on its own
+    // line, yielding the four-line output the issue author described.
+    let options = semantic_slb(90);
+    let input = "You can also run the whole stack in docker-compose. \
+                 This has the advantage that the app runs behind a proxy \
+                 (traefik, see `docker-compose.yml`) and the app will be \
+                 available under a host and path prefix, similar as if deployed:";
+    let result = reflow_line(input, &options);
+
+    // The parenthetical must be its own line.
+    assert!(
+        result.iter().any(|l| l.trim() == "(traefik, see `docker-compose.yml`)"),
+        "Parenthetical must be isolated when continuation also exceeds limit. Got:\n{result:#?}"
+    );
+    // The line immediately before the parenthetical must end with "proxy".
+    let paren_idx = result
+        .iter()
+        .position(|l| l.trim() == "(traefik, see `docker-compose.yml`)")
+        .unwrap();
+    assert!(
+        paren_idx > 0 && result[paren_idx - 1].trim().ends_with("proxy"),
+        "The line before the parenthetical must end with 'proxy'. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_single_word_paren_not_split() {
+    // A single-word parenthetical like "(optional)" must never trigger a
+    // parenthetical split — it is too short to be meaningful as its own line.
+    let options = semantic_slb(60);
+    let input = "This configures the feature (optional) and enables the extended functionality for your project.";
+    let result = reflow_line(input, &options);
+
+    // "(optional)" must not appear as a standalone line.
+    assert!(
+        !result.iter().any(|l| l.trim() == "(optional)"),
+        "Single-word parens must not be isolated. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_multi_word_paren_split_before_open() {
+    // A multi-word parenthetical in the middle of a long line should cause a
+    // break just before the '('.
+    let options = semantic_slb(50);
+    let input = "The system supports multiple backends (Redis, Memcached) for caching purposes.";
+    let result = reflow_line(input, &options);
+
+    // Some line must end just before the parenthetical.
+    assert!(
+        result.iter().any(|l| l.trim().ends_with("backends")),
+        "Line must break before '('. Got:\n{result:#?}"
+    );
+    // The parenthetical must start its own line.
+    assert!(
+        result.iter().any(|l| l.trim().starts_with("(Redis,")),
+        "Parenthetical must start a new line. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_leading_parenthetical_split_after_close() {
+    // When a line produced by a prior split begins with '(', the whole group
+    // must be isolated and the continuation placed on the next line.
+    let options = semantic_slb(80);
+    // Craft a line that starts with a multi-word paren group followed by more text.
+    let input = "(traefik, see `docker-compose.yml`) and the app will be available \
+                 under a host and path prefix, similar as if deployed:";
+    let result = reflow_line(input, &options);
+
+    // First line must be the parenthetical itself.
+    assert_eq!(
+        result[0].trim(),
+        "(traefik, see `docker-compose.yml`)",
+        "Leading parenthetical must be first line. Got:\n{result:#?}"
+    );
+    // Must have at least two lines total.
+    assert!(result.len() >= 2, "Must produce at least 2 lines. Got:\n{result:#?}");
+}
+
+#[test]
+fn test_slb_comma_inside_parens_not_clause_split() {
+    // Commas inside a parenthetical must not be used as clause split points.
+    // The split should happen at the paren boundary, not at the comma.
+    let options = semantic_slb(60);
+    let input = "The cluster supports several storage drivers (overlay2, devicemapper, btrfs) \
+                 and each has different performance characteristics.";
+    let result = reflow_line(input, &options);
+
+    // No line must end with a comma that is inside the paren group, like "overlay2,"
+    for line in &result {
+        let trimmed = line.trim();
+        assert!(
+            !(trimmed.ends_with("(overlay2,") || trimmed.ends_with("overlay2,")),
+            "Must not split inside parenthetical at comma. Got line: {line:?}\nFull:\n{result:#?}"
+        );
+    }
+    // The complete parenthetical group must appear intact on one line.
+    assert!(
+        result.iter().any(|l| l.contains("(overlay2, devicemapper, btrfs)")),
+        "Parenthetical group must remain on one line. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_comma_outside_parens_still_clause_splits() {
+    // Commas OUTSIDE parentheticals must still be valid clause split points.
+    let options = semantic_slb(50);
+    let input = "First clause, second clause that is long enough to require wrapping here.";
+    let result = reflow_line(input, &options);
+
+    // Must split somewhere — the comma outside parens is a valid break.
+    assert!(
+        result.len() > 1,
+        "Comma outside parens must still be a split point. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_nested_parens_treated_as_unit() {
+    // A parenthetical containing nested parens must be kept as a single unit.
+    let options = semantic_slb(50);
+    let input = "See the function signature (foo(bar, baz) returns nothing) for the details.";
+    let result = reflow_line(input, &options);
+
+    // The outer parenthetical must not be split mid-group.
+    let paren_lines: Vec<&String> = result.iter().filter(|l| l.contains("foo(bar")).collect();
+    assert!(
+        !paren_lines.is_empty(),
+        "Parenthetical must appear in output. Got:\n{result:#?}"
+    );
+    // Every line that contains the start of the paren group must also contain its end.
+    for line in paren_lines {
+        let open_count = line.chars().filter(|&c| c == '(').count();
+        let close_count = line.chars().filter(|&c| c == ')').count();
+        assert_eq!(
+            open_count, close_count,
+            "Nested parens must be balanced on the same line. Got line: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_slb_paren_inside_link_not_split_point() {
+    // Parentheses that are part of markdown link syntax must not be treated as
+    // parenthetical split points.
+    let options = semantic_slb(60);
+    let input = "Visit [the documentation](https://example.com/docs) for more details \
+                 and comprehensive usage examples.";
+    let result = reflow_line(input, &options);
+
+    // The link must be preserved intact on a single line.
+    assert!(
+        result
+            .iter()
+            .any(|l| l.contains("[the documentation](https://example.com/docs)")),
+        "Link parens must not trigger a split. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_paren_inside_code_span_not_split_point() {
+    // Parentheses inside inline code must not be treated as split points.
+    let options = semantic_slb(60);
+    let input = "Call the function with `connect(host, port)` to establish a connection \
+                 to the remote server endpoint.";
+    let result = reflow_line(input, &options);
+
+    // The code span must be preserved intact.
+    assert!(
+        result.iter().any(|l| l.contains("`connect(host, port)`")),
+        "Code-span parens must not trigger a split. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_short_paren_abbreviations_not_split() {
+    // Common abbreviation-style parentheticals like "(e.g.)", "(i.e.)", "(2024)"
+    // have no spaces inside and must never trigger a parenthetical split.
+    let options = semantic_slb(50);
+    for abbr in &["(e.g.)", "(i.e.)", "(2024)", "(see above)", "(optional)"] {
+        let input = format!("This feature is useful {abbr} for processing large amounts of data efficiently.");
+        let result = reflow_line(&input, &options);
+        assert!(
+            !result.iter().any(|l| l.trim() == *abbr),
+            "Short/single-word paren {abbr:?} must not be isolated. Got:\n{result:#?}"
+        );
+    }
+}
+
+#[test]
+fn test_slb_parenthetical_with_code_span_inside() {
+    // A multi-word parenthetical that contains an inline code span should be
+    // isolated on its own line — the inner code parens must not interfere.
+    let options = semantic_slb(80);
+    let input = "The proxy is configurable (see `traefik.toml` for details) \
+                 and supports multiple backends in production environments.";
+    let result = reflow_line(input, &options);
+
+    // The parenthetical must be on its own line.
+    assert!(
+        result.iter().any(|l| l.trim().starts_with("(see `traefik.toml`")),
+        "Parenthetical with code span must be isolated. Got:\n{result:#?}"
+    );
+}
+
+#[test]
+fn test_slb_multiple_parentheticals_last_valid_used() {
+    // When a line contains two multi-word parentheticals, the rightmost one
+    // that fits within line_length should be the split point.
+    let options = semantic_slb(80);
+    let input = "First group (alpha, beta) and second group (gamma, delta, epsilon) continue here \
+                 with more text.";
+    let result = reflow_line(input, &options);
+
+    // The result must have more than one line.
+    assert!(result.len() > 1, "Should produce multiple lines. Got:\n{result:#?}");
+    // No line should contain all the text.
+    assert!(
+        result.iter().all(|l| l.len() < input.len()),
+        "Must actually split. Got:\n{result:#?}"
+    );
+}

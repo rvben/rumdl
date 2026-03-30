@@ -1617,6 +1617,127 @@ fn is_clause_punctuation(c: char) -> bool {
     matches!(c, ',' | ';' | ':' | '\u{2014}') // comma, semicolon, colon, em dash
 }
 
+/// Find the closing `)` that balances the `(` at the start of `slice`.
+///
+/// `offset` is the byte position of the `(` in the original full-line string;
+/// it is used to translate local byte positions into global positions for
+/// element-span lookups.  Parens inside markdown element spans are skipped so
+/// that, e.g., the closing `)` of an inline link does not prematurely end the
+/// scan.  The char's *start* byte (not byte-after) is used for the span check
+/// so that closing element delimiters — which sit exactly at the span's
+/// exclusive-end boundary — are correctly excluded.
+///
+/// Returns `(end_local, inner)` where `end_local` is the byte offset within
+/// `slice` just past the closing `)`, and `inner` is the content between the
+/// outermost `(` and `)`.
+fn paren_group_end<'a>(slice: &'a str, element_spans: &[(usize, usize)], offset: usize) -> Option<(usize, &'a str)> {
+    debug_assert!(slice.starts_with('('));
+    let mut depth: i32 = 0;
+    for (local_byte, c) in slice.char_indices() {
+        let global_byte = offset + local_byte;
+        // When depth > 0, skip parens that belong to a markdown element.
+        // Use the char's start byte so that a closing element delimiter
+        // (whose byte_after equals the span's exclusive end) is treated as
+        // inside the element rather than outside it.
+        if depth > 0 && is_inside_element(global_byte, element_spans) {
+            continue;
+        }
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = local_byte + 1;
+                    let inner = &slice[1..local_byte];
+                    return Some((end, inner));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a line at a parenthetical boundary for semantic line breaks.
+///
+/// Two strategies are tried in order:
+///
+/// 1. **Leading parenthetical** — if the line begins with `(`, isolate the
+///    entire balanced group on this line and start the rest on the next.
+///    This handles lines produced by a prior split that placed a `(` at the
+///    very beginning.
+///
+/// 2. **Mid-line parenthetical** — find the rightmost balanced `(…)` whose
+///    content spans multiple words and whose preceding text fits within
+///    `[min_first_len, line_length]`.  Split just before the `(` so the
+///    parenthetical begins the following line.
+///
+/// Parentheses that fall inside markdown element spans (links, code, etc.)
+/// are ignored in both strategies.
+fn split_at_parenthetical(
+    text: &str,
+    line_length: usize,
+    element_spans: &[(usize, usize)],
+    length_mode: ReflowLengthMode,
+) -> Option<(String, String)> {
+    let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
+
+    // Strategy 1: text starts with '(' — isolate the parenthetical as its own line.
+    if text.starts_with('(') {
+        if let Some((end_local, inner)) = paren_group_end(text, element_spans, 0) {
+            if inner.contains(' ') {
+                let first = &text[..end_local];
+                let first_len = display_len(first, length_mode);
+                // No MIN_SPLIT_RATIO check here: a parenthetical unit is always
+                // semantically valid on its own line regardless of its length.
+                if first_len <= line_length {
+                    let rest = text[end_local..].trim_start();
+                    if !rest.is_empty() {
+                        return Some((first.to_string(), rest.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    // Strategy 2: find the rightmost multi-word '(' whose preceding text fits.
+    let mut best_open_byte: Option<usize> = None;
+    let mut pos = 0usize;
+    while pos < text.len() {
+        // '(' is ASCII so a single-byte comparison is safe in UTF-8.
+        if text.as_bytes()[pos] != b'(' {
+            let c = text[pos..].chars().next().unwrap();
+            pos += c.len_utf8();
+            continue;
+        }
+        // Skip '(' that are part of a markdown element (use start byte).
+        if is_inside_element(pos, element_spans) {
+            pos += 1;
+            continue;
+        }
+        if let Some((end_local, inner)) = paren_group_end(&text[pos..], element_spans, pos) {
+            let first = text[..pos].trim_end();
+            let first_len = display_len(first, length_mode);
+            if !first.is_empty() && first_len >= min_first_len && first_len <= line_length && inner.contains(' ') {
+                if best_open_byte.is_none_or(|prev| pos > prev) {
+                    best_open_byte = Some(pos);
+                }
+            }
+            pos += end_local;
+        } else {
+            pos += 1;
+        }
+    }
+
+    let open_byte = best_open_byte?;
+    let first = text[..open_byte].trim_end().to_string();
+    let rest = text[open_byte..].to_string();
+    if first.is_empty() || rest.trim().is_empty() {
+        return None;
+    }
+    Some((first, rest))
+}
+
 /// Compute element spans for a flat text representation of elements.
 /// Returns Vec of (start, end) byte offsets for non-Text elements,
 /// so we can check that a split position doesn't fall inside them.
@@ -1667,15 +1788,31 @@ fn split_at_clause_punctuation(
         search_end_char = idx + 1;
     }
 
+    // Scan backwards tracking parenthesis depth to skip clause punctuation
+    // inside plain-text parenthetical groups.  Scanning right-to-left means
+    // ')' opens a depth level and '(' closes it.  Parens that belong to a
+    // markdown element are excluded using the char's start byte (not byte-after)
+    // so that closing element delimiters at the span boundary are correctly
+    // treated as part of the element.
+    let mut paren_depth: i32 = 0;
     let mut best_pos = None;
     for i in (0..search_end_char).rev() {
-        if is_clause_punctuation(chars[i]) {
-            // Convert char position to byte position for element span check
-            let byte_pos: usize = chars[..=i].iter().map(|c| c.len_utf8()).sum();
-            if !is_inside_element(byte_pos, element_spans) {
-                best_pos = Some(i);
-                break;
+        // Start byte of char i (for paren element check)
+        let byte_start: usize = chars[..i].iter().map(|c| c.len_utf8()).sum();
+        // Byte just after char i (for clause punctuation element check — existing convention)
+        let byte_after: usize = byte_start + chars[i].len_utf8();
+
+        if !is_inside_element(byte_start, element_spans) {
+            match chars[i] {
+                ')' => paren_depth += 1,
+                '(' => paren_depth = paren_depth.saturating_sub(1),
+                _ => {}
             }
+        }
+
+        if paren_depth == 0 && is_clause_punctuation(chars[i]) && !is_inside_element(byte_after, element_spans) {
+            best_pos = Some(i);
+            break;
         }
     }
 
@@ -1768,6 +1905,20 @@ fn cascade_split_line(
 
     let elements = parse_markdown_elements_inner(text, attr_lists);
     let element_spans = compute_element_spans(&elements);
+
+    // Try parenthetical boundary split (before clause punctuation so that
+    // multi-word parentheticals are kept intact as semantic units)
+    if let Some((first, rest)) = split_at_parenthetical(text, line_length, &element_spans, length_mode) {
+        let mut result = vec![first];
+        result.extend(cascade_split_line(
+            &rest,
+            line_length,
+            abbreviations,
+            length_mode,
+            attr_lists,
+        ));
+        return result;
+    }
 
     // Try clause punctuation split
     if let Some((first, rest)) = split_at_clause_punctuation(text, line_length, &element_spans, length_mode) {
