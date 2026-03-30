@@ -6131,6 +6131,30 @@ fn test_slb_parenthetical_with_code_span_inside() {
 }
 
 #[test]
+fn test_slb_trailing_comma_stays_with_paren() {
+    // When ')' is immediately followed by ',' (or other clause punctuation),
+    // the punctuation must stay on the same line as the closing ')' so that
+    // the continuation line does not start with a bare comma.
+    let options = semantic_slb(60);
+    let input = "rumdl loads configuration from config files \
+                 (with per-directory resolution when available), \
+                 then applies CLI overrides on top.";
+    let result = reflow_line(input, &options);
+
+    for line in &result {
+        assert!(
+            !line.trim().starts_with(','),
+            "No line must start with a bare comma. Got line: {line:?}\nFull:\n{result:#?}"
+        );
+    }
+    // The line containing ')' must also carry the trailing comma.
+    assert!(
+        result.iter().any(|l| l.contains("),")),
+        "Trailing comma must sit on the same line as the closing ')'. Got:\n{result:#?}"
+    );
+}
+
+#[test]
 fn test_slb_multiple_parentheticals_last_valid_used() {
     // When a line contains two multi-word parentheticals, the rightmost one
     // that fits within line_length should be the split point.

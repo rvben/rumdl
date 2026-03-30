@@ -1686,12 +1686,21 @@ fn split_at_parenthetical(
     if text.starts_with('(') {
         if let Some((end_local, inner)) = paren_group_end(text, element_spans, 0) {
             if inner.contains(' ') {
-                let first = &text[..end_local];
+                // If clause punctuation immediately follows the closing ')', attach it
+                // to the parenthetical so the continuation line does not start with a
+                // bare comma or semicolon (e.g., "(foo, bar), then" → "(foo, bar),"
+                // on one line and "then" on the next).
+                let tail = &text[end_local..];
+                let (first_end, rest_start) = match tail.chars().next() {
+                    Some(c) if is_clause_punctuation(c) => (end_local + c.len_utf8(), end_local + c.len_utf8()),
+                    _ => (end_local, end_local),
+                };
+                let first = &text[..first_end];
                 let first_len = display_len(first, length_mode);
-                // No MIN_SPLIT_RATIO check here: a parenthetical unit is always
-                // semantically valid on its own line regardless of its length.
+                // No MIN_SPLIT_RATIO check: a parenthetical unit is always a valid
+                // semantic line regardless of its length.
                 if first_len <= line_length {
-                    let rest = text[end_local..].trim_start();
+                    let rest = text[rest_start..].trim_start();
                     if !rest.is_empty() {
                         return Some((first.to_string(), rest.to_string()));
                     }
