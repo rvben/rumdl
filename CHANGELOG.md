@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.1.63](https://github.com/rvben/rumdl/compare/v0.1.62...v0.1.63) - 2026-03-31
+
+### Added
+
+- **md013**: treat parentheticals as semantic units in semantic-line-breaks reflow ([c250d34](https://github.com/rvben/rumdl/commit/c250d34d51ef076c115b154acb86b45d1e0d4f9f))
+
+### Fixed
+
+- **md013**: protect parenthetical groups from break-word splits and premature merging ([48e32aa](https://github.com/rvben/rumdl/commit/48e32aa803611b7f7d0edbdb4394a58a031b8447))
+- **md013**: attach trailing clause punctuation to closing paren in slb reflow ([4dc60fd](https://github.com/rvben/rumdl/commit/4dc60fda458e5238345b5aeb59e983b6f3bbe520))
+- make empty CHANGELOG entry a hard error in release verification ([875bff7](https://github.com/rvben/rumdl/commit/875bff7a8e1a7e41bdec30a9cf22fc78470d4dc3))
+
 ## [Unreleased]
 
 ## [0.1.62] - 2026-03-27
