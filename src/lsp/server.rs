@@ -232,6 +232,8 @@ impl LanguageServer for RumdlLanguageServer {
         // Load rumdl configuration with auto-discovery (fallback/default)
         self.load_configuration(false).await;
 
+        let enable_link_navigation = self.config.read().await.enable_link_navigation;
+
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
@@ -274,10 +276,10 @@ impl LanguageServer for RumdlLanguageServer {
                     all_commit_characters: None,
                     completion_item: None,
                 }),
-                definition_provider: Some(OneOf::Left(true)),
-                references_provider: Some(OneOf::Left(true)),
-                hover_provider: Some(HoverProviderCapability::Simple(true)),
-                rename_provider: Some(OneOf::Right(RenameOptions {
+                definition_provider: enable_link_navigation.then_some(OneOf::Left(true)),
+                references_provider: enable_link_navigation.then_some(OneOf::Left(true)),
+                hover_provider: enable_link_navigation.then_some(HoverProviderCapability::Simple(true)),
+                rename_provider: enable_link_navigation.then_some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
@@ -513,7 +515,7 @@ impl LanguageServer for RumdlLanguageServer {
             && (rule_settings.disable.is_some()
                 || rule_settings.enable.is_some()
                 || rule_settings.line_length.is_some()
-                || !rule_settings.rules.is_empty())
+                || (!rule_settings.rules.is_empty() && rule_settings.rules.keys().all(|k| is_valid_rule_name(k))))
         {
             // Validate rule names in disable/enable lists
             if let Some(ref disable) = rule_settings.disable {
@@ -548,7 +550,9 @@ impl LanguageServer for RumdlLanguageServer {
                 || full_config.disable_rules.is_some()
                 || full_config.settings.is_some()
                 || !full_config.enable_linting
-                || full_config.enable_auto_fix)
+                || full_config.enable_auto_fix
+                || !full_config.enable_link_completions
+                || !full_config.enable_link_navigation)
         {
             // Validate rule names
             if let Some(ref rules) = full_config.enable_rules {
@@ -1106,6 +1110,9 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn goto_definition(&self, params: GotoDefinitionParams) -> JsonRpcResult<Option<GotoDefinitionResponse>> {
+        if !self.config.read().await.enable_link_navigation {
+            return Ok(None);
+        }
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -1115,6 +1122,9 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn references(&self, params: ReferenceParams) -> JsonRpcResult<Option<Vec<Location>>> {
+        if !self.config.read().await.enable_link_navigation {
+            return Ok(None);
+        }
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -1124,6 +1134,9 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
+        if !self.config.read().await.enable_link_navigation {
+            return Ok(None);
+        }
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -1133,6 +1146,9 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn prepare_rename(&self, params: TextDocumentPositionParams) -> JsonRpcResult<Option<PrepareRenameResponse>> {
+        if !self.config.read().await.enable_link_navigation {
+            return Ok(None);
+        }
         let uri = params.text_document.uri;
         let position = params.position;
 
@@ -1142,6 +1158,9 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn rename(&self, params: RenameParams) -> JsonRpcResult<Option<WorkspaceEdit>> {
+        if !self.config.read().await.enable_link_navigation {
+            return Ok(None);
+        }
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let new_name = params.new_name;

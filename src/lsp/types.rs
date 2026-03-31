@@ -106,6 +106,10 @@ pub struct RumdlLspConfig {
     /// Enable file path and heading anchor completions inside markdown link targets
     /// When true, typing `](` triggers file path suggestions and `#` triggers anchor suggestions
     pub enable_link_completions: bool,
+    /// Enable hover preview, go-to-definition, find-references, and rename for markdown links
+    /// When false, rumdl will not respond to these requests, avoiding conflicts with other LSPs
+    /// that provide the same features (e.g., PKM-focused LSPs)
+    pub enable_link_navigation: bool,
 }
 
 impl Default for RumdlLspConfig {
@@ -119,6 +123,7 @@ impl Default for RumdlLspConfig {
             configuration_preference: ConfigurationPreference::default(),
             settings: None,
             enable_link_completions: true,
+            enable_link_navigation: true,
         }
     }
 }
@@ -534,6 +539,7 @@ mod tests {
             configuration_preference: ConfigurationPreference::EditorFirst,
             settings: None,
             enable_link_completions: true,
+            enable_link_navigation: true,
         };
 
         // Test serialization (uses camelCase)
