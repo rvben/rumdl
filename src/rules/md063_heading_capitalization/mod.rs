@@ -428,7 +428,8 @@ impl MD063HeadingCapitalization {
             .iter()
             .enumerate()
             .map(|(i, word)| {
-                let is_first = i == 0;
+                let after_period = i > 0 && original_words[i - 1].ends_with('.');
+                let is_first = i == 0 || after_period;
                 let is_last = i == total_words - 1;
 
                 // Words that are part of an MD044 proper name use the canonical form directly.
@@ -781,7 +782,8 @@ impl MD063HeadingCapitalization {
             .iter()
             .enumerate()
             .map(|(i, word)| {
-                let is_first = is_first_segment && i == 0;
+                let after_period = i > 0 && words[i - 1].ends_with('.');
+                let is_first = (is_first_segment && i == 0) || after_period;
                 let is_last = is_last_segment && i == total_words - 1;
 
                 // Words that are part of an MD044 proper name use the canonical form directly.
@@ -2734,6 +2736,82 @@ mod tests {
         assert!(
             fix.replacement.contains("IN THE INSERT"),
             "All caps should uppercase all words, got: {:?}",
+            fix.replacement
+        );
+    }
+
+    // Numbered prefix tests — words following a period-terminated token must be capitalized
+    #[test]
+    fn test_title_case_numbered_prefix_lowercase_word() {
+        // "to" follows "1." and must be treated as the start of a new phrase
+        let rule = create_rule();
+        let content = "## 1. To Be a Thing\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag '## 1. To Be a Thing', got: {result:?}"
+        );
+
+        let content_lower = "## 1. to be a thing\n";
+        let ctx2 = LintContext::new(content_lower, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(!result2.is_empty(), "Should flag '## 1. to be a thing'");
+        let fix = result2[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("1. To Be a Thing"),
+            "Fix should capitalize 'To', got: {:?}",
+            fix.replacement
+        );
+    }
+
+    #[test]
+    fn test_title_case_numbered_prefix_article() {
+        // "a" follows "2." and must be capitalized as the first word of the phrase
+        let rule = create_rule();
+        let content = "## 2. A Guide to the Galaxy\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag '## 2. A Guide to the Galaxy', got: {result:?}"
+        );
+
+        let content_lower = "## 2. a guide to the galaxy\n";
+        let ctx2 = LintContext::new(content_lower, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(!result2.is_empty(), "Should flag '## 2. a guide to the galaxy'");
+        let fix = result2[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("2. A Guide to the Galaxy"),
+            "Fix should capitalize 'A', got: {:?}",
+            fix.replacement
+        );
+    }
+
+    #[test]
+    fn test_title_case_mid_sentence_period_word() {
+        // "introduction" follows "1." embedded in a phrase — must be capitalized
+        let rule = create_rule();
+        let content = "## Step 1. Introduction to the Problem\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag '## Step 1. Introduction to the Problem', got: {result:?}"
+        );
+
+        let content_lower = "## Step 1. introduction to the problem\n";
+        let ctx2 = LintContext::new(content_lower, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(
+            !result2.is_empty(),
+            "Should flag '## Step 1. introduction to the problem'"
+        );
+        let fix = result2[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("Step 1. Introduction to the Problem"),
+            "Fix should capitalize 'Introduction', got: {:?}",
             fix.replacement
         );
     }
