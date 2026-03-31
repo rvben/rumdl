@@ -15,8 +15,8 @@ repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
     rev: v0.0.222  # Use latest version
     hooks:
-      - id: rumdl      # Lint only
-      - id: rumdl-fmt  # Auto-format
+      - id: rumdl      # Lint + auto-fix, fails if unfixable issues remain
+      - id: rumdl-fmt  # Pure format, always exits 0
 ```
 
 Then install the hooks:
@@ -29,7 +29,7 @@ pre-commit install
 
 ### `rumdl`
 
-Lints files and fails if any issues are found.
+Lints and auto-fixes files. Exits 1 if unfixable violations remain. Use this as your primary hook.
 
 ```yaml
 - id: rumdl
@@ -37,14 +37,14 @@ Lints files and fails if any issues are found.
 
 ### `rumdl-fmt`
 
-Auto-formats files and fails if unfixable issues remain.
+Formats files in place and always exits 0. Relies on pre-commit's file-change detection to signal failures. Use alongside `rumdl` when you want to separate formatting from linting.
 
 ```yaml
 - id: rumdl-fmt
 ```
 
-!!! tip "Recommended for CI"
-    Use `rumdl-fmt` for the best developer experience - it auto-fixes what it can and only fails when manual intervention is needed.
+!!! tip "Recommended setup"
+    Use `rumdl` first for lint coverage, then `rumdl-fmt` for formatting — the same pattern as `ruff` + `ruff-format`.
 
 ## Configuration
 
@@ -135,5 +135,6 @@ repos:
 
   - repo: https://github.com/rvben/rumdl-pre-commit
     hooks:
-      - id: rumdl-fmt  # Run after other hooks
+      - id: rumdl      # Run after other hooks
+      - id: rumdl-fmt
 ```
