@@ -35,7 +35,7 @@ rumdl check --fix .              # Lint and auto-fix issues
 
 ### `fmt [PATHS...]`
 
-Format Markdown files (always exits 0).
+Format Markdown files (same as `rumdl check --fix`, but always exits 0).
 
 ```bash
 rumdl fmt .                      # Format all files
