@@ -2815,4 +2815,37 @@ mod tests {
             fix.replacement
         );
     }
+
+    #[test]
+    fn test_title_case_numbered_prefix_in_link_text() {
+        // apply_title_case (link text path) must also respect after_period.
+        // A heading whose only content is a link: ## [1. to be a thing](url)
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::TitleCase,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+
+        // Correct heading — link text already title-cased after numbered prefix
+        let content = "## [1. To Be a Thing](https://example.com)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag '## [1. To Be a Thing](url)', got: {result:?}"
+        );
+
+        // Incorrect heading — "to" in link text must be capitalized after "1."
+        let content_lower = "## [1. to be a thing](https://example.com)\n";
+        let ctx2 = LintContext::new(content_lower, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert!(!result2.is_empty(), "Should flag '## [1. to be a thing](url)'");
+        let fix = result2[0].fix.as_ref().expect("Should have a fix");
+        assert!(
+            fix.replacement.contains("1. To Be a Thing"),
+            "Fix should capitalize 'To' in link text, got: {:?}",
+            fix.replacement
+        );
+    }
 }
