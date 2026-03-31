@@ -2751,6 +2751,179 @@ async fn test_link_completions_disabled_returns_none() {
     assert!(result.is_none(), "Link completions should be suppressed when disabled");
 }
 
+#[tokio::test]
+async fn test_link_navigation_disabled_hover_returns_none() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///tmp/test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 5 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+
+    let result = server.hover(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Hover should be suppressed when link navigation is disabled"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_disabled_goto_definition_returns_none() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///tmp/test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 5 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let result = server.goto_definition(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Go-to-definition should be suppressed when link navigation is disabled"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_disabled_references_returns_none() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = ReferenceParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///tmp/test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 5 },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: ReferenceContext {
+            include_declaration: false,
+        },
+    };
+
+    let result = server.references(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "References should be suppressed when link navigation is disabled"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_disabled_prepare_rename_returns_none() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier {
+            uri: Url::parse("file:///tmp/test.md").unwrap(),
+        },
+        position: Position { line: 0, character: 5 },
+    };
+
+    let result = server.prepare_rename(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Prepare-rename should be suppressed when link navigation is disabled"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_disabled_rename_returns_none() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = RenameParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///tmp/test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 5 },
+        },
+        new_name: "new-heading".to_string(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+
+    let result = server.rename(params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Rename should be suppressed when link navigation is disabled"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_disabled_via_did_change_configuration() {
+    let server = create_test_server();
+
+    // Default state: navigation is enabled
+    assert!(server.config.read().await.enable_link_navigation);
+
+    // Simulate a live config update with only enableLinkNavigation: false
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableLinkNavigation": false }),
+        })
+        .await;
+
+    // Flag must be applied — this is what the did_change_configuration heuristic guards
+    assert!(
+        !server.config.read().await.enable_link_navigation,
+        "did_change_configuration must apply enableLinkNavigation: false"
+    );
+
+    // Confirm the handler respects the updated flag
+    let result = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: Url::parse("file:///tmp/test.md").unwrap(),
+                },
+                position: Position { line: 0, character: 5 },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    assert!(
+        result.is_none(),
+        "Hover should be suppressed after live config disables link navigation"
+    );
+}
+
+#[test]
+fn test_link_navigation_config_serde_roundtrip() {
+    // Verify `enableLinkNavigation: false` round-trips correctly through serde
+    let json = r#"{"enableLinkNavigation": false}"#;
+    let config: RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(
+        !config.enable_link_navigation,
+        "enableLinkNavigation should deserialize to false"
+    );
+    // All other fields should use their defaults
+    assert!(config.enable_linting, "enableLinting should default to true");
+    assert!(
+        config.enable_link_completions,
+        "enableLinkCompletions should default to true"
+    );
+
+    // Verify serialization produces camelCase key
+    let serialized = serde_json::to_string(&config).unwrap();
+    assert!(serialized.contains("\"enableLinkNavigation\":false"));
+}
+
 /// Test that MD013 semantic-line-breaks config produces no false positives with CRLF line endings.
 /// The LSP receives content from the editor which may use CRLF line endings on Windows.
 /// The reflow comparison must account for line ending differences.
@@ -6283,5 +6456,215 @@ async fn test_rename_cross_file_multiple_links_same_line() {
     assert_ne!(
         anchor_edits[0].range.start.character, anchor_edits[1].range.start.character,
         "Edits should target different positions on the line"
+    );
+}
+
+// ── enable_link_navigation tests ────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_link_navigation_enabled_by_default() {
+    let server = create_test_server();
+    let config = server.config.read().await;
+    assert!(
+        config.enable_link_navigation,
+        "enable_link_navigation must default to true"
+    );
+}
+
+#[tokio::test]
+async fn test_link_navigation_config_deserialization() {
+    // Omitting the field must leave it true (backwards-compatible default)
+    let json = r#"{"enableLinting": true}"#;
+    let config: crate::lsp::types::RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(config.enable_link_navigation);
+
+    // Explicitly disabling must be honoured
+    let json = r#"{"enableLinkNavigation": false}"#;
+    let config: crate::lsp::types::RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(!config.enable_link_navigation);
+}
+
+#[tokio::test]
+async fn test_hover_disabled_when_link_navigation_off() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 0 },
+        },
+        work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+    };
+
+    let result = LanguageServer::hover(&server, params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "hover must return None when enable_link_navigation is false"
+    );
+}
+
+#[tokio::test]
+async fn test_goto_definition_disabled_when_link_navigation_off() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 0 },
+        },
+        work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+    };
+
+    let result = LanguageServer::goto_definition(&server, params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "goto_definition must return None when enable_link_navigation is false"
+    );
+}
+
+#[tokio::test]
+async fn test_references_disabled_when_link_navigation_off() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = ReferenceParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 0 },
+        },
+        work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+        partial_result_params: PartialResultParams {
+            partial_result_token: None,
+        },
+        context: ReferenceContext {
+            include_declaration: false,
+        },
+    };
+
+    let result = LanguageServer::references(&server, params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "references must return None when enable_link_navigation is false"
+    );
+}
+
+#[tokio::test]
+async fn test_prepare_rename_disabled_when_link_navigation_off() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = TextDocumentPositionParams {
+        text_document: TextDocumentIdentifier {
+            uri: Url::parse("file:///test.md").unwrap(),
+        },
+        position: Position { line: 0, character: 0 },
+    };
+
+    let result = LanguageServer::prepare_rename(&server, params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "prepare_rename must return None when enable_link_navigation is false"
+    );
+}
+
+#[tokio::test]
+async fn test_rename_disabled_when_link_navigation_off() {
+    let server = create_test_server();
+    server.config.write().await.enable_link_navigation = false;
+
+    let params = RenameParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse("file:///test.md").unwrap(),
+            },
+            position: Position { line: 0, character: 0 },
+        },
+        new_name: "new-name".to_string(),
+        work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+    };
+
+    let result = LanguageServer::rename(&server, params).await.unwrap();
+    assert!(
+        result.is_none(),
+        "rename must return None when enable_link_navigation is false"
+    );
+}
+
+/// Verify that when `enableLinkNavigation` is false, the server does not advertise
+/// hover, definition, references, or rename capabilities during initialization.
+/// Clients rely on ServerCapabilities to decide whether to send these requests at all;
+/// returning None from the handlers alone is not sufficient.
+#[tokio::test]
+async fn test_initialize_omits_nav_capabilities_when_disabled() {
+    let server = create_test_server();
+
+    let options = serde_json::json!({ "enableLinkNavigation": false });
+    let params = InitializeParams {
+        initialization_options: Some(options),
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+
+    let result = LanguageServer::initialize(&server, params).await.unwrap();
+    let caps = result.capabilities;
+
+    assert!(
+        caps.hover_provider.is_none(),
+        "hover_provider must be None when enableLinkNavigation is false"
+    );
+    assert!(
+        caps.definition_provider.is_none(),
+        "definition_provider must be None when enableLinkNavigation is false"
+    );
+    assert!(
+        caps.references_provider.is_none(),
+        "references_provider must be None when enableLinkNavigation is false"
+    );
+    assert!(
+        caps.rename_provider.is_none(),
+        "rename_provider must be None when enableLinkNavigation is false"
+    );
+}
+
+/// Verify that with `enableLinkNavigation` enabled (the default), all four navigation
+/// capabilities are advertised to the client.
+#[tokio::test]
+async fn test_initialize_advertises_nav_capabilities_when_enabled() {
+    let server = create_test_server();
+
+    let params = InitializeParams {
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+
+    let result = LanguageServer::initialize(&server, params).await.unwrap();
+    let caps = result.capabilities;
+
+    assert!(
+        caps.hover_provider.is_some(),
+        "hover_provider must be advertised by default"
+    );
+    assert!(
+        caps.definition_provider.is_some(),
+        "definition_provider must be advertised by default"
+    );
+    assert!(
+        caps.references_provider.is_some(),
+        "references_provider must be advertised by default"
+    );
+    assert!(
+        caps.rename_provider.is_some(),
+        "rename_provider must be advertised by default"
     );
 }
