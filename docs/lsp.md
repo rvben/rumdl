@@ -120,21 +120,10 @@ Add to your Zed settings:
 }
 ```
 
-### Sublime Text (LSP package)
+### Sublime Text
 
-Add to LSP settings (`Preferences > Package Settings > LSP > Settings`):
-
-```json
-{
-  "clients": {
-    "rumdl": {
-      "enabled": true,
-      "command": ["rumdl", "server"],
-      "selector": "text.html.markdown"
-    }
-  }
-}
-```
+For information on configuring Sublime Text with rumdl as a language server, see the
+[LSP for Sublime Text documentation](https://lsp.sublimetext.io/language_servers/#rumdl).
 
 ### Emacs (lsp-mode)
 
