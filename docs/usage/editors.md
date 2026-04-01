@@ -74,10 +74,10 @@ let g:ale_fixers = {'markdown': ['rumdl']}
 
 ```vim
 " Format selection
-:'<,'>!rumdl fmt - --quiet
+:'<,'>!rumdl fmt - --silent
 
 " Format entire buffer
-:%!rumdl fmt - --quiet
+:%!rumdl fmt - --silent
 ```
 
 ## Helix
@@ -153,7 +153,7 @@ The server communicates via stdin/stdout using the Language Server Protocol.
 Most editors can be configured to format on save using rumdl's stdin/stdout mode:
 
 ```bash
-rumdl fmt - --quiet
+rumdl fmt - --silent
 ```
 
 This reads from stdin and outputs formatted content to stdout.
