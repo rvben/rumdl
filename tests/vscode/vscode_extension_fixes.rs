@@ -64,7 +64,28 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
 
         Ok(result_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     } else {
-        Err("Multi-line warning ranges not implemented yet".to_string())
+        if warning_end_line > lines.len() {
+            return Err("Invalid warning end line number".to_string());
+        }
+
+        let start_line_content = lines[warning_start_line - 1];
+        let end_line_content = lines[warning_end_line - 1];
+
+        let start_byte = warning_start_col.saturating_sub(1);
+        let end_byte = warning_end_col.saturating_sub(1);
+
+        if start_byte > start_line_content.len() || end_byte > end_line_content.len() {
+            return Err("Invalid warning column range for multiline fix".to_string());
+        }
+
+        let before = &start_line_content[..start_byte];
+        let after = &end_line_content[end_byte..];
+        let new_line = format!("{}{}{}", before, fix.replacement, after);
+
+        let mut result_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        result_lines.splice((warning_start_line - 1)..warning_end_line, std::iter::once(new_line));
+
+        Ok(result_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
     }
 }
 
@@ -461,5 +482,36 @@ mod tests {
             passed_tests, rules_with_fixes,
             "All rules with fixes should pass the duplication test"
         );
+    }
+
+    #[test]
+    fn test_simulate_vscode_fix_handles_multiline_warning_range() {
+        use rumdl_lib::config::MarkdownFlavor;
+        use rumdl_lib::lint_context::LintContext;
+
+        // Check ALL rules for multiline warnings and verify none return "not implemented"
+        let rule_names = [
+            "MD001", "MD003", "MD004", "MD005", "MD007", "MD009", "MD010", "MD011", "MD012", "MD013", "MD014", "MD018",
+            "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028", "MD029", "MD030",
+            "MD031", "MD032", "MD033", "MD034", "MD035", "MD036", "MD037", "MD038", "MD039", "MD040", "MD041", "MD042",
+            "MD043", "MD044", "MD045", "MD046", "MD047", "MD048", "MD049", "MD050", "MD051", "MD052", "MD053", "MD054",
+            "MD055", "MD056", "MD057", "MD058",
+        ];
+
+        for rule_name in rule_names {
+            if let Some((content, rule)) = create_test_case_for_rule(rule_name) {
+                let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+                if let Ok(warnings) = rule.check(&ctx) {
+                    let has_multiline = warnings.iter().any(|w| w.end_line != w.line);
+                    if has_multiline {
+                        let result = simulate_vscode_fix(content, rule.as_ref());
+                        assert!(
+                            result != Err("Multi-line warning ranges not implemented yet".to_string()),
+                            "Rule {rule_name} has multiline warnings but simulate_vscode_fix returned 'not implemented'"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
