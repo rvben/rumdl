@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.65](https://github.com/rvben/rumdl/compare/v0.1.64...v0.1.65) - 2026-04-02
+
+### Added
+
+- **config**: add extends field for config inheritance ([abc0971](https://github.com/rvben/rumdl/commit/abc0971f89fae50b3272fa955ea515778cbffeb9))
+- **lsp**: add enableLinkNavigation config option ([7384ff0](https://github.com/rvben/rumdl/commit/7384ff0c23dac2b5c45763c2a8664235c476660e))
+
+### Fixed
+
+- **lint_context**: detect math blocks inside blockquotes ([b72158f](https://github.com/rvben/rumdl/commit/b72158f514b99fef5bb09f8ee26ae2cf18f89737))
+- **lint_context**: suppress list detection inside math blocks ([30f4ae0](https://github.com/rvben/rumdl/commit/30f4ae034be4f401db52cfe77dfe7d46e729f4e7))
+- **md063**: capitalize words following period-terminated tokens in title case ([4d03cc9](https://github.com/rvben/rumdl/commit/4d03cc99633b54a279d48102f17e5a2387d3fd7c))
+
 ## [0.1.64](https://github.com/rvben/rumdl/compare/v0.1.63...v0.1.64) - 2026-03-31
 
 ### Added
