@@ -2839,3 +2839,193 @@ extend-disable = ["MD033"]
         ".rumdl.toml should be in loaded_files"
     );
 }
+
+#[test]
+fn test_extends_base_values_propagate_when_child_silent() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("base.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), "extends = \"base.toml\"\n").unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.global.disable, vec!["MD013".to_string()]);
+}
+
+#[test]
+fn test_extends_child_disable_replaces_base() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("base.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(
+        dir.path().join(".rumdl.toml"),
+        "extends = \"base.toml\"\n[global]\ndisable = [\"MD001\"]\n",
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // disable uses override semantics: child replaces base
+    assert_eq!(config.global.disable, vec!["MD001".to_string()]);
+}
+
+#[test]
+fn test_extends_three_level_chain_propagates_from_root() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("root.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(dir.path().join("middle.toml"), "extends = \"root.toml\"\n").unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), "extends = \"middle.toml\"\n").unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.global.disable, vec!["MD013".to_string()]);
+}
+
+#[test]
+fn test_extends_rule_config_inherits_from_base() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("base.toml"), "[MD013]\nline-length = 120\n").unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), "extends = \"base.toml\"\n").unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    assert_eq!(line_length, Some(120));
+}
+
+#[test]
+fn test_extends_child_rule_config_overrides_base() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("base.toml"), "[MD013]\nline-length = 100\n").unwrap();
+    fs::write(
+        dir.path().join(".rumdl.toml"),
+        "extends = \"base.toml\"\n[MD013]\nline-length = 160\n",
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    let line_length = get_rule_config_value::<usize>(&config, "MD013", "line-length");
+    assert_eq!(line_length, Some(160));
+}
+
+#[test]
+fn test_extends_enable_wins_over_inherited_disable() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("base.toml"),
+        "[global]\ndisable = [\"MD013\", \"MD001\"]\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join(".rumdl.toml"),
+        "extends = \"base.toml\"\n[global]\nenable = [\"MD001\"]\n",
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        !config.global.disable.contains(&"MD001".to_string()),
+        "MD001 should not be disabled when explicitly enabled"
+    );
+}
+
+#[test]
+fn test_extends_cycle_returns_error() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.toml"), "extends = \"b.toml\"\n").unwrap();
+    fs::write(dir.path().join("b.toml"), "extends = \"a.toml\"\n").unwrap();
+
+    let result =
+        SourcedConfig::load_with_discovery_impl(Some(dir.path().join("a.toml").to_str().unwrap()), None, true, None);
+
+    assert!(
+        matches!(result, Err(ConfigError::CircularExtends { .. })),
+        "Expected CircularExtends error, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_extends_missing_file_returns_error() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join(".rumdl.toml"), "extends = \"nonexistent.toml\"\n").unwrap();
+
+    let result = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    );
+
+    assert!(
+        matches!(result, Err(ConfigError::ExtendsNotFound { .. })),
+        "Expected ExtendsNotFound error, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_extends_depth_limit_returns_error() {
+    let dir = tempdir().unwrap();
+
+    fs::write(dir.path().join("level_0.toml"), "[global]\n").unwrap();
+    for i in 1..=10 {
+        fs::write(
+            dir.path().join(format!("level_{i}.toml")),
+            format!("extends = \"level_{}.toml\"\n", i - 1),
+        )
+        .unwrap();
+    }
+
+    let result = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join("level_10.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+    );
+
+    assert!(
+        matches!(result, Err(ConfigError::ExtendsDepthExceeded { .. })),
+        "Expected ExtendsDepthExceeded error, got: {result:?}"
+    );
+}
