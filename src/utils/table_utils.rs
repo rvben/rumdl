@@ -29,27 +29,36 @@ pub struct ListTableContext {
 pub struct TableUtils;
 
 impl TableUtils {
-    /// Returns true if the line has at least one unescaped pipe separator outside inline code spans.
+    /// Returns true if the line has at least one unescaped pipe separator outside inline code and
+    /// math spans.
     ///
-    /// This helps distinguish actual table separators from command/prose examples like
-    /// `` `echo a | sed 's/a/b/'` `` where the pipe is fully inside inline code.
-    fn has_unescaped_pipe_outside_inline_code(text: &str) -> bool {
+    /// Skips pipes inside backtick code spans (`` `...` ``) and dollar-sign math spans (`$...$`,
+    /// `$$...$$`) to avoid false positives from prose like `` `echo a | sed 's/a/b/'` `` or math
+    /// like `$|S|$` (absolute value notation).
+    ///
+    /// Note: a bare `$` that opens a span without a matching closing `$` keeps the scanner in
+    /// math mode for the rest of the line, suppressing any subsequent pipes. This is conservative
+    /// and means that `$5 | $10`-style price comparisons (without outer pipes) are not detected
+    /// as table separators — an accepted trade-off to avoid false positives from real math.
+    fn has_unescaped_pipe_outside_spans(text: &str) -> bool {
         let chars: Vec<char> = text.chars().collect();
         let mut i = 0;
         let mut in_code = false;
         let mut code_delim_len = 0usize;
+        let mut in_math = false;
+        let mut math_delim_len = 0usize;
 
         while i < chars.len() {
             let ch = chars[i];
 
-            if ch == '\\' && !in_code {
-                // Skip escaped character (only outside code spans —
+            if ch == '\\' && !in_code && !in_math {
+                // Skip escaped character (only outside code and math spans —
                 // backslashes are literal inside code spans per CommonMark).
                 i += if i + 1 < chars.len() { 2 } else { 1 };
                 continue;
             }
 
-            if ch == '`' {
+            if ch == '`' && !in_math {
                 let mut run = 1usize;
                 while i + run < chars.len() && chars[i + run] == '`' {
                     run += 1;
@@ -60,6 +69,7 @@ impl TableUtils {
                         in_code = false;
                         code_delim_len = 0;
                     }
+                    // Mismatched backtick run inside a code span: consumed but span stays open.
                 } else {
                     in_code = true;
                     code_delim_len = run;
@@ -69,7 +79,28 @@ impl TableUtils {
                 continue;
             }
 
-            if ch == '|' && !in_code {
+            if ch == '$' && !in_code {
+                let mut run = 1usize;
+                while i + run < chars.len() && chars[i + run] == '$' {
+                    run += 1;
+                }
+
+                if in_math {
+                    if run == math_delim_len {
+                        in_math = false;
+                        math_delim_len = 0;
+                    }
+                    // Mismatched $-run inside a math span: consumed but span stays open.
+                } else {
+                    in_math = true;
+                    math_delim_len = run;
+                }
+
+                i += run;
+                continue;
+            }
+
+            if ch == '|' && !in_code && !in_math {
                 return true;
             }
 
@@ -124,9 +155,9 @@ impl TableUtils {
         }
 
         // For rows without explicit outer pipes, require a real separator outside
-        // inline code spans to avoid prose/command false positives.
+        // inline code and math spans to avoid prose/command false positives.
         let has_outer_pipes = trimmed.starts_with('|') && trimmed.ends_with('|');
-        if !has_outer_pipes && !Self::has_unescaped_pipe_outside_inline_code(trimmed) {
+        if !has_outer_pipes && !Self::has_unescaped_pipe_outside_spans(trimmed) {
             return false;
         }
 
@@ -939,6 +970,24 @@ mod tests {
         assert!(TableUtils::is_potential_table_row("`!foo && bar` | `(!foo) && bar`"));
         assert!(!TableUtils::is_potential_table_row("`echo a | sed 's/a/b/'`"));
 
+        // Math spans: pipes inside $...$ are not table separators
+        assert!(!TableUtils::is_potential_table_row(
+            "Text with $|S|$ math notation here."
+        ));
+        assert!(!TableUtils::is_potential_table_row(
+            "Size $|S|$ was even, check $|T|$ too."
+        ));
+        assert!(!TableUtils::is_potential_table_row("Display $$|A| + |B|$$ math here."));
+        // Math pipe in cell with outer pipes is still a table row
+        assert!(TableUtils::is_potential_table_row("| cell with $|S|$ math |"));
+        // Pipe after fully closed math spans is still detected
+        assert!(TableUtils::is_potential_table_row("$a$ | $b$"));
+        assert!(TableUtils::is_potential_table_row("$f(x)$ and $g(x)$ | result"));
+        // $5 | $10 style price comparisons are suppressed as a deliberate trade-off:
+        // the leading $ opens a math span, consuming the pipe. Tables with bare dollar
+        // amounts should use outer pipes (| $5 | $10 |) to be correctly detected.
+        assert!(!TableUtils::is_potential_table_row("$5 | $10"));
+
         // Single pipe not enough
         assert!(!TableUtils::is_potential_table_row("Just one |"));
         assert!(!TableUtils::is_potential_table_row("| Just one"));
@@ -1642,13 +1691,13 @@ But no delimiter row
     fn test_has_unescaped_pipe_backslash_literal_in_code_span() {
         // Per CommonMark: backslashes are literal inside code spans.
         // `foo\` is a complete code span, so the pipe after it is outside code.
-        assert!(TableUtils::has_unescaped_pipe_outside_inline_code(r"`foo\` | bar"));
+        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"`foo\` | bar"));
 
         // Escaped backtick outside code span: \` is not a code span opener
-        assert!(TableUtils::has_unescaped_pipe_outside_inline_code(r"\`foo | bar\`"));
+        assert!(TableUtils::has_unescaped_pipe_outside_spans(r"\`foo | bar\`"));
 
         // Pipe inside code span should not count
-        assert!(!TableUtils::has_unescaped_pipe_outside_inline_code(r"`foo | bar`"));
+        assert!(!TableUtils::has_unescaped_pipe_outside_spans(r"`foo | bar`"));
     }
 
     #[test]

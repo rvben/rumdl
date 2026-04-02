@@ -48,7 +48,7 @@ impl MD075OrphanedTableRows {
         Self { md060_formatter }
     }
 
-    /// Check if a line should be skipped (frontmatter, code block, HTML, ESM, mkdocstrings)
+    /// Check if a line should be skipped (frontmatter, code block, HTML, ESM, mkdocstrings, math)
     fn should_skip_line(&self, ctx: &crate::lint_context::LintContext, line_idx: usize) -> bool {
         if let Some(line_info) = ctx.lines.get(line_idx) {
             line_info.in_front_matter
@@ -58,6 +58,7 @@ impl MD075OrphanedTableRows {
                 || line_info.in_mdx_comment
                 || line_info.in_esm_block
                 || line_info.in_mkdocstrings
+                || line_info.in_math_block
         } else {
             false
         }
@@ -1297,6 +1298,34 @@ c | d";
 | `fenced`     | All code blocks must use fenced style (``` or ~~~) |
 | `indented`   | All code blocks must use indented style (4 spaces) |";
         assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_display_math_block_with_pipes_not_flagged() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "# Math\n\n$$\n|A| + |B| = |A \\cup B|\n|A| + |B| = |A \\cup B|\n$$\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Pipes inside display math blocks should not trigger MD075"
+        );
+    }
+
+    #[test]
+    fn test_math_absolute_value_bars_not_flagged() {
+        let rule = MD075OrphanedTableRows::default();
+        let content = "\
+# Math
+
+Roughly (for privacy reasons, this isn't exactly what the student said),
+the student talked about having done small cases on the size $|S|$,
+and figuring out that $|S|$ was even, but then running out of ideas.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty(), "Math absolute value bars should not trigger MD075");
     }
 
     #[test]
