@@ -17,6 +17,10 @@ on:
   # Gate complexity regressions on every PR
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   complexity-gate:
     name: Complexity Regression Gate
@@ -27,8 +31,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup mise
-        uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v4
         with:
           experimental: true
           install: false
@@ -41,13 +44,12 @@ jobs:
             sleep 10
           done
 
-      - name: Install cargo-nextest
-        run: |
-          cargo install cargo-nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
 
       - name: Run linear complexity regression tests
-        run: |
-          cargo nextest run --profile performance -E 'test(linear_complexity)'
+        run: make test-complexity
         env:
           RUST_BACKTRACE: 1
 
@@ -60,8 +62,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Setup mise
-        uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v4
         with:
           experimental: true
           install: false
@@ -75,14 +76,14 @@ jobs:
           done
 
       - name: Install Rust components
-        run: |
-          rustup component add rustfmt
-          rustup component add clippy
-          cargo install cargo-nextest
+        run: rustup component add rustfmt clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
 
       - name: Run performance tests
-        run: |
-          cargo nextest run --profile performance
+        run: make test-performance
         env:
           RUST_BACKTRACE: 1
           RUST_LOG: ${{ inputs.verbose == 'true' && 'debug' || 'warn' }}
