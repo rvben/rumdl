@@ -485,11 +485,102 @@ mod tests {
     }
 
     #[test]
+    fn test_simulate_vscode_fix_multiline_splice_is_correct() {
+        use rumdl_lib::config::{Config, MarkdownFlavor};
+        use rumdl_lib::lint_context::LintContext;
+        use rumdl_lib::rule::{
+            CrossFileScope, Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
+        };
+
+        // A test-only rule that returns a single warning spanning lines 2–3,
+        // with a fixed replacement string. This exercises the multiline splice
+        // branch of simulate_vscode_fix directly.
+        #[derive(Clone)]
+        struct MultilineTestRule;
+
+        impl Rule for MultilineTestRule {
+            fn name(&self) -> &'static str {
+                "TEST"
+            }
+            fn description(&self) -> &'static str {
+                "Test rule for multiline splice"
+            }
+            fn check(&self, _ctx: &LintContext) -> LintResult {
+                // Warning spans line 2 col 1 → line 3 col 6.
+                // end_column 6 is exclusive: "END X" has 5 chars, so col 6 points past the last char.
+                Ok(vec![LintWarning {
+                    line: 2,
+                    column: 1,
+                    end_line: 3,
+                    end_column: 6,
+                    message: "test".to_string(),
+                    fix: Some(Fix {
+                        range: 0..0,
+                        replacement: "REPLACED".to_string(),
+                    }),
+                    severity: Severity::Warning,
+                    rule_name: Some("TEST".to_string()),
+                }])
+            }
+            fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
+                Ok(ctx.content.to_string())
+            }
+            fn category(&self) -> RuleCategory {
+                RuleCategory::Other
+            }
+            fn as_any(&self) -> &dyn std::any::Any {
+                self
+            }
+            fn fix_capability(&self) -> FixCapability {
+                FixCapability::FullyFixable
+            }
+            fn cross_file_scope(&self) -> CrossFileScope {
+                CrossFileScope::None
+            }
+            fn from_config(_config: &Config) -> Box<dyn Rule>
+            where
+                Self: Sized,
+            {
+                Box::new(MultilineTestRule)
+            }
+        }
+
+        // 4-line content: line 1 "BEFORE", line 2 "START HERE", line 3 "END X", line 4 "AFTER"
+        // The warning spans line 2 col 1 → line 3 col 6 (the entirety of "START HERE\nEND X").
+        // After the splice, lines 2–3 should be replaced with "REPLACED".
+        let content = "BEFORE\nSTART HERE\nEND X\nAFTER\n";
+        let rule = MultilineTestRule;
+
+        // Verify the warning is indeed multiline before testing the fix path.
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let multiline_warning = warnings
+            .iter()
+            .find(|w| w.end_line != w.line)
+            .expect("MultilineTestRule should produce a multiline warning");
+        assert_eq!(multiline_warning.line, 2);
+        assert_eq!(multiline_warning.end_line, 3);
+
+        let result = simulate_vscode_fix(content, &rule);
+        let fixed = result.expect("Multiline fix should succeed");
+
+        // Lines 2–3 ("START HERE" and "END X") should be replaced by "REPLACED".
+        assert_eq!(
+            fixed, "BEFORE\nREPLACED\nAFTER\n",
+            "Multiline splice should replace lines 2–3 with the replacement text. Got: {fixed:?}"
+        );
+    }
+
+    #[test]
     fn test_simulate_vscode_fix_handles_multiline_warning_range() {
         use rumdl_lib::config::MarkdownFlavor;
         use rumdl_lib::lint_context::LintContext;
 
-        // Check ALL rules for multiline warnings and verify none return "not implemented"
+        // This test verifies that when rules DO produce multiline warnings,
+        // simulate_vscode_fix handles them rather than returning "not implemented".
+        // Currently, no rules in create_test_case_for_rule produce multiline warnings
+        // with their test fixtures, so this loop is a no-op today. It acts as a
+        // regression guard for future rules.
         let rule_names = [
             "MD001", "MD003", "MD004", "MD005", "MD007", "MD009", "MD010", "MD011", "MD012", "MD013", "MD014", "MD018",
             "MD019", "MD020", "MD021", "MD022", "MD023", "MD024", "MD025", "MD026", "MD027", "MD028", "MD029", "MD030",
