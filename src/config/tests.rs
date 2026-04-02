@@ -2877,7 +2877,6 @@ fn test_extends_child_disable_replaces_base() {
     .unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
-    // disable uses override semantics: child replaces base
     assert_eq!(config.global.disable, vec!["MD001".to_string()]);
 }
 
@@ -2969,6 +2968,10 @@ fn test_extends_enable_wins_over_inherited_disable() {
         !config.global.disable.contains(&"MD001".to_string()),
         "MD001 should not be disabled when explicitly enabled"
     );
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "MD013 should still be disabled (only MD001 was re-enabled)"
+    );
 }
 
 #[test]
@@ -3007,9 +3010,11 @@ fn test_extends_missing_file_returns_error() {
 #[test]
 fn test_extends_depth_limit_returns_error() {
     let dir = tempdir().unwrap();
-
+    // Build MAX_EXTENDS_DEPTH + 1 levels so the loader hits the depth guard.
+    // Mirrors MAX_EXTENDS_DEPTH = 10 from src/config/loading.rs.
+    let max_depth: usize = 10;
     fs::write(dir.path().join("level_0.toml"), "[global]\n").unwrap();
-    for i in 1..=10 {
+    for i in 1..=max_depth {
         fs::write(
             dir.path().join(format!("level_{i}.toml")),
             format!("extends = \"level_{}.toml\"\n", i - 1),
@@ -3018,7 +3023,7 @@ fn test_extends_depth_limit_returns_error() {
     }
 
     let result = SourcedConfig::load_with_discovery_impl(
-        Some(dir.path().join("level_10.toml").to_str().unwrap()),
+        Some(dir.path().join(format!("level_{max_depth}.toml")).to_str().unwrap()),
         None,
         true,
         None,
