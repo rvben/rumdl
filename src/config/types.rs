@@ -38,6 +38,12 @@ fn arbitrary_value_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Sch
     description = "rumdl configuration for linting Markdown files. Rules can be configured individually using [MD###] sections with rule-specific options."
 )]
 pub struct Config {
+    /// Path to a base config file to inherit settings from.
+    /// Supports relative paths, absolute paths, and `~/` for home directory.
+    /// Example: `extends = "../base.rumdl.toml"`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<String>,
+
     /// Global configuration options
     #[serde(default)]
     pub global: GlobalConfig,
@@ -735,7 +741,7 @@ pub enum ConfigError {
     CircularExtends { path: String, chain: Vec<String> },
 
     /// Extends chain exceeds maximum depth
-    #[error("extends chain exceeds maximum depth of {max_depth} at {path}")]
+    #[error("Extends chain exceeds maximum depth of {max_depth} at {path}")]
     ExtendsDepthExceeded { path: String, max_depth: usize },
 
     /// Extends target file not found

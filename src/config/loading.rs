@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, HashSet};
+use indexmap::IndexSet;
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -69,7 +70,7 @@ fn source_from_filename(filename: &str) -> ConfigSource {
 fn load_config_with_extends(
     sourced_config: &mut SourcedConfig<ConfigLoaded>,
     config_file_path: &Path,
-    visited: &mut HashSet<PathBuf>,
+    visited: &mut IndexSet<PathBuf>,
     chain_source: ConfigSource,
 ) -> Result<(), ConfigError> {
     // Canonicalize the path for circular reference detection
@@ -654,7 +655,7 @@ impl SourcedConfig<ConfigLoaded> {
 
         if filename == "pyproject.toml" || filename == ".rumdl.toml" || filename == "rumdl.toml" {
             // Use extends-aware loading for rumdl TOML configs
-            let mut visited = HashSet::new();
+            let mut visited = IndexSet::new();
             let chain_source = source_from_filename(filename);
             load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
         } else if MARKDOWNLINT_FILENAMES.contains(&filename)
@@ -669,7 +670,7 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.loaded_files.push(path_str);
         } else {
             // Try TOML with extends support
-            let mut visited = HashSet::new();
+            let mut visited = IndexSet::new();
             let chain_source = source_from_filename(filename);
             load_config_with_extends(sourced_config, path_obj, &mut visited, chain_source)?;
         }
@@ -695,7 +696,7 @@ impl SourcedConfig<ConfigLoaded> {
 
             // User config fallback also supports extends chains.
             // Use a uniform source across the chain so child overrides are determined by chain order.
-            let mut visited = HashSet::new();
+            let mut visited = IndexSet::new();
             load_config_with_extends(
                 sourced_config,
                 &user_config_path,
@@ -754,7 +755,7 @@ impl SourcedConfig<ConfigLoaded> {
                 sourced_config.project_root = Some(project_root);
 
                 // Use extends-aware loading for discovered configs
-                let mut visited = HashSet::new();
+                let mut visited = IndexSet::new();
                 let root_filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 let chain_source = source_from_filename(root_filename);
                 load_config_with_extends(&mut sourced_config, &config_file, &mut visited, chain_source)?;
@@ -980,7 +981,7 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config.merge(fragment);
             sourced_config.loaded_files.push(path_str);
         } else {
-            let mut visited = HashSet::new();
+            let mut visited = IndexSet::new();
             let chain_source = source_from_filename(filename);
             load_config_with_extends(&mut sourced_config, config_path, &mut visited, chain_source)?;
         }
@@ -1030,6 +1031,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         };
 
         let mut config = Config {
+            extends: None,
             global,
             per_file_ignores: sourced.per_file_ignores.value,
             per_file_flavor: sourced.per_file_flavor.value,

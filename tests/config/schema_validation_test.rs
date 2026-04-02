@@ -238,6 +238,60 @@ respect-gitignore = "true"  # Should be boolean, not string
     );
 }
 
+/// Ensure the committed schema file matches what the code generates.
+///
+/// Any change to `Config` or its fields that affects the schema must be followed
+/// by `rumdl schema generate`. This catches omitted fields, type changes, and
+/// description drift without maintaining a hardcoded property list.
+#[test]
+fn test_schema_file_is_up_to_date() {
+    use rumdl_lib::config::Config;
+
+    let schema = schemars::schema_for!(Config);
+    let mut schema_value: serde_json::Value = serde_json::to_value(&schema).expect("Failed to convert schema to Value");
+
+    // Apply the same post-processing as `rumdl schema generate`:
+    // allow arbitrary [MD###] sections at the root level.
+    if let Some(obj) = schema_value.as_object_mut() {
+        obj.insert(
+            "additionalProperties".to_string(),
+            serde_json::json!({ "$ref": "#/$defs/RuleConfig" }),
+        );
+    }
+
+    let generated = serde_json::to_string_pretty(&schema_value).expect("Failed to serialize schema");
+
+    let schema_path = concat!(env!("CARGO_MANIFEST_DIR"), "/rumdl.schema.json");
+    let on_disk =
+        fs::read_to_string(schema_path).expect("Failed to read rumdl.schema.json — run 'rumdl schema generate' first");
+
+    if on_disk != generated {
+        let first_diff = on_disk
+            .lines()
+            .zip(generated.lines())
+            .enumerate()
+            .find(|(_, (a, b))| a != b)
+            .map(|(i, (a, b))| {
+                format!(
+                    "First difference at line {}:\n  disk:      {}\n  generated: {}",
+                    i + 1,
+                    a,
+                    b
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "Line count differs: {} (disk) vs {} (generated)",
+                    on_disk.lines().count(),
+                    generated.lines().count()
+                )
+            });
+        panic!(
+            "rumdl.schema.json is out of date. Run 'rumdl schema generate' (or 'make schema') to update it.\n{first_diff}"
+        );
+    }
+}
+
 /// Regression test: GlobalConfig schema properties must use kebab-case
 ///
 /// This prevents regression where snake_case properties were being output
