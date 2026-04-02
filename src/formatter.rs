@@ -545,3 +545,126 @@ pub fn generate_diff(original: &str, modified: &str, file_path: &str) -> String 
 
     diff
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_diff_identical_content_reports_no_changes() {
+        let content = "line one\nline two\nline three\n";
+        let result = generate_diff(content, content, "test.md");
+        assert!(
+            result.contains("No changes"),
+            "Expected 'No changes' for identical inputs, got:\n{result}"
+        );
+    }
+
+    #[test]
+    fn test_generate_diff_single_line_change() {
+        let original = "line one\nline two\nline three\n";
+        let modified = "line one\nLINE TWO\nline three\n";
+        let result = generate_diff(original, modified, "test.md");
+
+        assert!(result.contains("--- test.md"), "Missing original header");
+        assert!(result.contains("+++ test.md (fixed)"), "Missing modified header");
+        assert!(result.contains("-line two"), "Missing removed line");
+        assert!(result.contains("+LINE TWO"), "Missing added line");
+    }
+
+    #[test]
+    fn test_generate_diff_line_added_to_modified() {
+        let original = "line one\nline three\n";
+        let modified = "line one\nline two\nline three\n";
+        let result = generate_diff(original, modified, "test.md");
+
+        assert!(result.contains("+line two"), "Expected added line in diff");
+    }
+
+    #[test]
+    fn test_generate_diff_line_removed_from_original() {
+        let original = "line one\nline two\nline three\n";
+        let modified = "line one\nline three\n";
+        let result = generate_diff(original, modified, "test.md");
+
+        assert!(result.contains("-line two"), "Expected removed line in diff");
+    }
+
+    #[test]
+    fn test_generate_diff_includes_three_lines_of_context() {
+        let lines: Vec<String> = (1..=10).map(|i| format!("line {i}")).collect();
+        let mut modified = lines.clone();
+        modified[4] = "CHANGED".to_string();
+
+        let original_str = lines.join("\n");
+        let modified_str = modified.join("\n");
+        let result = generate_diff(&original_str, &modified_str, "test.md");
+
+        assert!(result.contains(" line 4"), "Expected context line before change");
+        assert!(result.contains(" line 6"), "Expected context line after change");
+        assert!(result.contains("-line 5"), "Expected removed line");
+        assert!(result.contains("+CHANGED"), "Expected added line");
+    }
+
+    #[test]
+    fn test_generate_diff_hunk_header_format() {
+        let original = "a\nb\nc\n";
+        let modified = "a\nB\nc\n";
+        let result = generate_diff(original, modified, "f.md");
+
+        assert!(result.contains("@@"), "Expected @@ hunk header in diff:\n{result}");
+    }
+
+    #[test]
+    fn test_format_toml_value_string_is_quoted() {
+        let val = toml::Value::String("hello world".to_string());
+        assert_eq!(format_toml_value(&val), "\"hello world\"");
+    }
+
+    #[test]
+    fn test_format_toml_value_integer() {
+        let val = toml::Value::Integer(42);
+        assert_eq!(format_toml_value(&val), "42");
+    }
+
+    #[test]
+    fn test_format_toml_value_boolean_true() {
+        assert_eq!(format_toml_value(&toml::Value::Boolean(true)), "true");
+    }
+
+    #[test]
+    fn test_format_toml_value_boolean_false() {
+        assert_eq!(format_toml_value(&toml::Value::Boolean(false)), "false");
+    }
+
+    #[test]
+    fn test_format_toml_value_array_of_strings() {
+        let val = toml::Value::Array(vec![
+            toml::Value::String("a".to_string()),
+            toml::Value::String("b".to_string()),
+        ]);
+        assert_eq!(format_toml_value(&val), r#"["a", "b"]"#);
+    }
+
+    #[test]
+    fn test_format_toml_value_empty_array() {
+        let val = toml::Value::Array(vec![]);
+        assert_eq!(format_toml_value(&val), "[]");
+    }
+
+    #[test]
+    fn test_format_toml_value_table_is_placeholder() {
+        let val = toml::Value::Table(toml::map::Map::new());
+        assert_eq!(format_toml_value(&val), "<table>");
+    }
+
+    #[test]
+    fn test_format_toml_value_nested_array() {
+        let val = toml::Value::Array(vec![
+            toml::Value::Integer(1),
+            toml::Value::Integer(2),
+            toml::Value::Integer(3),
+        ]);
+        assert_eq!(format_toml_value(&val), "[1, 2, 3]");
+    }
+}
