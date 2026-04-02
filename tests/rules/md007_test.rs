@@ -2331,3 +2331,68 @@ mod issue541_start_indented_mixed_lists {
         );
     }
 }
+
+#[test]
+fn test_math_block_operators_not_flagged_by_md007() {
+    // Lines starting with - inside $$ ... $$ math blocks are math operators, not list items.
+    // MD007 must not flag them for incorrect unordered list indentation.
+    let rule = MD007ULIndent::default();
+    let content = "\
+# Example math
+
+$$
+- \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+  + \\frac{1}{2} \\log\\frac{q}{\\pi}
+$$
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD007 should not flag math operators inside $$ blocks as list items: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_math_block_indented_operators_not_flagged_by_md007() {
+    // Indented lines inside a math block that look like nested list items should not
+    // trigger MD007 indentation warnings.
+    let rule = MD007ULIndent::default();
+    let content = "\
+# Math
+
+$$
+- a
+  - b
+    - c
+$$
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD007 should not flag indented lines inside math blocks: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_real_list_after_math_block_still_checked_by_md007() {
+    // A real unordered list after a math block should still be checked by MD007.
+    let rule = MD007ULIndent::default();
+    let content = "\
+# Example
+
+$$
+- \\operatorname{Re}
+$$
+
+- Item 1
+   - Nested with wrong indent
+";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        !warnings.is_empty(),
+        "MD007 should still flag real list items with wrong indentation outside math blocks"
+    );
+}

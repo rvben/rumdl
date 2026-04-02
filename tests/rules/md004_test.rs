@@ -778,3 +778,75 @@ mod parity_with_markdownlint {
         assert_eq!(fixed, expected);
     }
 }
+
+#[test]
+fn test_math_block_minus_not_flagged() {
+    // Lines starting with - inside $$ ... $$ math blocks are math operators,
+    // not list markers, and must not trigger MD004.
+    let content = "# Example math\n\n$$\n- \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}\n$$\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD004 should not flag lines starting with - inside math blocks: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_math_block_plus_not_flagged() {
+    // Lines starting with + inside $$ ... $$ math blocks are math operators,
+    // not list markers, and must not trigger MD004.
+    let content = "# Example math\n\n$$\n+ \\frac{1}{2} \\log\\frac{q}{\\pi}\n$$\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD004 should not flag lines starting with + inside math blocks: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_math_block_multiline_not_flagged() {
+    // Multi-line math expression with - and + operators should not trigger MD004.
+    let content = "\
+# Example math
+
+$$
+- \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+  + \\frac{1}{2} \\log\\frac{q}{\\pi}
+$$
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD004 should not flag multi-line math expressions: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_real_list_adjacent_to_math_block_still_checked() {
+    // A real unordered list adjacent to a math block should still be checked by MD004.
+    let content = "\
+* Item 1
+* Item 2
+
+$$
+- \\operatorname{Re}
+$$
+
+- Item 3
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+    let warnings = rule.check(&ctx).unwrap();
+    // * Item 1 and * Item 2 use asterisk but rule requires dash — should warn
+    assert_eq!(
+        warnings.len(),
+        2,
+        "MD004 should still flag real list items outside math blocks: {warnings:?}"
+    );
+}

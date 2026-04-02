@@ -455,3 +455,45 @@ Text.[^note]
         "MD005 should not flag list items inside footnote definitions: {warnings:?}"
     );
 }
+
+#[test]
+fn test_math_block_not_flagged_as_list() {
+    // Lines starting with - inside $$ ... $$ math blocks are math operators, not list items.
+    // MD005 must not flag them for inconsistent indentation.
+    let md005 = MD005ListIndent::default();
+    let content = "\
+# Example math
+
+$$
+- \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+  + \\frac{1}{2} \\log\\frac{q}{\\pi}
+$$
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = md005.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD005 should not flag math operators inside $$ blocks: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_math_block_multiline_with_indented_lines() {
+    // Indented continuation lines in a math block should not be flagged by MD005.
+    let md005 = MD005ListIndent::default();
+    let content = "\
+# Math
+
+$$
+- a
+  - b
+    - c
+$$
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = md005.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD005 should not flag indented lines inside math blocks: {warnings:?}"
+    );
+}

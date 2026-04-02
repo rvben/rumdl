@@ -843,3 +843,69 @@ Text.[^note]
         "MD032 should not flag lists inside footnote definitions: {result:?}"
     );
 }
+
+#[test]
+fn test_math_block_operators_not_flagged_as_list() {
+    // Lines starting with - or + inside $$ ... $$ math blocks are math operators.
+    // MD032 must not require blank lines around them as if they were list items.
+    let rule = MD032BlanksAroundLists::default();
+    let content = "\
+# Example math
+
+$$
+- \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+  + \\frac{1}{2} \\log\\frac{q}{\\pi}
+$$
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD032 should not flag math operators inside $$ blocks as list items: {result:?}"
+    );
+}
+
+#[test]
+fn test_math_block_with_real_list_after() {
+    // A real list after a math block should still be checked by MD032.
+    let rule = MD032BlanksAroundLists::default();
+    let content = "\
+# Example
+
+$$
+- \\operatorname{Re}
+$$
+
+Some text
+- Item 1
+- Item 2
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "MD032 should still flag real lists missing a blank line before them: {result:?}"
+    );
+}
+
+#[test]
+fn test_math_block_delimiter_not_flagged() {
+    // The $$ delimiter line itself must not be treated as a list item.
+    let rule = MD032BlanksAroundLists::default();
+    let content = "\
+Some text
+
+$$
+x = y
+$$
+
+More text
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD032 should not flag $$ delimiter lines: {result:?}"
+    );
+}
