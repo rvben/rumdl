@@ -14,10 +14,47 @@ on:
         default: 'false'
         type: boolean
 
+  # Gate complexity regressions on every PR
+  pull_request:
+
 jobs:
+  complexity-gate:
+    name: Complexity Regression Gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install mise tools
+        run: |
+          for attempt in 1 2 3; do
+            mise install --yes && break
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Install cargo-nextest
+        run: |
+          cargo install cargo-nextest
+
+      - name: Run linear complexity regression tests
+        run: |
+          cargo nextest run --profile performance -E 'test(linear_complexity)'
+        env:
+          RUST_BACKTRACE: 1
+
   performance:
     name: Run Performance Tests
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
 
     steps:
       - name: Checkout code
