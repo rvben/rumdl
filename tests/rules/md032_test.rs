@@ -909,3 +909,25 @@ More text
         "MD032 should not flag $$ delimiter lines: {result:?}"
     );
 }
+
+#[test]
+fn test_math_block_inside_blockquote_not_flagged() {
+    // Lines starting with - or + inside a blockquote math block must not be treated as lists.
+    let rule = MD032BlanksAroundLists::default();
+    let content = "\
+Some text
+
+> $$
+> - \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+>   + \\frac{1}{2} \\log\\frac{q}{\\pi}
+> $$
+
+More text
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD032 should not flag math operators inside blockquote math blocks: {result:?}"
+    );
+}

@@ -319,8 +319,12 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
         }
 
         let trimmed = line.trim();
+        // Strip blockquote prefix so that `> $$` is recognized as a math delimiter
+        let content_after_blockquote = crate::utils::blockquote::parse_blockquote_prefix(trimmed)
+            .map(|p| p.content.trim())
+            .unwrap_or(trimmed);
 
-        if trimmed == "$$" {
+        if content_after_blockquote == "$$" {
             if inside_math {
                 in_math_block[i] = true;
                 inside_math = false;

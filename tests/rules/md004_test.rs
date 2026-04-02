@@ -850,3 +850,21 @@ $$
         "MD004 should still flag real list items outside math blocks: {warnings:?}"
     );
 }
+
+#[test]
+fn test_math_block_inside_blockquote_not_flagged() {
+    // Lines starting with - inside a blockquote math block must not trigger MD004.
+    let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+    let content = "\
+> $$
+> - \\operatorname{Re} \\frac{L'(s, \\chi)}{L(s, \\chi)}
+>   + \\frac{1}{2}
+> $$
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD004 should not flag math operators inside blockquote math blocks: {warnings:?}"
+    );
+}
