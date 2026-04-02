@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.66](https://github.com/rvben/rumdl/compare/v0.1.65...v0.1.66) - 2026-04-02
+
+### Added
+
+- **vscode**: implement multiline warning range support in VS Code fix simulation ([7e4e70b](https://github.com/rvben/rumdl/commit/7e4e70b64496609fb4b4038cd95fb0b3f911eda2))
+
+### Fixed
+
+- **md075**: skip pipes inside math spans to prevent false positives ([0420515](https://github.com/rvben/rumdl/commit/0420515230f5f94aaa458e41c960cbd71074d313))
+
 ## [0.1.65](https://github.com/rvben/rumdl/compare/v0.1.64...v0.1.65) - 2026-04-02
 
 ### Added
