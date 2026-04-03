@@ -6,7 +6,7 @@ hide:
 
 # Playground
 
-Try rumdl directly in your browser — no installation needed. Powered by [rumdl-wasm](https://www.npmjs.com/package/rumdl-wasm), the same linting engine compiled to WebAssembly.
+Try rumdl directly in your browser — no installation needed. Powered by [rumdl-wasm](https://github.com/rvben/rumdl), the same linting engine compiled to WebAssembly.
 
 <div id="rumdl-playground">
 
