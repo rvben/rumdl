@@ -252,8 +252,7 @@ Try rumdl directly in your browser — no installation needed. Powered by [rumdl
 </style>
 
 <script type="module">
-const WASM_VERSION = '0.1.65';
-const WASM_URL = `https://unpkg.com/rumdl-wasm@${WASM_VERSION}/rumdl_lib.js`;
+const WASM_URL = 'https://cdn.jsdelivr.net/npm/rumdl-wasm/rumdl_lib.js';
 
 const TRAIL = ' '.repeat(3);
 
