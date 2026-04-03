@@ -137,6 +137,7 @@ Try rumdl directly in your browser — no installation needed. Powered by [rumdl
   border-radius: 6px;
   overflow: hidden;
   background: var(--md-default-bg-color, #fff);
+  min-height: 460px;
 }
 
 .pg-panel-header {
