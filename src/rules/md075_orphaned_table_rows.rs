@@ -77,8 +77,6 @@ impl MD075OrphanedTableRows {
         TableUtils::is_delimiter_row(content)
     }
 
-    /// Strip blockquote prefix from a line, returning the content after it
-
     /// Check if a line is blank (including blockquote continuation lines like ">")
     fn is_blank_line(line: &str) -> bool {
         crate::utils::regex_cache::is_blank_in_blockquote_context(line)

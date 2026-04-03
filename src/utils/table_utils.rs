@@ -241,8 +241,6 @@ impl TableUtils {
         total_non_empty_parts > 0 && valid_delimiter_parts == total_non_empty_parts
     }
 
-    /// Strip blockquote prefix from a line, returning the content without the prefix
-
     /// Find all table blocks in the content with optimized detection
     /// This version accepts code_blocks and code_spans directly for use during LintContext construction
     pub fn find_table_blocks_with_code_info(
