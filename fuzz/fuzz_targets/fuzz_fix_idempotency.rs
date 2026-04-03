@@ -33,7 +33,7 @@ fuzz_target!(|data: &[u8]| {
     // Apply fixes
     let mut fixed1 = content.to_string();
     let coordinator = FixCoordinator::new();
-    let Ok(result1) = coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed1, &config, 10) else {
+    let Ok(result1) = coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed1, &config, 10, None) else {
         return;
     };
 
@@ -48,7 +48,7 @@ fuzz_target!(|data: &[u8]| {
 
     // Apply fixes again
     let mut fixed2 = fixed1.clone();
-    let _ = coordinator.apply_fixes_iterative(&rules, &warnings2, &mut fixed2, &config, 10);
+    let _ = coordinator.apply_fixes_iterative(&rules, &warnings2, &mut fixed2, &config, 10, None);
 
     // Idempotency check: second fix pass should not change content
     assert_eq!(fixed1, fixed2, "Fix is not idempotent");

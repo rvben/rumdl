@@ -35,7 +35,7 @@ fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<
         }
         #[cfg(not(feature = "native"))]
         {
-            // WASM: no home directory support
+            let _ = suffix;
             PathBuf::from(extends_value)
         }
     } else {

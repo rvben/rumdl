@@ -8,17 +8,67 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+arbitrary = { version = "1", features = ["derive"] }
+toml = "1.0"
 
 [dependencies.rumdl]
 path = ".."
 default-features = false
 features = ["parallel"]
 
-# Fuzz fix idempotency - verifies fixes don't oscillate
 [[bin]]
 name = "fuzz_fix_idempotency"
 path = "fuzz_targets/fuzz_fix_idempotency.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_lint"
+path = "fuzz_targets/fuzz_lint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_fix"
+path = "fuzz_targets/fuzz_fix.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_config"
+path = "fuzz_targets/fuzz_config.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_context"
+path = "fuzz_targets/fuzz_context.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_differential"
+path = "fuzz_targets/fuzz_differential.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_properties"
+path = "fuzz_targets/fuzz_properties.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_structured"
+path = "fuzz_targets/fuzz_structured.rs"
 test = false
 doc = false
 bench = false
