@@ -4,6 +4,7 @@ use rumdl_lib::rules::{
     MD004UnorderedListStyle, MD005ListIndent, MD007ULIndent, MD009TrailingSpaces, MD010NoHardTabs,
     MD012NoMultipleBlanks, MD022BlanksAroundHeadings, MD023HeadingStartLeft, MD028NoBlanksBlockquote,
     MD030ListMarkerSpace, MD031BlanksAroundFences, MD032BlanksAroundLists, MD047SingleTrailingNewline,
+    MD064NoMultipleConsecutiveSpaces,
 };
 
 #[test]
@@ -235,4 +236,45 @@ fn test_blockquote_list_combination() {
     assert_eq!(md028.check(&final_ctx).unwrap().len(), 0, "MD028 satisfied");
     assert_eq!(md004.check(&final_ctx).unwrap().len(), 0, "MD004 satisfied");
     assert_eq!(md009.check(&final_ctx).unwrap().len(), 0, "MD009 satisfied");
+}
+
+#[test]
+fn test_md030_md064_no_conflict_in_blockquoted_list() {
+    // Regression test for issue #558: MD030 and MD064 conflict inside blockquoted list
+    // When MD030 is configured with ol-single=2, it requires 2 spaces after ordered list
+    // markers. MD064 must not flag those spaces as "multiple consecutive spaces".
+    let md030 = MD030ListMarkerSpace::new(1, 1, 2, 2);
+    let md064 = MD064NoMultipleConsecutiveSpaces::new();
+
+    let content = "# Title\n\n> 1.  Hello.\n>     This is a list item.\n> 2.  This is another list item\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // MD030 should be satisfied (2 spaces after markers, as configured)
+    let md030_warnings = md030.check(&ctx).unwrap();
+    assert!(
+        md030_warnings.is_empty(),
+        "MD030 should be satisfied with 2-space markers"
+    );
+
+    // MD064 should not flag the list marker spaces
+    let md064_warnings = md064.check(&ctx).unwrap();
+    assert!(
+        md064_warnings.is_empty(),
+        "MD064 should not flag spaces controlled by MD030"
+    );
+
+    // Applying MD064 fix should not alter the content
+    let fixed = md064.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "MD064 fix should not modify content that MD030 controls"
+    );
+
+    // After MD064 fix, MD030 should still be satisfied (no conflict loop)
+    let ctx_after = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let md030_recheck = md030.check(&ctx_after).unwrap();
+    assert!(
+        md030_recheck.is_empty(),
+        "MD030 should still be satisfied after MD064 fix"
+    );
 }

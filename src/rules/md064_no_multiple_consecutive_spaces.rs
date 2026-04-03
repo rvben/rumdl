@@ -28,6 +28,7 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
+use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::sentence_utils::is_after_sentence_ending;
 use crate::utils::skip_context::is_table_line;
 use serde::{Deserialize, Serialize};
@@ -137,19 +138,28 @@ impl MD064NoMultipleConsecutiveSpaces {
 
     /// Check if the match is immediately after a list marker (handled by MD030)
     fn is_after_list_marker(&self, line: &str, match_start: usize) -> bool {
-        let before = line[..match_start].trim_start();
+        // Strip blockquote prefix to handle lists inside blockquotes (e.g., "> 1.  item")
+        let before_text = if let Some(parsed) = parse_blockquote_prefix(line) {
+            let prefix_len = parsed.prefix.len();
+            if match_start <= prefix_len {
+                return false;
+            }
+            line[prefix_len..match_start].trim_start()
+        } else {
+            line[..match_start].trim_start()
+        };
 
         // Unordered list markers: *, -, +
-        if before == "*" || before == "-" || before == "+" {
+        if before_text == "*" || before_text == "-" || before_text == "+" {
             return true;
         }
 
         // Ordered list markers: digits followed by . or )
         // Examples: "1.", "2)", "10.", "123)"
-        if before.len() >= 2 {
-            let last_char = before.chars().last().unwrap();
+        if before_text.len() >= 2 {
+            let last_char = before_text.chars().last().unwrap();
             if last_char == '.' || last_char == ')' {
-                let prefix = &before[..before.len() - 1];
+                let prefix = &before_text[..before_text.len() - 1];
                 if !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()) {
                     return true;
                 }
@@ -820,6 +830,68 @@ Normal paragraph.
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_skip_blockquoted_list_marker_spaces() {
+        let rule = MD064NoMultipleConsecutiveSpaces::new();
+
+        // Blockquoted ordered list with 2-space markers (MD030 ol-single=2)
+        let content = "# Title\n\n> 1.  Hello.\n>     This is a list item.\n> 2.  This is another list item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag spaces after list markers in blockquotes"
+        );
+
+        // Blockquoted unordered list
+        let content = "> *   Item one\n> -   Item two\n> +   Item three\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag spaces after unordered list markers in blockquotes"
+        );
+
+        // Nested blockquoted list
+        let content = "> > 1.  Nested blockquote list item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag spaces after list markers in nested blockquotes"
+        );
+
+        // Parenthesis-style ordered markers in blockquote
+        let content = "> 1)  First item\n> 2)  Second item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag spaces after parenthesis-style ordered markers in blockquotes"
+        );
+
+        // Extra whitespace between blockquote marker and list marker
+        let content = ">  1.  Item with extra space after >\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // The spaces after "1." should not be flagged (list marker context)
+        // The spaces after ">" are handled by is_after_blockquote_marker
+        assert!(
+            result.is_empty(),
+            "Should not flag list marker spaces even with extra space after blockquote marker"
+        );
+
+        // Multiple spaces in blockquoted list *content* should still be flagged
+        let content = "> 1.  Item with   extra spaces in content\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should still flag extra spaces in blockquoted list content"
+        );
     }
 
     #[test]

@@ -14,34 +14,7 @@ pub static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r
 
 /// Strip blockquote prefixes from a line to check for footnote definitions
 /// Handles nested blockquotes like `> > > ` and variations with/without spaces
-pub fn strip_blockquote_prefix(line: &str) -> &str {
-    let mut chars = line.chars().peekable();
-    let mut last_content_start = 0;
-    let mut pos = 0;
-
-    while let Some(&c) = chars.peek() {
-        match c {
-            '>' => {
-                chars.next();
-                pos += 1;
-                // Optionally consume one space after >
-                if chars.peek() == Some(&' ') {
-                    chars.next();
-                    pos += 1;
-                }
-                last_content_start = pos;
-            }
-            ' ' => {
-                // Allow leading spaces before >
-                chars.next();
-                pos += 1;
-            }
-            _ => break,
-        }
-    }
-
-    &line[last_content_start..]
-}
+pub use crate::utils::blockquote::strip_blockquote_prefix;
 
 /// Find the (column, end_column) of a footnote definition marker `[^id]:` on a line.
 /// Returns 1-indexed column positions pointing to `[^id]:`, not leading whitespace.

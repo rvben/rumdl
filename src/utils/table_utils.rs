@@ -2,6 +2,8 @@
 ///
 /// This module provides optimized table detection and processing functionality
 /// that can be shared across multiple table-related rules (MD055, MD056, MD058).
+use super::blockquote::strip_blockquote_prefix;
+
 /// Represents a table block in the document
 #[derive(Debug, Clone)]
 pub struct TableBlock {
@@ -240,20 +242,6 @@ impl TableUtils {
     }
 
     /// Strip blockquote prefix from a line, returning the content without the prefix
-    fn strip_blockquote_prefix(line: &str) -> &str {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('>') {
-            // Strip all blockquote markers and following space
-            let mut rest = trimmed;
-            while rest.starts_with('>') {
-                rest = rest.strip_prefix('>').unwrap_or(rest);
-                rest = rest.trim_start_matches(' ');
-            }
-            rest
-        } else {
-            line
-        }
-    }
 
     /// Find all table blocks in the content with optimized detection
     /// This version accepts code_blocks and code_spans directly for use during LintContext construction
@@ -301,7 +289,7 @@ impl TableUtils {
             }
 
             // Strip blockquote prefix for table detection
-            let line_content = Self::strip_blockquote_prefix(lines[i]);
+            let line_content = strip_blockquote_prefix(lines[i]);
 
             // Update active list tracking
             let (list_prefix, list_content, content_indent) = Self::extract_list_prefix(line_content);
@@ -368,7 +356,7 @@ impl TableUtils {
                 // For list tables (same-line or continuation), check indented continuation lines
                 // For regular tables, check the next line directly
                 let (next_line_content, delimiter_has_valid_indent) = if i + 1 < lines.len() {
-                    let next_raw = Self::strip_blockquote_prefix(lines[i + 1]);
+                    let next_raw = strip_blockquote_prefix(lines[i + 1]);
                     if is_any_list_table {
                         // Verify the delimiter line has proper indentation
                         let leading_spaces = next_raw.len() - next_raw.trim_start().len();
@@ -405,7 +393,7 @@ impl TableUtils {
                     while j < lines.len() {
                         let line = lines[j];
                         // Strip blockquote prefix for checking
-                        let raw_content = Self::strip_blockquote_prefix(line);
+                        let raw_content = strip_blockquote_prefix(line);
 
                         // For list tables, strip expected indentation
                         let line_content = if effective_is_list_table {
@@ -761,7 +749,7 @@ impl TableUtils {
     /// before analyzing the pipe style.
     pub fn determine_pipe_style(line: &str) -> Option<&'static str> {
         // Strip blockquote prefix if present before analyzing pipe style
-        let content = Self::strip_blockquote_prefix(line);
+        let content = strip_blockquote_prefix(line);
         let trimmed = content.trim();
         if !trimmed.contains('|') {
             return None;

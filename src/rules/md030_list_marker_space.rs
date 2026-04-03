@@ -6,7 +6,7 @@
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::rules::list_utils::ListType;
-use crate::utils::blockquote::effective_indent_in_blockquote;
+use crate::utils::blockquote::{effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::range_utils::calculate_match_range;
 use toml;
@@ -429,7 +429,10 @@ impl MD030ListMarkerSpace {
     /// Fix list marker spacing with context - handles tabs, multiple spaces, and mixed whitespace
     fn try_fix_list_marker_spacing_with_context(&self, line: &str, is_multi_line: bool) -> Option<String> {
         // Extract blockquote prefix if present
-        let (blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
+        let (blockquote_prefix, content) = match parse_blockquote_prefix(line) {
+            Some(parsed) => (parsed.prefix, parsed.content),
+            None => ("", line),
+        };
 
         let trimmed = content.trim_start();
         let indent = &content[..content.len() - trimmed.len()];
@@ -500,32 +503,6 @@ impl MD030ListMarkerSpace {
         None
     }
 
-    /// Strip blockquote prefix from a line, returning (prefix, content)
-    fn strip_blockquote_prefix(line: &str) -> (String, &str) {
-        let mut prefix = String::new();
-        let mut remaining = line;
-
-        loop {
-            let trimmed = remaining.trim_start();
-            if !trimmed.starts_with('>') {
-                break;
-            }
-            // Add leading spaces to prefix
-            let leading_spaces = remaining.len() - trimmed.len();
-            prefix.push_str(&remaining[..leading_spaces]);
-            prefix.push('>');
-            remaining = &trimmed[1..];
-
-            // Handle optional space after >
-            if remaining.starts_with(' ') {
-                prefix.push(' ');
-                remaining = &remaining[1..];
-            }
-        }
-
-        (prefix, remaining)
-    }
-
     /// Detect list-like patterns that the parser didn't recognize (e.g., "1.Text" with no space)
     /// This implements user-intention-based detection: if it looks like a list item, flag it
     fn check_unrecognized_list_marker(
@@ -537,8 +514,10 @@ impl MD030ListMarkerSpace {
     ) -> Option<LintWarning> {
         // Strip blockquote prefix to analyze the content.
         // Track the prefix length so fix positions are relative to the original line.
-        let (_blockquote_prefix, content) = Self::strip_blockquote_prefix(line);
-        let bq_prefix_len = line.len() - content.len();
+        let (bq_prefix_len, content) = match parse_blockquote_prefix(line) {
+            Some(parsed) => (parsed.prefix.len(), parsed.content),
+            None => (0, line),
+        };
 
         let trimmed = content.trim_start();
         let indent_len = content.len() - trimmed.len();

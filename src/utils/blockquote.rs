@@ -233,6 +233,30 @@ pub fn content_after_blockquote(line_content: &str, expected_bq_level: usize) ->
     &line_content[pos..]
 }
 
+/// Strip all blockquote markers from a line, returning the content after them.
+///
+/// Unlike [`content_after_blockquote`], this does not require knowing the
+/// expected nesting level — it strips all `>` markers and their trailing spaces.
+/// Returns the original line unchanged if it has no blockquote markers.
+///
+/// # Examples
+///
+/// ```
+/// use rumdl_lib::utils::blockquote::strip_blockquote_prefix;
+///
+/// assert_eq!(strip_blockquote_prefix("> text"), "text");
+/// assert_eq!(strip_blockquote_prefix("> > nested"), "nested");
+/// assert_eq!(strip_blockquote_prefix(">>compact"), "compact");
+/// assert_eq!(strip_blockquote_prefix("  > indented"), "indented");
+/// assert_eq!(strip_blockquote_prefix("no quote"), "no quote");
+/// ```
+pub fn strip_blockquote_prefix(line: &str) -> &str {
+    match parse_blockquote_prefix(line) {
+        Some(parsed) => parsed.content,
+        None => line,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

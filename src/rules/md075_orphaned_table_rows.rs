@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use super::md060_table_format::{MD060Config, MD060TableFormat};
 use crate::md013_line_length::MD013Config;
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::blockquote::strip_blockquote_prefix;
 use crate::utils::ensure_consistent_line_endings;
 use crate::utils::fix_utils::apply_warning_fixes;
 use crate::utils::table_utils::TableUtils;
@@ -66,28 +67,17 @@ impl MD075OrphanedTableRows {
 
     /// Check if a line is a potential table row, handling blockquote prefixes
     fn is_table_row_line(&self, line: &str) -> bool {
-        let content = Self::strip_blockquote_prefix(line);
+        let content = strip_blockquote_prefix(line);
         TableUtils::is_potential_table_row(content)
     }
 
     /// Check if a line is a delimiter row, handling blockquote prefixes
     fn is_delimiter_line(&self, line: &str) -> bool {
-        let content = Self::strip_blockquote_prefix(line);
+        let content = strip_blockquote_prefix(line);
         TableUtils::is_delimiter_row(content)
     }
 
     /// Strip blockquote prefix from a line, returning the content after it
-    fn strip_blockquote_prefix(line: &str) -> &str {
-        let trimmed = line.trim_start();
-        if !trimmed.starts_with('>') {
-            return line;
-        }
-        let mut rest = trimmed;
-        while rest.starts_with('>') {
-            rest = rest[1..].trim_start();
-        }
-        rest
-    }
 
     /// Check if a line is blank (including blockquote continuation lines like ">")
     fn is_blank_line(line: &str) -> bool {
@@ -120,14 +110,14 @@ impl MD075OrphanedTableRows {
 
     /// Pipe-bearing lines with template markers are often generated fragments, not literal tables.
     fn is_templated_pipe_line(line: &str) -> bool {
-        let content = Self::strip_blockquote_prefix(line).trim();
+        let content = strip_blockquote_prefix(line).trim();
         content.contains('|') && Self::contains_template_marker(content)
     }
 
     /// Row-like line with pipes that is not itself a valid table row, often used
     /// as an in-table section divider (for example: `Search||`).
     fn is_sparse_table_row_hint(line: &str) -> bool {
-        let content = Self::strip_blockquote_prefix(line).trim();
+        let content = strip_blockquote_prefix(line).trim();
         if content.is_empty()
             || !content.contains('|')
             || Self::contains_template_marker(content)
@@ -150,7 +140,7 @@ impl MD075OrphanedTableRows {
         let mut idx = start_line;
         while idx > 0 {
             idx -= 1;
-            let content = Self::strip_blockquote_prefix(content_lines[idx]).trim();
+            let content = strip_blockquote_prefix(content_lines[idx]).trim();
             if content.is_empty() {
                 continue;
             }
@@ -162,7 +152,7 @@ impl MD075OrphanedTableRows {
             let mut scan = idx;
             while scan > 0 {
                 scan -= 1;
-                let prev = Self::strip_blockquote_prefix(content_lines[scan]).trim();
+                let prev = strip_blockquote_prefix(content_lines[scan]).trim();
                 if prev.is_empty() {
                     break;
                 }
@@ -182,7 +172,7 @@ impl MD075OrphanedTableRows {
         let mut idx = start_line;
         while idx > 0 {
             idx -= 1;
-            let content = Self::strip_blockquote_prefix(content_lines[idx]).trim();
+            let content = strip_blockquote_prefix(content_lines[idx]).trim();
             if content.is_empty() {
                 continue;
             }
@@ -446,10 +436,10 @@ impl MD075OrphanedTableRows {
 
                     if !has_delimiter {
                         // Verify consistent column count
-                        let first_content = Self::strip_blockquote_prefix(content_lines[group_lines[0]]);
+                        let first_content = strip_blockquote_prefix(content_lines[group_lines[0]]);
                         let first_count = TableUtils::count_cells(first_content);
                         let consistent = group_lines.iter().all(|&idx| {
-                            let content = Self::strip_blockquote_prefix(content_lines[idx]);
+                            let content = strip_blockquote_prefix(content_lines[idx]);
                             TableUtils::count_cells(content) == first_count
                         });
 
@@ -487,7 +477,7 @@ impl MD075OrphanedTableRows {
                 continue;
             }
 
-            let content = Self::strip_blockquote_prefix(line).trim();
+            let content = strip_blockquote_prefix(line).trim();
             if content.is_empty() {
                 continue;
             }
