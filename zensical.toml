@@ -34,6 +34,7 @@ nav = [
     { "Markdown Flavors" = "flavors.md" },
   ]},
   { "Rules" = "rules.md" },
+  { "Playground" = "playground.md" },
   { "Integrations" = [
     { "LSP Server" = "lsp.md" },
     { "VS Code" = "vscode-extension.md" },
