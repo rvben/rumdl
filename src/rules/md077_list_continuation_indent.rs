@@ -48,6 +48,21 @@ impl MD077ListContinuationIndent {
         (ch == b'`' || ch == b'~') && bytes[1] == ch && bytes[2] == ch
     }
 
+    /// Check if a trimmed line starts with a list marker (*, -, +, or ordered).
+    /// Used to avoid flagging deeply indented list items that the parser doesn't
+    /// recognize as list items (e.g., with indent=8 configured in MD007).
+    fn starts_with_list_marker(trimmed: &str) -> bool {
+        let bytes = trimmed.as_bytes();
+        match bytes.first() {
+            Some(b'*' | b'-' | b'+') => bytes.get(1).is_some_and(|&b| b == b' ' || b == b'\t'),
+            Some(b'0'..=b'9') => {
+                let rest = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
+                rest.starts_with(". ") || rest.starts_with(") ")
+            }
+            _ => false,
+        }
+    }
+
     /// Check if a line should be skipped (inside code, HTML, frontmatter, etc.)
     ///
     /// Code block *content* is skipped, but fence opener/closer lines are not —
@@ -180,7 +195,7 @@ impl Rule for MD077ListContinuationIndent {
 
                 // Tight continuation (no blank line): flag over-indented lines
                 if !saw_blank {
-                    if actual > required && flagged_lines.insert(line_num) {
+                    if actual > required && !Self::starts_with_list_marker(trimmed) && flagged_lines.insert(line_num) {
                         let line_content = line_info.content(ctx.content);
                         let fix_start = line_info.byte_offset;
                         let fix_end = fix_start + line_info.indent;
@@ -465,6 +480,21 @@ mod tests {
         let content = "1. Item\n     over-indented\n";
         let fixed = fix_mkdocs(content);
         assert_eq!(fixed, "1. Item\n    over-indented\n");
+    }
+
+    #[test]
+    fn tight_continuation_deeply_indented_list_markers_not_flagged() {
+        // Deeply indented list markers (e.g., indent=8 in MD007) may not be
+        // recognized as list items by the parser. MD077 must not flag them.
+        let content = "* Level 0\n        * Level 1\n                * Level 2\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn tight_continuation_ordered_marker_not_flagged() {
+        // Indented ordered list marker should not be flagged
+        let content = "- Parent\n      1. Child item\n";
+        assert!(check(content).is_empty());
     }
 
     // ── Unordered list: correct indent after blank ────────────────────
