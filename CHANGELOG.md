@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.67](https://github.com/rvben/rumdl/compare/v0.1.66...v0.1.67) - 2026-04-04
+
+### Added
+
+- **md077**: detect over-indented tight continuation lines ([a1e100d](https://github.com/rvben/rumdl/commit/a1e100d71509d2ac509f749bc9fcc492c0b146a3))
+- **docs**: add interactive playground page powered by rumdl-wasm ([3352b87](https://github.com/rvben/rumdl/commit/3352b87785c8d35e7ee5361dda1c994f37059154))
+
+### Fixed
+
+- **md077**: correct nested list tight continuation false positive ([12f34e3](https://github.com/rvben/rumdl/commit/12f34e304f58cdd8292ca0ddbf4371ff61e1bc3f))
+- remove orphaned doc comments causing clippy warnings ([0dd98b4](https://github.com/rvben/rumdl/commit/0dd98b4cb850edd9300471d0d632bd0e370640ac))
+- **docs**: prevent playground panels from shrinking after Fix All ([e209ce6](https://github.com/rvben/rumdl/commit/e209ce677724ed5bbd6761bb18a2e81b9138383f))
+- **md064**: skip spaces after list markers inside blockquotes ([36fbeae](https://github.com/rvben/rumdl/commit/36fbeae45db14a05f8bf4590a9b4a637a6d83392))
+- **docs**: replace npmjs.com link with github link in playground ([da60e47](https://github.com/rvben/rumdl/commit/da60e47abc317d021ae4ca58d3148da2848839d3))
+- **docs**: load rumdl-wasm from jsdelivr without version pin ([e781e6b](https://github.com/rvben/rumdl/commit/e781e6be71119d47c2f55091d8552b833847904b))
+
 ## [0.1.66](https://github.com/rvben/rumdl/compare/v0.1.65...v0.1.66) - 2026-04-02
 
 ### Added
