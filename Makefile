@@ -99,7 +99,9 @@ test-smoke:
 
 test-push:
 	@echo "Running CI test suite (excludes performance tests)..."
-	cargo nextest run --profile ci
+	cargo nextest archive --archive-file /tmp/rumdl-nextest-archive.tar.zst --profile ci
+	cargo nextest run --archive-file /tmp/rumdl-nextest-archive.tar.zst --profile ci
+	@rm -f /tmp/rumdl-nextest-archive.tar.zst
 
 test-ci:
 	cargo nextest run --profile ci
