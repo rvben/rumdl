@@ -120,6 +120,9 @@ impl Rule for MD077ListContinuationIndent {
                 .unwrap_or(total_lines);
 
             let mut saw_blank = false;
+            // Track nested child items so we don't check their continuation
+            // lines against the parent's content column.
+            let mut nested_content_col: Option<usize> = None;
 
             for line_num in (item_line + 1)..=range_end {
                 let Some(line_info) = ctx.line_info(line_num) else {
@@ -138,7 +141,12 @@ impl Rule for MD077ListContinuationIndent {
                 }
 
                 // Nested list items are not continuation content
-                if line_info.list_item.is_some() {
+                if let Some(ref li) = line_info.list_item {
+                    if li.marker_column > marker_col {
+                        nested_content_col = Some(li.content_column);
+                    } else {
+                        nested_content_col = None;
+                    }
                     saw_blank = false;
                     continue;
                 }
@@ -160,6 +168,15 @@ impl Rule for MD077ListContinuationIndent {
                 }
 
                 let actual = line_info.visual_indent;
+
+                // Lines belonging to a nested item's scope are handled by
+                // that item's own iteration — skip them here.
+                if let Some(ncc) = nested_content_col {
+                    if actual >= ncc {
+                        continue;
+                    }
+                    nested_content_col = None;
+                }
 
                 // Tight continuation (no blank line): flag over-indented lines
                 if !saw_blank {
@@ -359,11 +376,30 @@ mod tests {
 
     #[test]
     fn tight_continuation_nested_over_indented() {
-        // L2 "- " at column 2, content_column = 4. Continuation at 5 is over-indented.
+        // L2 "- " at column 2, content_column = 4. Continuation at 5 is over-indented for L2.
         let content = "- L1\n  - L2\n     over-indented continuation of L2\n";
         let warnings = check(content);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].line, 3);
+        // Must report expected=4 (L2's content_col), not expected=2 (L1's)
+        assert!(warnings[0].message.contains("expected 4"));
+        assert!(warnings[0].message.contains("found 5"));
+    }
+
+    #[test]
+    fn tight_continuation_nested_correct_indent_not_flagged() {
+        // Continuation at 4 spaces is correct for L2 (content_col=4). Must NOT be
+        // flagged as over-indented relative to L1 (content_col=2).
+        let content = "- L1\n  - L2\n    correctly indented continuation of L2\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn fix_tight_continuation_nested_over_indented() {
+        // Fix should reduce to 4 spaces (L2's content_col), not 2 (L1's)
+        let content = "- L1\n  - L2\n     over-indented continuation of L2\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- L1\n  - L2\n    over-indented continuation of L2\n");
     }
 
     #[test]
