@@ -14,15 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **md077**: detect over-indented tight continuation lines ([a1e100d](https://github.com/rvben/rumdl/commit/a1e100d71509d2ac509f749bc9fcc492c0b146a3))
+- **MD077**: detect over-indented tight continuation lines ([a1e100d](https://github.com/rvben/rumdl/commit/a1e100d71509d2ac509f749bc9fcc492c0b146a3))
 - **docs**: add interactive playground page powered by rumdl-wasm ([3352b87](https://github.com/rvben/rumdl/commit/3352b87785c8d35e7ee5361dda1c994f37059154))
 
 ### Fixed
 
-- **md077**: correct nested list tight continuation false positive ([12f34e3](https://github.com/rvben/rumdl/commit/12f34e304f58cdd8292ca0ddbf4371ff61e1bc3f))
+- **MD077**: correct nested list tight continuation false positive ([12f34e3](https://github.com/rvben/rumdl/commit/12f34e304f58cdd8292ca0ddbf4371ff61e1bc3f))
+- **MD077**: skip deeply indented list markers in tight continuation check ([3455ae9](https://github.com/rvben/rumdl/commit/3455ae9b863746ef2f46aa8200c0f06601124095))
+- **ci**: use nextest archive in pre-push hook to prevent binary race ([fccfe9a](https://github.com/rvben/rumdl/commit/fccfe9a1a36943b4d2f5168817a9973da0bd47c0))
 - remove orphaned doc comments causing clippy warnings ([0dd98b4](https://github.com/rvben/rumdl/commit/0dd98b4cb850edd9300471d0d632bd0e370640ac))
 - **docs**: prevent playground panels from shrinking after Fix All ([e209ce6](https://github.com/rvben/rumdl/commit/e209ce677724ed5bbd6761bb18a2e81b9138383f))
-- **md064**: skip spaces after list markers inside blockquotes ([36fbeae](https://github.com/rvben/rumdl/commit/36fbeae45db14a05f8bf4590a9b4a637a6d83392))
+- **MD064**: skip spaces after list markers inside blockquotes ([36fbeae](https://github.com/rvben/rumdl/commit/36fbeae45db14a05f8bf4590a9b4a637a6d83392))
 - **docs**: replace npmjs.com link with github link in playground ([da60e47](https://github.com/rvben/rumdl/commit/da60e47abc317d021ae4ca58d3148da2848839d3))
 - **docs**: load rumdl-wasm from jsdelivr without version pin ([e781e6b](https://github.com/rvben/rumdl/commit/e781e6be71119d47c2f55091d8552b833847904b))
 
@@ -70,8 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **md013**: protect parenthetical groups from break-word splits and premature merging ([48e32aa](https://github.com/rvben/rumdl/commit/48e32aa803611b7f7d0edbdb4394a58a031b8447))
 - **md013**: attach trailing clause punctuation to closing paren in slb reflow ([4dc60fd](https://github.com/rvben/rumdl/commit/4dc60fda458e5238345b5aeb59e983b6f3bbe520))
 - make empty CHANGELOG entry a hard error in release verification ([875bff7](https://github.com/rvben/rumdl/commit/875bff7a8e1a7e41bdec30a9cf22fc78470d4dc3))
-
-## [Unreleased]
 
 ## [0.1.62] - 2026-03-27
 
