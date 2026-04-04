@@ -8,9 +8,14 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 
 /// Rule MD077: List continuation content indentation
 ///
-/// After a blank line inside a list item, continuation content must be indented
-/// to the item's content column (W+N rule). Under the MkDocs flavor, a minimum
-/// of 4 spaces is enforced for ordered list items to satisfy Python-Markdown.
+/// Checks two cases:
+/// - **Loose continuation** (after a blank line): content must be indented to the
+///   item's content column (W+N rule), or it falls out of the list.
+/// - **Tight continuation** (no blank line): content must not be over-indented
+///   beyond the item's content column.
+///
+/// Under the MkDocs flavor, a minimum of 4 spaces is enforced for ordered list
+/// items to satisfy Python-Markdown.
 #[derive(Clone, Default)]
 pub struct MD077ListContinuationIndent;
 
@@ -154,12 +159,31 @@ impl Rule for MD077ListContinuationIndent {
                     continue;
                 }
 
-                // Only flag content after a blank line (loose continuation)
+                let actual = line_info.visual_indent;
+
+                // Tight continuation (no blank line): flag over-indented lines
                 if !saw_blank {
+                    if actual > required && flagged_lines.insert(line_num) {
+                        let line_content = line_info.content(ctx.content);
+                        let fix_start = line_info.byte_offset;
+                        let fix_end = fix_start + line_info.indent;
+
+                        warnings.push(LintWarning {
+                            rule_name: Some("MD077".to_string()),
+                            line: line_num,
+                            column: 1,
+                            end_line: line_num,
+                            end_column: line_content.len() + 1,
+                            message: format!("Continuation line over-indented (expected {required}, found {actual})",),
+                            severity: Severity::Warning,
+                            fix: Some(Fix {
+                                range: fix_start..fix_end,
+                                replacement: " ".repeat(required),
+                            }),
+                        });
+                    }
                     continue;
                 }
-
-                let actual = line_info.visual_indent;
 
                 // Content at or below the marker column is not continuation —
                 // it starts a new paragraph (top-level) or belongs to a
@@ -283,13 +307,128 @@ mod tests {
         rule.fix(&ctx).unwrap()
     }
 
-    // ── Basic: no blank line (lazy continuation) → no warning ─────────
+    // ── Tight continuation (no blank line) ─────────────────────────────
 
     #[test]
-    fn lazy_continuation_not_flagged() {
-        // Without a blank line, this is lazy continuation - not our concern
+    fn tight_lazy_continuation_zero_indent_not_flagged() {
+        // Zero-indent lazy continuation is valid CommonMark
         let content = "- Item\ncontinuation\n";
         assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn tight_continuation_correct_indent_not_flagged() {
+        // Correctly indented tight continuation (aligns with content column)
+        let content = "1. Item\n   continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn tight_continuation_over_indented_ordered() {
+        // "1. " = 3 chars, but continuation has 4 spaces
+        let content = "1. This is a list item with multiple lines.\n    The second line is over-indented.\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 2);
+        assert!(warnings[0].message.contains("over-indented"));
+    }
+
+    #[test]
+    fn tight_continuation_over_indented_unordered() {
+        // "- " = 2 chars, but continuation has 3 spaces
+        let content = "- Item\n   over-indented\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 2);
+    }
+
+    #[test]
+    fn tight_continuation_multiple_over_indented_lines() {
+        let content = "1. Item\n    line one\n    line two\n    line three\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 3);
+    }
+
+    #[test]
+    fn tight_continuation_mixed_correct_and_over() {
+        let content = "1. Item\n   correct\n    over-indented\n   correct again\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+    }
+
+    #[test]
+    fn tight_continuation_nested_over_indented() {
+        // L2 "- " at column 2, content_column = 4. Continuation at 5 is over-indented.
+        let content = "- L1\n  - L2\n     over-indented continuation of L2\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
+    }
+
+    #[test]
+    fn tight_continuation_under_indented_not_flagged() {
+        // 2 spaces instead of 3 for "1. " — under-indented, not over-indented.
+        // Valid lazy continuation in CommonMark, so not flagged.
+        let content = "1. Item\n  under-indented\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn tight_continuation_tab_over_indented() {
+        // A tab expands to 4 visual columns, which exceeds content_col=2 for "- "
+        let content = "- Item\n\tover-indented\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn fix_tight_continuation_over_indented_ordered() {
+        let content = "1. This is a list item with multiple lines.\n    The second line is over-indented.\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "1. This is a list item with multiple lines.\n   The second line is over-indented.\n"
+        );
+    }
+
+    #[test]
+    fn fix_tight_continuation_over_indented_unordered() {
+        let content = "- Item\n   over-indented\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- Item\n  over-indented\n");
+    }
+
+    #[test]
+    fn fix_tight_continuation_multiple_lines() {
+        let content = "1. Item\n    line one\n    line two\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. Item\n   line one\n   line two\n");
+    }
+
+    #[test]
+    fn tight_continuation_mkdocs_4space_ordered_not_flagged() {
+        // MkDocs requires max(3, 4) = 4 spaces for "1. " items.
+        // 4-space tight continuation is correct, not over-indented.
+        let content = "1. Item\n    continuation\n";
+        assert!(check_mkdocs(content).is_empty());
+    }
+
+    #[test]
+    fn tight_continuation_mkdocs_5space_ordered_flagged() {
+        // 5 spaces exceeds the MkDocs required indent of 4
+        let content = "1. Item\n     over-indented\n";
+        let warnings = check_mkdocs(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("expected 4"));
+        assert!(warnings[0].message.contains("found 5"));
+    }
+
+    #[test]
+    fn fix_tight_continuation_mkdocs_over_indented() {
+        let content = "1. Item\n     over-indented\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "1. Item\n    over-indented\n");
     }
 
     // ── Unordered list: correct indent after blank ────────────────────
