@@ -13,6 +13,7 @@ Copyright &copy; 2024-2026 Ruben Jongejan
 
 # Repository settings for edit links
 repo_url = "https://github.com/rvben/rumdl"
+edit_uri = "blob/main/docs/"
 repo_name = "rvben/rumdl"
 
 # Navigation structure - references existing files directly
