@@ -2997,8 +2997,11 @@ impl MD013LineLength {
                             // No line-length constraint - always join single sentences
                             true
                         } else {
-                            // Only join if it fits within line-length
-                            let effective_length = self.calculate_effective_length(&paragraph_text);
+                            // Only join if it fits within line-length.
+                            // paragraph_text has the common indent stripped, so add it
+                            // back to get the true output length before comparing.
+                            let effective_length =
+                                self.calculate_effective_length(&paragraph_text) + common_indent.len();
                             effective_length <= config.line_length.get()
                         }
                     } else {
