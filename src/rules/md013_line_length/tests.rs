@@ -2047,6 +2047,51 @@ fn test_sentence_per_line_abbreviations() {
 }
 
 #[test]
+fn test_sentence_per_line_st_abbreviation() {
+    let config = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        line_length: crate::types::LineLength::from_const(0),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // Hyphenated form: "Wrangell-St." must not split at the period
+    let content = "Wrangell-St. Elias National Park and Preserve breaks sentence-per-line.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "Wrangell-St. should not be treated as a sentence boundary; got: {:?}",
+        result
+    );
+
+    // Plain form: "St. Name" also must not split
+    let content = "St. Elias is the name of a mountain range.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "St. should not be treated as a sentence boundary; got: {:?}",
+        result
+    );
+
+    // Two actual sentences must still be detected even when one contains "St."
+    let content = "Visit Wrangell-St. Elias. It is the largest national park.";
+    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        !result.is_empty(),
+        "Two sentences separated by a real period after 'Elias' should still be detected"
+    );
+    let fix = result[0].fix.as_ref().unwrap();
+    let lines: Vec<&str> = fix.replacement.trim_end_matches('\n').lines().collect();
+    assert_eq!(lines.len(), 2, "Expected fix to split into 2 lines: {:?}", lines);
+    assert_eq!(lines[0], "Visit Wrangell-St. Elias.");
+    assert_eq!(lines[1], "It is the largest national park.");
+}
+
+#[test]
 fn test_sentence_per_line_with_markdown() {
     let config = MD013Config {
         reflow: true,

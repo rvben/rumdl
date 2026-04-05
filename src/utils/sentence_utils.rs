@@ -22,7 +22,7 @@ use std::collections::HashSet;
 /// - Abbreviations that commonly end sentences (etc., Inc., Ph.D., U.S.)
 pub const DEFAULT_ABBREVIATIONS: &[&str] = &[
     // Titles - always have period, always followed by a name
-    "mr", "mrs", "ms", "dr", "prof", "sr", "jr",
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st",
     // Latin - always written with periods, introduce examples/references
     "i.e", "e.g", // Reference abbreviations - followed by what they refer to
     "vs", "fig", "no", "vol", "ch", "sec", "al",
@@ -80,8 +80,20 @@ pub fn text_ends_with_abbreviation(text: &str, abbreviations: &HashSet<String>) 
     // that may precede the abbreviation, e.g. "(e.g." or "[i.e."
     let stripped = last_word.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '.');
 
-    // O(1) HashSet lookup (abbreviations are already lowercase)
-    abbreviations.contains(&stripped.to_lowercase())
+    // Check the full stripped word first (covers simple cases like "Dr.", "Prof.")
+    if abbreviations.contains(&stripped.to_lowercase()) {
+        return true;
+    }
+
+    // Also check the last hyphen-separated component so that hyphenated place names
+    // like "Wrangell-St." are recognized via the "st" abbreviation entry.
+    if let Some(after_hyphen) = stripped.rsplit('-').next() {
+        if !after_hyphen.is_empty() && after_hyphen != stripped {
+            return abbreviations.contains(&after_hyphen.to_lowercase());
+        }
+    }
+
+    false
 }
 
 /// Check if a character is CJK sentence-ending punctuation
@@ -272,6 +284,30 @@ mod tests {
         assert!(abbrevs.contains("prof"));
         assert!(abbrevs.contains("i.e"));
         assert!(abbrevs.contains("e.g"));
+        assert!(abbrevs.contains("st"));
+    }
+
+    #[test]
+    fn test_st_abbreviation_not_sentence_boundary() {
+        let abbrevs = get_abbreviations(&None);
+
+        // Plain "St." is recognized as an abbreviation
+        assert!(text_ends_with_abbreviation("St.", &abbrevs));
+
+        // Hyphenated prefix form: "Wrangell-St." matches via the "st" component
+        assert!(text_ends_with_abbreviation("Wrangell-St.", &abbrevs));
+
+        // Non-abbreviation words are not affected
+        assert!(!text_ends_with_abbreviation("paradigms.", &abbrevs));
+        assert!(!text_ends_with_abbreviation("starts.", &abbrevs));
+
+        // Hyphenated word where suffix is NOT an abbreviation must NOT match
+        assert!(!text_ends_with_abbreviation("word-foo.", &abbrevs));
+        assert!(!text_ends_with_abbreviation("end-street.", &abbrevs));
+
+        // Other known abbreviations still work
+        assert!(text_ends_with_abbreviation("Dr.", &abbrevs));
+        assert!(text_ends_with_abbreviation("Mr.", &abbrevs));
     }
 
     #[test]
