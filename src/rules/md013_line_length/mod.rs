@@ -2909,9 +2909,50 @@ impl MD013LineLength {
                 i += 1;
             }
 
-            // Combine paragraph lines into a single string for processing
-            // This must be done BEFORE the needs_reflow check for sentence-per-line mode
-            let paragraph_text = paragraph_lines.join(" ");
+            // Compute the common leading indent of all non-empty paragraph lines,
+            // but only when those lines are structurally inside a list block.
+            // Indented continuation lines that follow a nested list arrive here
+            // with their structural indentation intact (e.g. 2 spaces for a
+            // top-level list item). Stripping the indent before reflow and
+            // re-applying it afterward prevents the fixer from moving those
+            // lines to column 0.
+            //
+            // The list-block guard is essential: top-level paragraphs that happen
+            // to start with spaces (insignificant in Markdown) must NOT have those
+            // spaces preserved or injected by the fixer.
+            let common_indent: String = if ctx.is_in_list_block(paragraph_start + 1) {
+                let min_len = paragraph_lines
+                    .iter()
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| l.len() - l.trim_start().len())
+                    .min()
+                    .unwrap_or(0);
+                paragraph_lines
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .map(|l| l[..min_len].to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            // Combine paragraph lines into a single string for processing.
+            // This must be done BEFORE the needs_reflow check for sentence-per-line mode.
+            let paragraph_text = if common_indent.is_empty() {
+                paragraph_lines.join(" ")
+            } else {
+                paragraph_lines
+                    .iter()
+                    .map(|l| {
+                        if l.starts_with(common_indent.as_str()) {
+                            &l[common_indent.len()..]
+                        } else {
+                            l.trim_start()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
 
             // Skip reflowing if this paragraph contains definition list items
             // Definition lists are multi-line structures that should not be joined
@@ -3034,6 +3075,16 @@ impl MD013LineLength {
                     },
                 };
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
+
+                // Re-apply the common indent to each non-empty reflowed line so
+                // that the replacement preserves the original structural indentation.
+                if !common_indent.is_empty() {
+                    for line in &mut reflowed {
+                        if !line.is_empty() {
+                            *line = format!("{common_indent}{line}");
+                        }
+                    }
+                }
 
                 // If the original paragraph ended with a hard break, preserve it
                 // Preserve the original hard break format (backslash or two spaces)
