@@ -356,10 +356,19 @@ impl MD044ProperNames {
                 }
 
                 // Skip if inside a Markdown inline link URL in contexts where
-                // pulldown-cmark doesn't parse Markdown syntax
+                // pulldown-cmark doesn't parse Markdown syntax (HTML comments,
+                // HTML blocks, frontmatter).
                 if (line_info.in_html_comment || line_info.in_html_block || line_info.in_front_matter)
                     && Self::is_in_markdown_link_url(line, start_pos)
                 {
+                    continue;
+                }
+
+                // Skip if inside the URL portion of a WikiLink followed by a
+                // parenthesised destination — [[text]](url). pulldown-cmark
+                // registers [[text]] as a WikiLink in ctx.links but leaves the
+                // (url) as plain text, so is_in_link() misses those bytes.
+                if Self::is_in_wikilink_url(ctx, byte_pos) {
                     continue;
                 }
 
@@ -495,12 +504,73 @@ impl MD044ProperNames {
         false
     }
 
+    /// Check if `byte_pos` falls inside the URL of a `[[text]](url)` construct.
+    ///
+    /// pulldown-cmark with WikiLinks enabled parses `[[text]]` as a WikiLink and
+    /// records it in `ctx.links`, but the immediately following `(url)` is left as
+    /// plain text and is therefore absent from `ctx.links`. This function detects
+    /// that gap by looking for a WikiLink entry whose `byte_end` falls exactly on a
+    /// `(` in the raw content, then checking whether `byte_pos` lies inside the
+    /// matching parenthesised URL span.
+    ///
+    /// Unlike `is_in_markdown_link_url`, this function is anchored to real parser
+    /// output (`ctx.links`) and will not suppress violations in text that merely
+    /// looks like a link (e.g. `[foo](github x)` with a space in the URL).
+    fn is_in_wikilink_url(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
+        use pulldown_cmark::LinkType;
+        let content = ctx.content.as_bytes();
+
+        // ctx.links is sorted by byte_offset; only links that start at or before
+        // byte_pos can have a URL that encloses it.
+        let end = ctx.links.partition_point(|l| l.byte_offset <= byte_pos);
+
+        for link in &ctx.links[..end] {
+            if !matches!(link.link_type, LinkType::WikiLink { .. }) {
+                continue;
+            }
+            let wiki_end = link.byte_end;
+            // The WikiLink must end before byte_pos and be immediately followed by '('.
+            if wiki_end >= byte_pos || wiki_end >= content.len() || content[wiki_end] != b'(' {
+                continue;
+            }
+            // Scan to the matching ')' tracking nested parens and backslash escapes.
+            // Per CommonMark, an unquoted inline link destination cannot contain
+            // spaces, tabs, or newlines. If we encounter one, this is parenthesised
+            // prose rather than a URL, and pulldown-cmark will not parse it as a link.
+            let mut depth: u32 = 1;
+            let mut k = wiki_end + 1;
+            let mut valid_destination = true;
+            while k < content.len() && depth > 0 {
+                match content[k] {
+                    b'\\' => {
+                        k += 1; // skip escaped character
+                    }
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    b' ' | b'\t' | b'\n' | b'\r' => {
+                        valid_destination = false;
+                        break;
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+            // byte_pos is inside the URL if it falls between '(' and the matching ')'
+            // and the destination is valid (no unescaped whitespace).
+            if valid_destination && depth == 0 && byte_pos > wiki_end && byte_pos < k {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Check if a position within a line falls inside a Markdown link's
     /// non-text portion (URL or reference label).
     ///
-    /// pulldown-cmark does not parse Markdown syntax inside HTML comments, HTML
-    /// blocks, or frontmatter, so `ctx.links` won't contain links found there.
-    /// This function detects link patterns directly in the line text:
+    /// Used as a text-level fallback for HTML comments, HTML blocks, and
+    /// frontmatter where pulldown-cmark skips link parsing entirely. Operates on
+    /// raw line bytes and therefore cannot distinguish real links from text that
+    /// merely resembles link syntax; do not call on regular markdown lines.
     /// - `[text](url)` — returns true if `pos` is within `(...)`
     /// - `[text][ref]` — returns true if `pos` is within the second `[...]`
     fn is_in_markdown_link_url(line: &str, pos: usize) -> bool {
@@ -2872,5 +2942,134 @@ Some javascript text.
         // Position 1-4 are inside the span
         assert!(MD044ProperNames::is_in_backtick_code_in_line(line, 1));
         assert!(MD044ProperNames::is_in_backtick_code_in_line(line, 4));
+    }
+
+    // Double-bracket WikiLink + URL: [[text]](url)
+    // pulldown-cmark parses [[text]] as a WikiLink but leaves the (url)
+    // as plain text, so ctx.links does not cover the URL portion.
+    // MD044 must fall back to is_in_markdown_link_url for all lines.
+
+    #[test]
+    fn test_double_bracket_link_url_not_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        // Exact reproduction from issue #564
+        let content = "[[rumdl]](https://github.com/rvben/rumdl)";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL inside [[text]](url) must not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_double_bracket_link_url_not_fixed() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "[[rumdl]](https://github.com/rvben/rumdl)\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "fix() must leave the URL inside [[text]](url) unchanged"
+        );
+    }
+
+    #[test]
+    fn test_double_bracket_link_text_still_flagged() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        // The link text portion [[github]](url) should still be checked.
+        let content = "[[github]](https://example.com)";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Incorrect name in [[text]] link text should still be flagged, got: {result:?}"
+        );
+        assert_eq!(result[0].message, "Proper name 'github' should be 'GitHub'");
+    }
+
+    #[test]
+    fn test_double_bracket_link_mixed_line() {
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        // URL must be skipped, standalone text must be flagged.
+        let content = "See [[rumdl]](https://github.com/rvben/rumdl) and github for more.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Only the standalone 'github' after the link should be flagged, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'github'"));
+        // "See " (4) + "[[rumdl]](https://github.com/rvben/rumdl)" (42) + " and " (4) = column 51
+        assert_eq!(
+            result[0].column, 51,
+            "Flagged column should be the trailing 'github', not the one in the URL"
+        );
+    }
+
+    #[test]
+    fn test_regular_link_url_still_not_flagged() {
+        // Confirm existing [text](url) behavior is unaffected by the fix.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "[rumdl](https://github.com/rvben/rumdl)";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL inside regular [text](url) must still not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_link_like_text_in_code_span_still_flagged_when_code_blocks_enabled() {
+        // When code-blocks = true the user explicitly opts into checking code spans.
+        // A code span containing link-like text (`[foo](https://github.com)`) must
+        // NOT be silently suppressed by is_in_markdown_link_url: the content is
+        // literal characters, not a real Markdown link.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
+        let content = "`[foo](https://github.com/org/repo)`";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Proper name inside a code span must be flagged when code-blocks=true, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'github'"));
+    }
+
+    #[test]
+    fn test_malformed_link_not_treated_as_url() {
+        // [text](url with spaces) is NOT a valid Markdown link; pulldown-cmark
+        // does not parse it, so the name inside must still be flagged.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "See [rumdl](github repo) for details.";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Name inside malformed [text](url with spaces) must still be flagged, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'github'"));
+    }
+
+    #[test]
+    fn test_wikilink_followed_by_prose_parens_still_flagged() {
+        // [[note]](github repo) — WikiLink followed by parenthesised prose, NOT
+        // a valid link URL (space in destination). pulldown-cmark does not parse
+        // it as a link, so the name inside must still be flagged.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "[[note]](github repo)";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Name inside [[wikilink]](prose with spaces) must still be flagged, got: {result:?}"
+        );
+        assert!(result[0].message.contains("'github'"));
     }
 }
