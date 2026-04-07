@@ -347,7 +347,10 @@ impl Rule for MD070NestedCodeFence {
                             }
                             replacement.push_str(closing_indent);
                             replacement.push_str(&suggested_fence);
-                            replacement.push('\n');
+                            // Only add trailing newline if the replaced range ends with one
+                            if close_byte_end <= ctx.content.len() && ctx.content[..close_byte_end].ends_with('\n') {
+                                replacement.push('\n');
+                            }
 
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
@@ -380,130 +383,16 @@ impl Rule for MD070NestedCodeFence {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let mut result = String::new();
-        let lines = ctx.raw_lines();
-
-        let mut i = 0;
-        while i < lines.len() {
-            // Skip lines where the rule is disabled via inline config
-            if ctx.is_rule_disabled(self.name(), i + 1) {
-                result.push_str(lines[i]);
-                result.push('\n');
-                i += 1;
-                continue;
-            }
-
-            // Skip lines in contexts that shouldn't be processed
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter
-                    || line_info.in_html_comment
-                    || line_info.in_mdx_comment
-                    || line_info.in_html_block)
-            {
-                result.push_str(lines[i]);
-                result.push('\n');
-                i += 1;
-                continue;
-            }
-
-            // Skip if we're already inside a code block (check previous line)
-            if i > 0
-                && let Some(prev_line_info) = ctx.lines.get(i - 1)
-                && prev_line_info.in_code_block
-            {
-                result.push_str(lines[i]);
-                result.push('\n');
-                i += 1;
-                continue;
-            }
-
-            let line = lines[i];
-
-            // Try to parse as opening fence
-            if let Some((indent, fence_char, fence_length, info_string)) = Self::parse_fence_line(line) {
-                let block_start = i;
-
-                // Extract the language
-                let language = info_string.split_whitespace().next().unwrap_or("");
-
-                // Find the first closing fence (what CommonMark sees)
-                let mut first_close = None;
-                for (j, line_j) in lines.iter().enumerate().skip(i + 1) {
-                    if Self::is_closing_fence(line_j, fence_char, fence_length) {
-                        first_close = Some(j);
-                        break;
-                    }
-                }
-
-                if let Some(end_line) = first_close {
-                    // Check if we should fix this block
-                    if Self::should_check_language(language) {
-                        // Get the content between fences
-                        let block_content: String = if block_start + 1 < end_line {
-                            lines[(block_start + 1)..end_line].join("\n")
-                        } else {
-                            String::new()
-                        };
-
-                        // Check for fence collision
-                        if Self::find_fence_collision(&block_content, fence_char, fence_length).is_some() {
-                            let intended_close =
-                                Self::find_intended_close(lines, end_line, fence_char, fence_length, indent);
-
-                            // Get content between opening and intended close
-                            let full_block_content: String = if block_start + 1 < intended_close {
-                                lines[(block_start + 1)..intended_close].join("\n")
-                            } else {
-                                String::new()
-                            };
-
-                            let safe_length = Self::find_safe_fence_length(&full_block_content, fence_char) + 1;
-                            let suggested_fence: String = std::iter::repeat_n(fence_char, safe_length).collect();
-
-                            // Write fixed opening fence
-                            let opening_indent = " ".repeat(indent);
-                            result.push_str(&format!("{opening_indent}{suggested_fence}{info_string}\n"));
-
-                            // Write content
-                            for line_content in &lines[(block_start + 1)..intended_close] {
-                                result.push_str(line_content);
-                                result.push('\n');
-                            }
-
-                            // Write fixed closing fence
-                            let closing_line = lines[intended_close];
-                            let closing_indent = closing_line.len() - closing_line.trim_start().len();
-                            let closing_indent_str = " ".repeat(closing_indent);
-                            result.push_str(&format!("{closing_indent_str}{suggested_fence}\n"));
-
-                            i = intended_close + 1;
-                            continue;
-                        }
-                    }
-
-                    // No collision or not a checked language - preserve as-is
-                    for line_content in &lines[block_start..=end_line] {
-                        result.push_str(line_content);
-                        result.push('\n');
-                    }
-                    i = end_line + 1;
-                    continue;
-                }
-            }
-
-            // Not a fence line, preserve as-is
-            result.push_str(line);
-            result.push('\n');
-            i += 1;
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Remove trailing newline if original didn't have one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::FixFailed)
     }
 
     fn category(&self) -> RuleCategory {
@@ -1187,6 +1076,122 @@ b()
             result2.is_empty(),
             "Re-check after LSP fix should find no issues, got: {:?}",
             result2.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// Helper: run fix() then check() on the result, asserting 0 violations remain
+    fn assert_fix_roundtrip(content: &str, label: &str) {
+        let fixed = run_fix(content).unwrap();
+        let rule = MD070NestedCodeFence::new();
+        let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "[{label}] fix() should resolve all violations, but {n} remain: {msgs:?}\nFixed content:\n{fixed}",
+            n = remaining.len(),
+            msgs = remaining.iter().map(|w| &w.message).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn test_fix_roundtrip_basic() {
+        assert_fix_roundtrip("```markdown\n```python\ncode()\n```\n```\n", "basic collision");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_longer_inner_fence() {
+        assert_fix_roundtrip("```markdown\n`````python\ncode()\n`````\n```\n", "longer inner fence");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_tilde_collision() {
+        assert_fix_roundtrip("~~~markdown\n~~~python\ncode()\n~~~\n~~~\n", "tilde collision");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_info_string_attrs() {
+        assert_fix_roundtrip(
+            "```markdown {.highlight}\n```python\ncode()\n```\n```\n",
+            "info string with attrs",
+        );
+    }
+
+    #[test]
+    fn test_fix_roundtrip_no_trailing_newline() {
+        assert_fix_roundtrip("```markdown\n```python\ncode()\n```\n```", "no trailing newline");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_python_triple_string() {
+        assert_fix_roundtrip(
+            "# Test\n\n```python\ndef f():\n    text = \"\"\"\n```json\n{}\n```\n\"\"\"\n```\n",
+            "python triple string",
+        );
+    }
+
+    #[test]
+    fn test_fix_roundtrip_deeply_nested() {
+        assert_fix_roundtrip(
+            "```markdown\n````markdown\n```python\ncode()\n```\n````\n```\n",
+            "deeply nested fences",
+        );
+    }
+
+    #[test]
+    fn test_fix_roundtrip_real_world_docs() {
+        let content = r#"```markdown
+1. First item
+
+   ```python
+   code_in_list()
+   ```
+
+1. Second item
+
+```
+"#;
+        assert_fix_roundtrip(content, "real world docs case");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_empty_lines() {
+        assert_fix_roundtrip(
+            "```markdown\n\n\n```python\n\ncode()\n\n```\n\n```\n",
+            "empty lines between fences",
+        );
+    }
+
+    #[test]
+    fn test_fix_no_change_when_no_violations() {
+        let content = "````markdown\n```python\ncode()\n```\n````\n";
+        let fixed = run_fix(content).unwrap();
+        assert_eq!(fixed, content, "fix() should not modify content with no violations");
+    }
+
+    #[test]
+    fn test_fix_roundtrip_consecutive_collisions() {
+        let content = r#"```markdown
+```python
+a()
+```
+```
+
+```md
+```ruby
+b()
+```
+```
+"#;
+        // Fix and verify each collision is resolved
+        let fixed = run_fix(content).unwrap();
+        let rule = MD070NestedCodeFence::new();
+        let ctx = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx).unwrap();
+        // At minimum the first block should be fixed; consecutive blocks may
+        // require multiple passes but the first pass must not make things worse
+        assert!(
+            remaining.len() < 2,
+            "fix() should resolve at least one collision, remaining: {remaining:?}",
         );
     }
 }
