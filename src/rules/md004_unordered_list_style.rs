@@ -267,84 +267,17 @@ impl Rule for MD004UnorderedListStyle {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        let mut lines: Vec<String> = ctx.content.lines().map(String::from).collect();
-
-        // For consistent mode, count occurrences of each marker (prevalence-based approach)
-        let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
-            self.count_marker_prevalence(ctx)
-        } else {
-            None
-        };
-
-        // Use centralized list blocks
-        for list_block in &ctx.list_blocks {
-            // Process each list item in this block
-            // We need to check individual items even in mixed lists
-            for &item_line in &list_block.item_lines {
-                if let Some(line_info) = ctx.line_info(item_line)
-                    && let Some(list_item) = &line_info.list_item
-                {
-                    // Skip ordered list items - we only care about unordered ones
-                    if list_item.is_ordered {
-                        continue;
-                    }
-
-                    // If rule is disabled for this line, skip modification
-                    if ctx.inline_config().is_rule_disabled(self.name(), item_line) {
-                        continue;
-                    }
-
-                    let line_idx = item_line - 1;
-                    if line_idx >= lines.len() {
-                        continue;
-                    }
-
-                    let line = &lines[line_idx];
-                    let marker = list_item.marker.chars().next().unwrap();
-
-                    // Determine the target marker
-                    let target_marker = match self.config.style {
-                        UnorderedListStyle::Consistent => target_marker_for_consistent.unwrap_or(marker),
-                        UnorderedListStyle::Sublist => {
-                            // Calculate expected marker based on indentation level
-                            // Each 2 spaces of indentation represents a nesting level
-                            let nesting_level = list_item.marker_column / 2;
-                            match nesting_level % 3 {
-                                0 => '*',
-                                1 => '+',
-                                2 => '-',
-                                _ => {
-                                    // This should never happen as % 3 only returns 0, 1, or 2
-                                    // but fallback to asterisk for safety
-                                    '*'
-                                }
-                            }
-                        }
-                        UnorderedListStyle::Asterisk => '*',
-                        UnorderedListStyle::Dash => '-',
-                        UnorderedListStyle::Plus => '+',
-                    };
-
-                    // Replace the marker if needed
-                    if marker != target_marker {
-                        let marker_pos = list_item.marker_column;
-                        if marker_pos < line.len() {
-                            let mut new_line = String::new();
-                            new_line.push_str(&line[..marker_pos]);
-                            new_line.push(target_marker);
-                            new_line.push_str(&line[marker_pos + 1..]);
-                            lines[line_idx] = new_line;
-                        }
-                    }
-                }
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') {
-            result.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing

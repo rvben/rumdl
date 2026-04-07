@@ -651,6 +651,103 @@ fn test_check_method_comprehensive() {
     assert_eq!(warnings[2].message, "List marker '-' does not match expected style '*'");
 }
 
+mod roundtrip_safety {
+    use super::*;
+
+    /// Helper: fix then re-check must yield zero warnings
+    fn assert_roundtrip(rule: &MD004UnorderedListStyle, content: &str) {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip failed: after fix, re-check found {} warnings on content:\n---\n{}\n---\nwarnings: {:?}",
+            warnings.len(),
+            fixed,
+            warnings,
+        );
+    }
+
+    #[test]
+    fn roundtrip_consistent_mixed() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        assert_roundtrip(&rule, "* Item 1\n- Item 2\n+ Item 3");
+    }
+
+    #[test]
+    fn roundtrip_consistent_nested() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        assert_roundtrip(
+            &rule,
+            "* Item 1\n  - Nested 1\n    + Double nested\n  - Nested 2\n* Item 2",
+        );
+    }
+
+    #[test]
+    fn roundtrip_asterisk() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        assert_roundtrip(&rule, "- Item 1\n+ Item 2\n* Item 3");
+    }
+
+    #[test]
+    fn roundtrip_dash() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        assert_roundtrip(&rule, "* Item 1\n+ Item 2\n- Item 3");
+    }
+
+    #[test]
+    fn roundtrip_plus() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Plus);
+        assert_roundtrip(&rule, "* Item 1\n- Item 2\n+ Item 3");
+    }
+
+    #[test]
+    fn roundtrip_sublist() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Sublist);
+        assert_roundtrip(&rule, "- Item 1\n  - Item 2\n    - Item 3\n      - Item 4");
+    }
+
+    #[test]
+    fn roundtrip_with_trailing_newline() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        assert_roundtrip(&rule, "- Item 1\n+ Item 2\n* Item 3\n");
+    }
+
+    #[test]
+    fn roundtrip_code_blocks() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        assert_roundtrip(&rule, "- Item 1\n\n```\n* code\n- code\n```\n\n+ Item 2\n");
+    }
+
+    #[test]
+    fn roundtrip_blockquotes() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        assert_roundtrip(&rule, "- Item 1\n> + Quoted\n> - Another\n* Item 2\n");
+    }
+
+    #[test]
+    fn roundtrip_front_matter() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        assert_roundtrip(&rule, "---\ntitle: Test\n---\n* Item 1\n+ Item 2\n");
+    }
+
+    #[test]
+    fn roundtrip_deeply_nested() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Consistent);
+        assert_roundtrip(
+            &rule,
+            "* Level 1\n  + Level 2\n    - Level 3\n      + Level 4\n  * Back to 2\n* Level 1\n",
+        );
+    }
+
+    #[test]
+    fn roundtrip_mixed_ordered_unordered() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Asterisk);
+        assert_roundtrip(&rule, "1. Ordered\n   - Unordered\n   + Another\n2. Ordered\n");
+    }
+}
+
 mod parity_with_markdownlint {
     use super::*;
 
