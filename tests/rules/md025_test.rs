@@ -531,3 +531,25 @@ fn test_md025_fix_roundtrip_mixed_setext_atx() {
         warnings.len()
     );
 }
+
+#[test]
+fn test_md025_level6_not_demoted_beyond_h6() {
+    // Markdown only supports heading levels 1-6. When level=6, duplicate H6
+    // headings cannot be demoted to H7 (which doesn't exist). The fix must
+    // leave them untouched rather than creating invalid "####### ..." lines.
+    let rule = MD025SingleTitle::new(6, "");
+    let content = "###### First\n###### Second\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    // check() should still detect the violation
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Should detect duplicate H6");
+    assert!(
+        warnings[0].fix.is_none(),
+        "Fix should be None when demotion would exceed H6"
+    );
+
+    // fix() should leave the content unchanged (unfixable)
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "Content should be unchanged when H6 cannot be demoted");
+}

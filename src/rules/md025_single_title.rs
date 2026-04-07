@@ -293,19 +293,35 @@ impl Rule for MD025SingleTitle {
                         ctx.line_index.line_content_range(line_num + 1)
                     };
 
+                    // Demote to one level below the configured top-level heading.
+                    // Markdown only supports levels 1-6, so if the configured level
+                    // is already 6, the heading cannot be demoted — emit no fix.
+                    let demoted_level = self.config.level.as_usize() + 1;
+                    if demoted_level > 6 {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: format!(
+                                "Multiple top-level headings (level {}) in the same document",
+                                self.config.level.as_usize()
+                            ),
+                            line: start_line,
+                            column: start_col,
+                            end_line,
+                            end_column: end_col,
+                            severity: Severity::Error,
+                            fix: None,
+                        });
+                        continue;
+                    }
+
                     let replacement = {
                         let leading_spaces = line_content.len() - line_content.trim_start().len();
                         let indentation = " ".repeat(leading_spaces);
                         let raw = &heading.raw_text;
                         if raw.is_empty() {
-                            format!("{}{}", indentation, "#".repeat(self.config.level.as_usize() + 1))
+                            format!("{}{}", indentation, "#".repeat(demoted_level))
                         } else {
-                            format!(
-                                "{}{} {}",
-                                indentation,
-                                "#".repeat(self.config.level.as_usize() + 1),
-                                raw
-                            )
+                            format!("{}{} {}", indentation, "#".repeat(demoted_level), raw)
                         }
                     };
 
