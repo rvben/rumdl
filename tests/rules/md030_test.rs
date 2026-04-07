@@ -298,11 +298,15 @@ mod tests {
 
     #[test]
     fn test_fix_preserves_indentation() {
+        // The parser only recognizes items 1 and 3 as list items (lines with 2- and 6-space
+        // indentation). Item 2 (`    -   Deeply indented`) is at 4-space indent without a
+        // blank-line separator, so the parser treats it as list continuation rather than a
+        // new list item. MD030 applies only to parser-recognized list items.
         let rule = MD030ListMarkerSpace::default();
         let content = "  *  Indented item\n    -   Deeply indented\n      +    Very deep";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "  * Indented item\n    - Deeply indented\n      + Very deep";
+        let expected = "  * Indented item\n    -   Deeply indented\n      + Very deep";
         assert_eq!(fixed, expected);
     }
 
@@ -423,12 +427,15 @@ mod tests {
 
     #[test]
     fn test_fix_complex_nested_structure() {
+        // The parser recognizes lines 1, 2, 4, 5 as list items. Line 3 (`    *   Deep nested`)
+        // is at 4-space indent without a blank-line separator; the parser treats it as list
+        // continuation rather than a new list item. MD030 does not touch it.
         let rule = MD030ListMarkerSpace::default();
         let content = "*  Top level\n  *  Nested level\n    *   Deep nested\n      1.  Ordered nested\n        2.   Very deep ordered";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         let expected =
-            "* Top level\n  * Nested level\n    * Deep nested\n      1. Ordered nested\n        2. Very deep ordered";
+            "* Top level\n  * Nested level\n    *   Deep nested\n      1. Ordered nested\n        2. Very deep ordered";
         assert_eq!(fixed, expected);
     }
 
