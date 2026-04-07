@@ -154,8 +154,8 @@ fn test_md025_fix() {
     let content = "# Title 1\n# Title 2\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // ## Heading is a child of demoted # Title 2, so it cascades to ###
-    assert_eq!(result, "# Title 1\n## Title 2\n### Heading\n");
+    // Only the duplicate H1 is demoted; child headings are not cascaded
+    assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
 }
 
 #[test]
@@ -164,9 +164,8 @@ fn test_md025_fix_multiple() {
     let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // Title 2 and Title 3 are demoted to ##, and ## Heading after Title 3
-    // gets cascaded to ### since it's a child of a demoted section
-    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n### Heading\n");
+    // Only duplicate H1s are demoted; child headings are not cascaded
+    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
 }
 
 #[test]
@@ -190,35 +189,34 @@ fn test_md025_fix_with_indentation() {
 }
 
 #[test]
-fn test_md025_fix_cascades_child_headings() {
-    // Issue #525: when a duplicate # is demoted to ##, its child headings
-    // must also shift down to preserve the heading hierarchy.
+fn test_md025_fix_demotes_duplicates_only() {
+    // Fix demotes only the duplicate top-level headings, not their children
     let rule = MD025SingleTitle::default();
 
     let content = "# 1_1\n# 1_2\n## 1_2-2_1\n# 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
-        result, "# 1_1\n## 1_2\n### 1_2-2_1\n## 1_3\n### 1_3-2_1\n#### 1_3-2_1-3_1\n",
-        "Fix should cascade demotion to child headings"
+        result, "# 1_1\n## 1_2\n## 1_2-2_1\n## 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n",
+        "Fix should only demote duplicate top-level headings"
     );
 }
 
 #[test]
-fn test_md025_fix_cascade_no_overflow_past_level_6() {
-    // If cascading would push a heading beyond level 6, preserve it as-is
+fn test_md025_fix_preserves_non_duplicate_headings() {
+    // Non-duplicate headings at other levels are not modified
     let rule = MD025SingleTitle::default();
 
     let content = "# Title\n# Second\n###### Deep\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // # Second → ## Second, but ###### Deep + 1 = 7 > 6, so preserved as ######
+    // # Second → ## Second, ###### Deep is not a duplicate H1 so stays as-is
     assert_eq!(result, "# Title\n## Second\n###### Deep\n");
 }
 
 #[test]
-fn test_md025_fix_cascade_resets_at_next_target_heading() {
-    // The cascade delta should apply per-section: each demoted # starts its own section
+fn test_md025_fix_multiple_duplicates_with_children() {
+    // Only the duplicate H1s are demoted; children stay at their original level
     let rule = MD025SingleTitle::default();
 
     let content = "# Keep\n# Demote1\n## Child1\n## Child2\n# Demote2\n## Child3\n";
@@ -226,47 +224,48 @@ fn test_md025_fix_cascade_resets_at_next_target_heading() {
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
-        "# Keep\n## Demote1\n### Child1\n### Child2\n## Demote2\n### Child3\n"
+        "# Keep\n## Demote1\n## Child1\n## Child2\n## Demote2\n## Child3\n"
     );
 }
 
 #[test]
-fn test_md025_fix_cascade_deep_hierarchy() {
+fn test_md025_fix_deep_hierarchy_unchanged() {
+    // Only the duplicate H1 is demoted; deeper headings are untouched
     let rule = MD025SingleTitle::default();
 
     let content = "# Main\n# Other\n## H2\n### H3\n#### H4\n##### H5\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Main\n## Other\n### H2\n#### H3\n##### H4\n###### H5\n");
+    assert_eq!(result, "# Main\n## Other\n## H2\n### H3\n#### H4\n##### H5\n");
 }
 
 #[test]
-fn test_md025_fix_cascade_with_frontmatter_title() {
+fn test_md025_fix_with_frontmatter_title_demotes_h1() {
     let rule = MD025SingleTitle::default();
 
-    // Frontmatter title counts as first heading, so ALL body # headings get demoted
+    // Frontmatter title counts as first heading, so body H1 gets demoted
     let content = "---\ntitle: FM Title\n---\n\n# Body H1\n## Sub\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert!(
-        result.contains("## Body H1") && result.contains("### Sub"),
-        "Frontmatter title should trigger cascade for body headings, got: {result}"
+        result.contains("## Body H1"),
+        "Body H1 should be demoted when frontmatter has title, got: {result}"
     );
+    // ## Sub is not a duplicate H1, so it stays as-is
+    assert!(result.contains("## Sub"), "## Sub should stay unchanged, got: {result}");
 }
 
 #[test]
-fn test_md025_fix_cascade_allowed_section_resets_delta() {
-    // Allowed sections (like "References") should not be demoted,
-    // and should reset the cascade delta for headings that follow.
+fn test_md025_fix_allowed_section_not_demoted() {
+    // Allowed sections (like "References") should not be demoted.
     // MD025SingleTitle::new() sets allow_document_sections: true.
     let rule = MD025SingleTitle::new(1, "");
 
     let content = "# Main\n# Other\n## Child\n# References\n## Ref1\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // "Other" demoted to ##, "Child" cascaded to ###
-    // "References" is allowed (kept as #), so "Ref1" stays as ## (delta reset to 0)
-    assert_eq!(result, "# Main\n## Other\n### Child\n# References\n## Ref1\n");
+    // "Other" demoted to ##, "Child" stays at ##, "References" is allowed (kept as #)
+    assert_eq!(result, "# Main\n## Other\n## Child\n# References\n## Ref1\n");
 }
 
 #[test]
@@ -274,7 +273,7 @@ fn test_md025_fix_idempotent() {
     // Running fix twice should produce the same result
     let rule = MD025SingleTitle::default();
 
-    let content = "# 1_1\n# 1_2\n## 1_2-2_1\n# 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n";
+    let content = "# Title\n# Duplicate\n## Sub\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let first_fix = rule.fix(&ctx).unwrap();
 
@@ -295,43 +294,46 @@ fn test_md025_check_has_per_warning_fix() {
 }
 
 #[test]
-fn test_md025_fix_setext_child_under_demoted_section() {
+fn test_md025_fix_setext_child_preserved() {
+    // Setext child headings at level 2 are not duplicate H1s, so they stay as-is
     let rule = MD025SingleTitle::default();
     let content = "# Title\n# Other\nSetext Child\n-------------\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // Setext Child is level 2, cascaded to level 3 → must convert to ATX
+    // Only # Other gets demoted; the setext H2 is not a duplicate H1
     assert!(
-        result.contains("### Setext Child"),
-        "Setext child should cascade to ATX level 3, got: {result}"
+        result.contains("## Other"),
+        "Duplicate H1 should be demoted, got: {result}"
     );
     assert!(
-        !result.contains("-------------"),
-        "Setext underline must not appear in output, got: {result}"
+        result.contains("Setext Child\n-------------"),
+        "Setext H2 should be preserved as-is, got: {result}"
     );
 }
 
 #[test]
-fn test_md025_fix_level2_config_cascades() {
+fn test_md025_fix_level2_config() {
     let rule = MD025SingleTitle::new(2, "");
     let content = "# H1\n## First\n### Child1\n## Dup\n### Child2\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // ## First kept, ## Dup demoted to ###, ### Child2 cascaded to ####
-    assert_eq!(result, "# H1\n## First\n### Child1\n### Dup\n#### Child2\n");
+    // ## First kept, ## Dup demoted to ###, ### Child2 stays as-is (not a duplicate H2)
+    assert_eq!(result, "# H1\n## First\n### Child1\n### Dup\n### Child2\n");
 }
 
 #[test]
-fn test_md025_fix_atx_closed_child_cascades() {
+fn test_md025_fix_atx_closed_child_preserved() {
+    // ATX-closed child headings are not duplicate H1s, so they stay as-is
     let rule = MD025SingleTitle::default();
     let content = "# Keep\n# Demote\n## Child ##\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Keep\n## Demote\n### Child ###\n");
+    assert_eq!(result, "# Keep\n## Demote\n## Child ##\n");
 }
 
 #[test]
-fn test_md025_fix_code_block_inside_demoted_section() {
+fn test_md025_fix_code_block_preserved() {
+    // Headings in code blocks are not touched; non-duplicate headings are preserved
     let rule = MD025SingleTitle::default();
     let content = "# Keep\n# Demote\n```\n## Not a heading\n```\n## Real Child\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -341,30 +343,27 @@ fn test_md025_fix_code_block_inside_demoted_section() {
         "Heading in code block must not be demoted, got: {result}"
     );
     assert!(
-        result.contains("### Real Child"),
-        "Real child heading must be cascaded, got: {result}"
+        result.contains("## Real Child"),
+        "Non-duplicate child heading should stay as-is, got: {result}"
     );
 }
 
 #[test]
-fn test_md025_fix_inline_disable_resets_cascade() {
+fn test_md025_fix_inline_disable_respected() {
     let rule = MD025SingleTitle::default();
     let content = "# Title\n# Dup\n## Child\n<!-- markdownlint-disable MD025 -->\n# Preserved\n## Under\n<!-- markdownlint-enable MD025 -->\n## After\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // # Dup demoted to ##, ## Child cascaded to ###
+    // # Dup demoted to ##, ## Child stays as-is (not a duplicate H1)
     assert!(result.contains("## Dup"), "Dup should be demoted, got: {result}");
-    assert!(result.contains("### Child"), "Child should cascade, got: {result}");
-    // # Preserved is in a disabled region, kept as-is, resets delta
+    assert!(result.contains("## Child"), "Child should stay as ##, got: {result}");
+    // # Preserved is in a disabled region, kept as-is
     assert!(
         result.contains("# Preserved"),
         "Preserved heading must stay as-is, got: {result}"
     );
-    // ## Under is after delta reset, should stay as ##
-    assert!(
-        result.contains("## Under"),
-        "Under should not cascade (delta reset), got: {result}"
-    );
+    // ## Under stays as-is (not a duplicate H1)
+    assert!(result.contains("## Under"), "Under should stay as ##, got: {result}");
 }
 
 #[test]
@@ -386,5 +385,149 @@ fn test_md025_per_warning_fix_setext_includes_underline() {
     assert!(
         fixed.contains("## Duplicate Setext"),
         "Per-warning fix should demote to ##, got: {fixed}"
+    );
+}
+
+// === Roundtrip safety tests: fix() then check() should produce 0 violations ===
+
+#[test]
+fn test_md025_fix_roundtrip_simple() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n# Title 2\n## Heading\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_multiple() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_setext() {
+    let rule = MD025SingleTitle::default();
+    let content = "Title 1\n=======\n\nTitle 2\n=======\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Should have 1 warning");
+    let fix = warnings[0].fix.as_ref().expect("Should have fix");
+    // Debug: print the fix range and replacement
+    let range_text = &content[fix.range.clone()];
+    assert!(
+        !fix.replacement.is_empty(),
+        "Fix replacement should not be empty, range covers: {:?}, replacement: {:?}",
+        range_text,
+        fix.replacement
+    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("## Title 2"),
+        "Setext duplicate should be demoted to ATX ##, got: {:?}",
+        fixed
+    );
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed setext content should have no MD025 warnings, got {} warnings for: {:?}",
+        warnings.len(),
+        fixed
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_frontmatter() {
+    let rule = MD025SingleTitle::default();
+    let content = "---\ntitle: FM Title\n---\n\n# Body H1\n## Sub\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed frontmatter content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_frontmatter_multiple_h1s() {
+    let rule = MD025SingleTitle::default();
+    let content = "---\ntitle: FM Title\n---\n\n# First Body H1\n\nContent\n\n# Second Body H1\n\nMore content\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_with_inline_formatting() {
+    let rule = MD025SingleTitle::default();
+    let content = "# **Bold Title**\n\n# *Italic Title*\n\n# `Code Title`\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_code_blocks_ignored() {
+    let rule = MD025SingleTitle::default();
+    let content = "# Title\n\n```\n# Not a heading\n```\n\n# Duplicate\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    // Code block content should be preserved
+    assert!(
+        fixed.contains("# Not a heading"),
+        "Code block heading should be preserved, got: {fixed}"
+    );
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
+    );
+}
+
+#[test]
+fn test_md025_fix_roundtrip_mixed_setext_atx() {
+    let rule = MD025SingleTitle::default();
+    let content = "Title One\n=========\n\n# Title Two\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Fixed mixed setext/atx content should have no MD025 warnings, got {} warnings for: {fixed}",
+        warnings.len()
     );
 }
