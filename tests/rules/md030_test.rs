@@ -324,14 +324,16 @@ mod tests {
     }
 
     #[test]
-    fn test_fix_preserves_indented_code_blocks() {
+    fn test_fix_corrects_loose_nested_list_items() {
+        // Items indented with 4 spaces after a blank line inside a list are nested list
+        // items (not indented code blocks) — the parser confirms this. They must be fixed
+        // for marker spacing just like any other list item.
         let rule = MD030ListMarkerSpace::default();
         let content =
-            "*  Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n-   Another normal item";
+            "*  Normal item\n\n    *  Loose nested item\n    1.   Loose nested ordered\n\n-   Another normal item";
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        let expected =
-            "* Normal item\n\n    *  Indented code block\n    1.   Should not be fixed\n\n- Another normal item";
+        let expected = "* Normal item\n\n    * Loose nested item\n    1. Loose nested ordered\n\n- Another normal item";
         assert_eq!(fixed, expected);
     }
 

@@ -253,8 +253,11 @@ impl Rule for MD030ListMarkerSpace {
                 continue;
             }
 
-            // Skip if this is an indented code block (4+ spaces with blank line before)
-            if self.is_indented_code_block(line, line_idx, lines) {
+            // Skip if this is an indented code block (4+ spaces with blank line before),
+            // but only when the parser did not identify the line as a list item.
+            // A parser-recognized list item must be fixed regardless of its indentation.
+            let parser_sees_list_item = ctx.lines.get(line_idx).and_then(|li| li.list_item.as_ref()).is_some();
+            if !parser_sees_list_item && self.is_indented_code_block(line, line_idx, lines) {
                 result_lines.push(line.to_string());
                 continue;
             }
@@ -846,6 +849,31 @@ mod tests {
             result_ol.len(),
             1,
             "Nested ordered item with 1 space (ol_single=2) should be flagged; got: {result_ol:?}"
+        );
+    }
+
+    #[test]
+    fn test_loose_nested_item_fix_matches_check() {
+        // A loose nested list item (blank line between parent and child) with 4-space
+        // indentation must be both detected AND fixed. check() and fix() must agree.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1);
+
+        let content = "- parent\n\n    -  nested wrong\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // check() must detect it
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Loose nested item with 2 spaces should be detected; got: {warnings:?}"
+        );
+
+        // fix() must fix it
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "- parent\n\n    - nested wrong\n",
+            "fix() should reduce 2 spaces to 1 for loose nested item"
         );
     }
 
