@@ -302,14 +302,13 @@ fn test_md009_table_with_trailing_spaces() {
 #[test]
 fn test_md009_fix_with_crlf() {
     let rule = MD009TrailingSpaces::default();
-    // Note: The fix method uses .lines() which normalizes line endings to \n
     let content = "Line one  \r\nLine two   \r\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // The fix normalizes to \n line endings
     // Line 1: 2 spaces -> preserved (matches br_spaces=2)
     // Line 2: 3 spaces -> removed (doesn't match br_spaces=2)
-    assert_eq!(result, "Line one  \nLine two\n");
+    // Line endings are preserved from the original document
+    assert_eq!(result, "Line one  \r\nLine two\r\n");
 }
 
 #[test]

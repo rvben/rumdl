@@ -1,12 +1,10 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_trailing_range;
-use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX, get_cached_regex};
+use crate::utils::regex_cache::{ORDERED_LIST_MARKER_REGEX, UNORDERED_LIST_MARKER_REGEX};
 
 mod md009_config;
 use md009_config::MD009Config;
-
-// No need for lazy_static, we'll use get_cached_regex directly
 
 #[derive(Debug, Clone, Default)]
 pub struct MD009TrailingSpaces {
@@ -40,11 +38,6 @@ impl MD009TrailingSpaces {
     /// This includes U+2000..U+200A (various Unicode spaces), ASCII space, tab, etc.
     fn count_trailing_whitespace(line: &str) -> usize {
         line.chars().rev().take_while(|c| c.is_whitespace()).count()
-    }
-
-    /// Check if a line has any trailing whitespace (ASCII or Unicode)
-    fn has_trailing_whitespace(line: &str) -> bool {
-        line.chars().next_back().is_some_and(|c| c.is_whitespace())
     }
 
     fn trimmed_len_ascii_whitespace(line: &str) -> usize {
@@ -247,146 +240,16 @@ impl Rule for MD009TrailingSpaces {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // For simple cases (strict mode), use fast regex approach
-        if self.config.strict {
-            // In strict mode, remove ALL trailing whitespace everywhere
-            // but respect inline config disable comments
-            let lines = ctx.raw_lines();
-            let mut result = String::with_capacity(content.len());
-            for (i, line) in lines.iter().enumerate() {
-                let line_num = i + 1;
-                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                    result.push_str(line);
-                } else {
-                    result.push_str(
-                        &get_cached_regex(r"[\p{White_Space}&&[^\n\r]]+$")
-                            .unwrap()
-                            .replace_all(line, ""),
-                    );
-                }
-                if i < lines.len() - 1 || content.ends_with('\n') {
-                    result.push('\n');
-                }
-            }
-            if !content.ends_with('\n') && result.ends_with('\n') {
-                result.pop();
-            }
-            return Ok(result);
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // For complex cases, we need line-by-line processing but with optimizations
-        // Use pre-computed lines since we need to look at previous lines for list item checks
-        let lines = ctx.raw_lines();
-        let mut result = String::with_capacity(content.len()); // Pre-allocate capacity
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            let line_is_ascii = line.is_ascii();
-            // Fast path: check if line has any trailing spaces (ASCII) or
-            // trailing whitespace (Unicode) that we need to handle
-            let needs_processing = if line_is_ascii {
-                line.ends_with(' ')
-            } else {
-                Self::has_trailing_whitespace(line)
-            };
-            if !needs_processing {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            let trimmed = line.trim_end();
-            // Count ASCII trailing spaces for br_spaces comparison
-            let trailing_ascii_spaces = Self::count_trailing_spaces(line);
-            // Count all trailing whitespace to detect Unicode whitespace presence
-            let trailing_all_whitespace = if line_is_ascii {
-                trailing_ascii_spaces
-            } else {
-                Self::count_trailing_whitespace(line)
-            };
-            // Only consider pure ASCII trailing spaces for br_spaces preservation
-            let has_only_ascii_trailing = trailing_ascii_spaces == trailing_all_whitespace;
-
-            // Handle empty lines - fast regex replacement
-            if trimmed.is_empty() {
-                // Check if this is an empty list item line and config allows it
-                let prev_line = if i > 0 { Some(lines[i - 1]) } else { None };
-                if self.config.list_item_empty_lines && Self::is_empty_list_item_line(line, prev_line) {
-                    result.push_str(line);
-                } else {
-                    // Remove all trailing spaces - line is empty so don't add anything
-                }
-                result.push('\n');
-                continue;
-            }
-
-            // Handle code blocks if not in strict mode
-            if let Some(line_info) = ctx.line_info(i + 1)
-                && line_info.in_code_block
-            {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            // No special handling for empty blockquote lines - treat them like regular lines
-
-            // Handle lines with trailing spaces
-            let is_truly_last_line = i == lines.len() - 1 && !content.ends_with('\n');
-
-            result.push_str(trimmed);
-
-            // Check if this line is a heading - headings should never have trailing spaces
-            let is_heading = if let Some(line_info) = ctx.line_info(i + 1) {
-                line_info.heading.is_some()
-            } else {
-                // Fallback: check if line starts with #
-                trimmed.starts_with('#')
-            };
-
-            // Check if this is an empty blockquote line (just ">")
-            let is_empty_blockquote = if let Some(line_info) = ctx.line_info(i + 1) {
-                line_info.blockquote.as_ref().is_some_and(|bq| bq.content.is_empty())
-            } else {
-                false
-            };
-
-            // In non-strict mode, preserve line breaks ONLY if they have exactly br_spaces
-            // of pure ASCII trailing spaces (no Unicode whitespace mixed in).
-            // Never preserve trailing spaces in headings or empty blockquotes.
-            if !self.config.strict
-                && !is_truly_last_line
-                && has_only_ascii_trailing
-                && trailing_ascii_spaces == self.config.br_spaces.get()
-                && !is_heading
-                && !is_empty_blockquote
-            {
-                // Preserve the exact number of spaces for hard line breaks
-                match self.config.br_spaces.get() {
-                    0 => {}
-                    1 => result.push(' '),
-                    2 => result.push_str("  "),
-                    n => result.push_str(&" ".repeat(n)),
-                }
-            }
-            result.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        // Preserve original ending (with or without final newline)
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -866,6 +729,138 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "text\nmore\n");
+    }
+
+    /// Helper: after fix(), run check() on the result and assert zero violations remain.
+    fn assert_fix_roundtrip(rule: &MD009TrailingSpaces, content: &str) {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx2).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "After fix(), check() should find 0 violations.\nOriginal: {content:?}\nFixed: {fixed:?}\nRemaining: {remaining:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_basic_trailing_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(&rule, "Line with spaces   \nAnother line  \nClean line");
+    }
+
+    #[test]
+    fn test_roundtrip_strict_mode() {
+        let rule = MD009TrailingSpaces::new(2, true);
+        assert_fix_roundtrip(
+            &rule,
+            "Line with spaces  \nCode block:  \n```  \nCode with spaces  \n```  ",
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_empty_lines() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(&rule, "Normal line\n   \n  \nAnother line");
+    }
+
+    #[test]
+    fn test_roundtrip_br_spaces_preservation() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        assert_fix_roundtrip(
+            &rule,
+            "Line with two spaces  \nLine with three spaces   \nLine with one space ",
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_last_line_no_newline() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        assert_fix_roundtrip(&rule, "First line  \nLast line  ");
+    }
+
+    #[test]
+    fn test_roundtrip_last_line_with_newline() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        assert_fix_roundtrip(&rule, "First line  \nLast line  \n");
+    }
+
+    #[test]
+    fn test_roundtrip_unicode_whitespace() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(&rule, "> 0\u{2000} ");
+        assert_fix_roundtrip(&rule, "text\u{2000}\n");
+        assert_fix_roundtrip(&rule, "text\u{3000}\n");
+        assert_fix_roundtrip(&rule, "text\u{2000}  \n");
+    }
+
+    #[test]
+    fn test_roundtrip_code_blocks_non_strict() {
+        let rule = MD009TrailingSpaces::new(2, false);
+        assert_fix_roundtrip(
+            &rule,
+            "Line with spaces  \n```\nCode with spaces  \n```\nOutside code  ",
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_blockquotes() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(&rule, "> Quote\n>   \n> More quote");
+        assert_fix_roundtrip(&rule, "> > Nested  \n> >   \n> Normal  ");
+    }
+
+    #[test]
+    fn test_roundtrip_list_item_empty_lines() {
+        let config = MD009Config {
+            list_item_empty_lines: true,
+            ..Default::default()
+        };
+        let rule = MD009TrailingSpaces::from_config_struct(config);
+        assert_fix_roundtrip(&rule, "- First item\n  \n- Second item");
+        assert_fix_roundtrip(&rule, "Normal paragraph\n  \nAnother paragraph");
+    }
+
+    #[test]
+    fn test_roundtrip_complex_document() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(
+            &rule,
+            "# Title   \n\nParagraph  \n\n- List   \n  - Nested  \n\n```\ncode   \n```\n\n> Quote   \n>    \n\nEnd  ",
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_multibyte() {
+        let rule = MD009TrailingSpaces::new(2, true);
+        assert_fix_roundtrip(&rule, "- 1€ expenses \n");
+        assert_fix_roundtrip(&rule, "€100 + €50 = €150   \n");
+        assert_fix_roundtrip(&rule, "Hello 你好世界   \n");
+        assert_fix_roundtrip(&rule, "Party 🎉🎉🎉   \n");
+        assert_fix_roundtrip(&rule, "안녕하세요   \n");
+    }
+
+    #[test]
+    fn test_roundtrip_mixed_tabs_and_spaces() {
+        let rule = MD009TrailingSpaces::default();
+        assert_fix_roundtrip(&rule, "Line with tab\t\nLine with spaces  ");
+        assert_fix_roundtrip(&rule, "Line\t  \nAnother\n");
+    }
+
+    #[test]
+    fn test_roundtrip_heading_with_br_spaces() {
+        // Headings with exactly br_spaces trailing spaces: check() does not flag them,
+        // so fix() should not remove them. This tests consistency.
+        let rule = MD009TrailingSpaces::new(2, false);
+        let content = "# Heading  \nParagraph\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // check() allows br_spaces on headings (does not flag)
+        assert!(
+            warnings.is_empty(),
+            "check() should not flag heading with exactly br_spaces trailing spaces"
+        );
+        assert_fix_roundtrip(&rule, content);
     }
 
     #[test]
