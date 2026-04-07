@@ -270,84 +270,17 @@ impl Rule for MD026NoTrailingPunctuation {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // Fast path optimizations
-        if content.is_empty() {
-            return Ok(content.to_string());
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Quick check for punctuation
-        // For custom punctuation, we need to check differently
-        if self.config.punctuation == DEFAULT_PUNCTUATION {
-            if !QUICK_PUNCTUATION_CHECK.is_match(content) {
-                return Ok(content.to_string());
-            }
-        } else {
-            // For custom punctuation, check if any of those characters exist
-            let has_custom_punctuation = self.config.punctuation.chars().any(|c| content.contains(c));
-            if !has_custom_punctuation {
-                return Ok(content.to_string());
-            }
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        // Check if we have any headings from pre-computed line info
-        let has_headings = ctx.lines.iter().any(|line| line.heading.is_some());
-        if !has_headings {
-            return Ok(content.to_string());
-        }
-
-        let re = match self.get_punctuation_regex() {
-            Ok(regex) => regex,
-            Err(_) => return Ok(content.to_string()),
-        };
-
-        let lines = ctx.raw_lines();
-        let mut fixed_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
-
-        // Use pre-computed heading information from LintContext
-        for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num + 1) {
-                continue;
-            }
-
-            if let Some(heading) = &line_info.heading {
-                // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
-                if !heading.is_valid {
-                    continue;
-                }
-
-                // Skip deeply indented headings (they're code blocks)
-                if line_info.visual_indent >= 4 && matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    continue;
-                }
-
-                // LintContext already strips custom header IDs from heading.text
-                // So we just check the heading text directly for trailing punctuation
-                let text_to_check = heading.text.clone();
-
-                // Check and fix trailing punctuation
-                if self.has_trailing_punctuation(&text_to_check, &re) {
-                    fixed_lines[line_num] = if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                        self.fix_atx_heading(line_info.content(ctx.content), &re)
-                    } else {
-                        self.fix_setext_heading(line_info.content(ctx.content), &re)
-                    };
-                }
-            }
-        }
-
-        // Reconstruct content preserving line endings
-        let mut result = String::with_capacity(content.len());
-        for (i, line) in fixed_lines.iter().enumerate() {
-            result.push_str(line);
-            if i < fixed_lines.len() - 1 || content.ends_with('\n') {
-                result.push('\n');
-            }
-        }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

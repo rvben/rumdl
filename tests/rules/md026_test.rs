@@ -539,3 +539,88 @@ fn test_md026_mixed_alphanumeric_and_punctuation() {
     assert_eq!(result[2].line, 3); // a
     assert_eq!(result[3].line, 4); // 1
 }
+
+#[test]
+fn test_md026_roundtrip_atx_headings() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "# Title.\n## Subtitle,\n### Sub-subtitle;\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md026_roundtrip_setext_headings() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "Heading with period.\n========\n\nAnother with comma,\n--------\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md026_roundtrip_closed_atx() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "# Heading 1! #\n## Heading 2. ##\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md026_roundtrip_custom_punctuation() {
+    let rule = MD026NoTrailingPunctuation::new(Some("!?".to_string()));
+    let content = "# Warning!\n## Question?\n### Statement.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md026_roundtrip_multiple_punctuation() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content = "# Title...\n## Another heading!!\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md026_roundtrip_mixed_content() {
+    let rule = MD026NoTrailingPunctuation::default();
+    let content =
+        "# Main Title\n\nSome paragraph.\n\n## Section.\n\n- List item.\n\n### Subsection,\n\n#### Final heading;\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx2).unwrap();
+    assert!(
+        result.is_empty(),
+        "Roundtrip: fix then re-check should produce 0 violations, got {result:?}"
+    );
+}
