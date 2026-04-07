@@ -849,7 +849,10 @@ impl Rule for MD046CodeBlockStyle {
 
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
-        let mut fenced_fence_type = None;
+        // Tracks the opening fence: (fence_char, opener_length).
+        // Per CommonMark spec, the closing fence must use the same character and have
+        // at least as many characters as the opener, with no info string.
+        let mut fenced_fence_opener: Option<(char, usize)> = None;
         let mut in_indented_block = false;
 
         // Track which code block opening lines are disabled by inline config
@@ -868,7 +871,9 @@ impl Rule for MD046CodeBlockStyle {
                 // Check if inline config disables this rule for the opening fence
                 current_block_disabled = ctx.inline_config().is_rule_disabled(self.name(), line_num);
                 in_fenced_block = true;
-                fenced_fence_type = Some(if trimmed.starts_with("```") { "```" } else { "~~~" });
+                let fence_char = if trimmed.starts_with("```") { '`' } else { '~' };
+                let opener_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+                fenced_fence_opener = Some((fence_char, opener_len));
 
                 if current_block_disabled {
                     // Inline config disables this rule — preserve original
@@ -882,11 +887,16 @@ impl Rule for MD046CodeBlockStyle {
                     result.push_str(line);
                     result.push('\n');
                 }
-            } else if in_fenced_block && fenced_fence_type.is_some() {
-                let fence = fenced_fence_type.unwrap();
-                if trimmed.starts_with(fence) {
+            } else if in_fenced_block && fenced_fence_opener.is_some() {
+                let (fence_char, opener_len) = fenced_fence_opener.unwrap();
+                // Per CommonMark: closing fence uses the same character, has at least as
+                // many characters as the opener, and has no info string (only optional trailing spaces).
+                let closer_len = trimmed.chars().take_while(|&c| c == fence_char).count();
+                let after_closer = &trimmed[closer_len..];
+                let is_closer = closer_len >= opener_len && after_closer.trim().is_empty() && closer_len > 0;
+                if is_closer {
                     in_fenced_block = false;
-                    fenced_fence_type = None;
+                    fenced_fence_opener = None;
                     in_indented_block = false;
 
                     if current_block_disabled {
@@ -990,12 +1000,19 @@ impl Rule for MD046CodeBlockStyle {
             result.push_str("```\n");
         }
 
-        // Close any unclosed fenced blocks
-        if let Some(fence_type) = fenced_fence_type
-            && in_fenced_block
-        {
-            result.push_str(fence_type);
-            result.push('\n');
+        // Close any unclosed fenced blocks.
+        // Only close if check() also confirms this block is unclosed. The line-by-line
+        // fence scanner in fix() can disagree with pulldown-cmark on block boundaries
+        // (e.g., markdown documentation blocks with nested fence examples), so we use
+        // check_unclosed_code_blocks() as the authoritative source of truth.
+        if fenced_fence_opener.is_some() && in_fenced_block {
+            let has_unclosed_violation = self.check_unclosed_code_blocks(ctx).is_ok_and(|w| !w.is_empty());
+            if has_unclosed_violation {
+                let (fence_char, opener_len) = fenced_fence_opener.unwrap();
+                let closer: String = std::iter::repeat(fence_char).take(opener_len).collect();
+                result.push_str(&closer);
+                result.push('\n');
+            }
         }
 
         // Remove trailing newline if original didn't have one
