@@ -294,3 +294,98 @@ mod parity_with_markdownlint {
         assert_eq!(warnings.len(), 1);
     }
 }
+
+/// Helper: fix content, then check the result has zero violations
+fn assert_fix_roundtrip(input: &str) {
+    let rule = MD039NoSpaceInLinks::new();
+    let ctx = LintContext::new(input, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let remaining = rule.check(&ctx2).unwrap();
+    assert!(
+        remaining.is_empty(),
+        "After fix, check() should return 0 warnings but got {} for input: {:?}\nFixed output: {:?}",
+        remaining.len(),
+        input,
+        fixed,
+    );
+}
+
+mod roundtrip_tests {
+    use super::*;
+
+    #[test]
+    fn roundtrip_spaces_both_ends() {
+        assert_fix_roundtrip("[ link ](url) and [ another link ](url) here");
+    }
+
+    #[test]
+    fn roundtrip_space_at_start() {
+        assert_fix_roundtrip("[ link](url) and [ another link](url) here");
+    }
+
+    #[test]
+    fn roundtrip_space_at_end() {
+        assert_fix_roundtrip("[link ](url) and [another link ](url) here");
+    }
+
+    #[test]
+    fn roundtrip_code_block() {
+        assert_fix_roundtrip("```\n[ link ](url)\n```\n[ link ](url)");
+    }
+
+    #[test]
+    fn roundtrip_multiple_links_same_line() {
+        assert_fix_roundtrip("[ link ](url) and [ another ](url) in one line");
+    }
+
+    #[test]
+    fn roundtrip_only_whitespace_text() {
+        assert_fix_roundtrip("[   ](url) and [ ](url)");
+    }
+
+    #[test]
+    fn roundtrip_unicode_whitespace() {
+        assert_fix_roundtrip("[\u{00A0}link\u{00A0}](url) and [\u{2003}another\u{2003}](url)");
+    }
+
+    #[test]
+    fn roundtrip_tab_whitespace() {
+        assert_fix_roundtrip("[\tlink\t](url) and [\tanother\t](url)");
+    }
+
+    #[test]
+    fn roundtrip_inline_images() {
+        assert_fix_roundtrip("![ alt ](img.png) and ![ another ](img2.png)");
+    }
+
+    #[test]
+    fn roundtrip_nested_formatting() {
+        assert_fix_roundtrip("[ * link * ](url) and [ _ another _ ](url)");
+    }
+
+    #[test]
+    fn roundtrip_html_entities() {
+        assert_fix_roundtrip("[ &nbsp;link&nbsp; ](url)");
+    }
+
+    #[test]
+    fn roundtrip_mixed_links_and_images() {
+        assert_fix_roundtrip("[ link ](url) and ![ image ](img.png) together");
+    }
+
+    #[test]
+    fn roundtrip_link_with_title() {
+        assert_fix_roundtrip("[ link ](url \"title\") here");
+    }
+
+    #[test]
+    fn roundtrip_multiple_spaces() {
+        assert_fix_roundtrip("[   link   ](url) text");
+    }
+
+    #[test]
+    fn roundtrip_unicode_content() {
+        assert_fix_roundtrip("[ 日本語 ](url) and [ émojis 🎉 ](url2)");
+    }
+}

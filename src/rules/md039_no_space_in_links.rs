@@ -239,150 +239,16 @@ impl Rule for MD039NoSpaceInLinks {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let mut fixes = Vec::new();
-
-        // Process links
-        for link in &ctx.links {
-            // Skip reference links (markdownlint doesn't check these)
-            if link.is_reference {
-                continue;
-            }
-
-            // Skip links where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), link.line) {
-                continue;
-            }
-
-            // Skip links inside Jinja templates
-            if ctx.is_in_jinja_range(link.byte_offset) {
-                continue;
-            }
-
-            if !self.needs_trimming(&link.text) {
-                continue;
-            }
-
-            let unescaped = self.unescape_fast(&link.text);
-
-            let needs_fix = if get_cached_regex(ALL_WHITESPACE_STR)
-                .map(|re| re.is_match(&unescaped))
-                .unwrap_or(false)
-            {
-                true
-            } else {
-                let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
-                link.text.as_ref() != trimmed
-            };
-
-            if needs_fix {
-                let url_part = if link.is_reference {
-                    if let Some(ref_id) = &link.reference_id {
-                        format!("[{ref_id}]")
-                    } else {
-                        "[]".to_string()
-                    }
-                } else {
-                    format!("({})", link.url)
-                };
-
-                let replacement = if get_cached_regex(ALL_WHITESPACE_STR)
-                    .map(|re| re.is_match(&unescaped))
-                    .unwrap_or(false)
-                {
-                    format!("[]{url_part}")
-                } else {
-                    let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                    format!("[{trimmed}]{url_part}")
-                };
-
-                fixes.push((link.byte_offset, link.byte_end, replacement));
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Process images
-        for image in &ctx.images {
-            // Skip reference images (markdownlint doesn't check these)
-            if image.is_reference {
-                continue;
-            }
-
-            // Skip images where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), image.line) {
-                continue;
-            }
-
-            // Skip images inside Jinja templates
-            if ctx.is_in_jinja_range(image.byte_offset) {
-                continue;
-            }
-
-            if !self.needs_trimming(&image.alt_text) {
-                continue;
-            }
-
-            let unescaped = self.unescape_fast(&image.alt_text);
-
-            let needs_fix = if get_cached_regex(ALL_WHITESPACE_STR)
-                .map(|re| re.is_match(&unescaped))
-                .unwrap_or(false)
-            {
-                true
-            } else {
-                let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
-                image.alt_text.as_ref() != trimmed
-            };
-
-            if needs_fix {
-                let url_part = if image.is_reference {
-                    if let Some(ref_id) = &image.reference_id {
-                        format!("[{ref_id}]")
-                    } else {
-                        "[]".to_string()
-                    }
-                } else {
-                    format!("({})", image.url)
-                };
-
-                let replacement = if get_cached_regex(ALL_WHITESPACE_STR)
-                    .map(|re| re.is_match(&unescaped))
-                    .unwrap_or(false)
-                {
-                    format!("![]{url_part}")
-                } else {
-                    let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                    format!("![{trimmed}]{url_part}")
-                };
-
-                fixes.push((image.byte_offset, image.byte_end, replacement));
-            }
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        if fixes.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        // Sort fixes by position to apply them in order
-        fixes.sort_by_key(|&(start, _, _)| start);
-
-        // Apply fixes efficiently
-        let mut result = String::with_capacity(content.len());
-        let mut last_pos = 0;
-
-        for (start, end, replacement) in fixes {
-            if start < last_pos {
-                // This should not happen if fixes are properly sorted and non-overlapping
-                return Err(LintError::FixFailed(format!(
-                    "Overlapping fixes detected: last_pos={last_pos}, start={start}"
-                )));
-            }
-            result.push_str(&content[last_pos..start]);
-            result.push_str(&replacement);
-            last_pos = end;
-        }
-        result.push_str(&content[last_pos..]);
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
