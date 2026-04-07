@@ -809,3 +809,114 @@ print("hello")
         "Mixed blockquotes and fenced code blocks should work correctly"
     );
 }
+
+/// Helper: run check → fix → check again and assert no violations remain after fix.
+/// This is the canonical test for check/fix alignment.
+fn assert_fix_resolves_violations(rule: &MD046CodeBlockStyle, content: &str) {
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let before = rule.check(&ctx).unwrap();
+    assert!(
+        !before.is_empty(),
+        "Expected violations before fix, got none. Content:\n{content}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let after = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        after.is_empty(),
+        "Violations remain after fix.\nOriginal violations: {before:?}\nAfter fix violations: {after:?}\nFixed content:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_roundtrip_multiple_indented_blocks_to_fenced() {
+    // Multiple separate indented code blocks - fix must convert ALL of them
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content =
+        "# Doc\n\n    first block\n    continues\n\nSome text.\n\n    second block\n\nMore text.\n\n    third block\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_multiple_fenced_blocks_to_indented() {
+    // Multiple fenced blocks - fix must convert ALL of them
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "# Doc\n\n```\nfirst block\n```\n\nSome text.\n\n```python\nsecond block\n```\n\nMore text.\n\n```\nthird block\n```\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_consistent_mixed_prefers_fenced() {
+    // Consistent mode: 2 fenced, 1 indented → should fix to all fenced
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "```\nblock one\n```\n\nText.\n\n```\nblock two\n```\n\nText.\n\n    indented block\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_consistent_mixed_prefers_indented() {
+    // Consistent mode: 2 indented, 1 fenced → should fix to all indented
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "    indented one\n\nText.\n\n    indented two\n\nText.\n\n```\nfenced block\n```\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_indented_block_preceded_by_paragraph() {
+    // Indented block immediately after paragraph text (no blank line before) is NOT a code block per CommonMark.
+    // When it IS a code block (preceded by blank line), fix should handle it correctly.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+    let content = "Paragraph text.\n\n    code line one\n    code line two\n    code line three\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_fenced_with_info_string_to_indented() {
+    // Fenced block with info string (```python) - info string must be dropped in conversion
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "```python\ndef hello():\n    print('world')\n```\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_longer_fence_to_indented() {
+    // Four-backtick fence - fix must correctly identify the closing fence
+    // and not confuse a ``` line inside the block as the closer
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "````python\n```not-a-close\ncode here\n```\n````\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_roundtrip_tilde_fence_to_indented() {
+    // Tilde-style fence - fix must match tilde closing fence, not backtick
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "~~~\ncode content\n~~~\n";
+    assert_fix_resolves_violations(&rule, content);
+}
+
+#[test]
+fn test_fix_longer_fence_closing_detection() {
+    // When a fenced block opens with ```` (4 backticks), fix() must use the full
+    // opener length to find the closer, not just ```.
+    // A ``` line inside the block is CONTENT, not a closer.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+    let content = "````\n```\ncode here\n```\n````\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // The fixed output should have exactly one indented block (no fences remain)
+    let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let after = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        after.is_empty(),
+        "Violations remain after fix for 4-backtick fence.\nFixed content:\n{fixed}\nViolations: {after:?}"
+    );
+
+    // The content inside should be preserved (``` line should appear as indented content)
+    assert!(
+        fixed.contains("    ```"),
+        "The inner ``` should be preserved as indented content, got:\n{fixed}"
+    );
+}
