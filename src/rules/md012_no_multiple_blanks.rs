@@ -349,119 +349,17 @@ impl Rule for MD012NoMultipleBlanks {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        let mut result = Vec::new();
-        let mut blank_count = 0;
-
-        let mut in_code_block = false;
-        let mut code_block_blanks = Vec::new();
-        let mut in_front_matter = false;
-        // Track whether the last emitted content line is heading-adjacent
-        let mut last_content_is_heading: bool = false;
-        // Track whether we've seen any content (for start-of-file detection)
-        let mut has_seen_content: bool = false;
-
-        // Process ALL lines (don't skip front-matter in fix mode)
-        for filtered_line in ctx.filtered_lines() {
-            let line = filtered_line.content;
-            let line_num = filtered_line.line_num;
-            let line_idx = line_num - 1; // Convert to 0-based
-
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result.push(line);
-                continue;
-            }
-
-            // Pass through front-matter lines unchanged
-            if filtered_line.line_info.in_front_matter {
-                if !in_front_matter {
-                    // Entering front-matter: flush any accumulated blanks
-                    let allowed_blanks = blank_count.min(self.config.maximum.get());
-                    if allowed_blanks > 0 {
-                        result.extend(vec![""; allowed_blanks]);
-                    }
-                    blank_count = 0;
-                    in_front_matter = true;
-                    last_content_is_heading = false;
-                }
-                result.push(line);
-                continue;
-            } else if in_front_matter {
-                // Exiting front-matter
-                in_front_matter = false;
-                last_content_is_heading = false;
-            }
-
-            // Track code blocks
-            if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
-                // Handle accumulated blank lines before code block
-                if !in_code_block {
-                    // Cap heading-adjacent blanks at effective max (MD012 max or MD022 limit)
-                    let effective_max = if last_content_is_heading {
-                        self.effective_max_below()
-                    } else {
-                        self.config.maximum.get()
-                    };
-                    let allowed_blanks = blank_count.min(effective_max);
-                    if allowed_blanks > 0 {
-                        result.extend(vec![""; allowed_blanks]);
-                    }
-                    blank_count = 0;
-                    last_content_is_heading = false;
-                } else {
-                    // Add accumulated blank lines inside code block
-                    result.append(&mut code_block_blanks);
-                }
-                in_code_block = !in_code_block;
-                result.push(line);
-                continue;
-            }
-
-            if in_code_block {
-                if line.trim().is_empty() {
-                    code_block_blanks.push(line);
-                } else {
-                    result.append(&mut code_block_blanks);
-                    result.push(line);
-                }
-            } else if line.trim().is_empty() {
-                blank_count += 1;
-            } else {
-                // Cap heading-adjacent blanks at effective max (MD012 max or MD022 limit).
-                // Start-of-file blanks before a heading use normal maximum.
-                let heading_below = last_content_is_heading;
-                let heading_above = has_seen_content && is_heading_context(ctx, line_idx);
-                let effective_max = if heading_below && heading_above {
-                    self.effective_max_above().max(self.effective_max_below())
-                } else if heading_below {
-                    self.effective_max_below()
-                } else if heading_above {
-                    self.effective_max_above()
-                } else {
-                    self.config.maximum.get()
-                };
-                let allowed_blanks = blank_count.min(effective_max);
-                if allowed_blanks > 0 {
-                    result.extend(vec![""; allowed_blanks]);
-                }
-                blank_count = 0;
-                last_content_is_heading = is_heading_context(ctx, line_idx);
-                has_seen_content = true;
-                result.push(line);
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Trailing blank lines at EOF are removed entirely (matching markdownlint-cli)
-
-        // Join lines and handle final newline
-        let mut output = result.join("\n");
-        if content.ends_with('\n') {
-            output.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(output)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -758,8 +656,9 @@ mod tests {
         let content = "Text\n\n\n    code\n    \n    more code\n\n\nText";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
-        // The fix removes the extra blank line, but this is expected behavior
-        assert_eq!(fixed, "Text\n\n    code\n\n    more code\n\nText");
+        // Fix removes excess blank lines outside code blocks but preserves
+        // whitespace-only lines inside indented code blocks unchanged.
+        assert_eq!(fixed, "Text\n\n    code\n    \n    more code\n\nText");
     }
 
     #[test]
@@ -1294,5 +1193,123 @@ Some more text for this section.
         let result = rule.check(&ctx).unwrap();
         // In standard flavor, the triple blank inside "div" is flagged
         assert!(!result.is_empty(), "Standard flavor should flag blanks in 'div'");
+    }
+
+    // Roundtrip safety tests: fix then re-check = 0 violations
+
+    #[test]
+    fn test_roundtrip_multiple_blank_lines() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Line 1\n\n\nLine 2\n\n\n\nLine 3";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(
+            recheck.is_empty(),
+            "Roundtrip: fix then check should be clean, got {recheck:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_trailing_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Content\n\n\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: trailing blanks, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_leading_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "\n\n\nContent\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: leading blanks, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_custom_maximum() {
+        let rule = MD012NoMultipleBlanks::new(2);
+        let content = "Line 1\n\n\n\n\nLine 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: max=2, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_code_blocks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n\n```\ncode\n\n\n\nmore code\n```\n\n\nAfter";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: code blocks, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_heading_limits() {
+        let rule = MD012NoMultipleBlanks::default().with_heading_limits(2, 2);
+        let content = "# Heading\n\n\n\n\nParagraph\n\n\n\n## Heading 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: heading limits, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_front_matter() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "---\ntitle: Test\n\n\nauthor: Me\n---\n\n\n\nContent\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: front matter, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_only_blanks() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "\n\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: only blanks, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_single_eof_blank() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Content\n\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(recheck.is_empty(), "Roundtrip: single EOF blank, got {recheck:?}");
+    }
+
+    #[test]
+    fn test_roundtrip_mixed_heading_and_non_heading() {
+        let rule = MD012NoMultipleBlanks::default().with_heading_limits(1, 2);
+        let content = "# Heading\n\n\n\nParagraph 1\n\n\n\nParagraph 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let recheck = rule.check(&ctx2).unwrap();
+        assert!(
+            recheck.is_empty(),
+            "Roundtrip: mixed heading/non-heading, got {recheck:?}"
+        );
     }
 }
