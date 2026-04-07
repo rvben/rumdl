@@ -36,6 +36,7 @@ mod tests {
                 warning.message
             );
         }
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -175,6 +176,7 @@ mod tests {
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -203,6 +205,7 @@ mod tests {
             "Warning message should include expected and actual values, got: '{}'",
             result[0].message
         );
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -335,6 +338,7 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
         let expected = "* Normal item\n\n    * Loose nested item\n    1. Loose nested ordered\n\n- Another normal item";
         assert_eq!(fixed, expected);
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -346,6 +350,7 @@ mod tests {
         // Blockquoted list items should also be fixed to correct spacing
         let expected = "* Normal item\n> * Blockquote item\n> 1. Blockquote ordered\n- Another normal item";
         assert_eq!(fixed, expected);
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -460,6 +465,7 @@ mod tests {
         // Single space should be expanded to match configuration
         let expected = "*   Item with one space\n1.  Ordered with one space";
         assert_eq!(fixed, expected);
+        crate::utils::assert_fix_resolves_all_violations(&rule, content, rumdl_lib::config::MarkdownFlavor::Standard);
     }
 
     #[test]

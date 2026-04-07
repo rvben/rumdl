@@ -222,65 +222,23 @@ impl Rule for MD030ListMarkerSpace {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
-        let content = ctx.content;
-
-        // Early return if no fixes needed
         if self.should_skip(ctx) {
-            return Ok(content.to_string());
+            return Ok(ctx.content.to_string());
         }
 
-        let lines = ctx.raw_lines();
-        let mut result_lines = Vec::with_capacity(lines.len());
-
-        for (line_idx, line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // Skip lines in code blocks, front matter, HTML comments, or footnote definitions
-            if let Some(line_info) = ctx.lines.get(line_idx)
-                && (line_info.in_code_block
-                    || line_info.in_front_matter
-                    || line_info.in_html_comment
-                    || line_info.in_mdx_comment
-                    || line_info.in_footnote_definition)
-            {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // Skip if this is an indented code block (4+ spaces with blank line before),
-            // but only when the parser did not identify the line as a list item.
-            // A parser-recognized list item must be fixed regardless of its indentation.
-            let parser_sees_list_item = ctx.lines.get(line_idx).and_then(|li| li.list_item.as_ref()).is_some();
-            if !parser_sees_list_item && self.is_indented_code_block(line, line_idx, lines) {
-                result_lines.push(line.to_string());
-                continue;
-            }
-
-            // Use regex-based detection to find list markers, not parser detection.
-            // This ensures we fix spacing on ALL lines that look like list items,
-            // even if the parser doesn't recognize them due to strict nesting rules.
-            // User intention matters: if it looks like a list item, fix it.
-            let is_multi_line = self.is_multi_line_list_item(ctx, line_num, lines);
-            if let Some(fixed_line) = self.try_fix_list_marker_spacing_with_context(line, is_multi_line) {
-                result_lines.push(fixed_line);
-            } else {
-                result_lines.push(line.to_string());
-            }
+        // Derive fixes directly from check() so detection and fixing share one code path.
+        // This guarantees that every violation check() reports is also fixed, with no
+        // possibility of the two paths diverging due to mismatched skip conditions.
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
 
-        // Preserve trailing newline if original content had one
-        let result = result_lines.join("\n");
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            Ok(result + "\n")
-        } else {
-            Ok(result)
-        }
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 }
 
@@ -645,6 +603,27 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
+    /// Assert that running `fix()` on content with violations produces output that
+    /// passes `check()` with zero remaining violations.
+    fn assert_fix_resolves_all_violations(rule: &MD030ListMarkerSpace, content: &str) {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let before = rule.check(&ctx).unwrap();
+        assert!(
+            !before.is_empty(),
+            "Expected violations but check() found none in:\n{content}"
+        );
+
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx_fixed = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let after = rule.check(&ctx_fixed).unwrap();
+        assert!(
+            after.is_empty(),
+            "fix() left {} violation(s) unresolved:\n{:?}\nOriginal:\n{content}\nFixed:\n{fixed}",
+            after.len(),
+            after
+        );
+    }
+
     #[test]
     fn test_basic_functionality() {
         let rule = MD030ListMarkerSpace::default();
@@ -880,6 +859,11 @@ mod tests {
             "Deeply nested (8-space) item with 1 space should be flagged; got: {result_deep:?}"
         );
         assert_eq!(result_deep[0].line, 3, "Violation should be on the deeply nested line");
+
+        // Verify the full roundtrip: fix() must resolve everything check() found.
+        assert_fix_resolves_all_violations(&rule, content);
+        assert_fix_resolves_all_violations(&rule_ol, content_ol);
+        assert_fix_resolves_all_violations(&rule, content_deep);
     }
 
     #[test]
@@ -905,6 +889,9 @@ mod tests {
             fixed, "- parent\n\n    - nested wrong\n",
             "fix() should reduce 2 spaces to 1 for loose nested item"
         );
+
+        // Verify the full roundtrip: fix() must resolve everything check() found.
+        assert_fix_resolves_all_violations(&rule, content);
     }
 
     #[test]
