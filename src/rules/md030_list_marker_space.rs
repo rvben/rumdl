@@ -820,7 +820,8 @@ mod tests {
         // list items.
         let rule = MD030ListMarkerSpace::new(3, 3, 1, 1);
 
-        // Nested unordered item: 4 spaces indent, 1 space after marker → violation (expected 3)
+        // Tight nested list (no blank line): the exact scenario from issue #565.
+        // ul_single=3: the nested item "    - Nested wrong" has 1 space → violation.
         let content = "-   Top-level correct\n    - Nested wrong spacing\n    -   Nested correct\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
@@ -830,6 +831,18 @@ mod tests {
             "Nested item with 1 space (ul_single=3) should be flagged; got: {result:?}"
         );
         assert_eq!(result[0].line, 2, "Violation should be on line 2");
+        assert!(
+            result[0].message.contains("Expected: 3") && result[0].message.contains("Actual: 1"),
+            "Message should state expected/actual spaces; got: {}",
+            result[0].message
+        );
+
+        // fix() must produce correct output for the tight nested case.
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, "-   Top-level correct\n    -   Nested wrong spacing\n    -   Nested correct\n",
+            "fix() should expand 1 space to ul_single=3 on the nested item"
+        );
 
         // Nested unordered item with correct spacing should not be flagged
         let content_ok = "-   Top-level\n    -   Nested correct\n";
@@ -840,7 +853,7 @@ mod tests {
             "Nested item with correct spacing should not be flagged; got: {result_ok:?}"
         );
 
-        // Nested ordered item: 4 spaces indent, wrong spacing
+        // Nested ordered item: 4 spaces indent, 1 space after marker → violation (ol_single=2)
         let rule_ol = MD030ListMarkerSpace::new(1, 1, 2, 2);
         let content_ol = "1.  Top-level multi\n    1. Nested wrong\n";
         let ctx_ol = LintContext::new(content_ol, crate::config::MarkdownFlavor::Standard, None);
@@ -850,6 +863,23 @@ mod tests {
             1,
             "Nested ordered item with 1 space (ol_single=2) should be flagged; got: {result_ol:?}"
         );
+        let fixed_ol = rule_ol.fix(&ctx_ol).unwrap();
+        assert_eq!(
+            fixed_ol, "1.  Top-level multi\n    1.  Nested wrong\n",
+            "fix() should expand 1 space to ol_single=2 on the nested ordered item"
+        );
+
+        // Deeply nested (8+ spaces) items are also checked.
+        // Only the 8-space-indented item has wrong spacing; outer levels are correct.
+        let content_deep = "-   Level 1\n    -   Level 2\n        - Level 3 wrong\n        -   Level 3 correct\n";
+        let ctx_deep = LintContext::new(content_deep, crate::config::MarkdownFlavor::Standard, None);
+        let result_deep = rule.check(&ctx_deep).unwrap();
+        assert_eq!(
+            result_deep.len(),
+            1,
+            "Deeply nested (8-space) item with 1 space should be flagged; got: {result_deep:?}"
+        );
+        assert_eq!(result_deep[0].line, 3, "Violation should be on the deeply nested line");
     }
 
     #[test]
