@@ -291,11 +291,13 @@ impl Rule for MD040FencedCodeLanguage {
                     fix: Some(Fix {
                         range: {
                             let trimmed_start = line.len() - line.trim_start().len();
-                            let fence_len = block.fence_marker.len();
                             let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
                             let fence_start_byte = line_start_byte + trimmed_start;
-                            let fence_end_byte = fence_start_byte + fence_len;
-                            fence_start_byte..fence_end_byte
+                            // Cover from fence start to end of entire line content
+                            // (including trailing whitespace), so stale info strings
+                            // and trailing spaces are replaced cleanly
+                            let line_end_byte = line_start_byte + line.len();
+                            fence_start_byte..line_end_byte
                         },
                         replacement: format!("{}text", block.fence_marker),
                     }),
@@ -380,119 +382,16 @@ impl Rule for MD040FencedCodeLanguage {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // Derive fenced code blocks from pre-computed context
-        let fenced_blocks = derive_fenced_code_blocks(ctx);
-
-        // Pre-compute disabled ranges
-        let disabled_ranges = compute_disabled_ranges(content, self.name());
-
-        // Compute preferred labels for consistent mode
-        let preferred_labels = if self.config.style == LanguageStyle::Consistent {
-            self.compute_preferred_labels(&fenced_blocks, &disabled_ranges)
-        } else {
-            HashMap::new()
-        };
-
-        // Build a set of line indices that need fixing
-        let mut lines_to_fix: std::collections::HashMap<usize, FixAction> = std::collections::HashMap::new();
-
-        for block in &fenced_blocks {
-            if is_line_disabled(&disabled_ranges, block.line_idx) {
-                continue;
-            }
-
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), block.line_idx + 1) {
-                continue;
-            }
-
-            let fix_lines = ctx.raw_lines();
-            let line = fix_lines.get(block.line_idx).unwrap_or(&"");
-            let trimmed = line.trim();
-            let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
-
-            let has_mkdocs_attrs_only =
-                ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_superfences_attribute(after_fence);
-
-            let has_quarto_syntax = ctx.flavor == crate::config::MarkdownFlavor::Quarto
-                && after_fence.starts_with('{')
-                && after_fence.contains('}');
-
-            let needs_language =
-                !has_mkdocs_attrs_only && (block.language.is_empty() || is_superfences_attribute(&block.language));
-
-            if needs_language && !has_quarto_syntax {
-                lines_to_fix.insert(
-                    block.line_idx,
-                    FixAction::AddLanguage {
-                        fence_marker: block.fence_marker.clone(),
-                        has_mkdocs_attrs_only,
-                    },
-                );
-            } else if !has_quarto_syntax
-                && self.config.style == LanguageStyle::Consistent
-                && let Some(canonical) = resolve_canonical(&block.language)
-                && let Some(preferred) = preferred_labels.get(canonical)
-                && &block.language != preferred
-            {
-                lines_to_fix.insert(
-                    block.line_idx,
-                    FixAction::NormalizeLabel {
-                        fence_marker: block.fence_marker.clone(),
-                        new_label: preferred.clone(),
-                    },
-                );
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Build the result by iterating through lines
-        let mut result = String::new();
-        for (i, line) in content.lines().enumerate() {
-            if let Some(action) = lines_to_fix.get(&i) {
-                match action {
-                    FixAction::AddLanguage {
-                        fence_marker,
-                        has_mkdocs_attrs_only,
-                    } => {
-                        let indent = &line[..line.len() - line.trim_start().len()];
-                        let trimmed = line.trim();
-                        let after_fence = trimmed.strip_prefix(fence_marker).unwrap_or("").trim();
-
-                        if *has_mkdocs_attrs_only {
-                            result.push_str(&format!("{indent}{fence_marker}text {after_fence}\n"));
-                        } else {
-                            result.push_str(&format!("{indent}{fence_marker}text\n"));
-                        }
-                    }
-                    FixAction::NormalizeLabel {
-                        fence_marker,
-                        new_label,
-                    } => {
-                        if let Some((label_start, label_end)) = find_label_span(line, fence_marker) {
-                            result.push_str(&line[..label_start]);
-                            result.push_str(new_label);
-                            result.push_str(&line[label_end..]);
-                            result.push('\n');
-                        } else {
-                            result.push_str(line);
-                            result.push('\n');
-                        }
-                    }
-                }
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        // Remove trailing newline if the original content didn't have one
-        if !content.ends_with('\n') {
-            result.pop();
-        }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing
@@ -532,18 +431,6 @@ impl Rule for MD040FencedCodeLanguage {
         let rule_config: MD040Config = load_rule_config(config);
         Box::new(MD040FencedCodeLanguage::with_config(rule_config))
     }
-}
-
-#[derive(Debug, Clone)]
-enum FixAction {
-    AddLanguage {
-        fence_marker: String,
-        has_mkdocs_attrs_only: bool,
-    },
-    NormalizeLabel {
-        fence_marker: String,
-        new_label: String,
-    },
 }
 
 /// Derive fenced code blocks from pre-computed CodeBlockDetail data
