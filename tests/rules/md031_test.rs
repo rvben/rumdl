@@ -318,6 +318,132 @@ fn test_blockquote_still_detects_missing_blanks() {
 }
 
 #[test]
+fn test_roundtrip_fix_then_recheck_basic() {
+    // Roundtrip: fix then re-check should yield zero warnings
+    let rule = MD031BlanksAroundFences::default();
+    let content = "Text before\n```\ncode block\n```\nText after";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (basic): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_list_items() {
+    let rule = MD031BlanksAroundFences::new(true);
+    let content = "1. First item\n   ```python\n   code_in_list()\n   ```\n2. Second item";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (list items): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_blockquote() {
+    let rule = MD031BlanksAroundFences::default();
+    let content = "> Text before\n> ```\n> code\n> ```\n> Text after";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (blockquote): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_nested_blockquote() {
+    let rule = MD031BlanksAroundFences::default();
+    let content = ">> Nested quote\n>> ```\n>> code\n>> ```\n>> More text";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (nested blockquote): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_multiple_blocks() {
+    let rule = MD031BlanksAroundFences::default();
+    let content = "Text\n```\ncode1\n```\nMiddle\n```\ncode2\n```\nEnd";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (multiple blocks): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_trailing_newline() {
+    let rule = MD031BlanksAroundFences::default();
+    let content = "Some text\n```\ncode\n```\nMore text\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (trailing newline): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_idempotent() {
+    // Applying fix twice should produce the same result
+    let rule = MD031BlanksAroundFences::default();
+    let content = "Text\n```\ncode\n```\nMore";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed1, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert_eq!(fixed1, fixed2, "Fix should be idempotent");
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_mkdocs_admonition() {
+    let rule = MD031BlanksAroundFences::default();
+    let content = "Text before\n!!! note\n    Content\nText after";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::MkDocs, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (MkDocs admonition): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_4space_list() {
+    let rule = MD031BlanksAroundFences::new(true);
+    let content =
+        "1. First item\n2. Second item with code:\n    ```python\n    print(\"Hello\")\n    ```\n3. Third item";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Roundtrip (4-space list): fix then re-check should produce 0 warnings, got {warnings:?}"
+    );
+}
+
+#[test]
 fn test_mixed_blockquote_and_regular_content() {
     // Test that regular content outside blockquotes still requires blank lines
     let rule = MD031BlanksAroundFences::default();

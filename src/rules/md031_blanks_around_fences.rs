@@ -270,11 +270,7 @@ impl Rule for MD031BlanksAroundFences {
                     message: "No blank line after fenced code block".to_string(),
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(
-                            *closing_line + 1,
-                            lines[*closing_line].len() + 1,
-                            0,
-                        ),
+                        range: line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
                         replacement: format!("{bq_prefix}\n"),
                     }),
                 });
@@ -361,7 +357,7 @@ impl Rule for MD031BlanksAroundFences {
                             message: "No blank line after admonition block".to_string(),
                             severity: Severity::Warning,
                             fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(i, 0, 0),
+                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
                                 replacement: format!("{bq_prefix}\n"),
                             }),
                         });
@@ -378,88 +374,17 @@ impl Rule for MD031BlanksAroundFences {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // Check if original content ended with newline
-        let had_trailing_newline = content.ends_with('\n');
-
-        let lines = ctx.raw_lines();
-        let is_quarto = ctx.flavor == crate::config::MarkdownFlavor::Quarto;
-
-        // Helper to check if a line is a Quarto div marker (opening or closing)
-        let is_quarto_div_marker =
-            |line: &str| -> bool { is_quarto && (quarto_divs::is_div_open(line) || quarto_divs::is_div_close(line)) };
-
-        // Detect fenced code blocks using pulldown-cmark (handles list-indented fences correctly)
-        let fenced_blocks = Self::fenced_block_line_ranges(ctx);
-
-        // Collect lines that need blank lines before/after
-        let mut needs_blank_before: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        let mut needs_blank_after: std::collections::HashSet<usize> = std::collections::HashSet::new();
-
-        for (opening_line, closing_line) in &fenced_blocks {
-            // Skip fences where this rule is disabled by inline config
-            // opening_line and closing_line are 0-indexed; inline config uses 1-indexed
-            if ctx.inline_config().is_rule_disabled(self.name(), *opening_line + 1) {
-                continue;
-            }
-
-            // Check if needs blank line before opening fence
-            // Skip if right after Quarto div marker (Quarto flavor)
-            // Use is_effectively_empty_line to handle blockquote blank lines
-            let prev_line_is_quarto_marker = *opening_line > 0 && is_quarto_div_marker(lines[*opening_line - 1]);
-            if *opening_line > 0
-                && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
-                && !Self::is_right_after_frontmatter(*opening_line, ctx)
-                && !prev_line_is_quarto_marker
-                && self.should_require_blank_line(*opening_line, lines)
-            {
-                needs_blank_before.insert(*opening_line);
-            }
-
-            // Check if needs blank line after closing fence
-            // Skip if followed by Quarto div marker (Quarto flavor)
-            // Use is_effectively_empty_line to handle blockquote blank lines
-            let next_line_is_quarto_marker =
-                *closing_line + 1 < lines.len() && is_quarto_div_marker(lines[*closing_line + 1]);
-            if *closing_line + 1 < lines.len()
-                && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
-                && !is_kramdown_block_attribute(lines[*closing_line + 1])
-                && !next_line_is_quarto_marker
-                && self.should_require_blank_line(*closing_line, lines)
-            {
-                needs_blank_after.insert(*closing_line);
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Build result with blank lines inserted as needed
-        let mut result = Vec::new();
-        for (i, line) in lines.iter().enumerate() {
-            // Add blank line before this line if needed
-            if needs_blank_before.contains(&i) {
-                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
-                result.push(bq_prefix);
-            }
-
-            result.push((*line).to_string());
-
-            // Add blank line after this line if needed
-            if needs_blank_after.contains(&i) {
-                let bq_prefix = ctx.blockquote_prefix_for_blank_line(i);
-                result.push(bq_prefix);
-            }
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        let fixed = result.join("\n");
-
-        // Preserve original trailing newline if it existed
-        let final_result = if had_trailing_newline && !fixed.ends_with('\n') {
-            format!("{fixed}\n")
-        } else {
-            fixed
-        };
-
-        Ok(final_result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing
@@ -469,8 +394,12 @@ impl Rule for MD031BlanksAroundFences {
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Check for fenced code blocks (backticks or tildes)
-        ctx.content.is_empty() || (!ctx.likely_has_code() && !ctx.has_char('~'))
+        if ctx.content.is_empty() {
+            return true;
+        }
+        let has_fences = ctx.likely_has_code() || ctx.has_char('~');
+        let has_mkdocs_admonitions = ctx.flavor == crate::config::MarkdownFlavor::MkDocs && ctx.content.contains("!!!");
+        !has_fences && !has_mkdocs_admonitions
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
