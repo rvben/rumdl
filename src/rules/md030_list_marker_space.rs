@@ -86,11 +86,6 @@ impl Rule for MD030ListMarkerSpace {
 
                 let line = lines[line_num];
 
-                // Skip indented code blocks (4+ columns accounting for tab expansion)
-                if calculate_indentation_width_default(line) >= 4 {
-                    continue;
-                }
-
                 if let Some(list_info) = &line_info.list_item {
                     let list_type = if list_info.is_ordered {
                         ListType::Ordered
@@ -811,6 +806,46 @@ mod tests {
         assert!(
             result.is_empty(),
             "Normal list item should not trigger MD030, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_items_with_4space_indent_are_detected() {
+        // Nested list items indented with 4 spaces should be checked for marker spacing.
+        // Previously, the check skipped any line with >= 4 columns of indentation,
+        // treating them as indented code blocks even when the parser identified them as
+        // list items.
+        let rule = MD030ListMarkerSpace::new(3, 3, 1, 1);
+
+        // Nested unordered item: 4 spaces indent, 1 space after marker → violation (expected 3)
+        let content = "-   Top-level correct\n    - Nested wrong spacing\n    -   Nested correct\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Nested item with 1 space (ul_single=3) should be flagged; got: {result:?}"
+        );
+        assert_eq!(result[0].line, 2, "Violation should be on line 2");
+
+        // Nested unordered item with correct spacing should not be flagged
+        let content_ok = "-   Top-level\n    -   Nested correct\n";
+        let ctx_ok = LintContext::new(content_ok, crate::config::MarkdownFlavor::Standard, None);
+        let result_ok = rule.check(&ctx_ok).unwrap();
+        assert!(
+            result_ok.is_empty(),
+            "Nested item with correct spacing should not be flagged; got: {result_ok:?}"
+        );
+
+        // Nested ordered item: 4 spaces indent, wrong spacing
+        let rule_ol = MD030ListMarkerSpace::new(1, 1, 2, 2);
+        let content_ol = "1.  Top-level multi\n    1. Nested wrong\n";
+        let ctx_ol = LintContext::new(content_ol, crate::config::MarkdownFlavor::Standard, None);
+        let result_ol = rule_ol.check(&ctx_ol).unwrap();
+        assert_eq!(
+            result_ol.len(),
+            1,
+            "Nested ordered item with 1 space (ol_single=2) should be flagged; got: {result_ol:?}"
         );
     }
 
