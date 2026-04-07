@@ -94,6 +94,12 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
 
     let mut result = content.to_string();
 
+    // Track the lowest byte offset touched by an already-applied fix.
+    // Since fixes are sorted in reverse order (highest start first),
+    // any subsequent fix whose range.end > min_applied_start would
+    // overlap with an already-applied fix and corrupt the result.
+    let mut min_applied_start = usize::MAX;
+
     for (_, fix) in fixes {
         // Validate range bounds
         if fix.range.end > result.len() {
@@ -111,8 +117,15 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
             ));
         }
 
+        // Skip fixes that overlap with an already-applied fix to prevent
+        // offset corruption (e.g., nested link/image constructs in MD039).
+        if fix.range.end > min_applied_start {
+            continue;
+        }
+
         // Apply the fix by replacing the range with the replacement text
         result.replace_range(fix.range.clone(), &fix.replacement);
+        min_applied_start = fix.range.start;
     }
 
     // Ensure line endings are consistent with the original document
@@ -405,6 +418,48 @@ mod tests {
 
         let result = apply_warning_fixes(content, &warnings).unwrap();
         assert_eq!(result, content);
+    }
+
+    #[test]
+    fn test_overlapping_fixes_skip_outer() {
+        // Simulates nested link/image: [ ![ alt ](img) ](url) suffix
+        // Inner fix: range 2..15 (image text)
+        // Outer fix: range 0..22 (link text) — overlaps inner
+        // Only the inner (higher start) should be applied; outer is skipped.
+        let content = "[ ![ alt ](img) ](url) suffix";
+        let warnings = vec![
+            LintWarning {
+                message: "Outer link".to_string(),
+                line: 1,
+                column: 1,
+                end_line: 1,
+                end_column: 22,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 0..22,
+                    replacement: "[![alt](img)](url)".to_string(),
+                }),
+                rule_name: Some("MD039".to_string()),
+            },
+            LintWarning {
+                message: "Inner image".to_string(),
+                line: 1,
+                column: 3,
+                end_line: 1,
+                end_column: 15,
+                severity: Severity::Warning,
+                fix: Some(Fix {
+                    range: 2..15,
+                    replacement: "![alt](img)".to_string(),
+                }),
+                rule_name: Some("MD039".to_string()),
+            },
+        ];
+
+        let result = apply_warning_fixes(content, &warnings).unwrap();
+        // Inner fix applied: "![ alt ](img)" → "![alt](img)"
+        // Outer fix skipped (overlaps). Suffix preserved.
+        assert_eq!(result, "[ ![alt](img) ](url) suffix");
     }
 
     #[test]
