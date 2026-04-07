@@ -389,140 +389,17 @@ impl Rule for MD048CodeFenceStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        let target_style = match self.config.style {
-            CodeFenceStyle::Consistent => self.detect_style(ctx).unwrap_or(CodeFenceStyle::Backtick),
-            _ => self.config.style,
-        };
-
-        let lines: Vec<&str> = content.lines().collect();
-        let mut result = String::new();
-        let mut in_code_block = false;
-        let mut code_block_fence_char = '`';
-        let mut code_block_fence_len = 0usize;
-        let mut converted_fence_len = 0usize;
-        let mut needs_lengthening = false;
-
-        for (line_idx, &line) in lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            // Skip lines where the rule is disabled via inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result.push_str(line);
-                // Still track code block state for correctness
-                if let Some(marker) = parse_fence_marker(line) {
-                    if !in_code_block {
-                        in_code_block = true;
-                        code_block_fence_char = marker.fence_char;
-                        code_block_fence_len = marker.fence_len;
-                        converted_fence_len = marker.fence_len;
-                        needs_lengthening = false;
-                    } else if is_closing_fence(marker, code_block_fence_char, code_block_fence_len) {
-                        in_code_block = false;
-                        code_block_fence_len = 0;
-                        converted_fence_len = 0;
-                        needs_lengthening = false;
-                    }
-                }
-                result.push('\n');
-                continue;
-            }
-
-            if let Some(marker) = parse_fence_marker(line) {
-                let fence_char = marker.fence_char;
-                let fence_len = marker.fence_len;
-
-                if !in_code_block {
-                    in_code_block = true;
-                    code_block_fence_char = fence_char;
-                    code_block_fence_len = fence_len;
-
-                    let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
-                        || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
-
-                    let prefix = &line[..marker.fence_start];
-                    let info = marker.rest;
-
-                    if needs_conversion {
-                        let target_char = if target_style == CodeFenceStyle::Backtick {
-                            '`'
-                        } else {
-                            '~'
-                        };
-
-                        let max_inner =
-                            max_inner_fence_length_of_char(&lines, line_idx, fence_len, fence_char, target_char);
-                        converted_fence_len = fence_len.max(max_inner + 1);
-                        needs_lengthening = false;
-
-                        result.push_str(prefix);
-                        result.push_str(&target_char.to_string().repeat(converted_fence_len));
-                        result.push_str(info);
-                    } else {
-                        // Already the correct style. Check for fence-length ambiguity.
-                        let max_inner =
-                            max_inner_fence_length_of_char(&lines, line_idx, fence_len, fence_char, fence_char);
-                        if max_inner >= fence_len {
-                            converted_fence_len = max_inner + 1;
-                            needs_lengthening = true;
-
-                            result.push_str(prefix);
-                            result.push_str(&fence_char.to_string().repeat(converted_fence_len));
-                            result.push_str(info);
-                        } else {
-                            converted_fence_len = fence_len;
-                            needs_lengthening = false;
-                            result.push_str(line);
-                        }
-                    }
-                } else {
-                    // Inside a code block — check if this is the closing fence.
-                    let is_closing = is_closing_fence(marker, code_block_fence_char, code_block_fence_len);
-
-                    if is_closing {
-                        let needs_conversion = (fence_char == '`' && target_style == CodeFenceStyle::Tilde)
-                            || (fence_char == '~' && target_style == CodeFenceStyle::Backtick);
-
-                        if needs_conversion || needs_lengthening {
-                            let target_char = if needs_conversion {
-                                if target_style == CodeFenceStyle::Backtick {
-                                    '`'
-                                } else {
-                                    '~'
-                                }
-                            } else {
-                                fence_char
-                            };
-                            let prefix = &line[..marker.fence_start];
-                            result.push_str(prefix);
-                            result.push_str(&target_char.to_string().repeat(converted_fence_len));
-                            result.push_str(marker.rest);
-                        } else {
-                            result.push_str(line);
-                        }
-
-                        in_code_block = false;
-                        code_block_fence_len = 0;
-                        converted_fence_len = 0;
-                        needs_lengthening = false;
-                    } else {
-                        // Inside block, not the closing fence — preserve as-is.
-                        result.push_str(line);
-                    }
-                }
-            } else {
-                result.push_str(line);
-            }
-            result.push('\n');
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Remove the last newline if the original content didn't end with one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -1026,6 +903,101 @@ mod tests {
 
         assert_eq!(warnings.len(), 0);
         assert_eq!(fixed, content);
+    }
+
+    // -----------------------------------------------------------------------
+    // Roundtrip safety tests: fix() output must produce 0 violations
+    // -----------------------------------------------------------------------
+
+    /// Helper: apply fix, then re-check and assert zero violations remain.
+    fn assert_fix_roundtrip(rule: &MD048CodeFenceStyle, content: &str) {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx2).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "After fix, expected 0 violations but got {}.\nOriginal:\n{content}\nFixed:\n{fixed}\nRemaining: {remaining:?}",
+            remaining.len(),
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_backticks_to_tildes() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        assert_fix_roundtrip(&rule, "```\ncode\n```");
+    }
+
+    #[test]
+    fn test_roundtrip_tildes_to_backticks() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~\ncode\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_mixed_fences_consistent() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        assert_fix_roundtrip(&rule, "```\ncode\n```\n\n~~~\nmore code\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_with_info_string() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~rust\nfn main() {}\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_longer_fences() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        assert_fix_roundtrip(&rule, "`````\ncode\n`````");
+    }
+
+    #[test]
+    fn test_roundtrip_nested_inner_fences() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~text\n```rust\ncode\n```\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_indented_fences() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        assert_fix_roundtrip(&rule, "  ```\n  code\n  ```");
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_blocks() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~\ncode1\n~~~\n\nText\n\n~~~python\ncode2\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_fence_length_ambiguity() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~\n`````rust\ncode\n```\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_trailing_newline() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~\ncode\n~~~\n");
+    }
+
+    #[test]
+    fn test_roundtrip_tilde_outer_longer_backtick_inner() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Backtick);
+        assert_fix_roundtrip(&rule, "~~~text\n````rust\ncode\n````\n~~~");
+    }
+
+    #[test]
+    fn test_roundtrip_backtick_outer_tilde_inner() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Tilde);
+        assert_fix_roundtrip(&rule, "```text\n~~~rust\ncode\n~~~\n```");
+    }
+
+    #[test]
+    fn test_roundtrip_consistent_tilde_prevalent() {
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        assert_fix_roundtrip(&rule, "~~~\ncode\n~~~\n\n```\nmore code\n```\n\n~~~\neven more\n~~~");
     }
 
     /// The combined MD013+MD048 fix must be idempotent: applying the fix twice
