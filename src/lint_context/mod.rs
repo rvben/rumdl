@@ -1110,7 +1110,7 @@ impl<'a> LintContext<'a> {
 
     /// Check if content likely contains headings (fast)
     pub fn likely_has_headings(&self) -> bool {
-        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 2 // Potential setext underlines
+        self.char_frequency.hash_count > 0 || self.char_frequency.hyphen_count > 2 || self.content.contains('=') // Setext H1 underlines use '='
     }
 
     /// Check if content likely contains lists (fast)
