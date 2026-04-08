@@ -1005,11 +1005,12 @@ impl Rule for MD046CodeBlockStyle {
         // fence scanner in fix() can disagree with pulldown-cmark on block boundaries
         // (e.g., markdown documentation blocks with nested fence examples), so we use
         // check_unclosed_code_blocks() as the authoritative source of truth.
-        if fenced_fence_opener.is_some() && in_fenced_block {
+        if let Some((fence_char, opener_len)) = fenced_fence_opener
+            && in_fenced_block
+        {
             let has_unclosed_violation = self.check_unclosed_code_blocks(ctx).is_ok_and(|w| !w.is_empty());
             if has_unclosed_violation {
-                let (fence_char, opener_len) = fenced_fence_opener.unwrap();
-                let closer: String = std::iter::repeat(fence_char).take(opener_len).collect();
+                let closer: String = std::iter::repeat_n(fence_char, opener_len).collect();
                 result.push_str(&closer);
                 result.push('\n');
             }

@@ -87,10 +87,11 @@ pub fn text_ends_with_abbreviation(text: &str, abbreviations: &HashSet<String>) 
 
     // Also check the last hyphen-separated component so that hyphenated place names
     // like "Wrangell-St." are recognized via the "st" abbreviation entry.
-    if let Some(after_hyphen) = stripped.rsplit('-').next() {
-        if !after_hyphen.is_empty() && after_hyphen != stripped {
-            return abbreviations.contains(&after_hyphen.to_lowercase());
-        }
+    if let Some(after_hyphen) = stripped.rsplit('-').next()
+        && !after_hyphen.is_empty()
+        && after_hyphen != stripped
+    {
+        return abbreviations.contains(&after_hyphen.to_lowercase());
     }
 
     false
