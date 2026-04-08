@@ -522,3 +522,103 @@ fn test_consecutive_headings_pattern() {
         "Should have blank line after second heading"
     );
 }
+
+/// Verify that applying check()-emitted fixes produces the same result as fix()
+fn assert_check_fix_roundtrip(content: &str, rule: &MD022BlanksAroundHeadings) {
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fix_result = rule.fix(&ctx).unwrap();
+
+    let warnings = rule.check(&ctx).unwrap();
+    let warnings =
+        rumdl_lib::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), rule.name());
+    let apply_result = rumdl_lib::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap();
+
+    assert_eq!(
+        fix_result, apply_result,
+        "fix() and apply_warning_fixes(check()) must produce identical output\n\
+         --- fix() output ---\n{fix_result}\n\
+         --- apply_warning_fixes output ---\n{apply_result}"
+    );
+
+    // Verify idempotency: fixing the fixed content should produce no further changes
+    let fixed_ctx = LintContext::new(&fix_result, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let re_warnings = rule.check(&fixed_ctx).unwrap();
+    assert!(
+        re_warnings.is_empty(),
+        "Fixed content should have no warnings, but got: {re_warnings:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_simple_missing_blank_below() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# Heading\nText", &rule);
+}
+
+#[test]
+fn test_roundtrip_missing_blank_above_and_below() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("Text\n# Heading\nMore text", &rule);
+}
+
+#[test]
+fn test_roundtrip_multiple_headings() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip(
+        "# Heading 1\nSome content.\n## Heading 2\nMore content.\n### Heading 3\nFinal.",
+        &rule,
+    );
+}
+
+#[test]
+fn test_roundtrip_consecutive_headings() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# Heading 1\n## Heading 2\n### Heading 3", &rule);
+}
+
+#[test]
+fn test_roundtrip_setext_headings() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip(
+        "Heading 1\n=========\nSome content.\nHeading 2\n---------\nMore content.",
+        &rule,
+    );
+}
+
+#[test]
+fn test_roundtrip_already_valid() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# Heading 1\n\nSome content.\n\n## Heading 2\n\nMore content.", &rule);
+}
+
+#[test]
+fn test_roundtrip_with_trailing_newline() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# Heading 1\nContent here.\n", &rule);
+}
+
+#[test]
+fn test_roundtrip_heading_at_start() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip("# First Heading\nContent.\n\n## Second\nMore content.", &rule);
+}
+
+#[test]
+fn test_roundtrip_custom_blank_lines() {
+    let rule = MD022BlanksAroundHeadings::with_values(2, 2);
+    assert_check_fix_roundtrip("# Heading 1\nContent.\n## Heading 2\nMore content.", &rule);
+}
+
+// TODO: kramdown IAL and frontmatter roundtrip tests skipped — MD022's
+// _fix_content has special IAL/frontmatter handling that check()'s Fix
+// structs don't replicate yet. Refactoring fix() requires enhancing
+// check() to emit IAL-aware Fix structs first.
+
+#[test]
+fn test_roundtrip_code_block_heading() {
+    let rule = MD022BlanksAroundHeadings::default();
+    assert_check_fix_roundtrip(
+        "# Real Heading\nSome text\n\n```\n# Fake heading\n```\n\nMore text",
+        &rule,
+    );
+}
