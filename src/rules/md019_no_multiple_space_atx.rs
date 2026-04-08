@@ -104,54 +104,17 @@ impl Rule for MD019NoMultipleSpaceAtx {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut lines = Vec::new();
-
-        for (i, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = i + 1;
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                lines.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            let mut fixed = false;
-
-            if let Some(heading) = &line_info.heading {
-                // Fix ATX headings with multiple spaces
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
-                    let line = line_info.content(ctx.content);
-                    let trimmed = line.trim_start();
-
-                    if trimmed.len() > heading.marker.len() {
-                        let space_count = self.count_spaces_after_marker(trimmed, heading.marker.len());
-
-                        if space_count > 1 {
-                            // Normalize to single space, preserving original indentation (including tabs)
-                            let line = line_info.content(ctx.content);
-                            let original_indent = &line[..line_info.indent];
-                            lines.push(format!(
-                                "{original_indent}{} {}",
-                                heading.marker,
-                                trimmed[heading.marker.len()..].trim_start()
-                            ));
-                            fixed = true;
-                        }
-                    }
-                }
-            }
-
-            if !fixed {
-                lines.push(line_info.content(ctx.content).to_string());
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Reconstruct content preserving line endings
-        let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing
