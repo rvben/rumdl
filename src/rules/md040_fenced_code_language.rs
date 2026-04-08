@@ -290,16 +290,26 @@ impl Rule for MD040FencedCodeLanguage {
                     severity: Severity::Warning,
                     fix: Some(Fix {
                         range: {
-                            let trimmed_start = line.len() - line.trim_start().len();
+                            let trimmed = line.trim_start();
+                            let trimmed_start = line.len() - trimmed.len();
                             let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                            let fence_start_byte = line_start_byte + trimmed_start;
-                            // Cover from fence start to end of entire line content
-                            // (including trailing whitespace), so stale info strings
-                            // and trailing spaces are replaced cleanly
+                            let fence_end_byte = line_start_byte + trimmed_start + block.fence_marker.len();
+                            // Replace from after fence marker to end of line content,
+                            // so trailing whitespace is cleaned up while any existing
+                            // info string / attributes are preserved via the replacement.
                             let line_end_byte = line_start_byte + line.len();
-                            fence_start_byte..line_end_byte
+                            fence_end_byte..line_end_byte
                         },
-                        replacement: format!("{}text", block.fence_marker),
+                        replacement: {
+                            let trimmed = line.trim_start();
+                            let after_fence = &trimmed[block.fence_marker.len()..];
+                            let after_fence_trimmed = after_fence.trim();
+                            if after_fence_trimmed.is_empty() {
+                                "text".to_string()
+                            } else {
+                                format!("text {after_fence_trimmed}")
+                            }
+                        },
                     }),
                 });
                 continue;
