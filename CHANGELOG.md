@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.68](https://github.com/rvben/rumdl/compare/v0.1.67...v0.1.68) - 2026-04-08
+
+### Fixed
+
+- **MD039**: preserve link titles and image captions when trimming spaces ([845bcb3](https://github.com/rvben/rumdl/commit/845bcb3b5b010499d74a094d5e5042a5caa09243))
+- **MD025**: preserve closing hashes when demoting closed ATX headings ([58b690d](https://github.com/rvben/rumdl/commit/58b690d18c7fcd1f95bf509d31106c59ec791260))
+- **MD040**: preserve existing info string attributes when adding language ([c46da6a](https://github.com/rvben/rumdl/commit/c46da6ab6325d4e760a4f6129050543a4b78485f))
+- **MD026**: include setext H1 underlines in likely_has_headings check ([83dbca2](https://github.com/rvben/rumdl/commit/83dbca2b0860cf712aaaabc63bc941010305ef22))
+- skip overlapping fix ranges in apply_warning_fixes to prevent data corruption ([2ecf48c](https://github.com/rvben/rumdl/commit/2ecf48c60ea187e32ece6ef93f1ec9f648ad1ff1))
+- **MD025**: prevent infinite demotion loop when configured level is 6 ([b4a6d3d](https://github.com/rvben/rumdl/commit/b4a6d3d7c7ce6349c389a23d89d85d9dbb98fd43))
+- **MD046**: correctly match closing fence by opener length in fix() ([1e03cae](https://github.com/rvben/rumdl/commit/1e03cae513b7e34530109c11f82b469f77477fd3))
+- **MD030**: align fix() with check() for parser-recognized list items ([96aa7aa](https://github.com/rvben/rumdl/commit/96aa7aa3c3307ad534c1c65c2dd0dafb6e583532))
+- **MD030**: check nested list items regardless of indentation depth ([423435f](https://github.com/rvben/rumdl/commit/423435f1d8aa304bd6f3022e9c930adc88b74af4))
+- **MD044**: skip URL after WikiLink double-bracket links ([f2390c8](https://github.com/rvben/rumdl/commit/f2390c89f9d3e0677f5f14cde8519cc825d6d52d))
+- **MD013**: correct line-length boundary check when indentation is stripped ([7620cd6](https://github.com/rvben/rumdl/commit/7620cd6170d81078738bdaa6e39819ce9630cd31))
+- **MD013**: preserve indentation of list continuation lines after nested lists ([a4cb7c0](https://github.com/rvben/rumdl/commit/a4cb7c006f00765aef890d7aec8e15d6ebd99459))
+- **MD013**: recognize "St." as abbreviation in sentence-per-line mode ([31c76cf](https://github.com/rvben/rumdl/commit/31c76cf778acb9effab04597cfa0dd68aa4ba259))
+
 ## [0.1.67](https://github.com/rvben/rumdl/compare/v0.1.66...v0.1.67) - 2026-04-04
 
 ### Added
