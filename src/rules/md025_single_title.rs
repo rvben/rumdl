@@ -303,10 +303,16 @@ impl Rule for MD025SingleTitle {
                         let leading_spaces = line_content.len() - line_content.trim_start().len();
                         let indentation = " ".repeat(leading_spaces);
                         let raw = &heading.raw_text;
-                        let replacement = if raw.is_empty() {
-                            format!("{}{}", indentation, "#".repeat(demoted_level))
+                        let hashes = "#".repeat(demoted_level);
+                        let closing = if heading.has_closing_sequence {
+                            format!(" {}", "#".repeat(demoted_level))
                         } else {
-                            format!("{}{} {}", indentation, "#".repeat(demoted_level), raw)
+                            String::new()
+                        };
+                        let replacement = if raw.is_empty() {
+                            format!("{}{}{}", indentation, hashes, closing)
+                        } else {
+                            format!("{}{} {}{}", indentation, hashes, raw, closing)
                         };
                         Some(Fix {
                             range: fix_range,
