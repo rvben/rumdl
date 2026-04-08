@@ -130,7 +130,7 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let _line_index = &ctx.line_index;
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
@@ -208,7 +208,7 @@ impl Rule for MD010NoHardTabs {
                     message,
                     severity: Severity::Warning,
                     fix: Some(Fix {
-                        range: _line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
+                        range: line_index.line_col_to_byte_range_with_length(line_num + 1, start_pos + 1, tab_count),
                         replacement: " ".repeat(tab_count * self.config.spaces_per_tab.get()),
                     }),
                 });
@@ -219,50 +219,17 @@ impl Rule for MD010NoHardTabs {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        let mut result = String::new();
-        let lines = ctx.raw_lines();
-
-        // Track fenced code blocks separately — preserve tabs in FENCED blocks
-        let fenced_lines = Self::find_fenced_code_block_lines(lines);
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1;
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result.push_str(line);
-                if i < lines.len() - 1 || content.ends_with('\n') {
-                    result.push('\n');
-                }
-                continue;
-            }
-
-            // Preserve fenced code blocks and other non-markdown contexts
-            let should_skip = fenced_lines[i]
-                || ctx.line_info(i + 1).is_some_and(|info| {
-                    info.in_html_comment
-                        || info.in_mdx_comment
-                        || info.in_html_block
-                        || info.in_pymdown_block
-                        || info.in_mkdocstrings
-                        || info.in_esm_block
-                });
-
-            if should_skip {
-                result.push_str(line);
-            } else {
-                // Replace tabs with spaces in regular markdown content
-                result.push_str(&line.replace('\t', &" ".repeat(self.config.spaces_per_tab.get())));
-            }
-
-            // Add newline if not the last line without a newline
-            if i < lines.len() - 1 || content.ends_with('\n') {
-                result.push('\n');
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

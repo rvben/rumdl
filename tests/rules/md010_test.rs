@@ -426,3 +426,93 @@ fn test_inline_code_spans() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "Text with `inline    code` and    tab outside");
 }
+
+#[test]
+fn test_roundtrip_fix_then_recheck_simple() {
+    let rule = MD010NoHardTabs::default();
+    let content = "\tIndented\nNormal\tline\nNo tabs";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_code_blocks() {
+    let rule = MD010NoHardTabs::default();
+    let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n```\nMore\ttabs";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_custom_spaces() {
+    let rule = MD010NoHardTabs::new(2);
+    let content = "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_mixed_content() {
+    let rule = MD010NoHardTabs::default();
+    let content = "# Header\n\n\tIndented paragraph\n\n- List\n\t- Nested\n\t\t- Double nested\n\n```\n\tCode block\n```\n\n> Quote\n> \tWith tab\n\n| Col1\t| Col2\t|\n|---\t|---\t|\n| Data\t| Data\t|";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_empty_lines_with_tabs() {
+    let rule = MD010NoHardTabs::default();
+    let content = "Normal line\n\t\t\n\t\nAnother line";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn test_roundtrip_fix_then_recheck_html_comments() {
+    let rule = MD010NoHardTabs::default();
+    let content = "<!-- Start of comment\nUser: \t\tuser\nPassword:\tpass\n-->\nNormal\tline";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "After fix, re-check should produce 0 warnings but got: {:?}",
+        warnings
+    );
+}
