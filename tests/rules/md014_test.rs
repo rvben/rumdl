@@ -405,3 +405,83 @@ fn test_multiple_violations_fix_produces_valid_output() {
         "No warnings should remain after fix, got: {result2:?}"
     );
 }
+
+/// Roundtrip safety: fix() output must match apply_warning_fixes(check()) output
+fn assert_fix_roundtrip(content: &str) {
+    use rumdl_lib::utils::fix_utils::apply_warning_fixes;
+
+    let rule = MD014CommandsShowOutput::new();
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fix_output = rule.fix(&ctx).unwrap();
+    let warnings = rule.check(&ctx).unwrap();
+
+    if warnings.is_empty() {
+        assert_eq!(fix_output, content, "fix() should be identity when no warnings");
+        return;
+    }
+
+    let check_fix_output = apply_warning_fixes(content, &warnings).unwrap();
+    assert_eq!(
+        fix_output, check_fix_output,
+        "fix() and apply_warning_fixes(check()) must produce identical output"
+    );
+
+    // Verify idempotence: fixing the fixed output should produce no warnings
+    let ctx2 = LintContext::new(&fix_output, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings2 = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings2.is_empty(),
+        "fix output should have no warnings, got: {warnings2:?}"
+    );
+}
+
+#[test]
+fn test_roundtrip_single_command() {
+    assert_fix_roundtrip("```bash\n$ echo test\n```");
+}
+
+#[test]
+fn test_roundtrip_multiple_commands() {
+    assert_fix_roundtrip("```bash\n$ echo one\n$ echo two\n$ echo three\n```");
+}
+
+#[test]
+fn test_roundtrip_mixed_silent_and_output_commands() {
+    assert_fix_roundtrip("```bash\n$ cd /home\n$ ls -la\n```");
+}
+
+#[test]
+fn test_roundtrip_with_surrounding_content() {
+    assert_fix_roundtrip("# Header\n\nSome text\n\n```bash\n$ echo test\n```\n\nMore text\n");
+}
+
+#[test]
+fn test_roundtrip_multiple_blocks() {
+    assert_fix_roundtrip("```bash\n$ echo one\n```\n\nText\n\n```shell\n$ pwd\n```\n");
+}
+
+#[test]
+fn test_roundtrip_no_warnings() {
+    assert_fix_roundtrip("```bash\n$ echo test\ntest\n```");
+}
+
+#[test]
+fn test_roundtrip_indented_commands() {
+    assert_fix_roundtrip("```bash\n    $ echo test\n    $ pwd\n```");
+}
+
+#[test]
+fn test_roundtrip_trailing_newline_preserved() {
+    assert_fix_roundtrip("```bash\n$ echo test\n```\n");
+}
+
+#[test]
+fn test_roundtrip_no_trailing_newline() {
+    assert_fix_roundtrip("```bash\n$ echo test\n```");
+}
+
+#[test]
+fn test_roundtrip_commands_with_comments() {
+    assert_fix_roundtrip("```shell\n# First invocation\n$ my_command\n\n# Second invocation\n$ my_command\n```\n");
+}

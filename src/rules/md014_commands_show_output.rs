@@ -265,60 +265,17 @@ impl Rule for MD014CommandsShowOutput {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let _line_index = &ctx.line_index;
-
-        let mut result = String::new();
-
-        let mut current_block = Vec::new();
-
-        let mut in_code_block = false;
-
-        let mut current_lang = String::new();
-
-        let mut block_start_line_num = 0usize;
-
-        for (line_num_0, line) in content.lines().enumerate() {
-            let line_num = line_num_0 + 1;
-            if line.trim_start().starts_with("```") {
-                if in_code_block {
-                    // End of code block
-                    // Check if any line in the block is disabled
-                    let block_disabled = (0..current_block.len()).any(|j| {
-                        let block_line_num = block_start_line_num + 1 + j;
-                        ctx.inline_config().is_rule_disabled(self.name(), block_line_num)
-                    });
-                    if !block_disabled && self.is_command_without_output(&current_block, &current_lang) {
-                        result.push_str(&self.fix_command_block(&current_block));
-                        result.push('\n');
-                    } else {
-                        for block_line in &current_block {
-                            result.push_str(block_line);
-                            result.push('\n');
-                        }
-                    }
-                    current_block.clear();
-                } else {
-                    current_lang = Self::get_code_block_language(line);
-                    block_start_line_num = line_num;
-                }
-                in_code_block = !in_code_block;
-                result.push_str(line);
-                result.push('\n');
-            } else if in_code_block {
-                current_block.push(line);
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Remove trailing newline if original didn't have one
-        if !content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
