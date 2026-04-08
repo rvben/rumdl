@@ -437,8 +437,7 @@ fn test_roundtrip_fix_then_recheck_simple() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }
 
@@ -452,8 +451,7 @@ fn test_roundtrip_fix_then_recheck_code_blocks() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }
 
@@ -467,8 +465,7 @@ fn test_roundtrip_fix_then_recheck_custom_spaces() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }
 
@@ -482,8 +479,7 @@ fn test_roundtrip_fix_then_recheck_mixed_content() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }
 
@@ -497,8 +493,7 @@ fn test_roundtrip_fix_then_recheck_empty_lines_with_tabs() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }
 
@@ -512,7 +507,6 @@ fn test_roundtrip_fix_then_recheck_html_comments() {
     let warnings = rule.check(&ctx2).unwrap();
     assert!(
         warnings.is_empty(),
-        "After fix, re-check should produce 0 warnings but got: {:?}",
-        warnings
+        "After fix, re-check should produce 0 warnings but got: {warnings:?}"
     );
 }

@@ -171,7 +171,7 @@ fn test_roundtrip_check_fixes_match_fix() {
         let warnings = rule.check(&ctx).unwrap();
         let fix_result = rule.fix(&ctx).unwrap();
         let check_based_fix = apply_warning_fixes(content, &warnings).unwrap();
-        assert_eq!(fix_result, check_based_fix, "Mismatch for content: {:?}", content);
+        assert_eq!(fix_result, check_based_fix, "Mismatch for content: {content:?}");
     }
 }
 

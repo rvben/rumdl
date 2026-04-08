@@ -439,8 +439,7 @@ fn test_md025_fix_roundtrip_setext() {
     let fixed = rule.fix(&ctx).unwrap();
     assert!(
         fixed.contains("## Title 2"),
-        "Setext duplicate should be demoted to ATX ##, got: {:?}",
-        fixed
+        "Setext duplicate should be demoted to ATX ##, got: {fixed:?}"
     );
     let fixed_ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let warnings = rule.check(&fixed_ctx).unwrap();
