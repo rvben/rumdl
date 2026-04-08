@@ -310,9 +310,9 @@ impl Rule for MD025SingleTitle {
                             String::new()
                         };
                         let replacement = if raw.is_empty() {
-                            format!("{}{}{}", indentation, hashes, closing)
+                            format!("{indentation}{hashes}{closing}")
                         } else {
-                            format!("{}{} {}{}", indentation, hashes, raw, closing)
+                            format!("{indentation}{hashes} {raw}{closing}")
                         };
                         Some(Fix {
                             range: fix_range,

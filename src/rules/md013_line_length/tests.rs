@@ -2062,8 +2062,7 @@ fn test_sentence_per_line_st_abbreviation() {
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "Wrangell-St. should not be treated as a sentence boundary; got: {:?}",
-        result
+        "Wrangell-St. should not be treated as a sentence boundary; got: {result:?}"
     );
 
     // Plain form: "St. Name" also must not split
@@ -2072,8 +2071,7 @@ fn test_sentence_per_line_st_abbreviation() {
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "St. should not be treated as a sentence boundary; got: {:?}",
-        result
+        "St. should not be treated as a sentence boundary; got: {result:?}"
     );
 
     // Two actual sentences must still be detected even when one contains "St."
@@ -2086,7 +2084,7 @@ fn test_sentence_per_line_st_abbreviation() {
     );
     let fix = result[0].fix.as_ref().unwrap();
     let lines: Vec<&str> = fix.replacement.trim_end_matches('\n').lines().collect();
-    assert_eq!(lines.len(), 2, "Expected fix to split into 2 lines: {:?}", lines);
+    assert_eq!(lines.len(), 2, "Expected fix to split into 2 lines: {lines:?}");
     assert_eq!(lines[0], "Visit Wrangell-St. Elias.");
     assert_eq!(lines[1], "It is the largest national park.");
 }
@@ -2171,7 +2169,7 @@ fn test_sentence_per_line_nested_list_continuation_indentation() {
     // Stronger: applying the fix must produce output that still places the
     // continuation lines at 2-space indent (inside the outer list item).
     let all_fixes_preserve_indent = result.iter().all(|w| {
-        w.fix.as_ref().map_or(true, |f| {
+        w.fix.as_ref().is_none_or(|f| {
             // Any replacement touching the continuation lines must keep them indented
             !f.replacement.contains("More lines.") || f.replacement.contains("  More lines.")
         })
@@ -2209,7 +2207,7 @@ fn test_sentence_per_line_nested_list_continuation_two_sentences() {
         .find(|w| {
             w.fix
                 .as_ref()
-                .map_or(false, |f| f.replacement.contains("First sentence."))
+                .is_some_and(|f| f.replacement.contains("First sentence."))
         })
         .expect("should have a fix for the two-sentence line");
 
@@ -2217,13 +2215,11 @@ fn test_sentence_per_line_nested_list_continuation_two_sentences() {
     // Both output lines must carry the 2-space indent
     assert!(
         replacement.contains("  First sentence."),
-        "First sentence must be indented: {:?}",
-        replacement
+        "First sentence must be indented: {replacement:?}"
     );
     assert!(
         replacement.contains("  Second sentence."),
-        "Second sentence must be indented: {:?}",
-        replacement
+        "Second sentence must be indented: {replacement:?}"
     );
 }
 
@@ -2246,15 +2242,15 @@ fn test_normalize_mode_nested_list_continuation_indentation() {
     let result = rule.check(&ctx).unwrap();
 
     for warning in &result {
-        if let Some(fix) = &warning.fix {
-            if fix.replacement.contains("continuation") {
-                assert!(
-                    !fix.replacement.contains("\nFirst continuation.")
-                        && !fix.replacement.contains("\nSecond continuation."),
-                    "Normalize fix must not strip indent from continuation lines: {:?}",
-                    fix.replacement
-                );
-            }
+        if let Some(fix) = &warning.fix
+            && fix.replacement.contains("continuation")
+        {
+            assert!(
+                !fix.replacement.contains("\nFirst continuation.")
+                    && !fix.replacement.contains("\nSecond continuation."),
+                "Normalize fix must not strip indent from continuation lines: {:?}",
+                fix.replacement
+            );
         }
     }
 }
@@ -2283,7 +2279,7 @@ fn test_indented_top_level_paragraph_not_affected() {
 
     let fix = result[0].fix.as_ref().unwrap();
     let lines: Vec<&str> = fix.replacement.trim_end_matches('\n').lines().collect();
-    assert_eq!(lines.len(), 2, "Fix should split into 2 lines: {:?}", lines);
+    assert_eq!(lines.len(), 2, "Fix should split into 2 lines: {lines:?}");
     // Spurious top-level indent must not be injected into the output
     assert_eq!(lines[0], "First sentence.");
     assert_eq!(lines[1], "Second sentence.");
@@ -2344,14 +2340,14 @@ fn test_semantic_line_breaks_nested_list_continuation_indentation() {
     let result = rule.check(&ctx).unwrap();
 
     for warning in &result {
-        if let Some(fix) = &warning.fix {
-            if fix.replacement.contains("More lines.") || fix.replacement.contains("Even more.") {
-                assert!(
-                    fix.replacement.contains("  More lines."),
-                    "SemanticLineBreaks fix must preserve 2-space indent: {:?}",
-                    fix.replacement
-                );
-            }
+        if let Some(fix) = &warning.fix
+            && (fix.replacement.contains("More lines.") || fix.replacement.contains("Even more."))
+        {
+            assert!(
+                fix.replacement.contains("  More lines."),
+                "SemanticLineBreaks fix must preserve 2-space indent: {:?}",
+                fix.replacement
+            );
         }
     }
 
@@ -2365,7 +2361,7 @@ fn test_semantic_line_breaks_nested_list_continuation_indentation() {
         .find(|w| {
             w.fix
                 .as_ref()
-                .map_or(false, |f| f.replacement.contains("First sentence."))
+                .is_some_and(|f| f.replacement.contains("First sentence."))
         })
         .and_then(|w| w.fix.as_ref())
         .expect("Should produce a fix for two sentences on one line");
