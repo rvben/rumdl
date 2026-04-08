@@ -85,12 +85,12 @@ impl Rule for MD023HeadingStartLeft {
                             severity: Severity::Warning,
                             message: format!("Setext heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
-                                range: ctx.line_index.line_col_to_byte_range_with_length(
-                                    line_num + 1,
-                                    start_col,
-                                    indentation,
-                                ),
-                                replacement: String::new(), // Remove the indentation
+                                range: {
+                                    // indent is in bytes, so use byte offset directly
+                                    let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
+                                    line_start..line_start + indentation
+                                },
+                                replacement: String::new(),
                             }),
                         });
 
@@ -98,13 +98,8 @@ impl Rule for MD023HeadingStartLeft {
                         if underline_line < ctx.lines.len() {
                             let underline_indentation = ctx.lines[underline_line].indent;
                             if underline_indentation > 0 {
-                                // Calculate precise character range for the underline indentation
                                 let (underline_start_line, underline_start_col, underline_end_line, underline_end_col) =
-                                    calculate_single_line_range(
-                                        underline_line + 1, // Convert to 1-indexed
-                                        1,
-                                        underline_indentation,
-                                    );
+                                    calculate_single_line_range(underline_line + 1, 1, underline_indentation);
 
                                 warnings.push(LintWarning {
                                     rule_name: Some(self.name().to_string()),
@@ -115,12 +110,12 @@ impl Rule for MD023HeadingStartLeft {
                                     severity: Severity::Warning,
                                     message: "Setext heading underline should not be indented".to_string(),
                                     fix: Some(Fix {
-                                        range: ctx.line_index.line_col_to_byte_range_with_length(
-                                            underline_line + 1,
-                                            underline_start_col,
-                                            underline_indentation,
-                                        ),
-                                        replacement: String::new(), // Remove the indentation
+                                        range: {
+                                            let line_start =
+                                                ctx.line_index.get_line_start_byte(underline_line + 1).unwrap_or(0);
+                                            line_start..line_start + underline_indentation
+                                        },
+                                        replacement: String::new(),
                                     }),
                                 });
                             }
@@ -144,12 +139,11 @@ impl Rule for MD023HeadingStartLeft {
                             severity: Severity::Warning,
                             message: format!("Heading should not be indented by {indentation} spaces"),
                             fix: Some(Fix {
-                                range: ctx.line_index.line_col_to_byte_range_with_length(
-                                    line_num + 1,
-                                    atx_start_col,
-                                    indentation,
-                                ),
-                                replacement: String::new(), // Remove the indentation
+                                range: {
+                                    let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
+                                    line_start..line_start + indentation
+                                },
+                                replacement: String::new(),
                             }),
                         });
                     }
