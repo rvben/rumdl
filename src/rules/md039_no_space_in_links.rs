@@ -127,24 +127,25 @@ impl Rule for MD039NoSpaceInLinks {
             };
 
             if needs_warning {
-                let url = if link.is_reference {
-                    if let Some(ref_id) = &link.reference_id {
-                        format!("[{ref_id}]")
-                    } else {
-                        "[]".to_string()
-                    }
-                } else {
-                    format!("({})", link.url)
-                };
+                // Extract the destination portion from the original content so that
+                // titles and attributes are preserved. Find `](` for inline links
+                // or `][` for reference links to split text from destination.
+                let original = &ctx.content[link.byte_offset..link.byte_end];
+                let dest_start = original
+                    .find("](")
+                    .or_else(|| original.find("]["))
+                    .map(|p| p + 1)
+                    .unwrap_or(original.len());
+                let dest_portion = &original[dest_start..];
 
                 let fixed = if get_cached_regex(ALL_WHITESPACE_STR)
                     .map(|re| re.is_match(&unescaped))
                     .unwrap_or(false)
                 {
-                    format!("[]{url}")
+                    format!("[]{dest_portion}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
-                    format!("[{trimmed}]{url}")
+                    format!("[{trimmed}]{dest_portion}")
                 };
 
                 warnings.push(LintWarning {
@@ -199,24 +200,22 @@ impl Rule for MD039NoSpaceInLinks {
             };
 
             if needs_warning {
-                let url = if image.is_reference {
-                    if let Some(ref_id) = &image.reference_id {
-                        format!("[{ref_id}]")
-                    } else {
-                        "[]".to_string()
-                    }
-                } else {
-                    format!("({})", image.url)
-                };
+                let original = &ctx.content[image.byte_offset..image.byte_end];
+                let dest_start = original
+                    .find("](")
+                    .or_else(|| original.find("]["))
+                    .map(|p| p + 1)
+                    .unwrap_or(original.len());
+                let dest_portion = &original[dest_start..];
 
                 let fixed = if get_cached_regex(ALL_WHITESPACE_STR)
                     .map(|re| re.is_match(&unescaped))
                     .unwrap_or(false)
                 {
-                    format!("![]{url}")
+                    format!("![]{dest_portion}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);
-                    format!("![{trimmed}]{url}")
+                    format!("![{trimmed}]{dest_portion}")
                 };
 
                 warnings.push(LintWarning {
