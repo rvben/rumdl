@@ -924,79 +924,17 @@ impl Rule for MD044ProperNames {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        if content.is_empty() || self.config.names.is_empty() {
-            return Ok(content.to_string());
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let content_lower = if content.is_ascii() {
-            content.to_ascii_lowercase()
-        } else {
-            content.to_lowercase()
-        };
-        let violations = self.find_name_violations(content, ctx, &content_lower);
-        if violations.is_empty() {
-            return Ok(content.to_string());
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        // Process lines and build the fixed content
-        let mut fixed_lines = Vec::new();
-
-        // Group violations by line
-        let mut violations_by_line: HashMap<usize, Vec<(usize, String)>> = HashMap::new();
-        for (line_num, col_num, found_name) in violations {
-            violations_by_line
-                .entry(line_num)
-                .or_default()
-                .push((col_num, found_name));
-        }
-
-        // Sort violations within each line in reverse order
-        for violations in violations_by_line.values_mut() {
-            violations.sort_by_key(|b| std::cmp::Reverse(b.0));
-        }
-
-        // Process each line
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                fixed_lines.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            if let Some(line_violations) = violations_by_line.get(&line_num) {
-                // This line has violations, fix them
-                let mut fixed_line = line_info.content(ctx.content).to_string();
-
-                for (col_num, found_name) in line_violations {
-                    if let Some(proper_name) = self.get_proper_name_for(found_name) {
-                        let start_col = col_num - 1; // Convert to 0-based
-                        let end_col = start_col + found_name.len();
-
-                        if end_col <= fixed_line.len()
-                            && fixed_line.is_char_boundary(start_col)
-                            && fixed_line.is_char_boundary(end_col)
-                        {
-                            fixed_line.replace_range(start_col..end_col, &proper_name);
-                        }
-                    }
-                }
-
-                fixed_lines.push(fixed_line);
-            } else {
-                // No violations on this line, keep it as is
-                fixed_lines.push(line_info.content(ctx.content).to_string());
-            }
-        }
-
-        // Join lines with newlines, preserving the original ending
-        let mut result = fixed_lines.join("\n");
-        if content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
-        }
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -3071,5 +3009,94 @@ Some javascript text.
             "Name inside [[wikilink]](prose with spaces) must still be flagged, got: {result:?}"
         );
         assert!(result[0].message.contains("'github'"));
+    }
+
+    /// Roundtrip safety: fix() output must produce zero warnings on re-check.
+    #[test]
+    fn test_roundtrip_fix_then_check_basic() {
+        let rule = MD044ProperNames::new(
+            vec![
+                "JavaScript".to_string(),
+                "TypeScript".to_string(),
+                "Node.js".to_string(),
+            ],
+            true,
+        );
+        let content = "I love javascript, typescript, and nodejs!";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = create_context(&fixed);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Re-check after fix should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    /// Roundtrip safety: fix() output must produce zero warnings for multiline content.
+    #[test]
+    fn test_roundtrip_fix_then_check_multiline() {
+        let rule = MD044ProperNames::new(vec!["Rust".to_string(), "Python".to_string()], true);
+        let content = "First line with rust.\nSecond line with python.\nThird line with RUST and PYTHON.\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = create_context(&fixed);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Re-check after fix should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    /// Roundtrip safety: fix() with inline config disable blocks.
+    #[test]
+    fn test_roundtrip_fix_then_check_inline_config() {
+        let config = MD044Config {
+            names: vec!["RUMDL".to_string()],
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+        let content =
+            "<!-- rumdl-disable MD044 -->\nSome rumdl text.\n<!-- rumdl-enable MD044 -->\n\nSome rumdl text outside.\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The disabled block should be preserved, the outside text fixed
+        assert!(
+            fixed.contains("Some rumdl text.\n"),
+            "Disabled block text should be preserved"
+        );
+        assert!(
+            fixed.contains("Some RUMDL text outside."),
+            "Outside text should be fixed"
+        );
+    }
+
+    /// Roundtrip safety: fix() with HTML comment content.
+    #[test]
+    fn test_roundtrip_fix_then_check_html_comments() {
+        let config = MD044Config {
+            names: vec!["JavaScript".to_string()],
+            ..MD044Config::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+        let content = "# Guide\n\n<!-- javascript mentioned here -->\n\njavascript outside\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = create_context(&fixed);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Re-check after fix should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    /// Roundtrip safety: fix() preserves content when no violations exist.
+    #[test]
+    fn test_roundtrip_no_op_when_correct() {
+        let rule = MD044ProperNames::new(vec!["JavaScript".to_string(), "TypeScript".to_string()], true);
+        let content = "This uses JavaScript and TypeScript correctly.\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Fix should be a no-op when content is already correct");
     }
 }
