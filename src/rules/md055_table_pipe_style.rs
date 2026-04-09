@@ -373,8 +373,15 @@ impl Rule for MD055TablePipeStyle {
                     fixed_table_lines.push(fixed_line);
                 }
             }
-            let table_replacement = fixed_table_lines.concat();
+            let mut table_replacement = fixed_table_lines.concat();
             let table_range = line_index.multi_line_range(table_start_line, table_end_line);
+
+            // Preserve trailing newline: if the original range ends with '\n' but
+            // the replacement does not, append '\n' so apply_warning_fixes does not
+            // strip it when the table is at the end of the document.
+            if ctx.content[table_range.clone()].ends_with('\n') && !table_replacement.ends_with('\n') {
+                table_replacement.push('\n');
+            }
 
             // Check all rows in the table
             for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
