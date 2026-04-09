@@ -466,34 +466,17 @@ impl Rule for MD028NoBlanksBlockquote {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut result = Vec::with_capacity(ctx.lines.len());
-        let lines = ctx.raw_lines();
-
-        for (line_idx, line) in lines.iter().enumerate() {
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_idx + 1) {
-                result.push(line.to_string());
-                continue;
-            }
-
-            // Skip lines in non-markdown content contexts
-            if line_idx < ctx.lines.len() {
-                let li = &ctx.lines[line_idx];
-                if li.in_code_block || li.in_html_comment || li.in_mdx_comment || li.in_html_block || li.in_front_matter
-                {
-                    result.push(line.to_string());
-                    continue;
-                }
-            }
-            // Check if this blank line needs fixing
-            if let Some((_, fix_content)) = Self::is_problematic_blank_line(lines, &ctx.lines, line_idx, ctx.flavor) {
-                result.push(fix_content);
-            } else {
-                result.push(line.to_string());
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing
@@ -1466,6 +1449,104 @@ Final text."#;
             result.is_empty(),
             "Lines inside HTML blocks should not trigger MD028. Got: {result:?}"
         );
+    }
+
+    // ==================== Roundtrip Safety Tests ====================
+    // Verify that fix() output, when re-checked, produces zero warnings.
+
+    #[test]
+    fn test_roundtrip_single_blank() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First\n\n> Third";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_blanks() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First\n\n\n> Fourth";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_nested() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = ">> Nested\n\n>> More";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_indented() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "  > Indented\n\n  > More";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_deeply_nested() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = ">>> Deep\n\n>>> More";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_multi_blockquotes() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First\n> Line\n\n> Second\n> Line\n\n> Third\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "Roundtrip should produce zero warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_idempotent() {
+        let rule = MD028NoBlanksBlockquote;
+        let content = "> First\n\n> Second\n\n> Third\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed1 = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed1, crate::config::MarkdownFlavor::Standard, None);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed1, fixed2, "Fix should be idempotent");
     }
 
     #[test]
