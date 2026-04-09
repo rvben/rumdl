@@ -74,32 +74,16 @@ impl Rule for MD047SingleTrailingNewline {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-
-        // Empty content remains empty
-        if content.is_empty() {
-            return Ok(String::new());
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Content has been normalized to LF at I/O boundary
-        // Check if file already ends with a newline
-        let has_trailing_newline = content.ends_with('\n');
-
-        if has_trailing_newline {
-            return Ok(content.to_string());
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        // Check if the rule is disabled on the last line via inline config
-        let last_line_num = ctx.lines.len();
-        if ctx.inline_config().is_rule_disabled(self.name(), last_line_num) {
-            return Ok(content.to_string());
-        }
-
-        // Content doesn't end with newline, add LF (will be converted at I/O boundary if needed)
-        let mut result = String::with_capacity(content.len() + 1);
-        result.push_str(content);
-        result.push('\n');
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -182,5 +166,72 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty());
+    }
+
+    /// Roundtrip safety: applying check()'s Fix structs via apply_warning_fixes
+    /// must produce the same result as fix(). This guards against check/fix divergence.
+    fn assert_check_fix_roundtrip(content: &str) {
+        let rule = MD047SingleTrailingNewline;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed_via_fix = rule.fix(&ctx).unwrap();
+
+        // Apply fixes from check() warnings directly
+        let fixed_via_check = if warnings.is_empty() {
+            content.to_string()
+        } else {
+            crate::utils::fix_utils::apply_warning_fixes(content, &warnings).unwrap()
+        };
+
+        assert_eq!(
+            fixed_via_check, fixed_via_fix,
+            "check() Fix structs and fix() must produce identical results for content: {content:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_missing_newline() {
+        assert_check_fix_roundtrip("Line 1\nLine 2");
+    }
+
+    #[test]
+    fn test_roundtrip_single_trailing_newline() {
+        assert_check_fix_roundtrip("Line 1\nLine 2\n");
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_trailing_newlines() {
+        assert_check_fix_roundtrip("Line 1\nLine 2\n\n\n");
+    }
+
+    #[test]
+    fn test_roundtrip_empty_content() {
+        assert_check_fix_roundtrip("");
+    }
+
+    #[test]
+    fn test_roundtrip_only_newlines() {
+        assert_check_fix_roundtrip("\n\n\n");
+    }
+
+    #[test]
+    fn test_roundtrip_single_line_no_newline() {
+        assert_check_fix_roundtrip("Single line");
+    }
+
+    #[test]
+    fn test_roundtrip_unicode_content() {
+        // Multi-byte UTF-8 characters - ensure byte offsets in Fix are correct
+        assert_check_fix_roundtrip("Héllo wörld 日本語");
+    }
+
+    #[test]
+    fn test_roundtrip_inline_disable_on_last_line() {
+        // Inline disable should suppress the fix
+        let content = "Line 1\nLine 2 <!-- rumdl-disable-line MD047 -->";
+        let rule = MD047SingleTrailingNewline;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Inline disable on last line should prevent the fix");
     }
 }
