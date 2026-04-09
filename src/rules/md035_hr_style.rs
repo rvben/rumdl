@@ -96,7 +96,7 @@ impl Rule for MD035HRStyle {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
-        let _line_index = &ctx.line_index;
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
@@ -143,7 +143,7 @@ impl Rule for MD035HRStyle {
                         },
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: _line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
+                            range: line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
                             replacement: expected_style.clone(),
                         }),
                     });
@@ -155,55 +155,17 @@ impl Rule for MD035HRStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let _line_index = &ctx.line_index;
-
-        let mut result = Vec::new();
-        let lines = ctx.raw_lines();
-
-        // Use the configured style or find the most prevalent HR style
-        let expected_style = if self.config.style.is_empty() || self.config.style == "consistent" {
-            Self::most_prevalent_hr_style(lines, ctx).unwrap_or_else(|| "---".to_string())
-        } else {
-            self.config.style.clone()
-        };
-
-        for (i, line) in lines.iter().enumerate() {
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), i + 1) {
-                result.push(line.to_string());
-                continue;
-            }
-
-            // Skip if this line is in frontmatter, code block, or MkDocs markdown HTML div
-            if let Some(line_info) = ctx.lines.get(i)
-                && (line_info.in_front_matter || line_info.in_code_block || line_info.in_mkdocs_html_markdown)
-            {
-                result.push(line.to_string());
-                continue;
-            }
-
-            // Skip if this is a potential Setext heading underline
-            if Self::is_potential_setext_heading(lines, i) {
-                result.push(line.to_string());
-                continue;
-            }
-
-            if Self::is_horizontal_rule(line) {
-                // Here we have a proper horizontal rule - replace it with the expected style
-                result.push(expected_style.clone());
-            } else {
-                // Not a horizontal rule, keep the original line
-                result.push(line.to_string());
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let mut fixed = result.join("\n");
-        // Preserve trailing newline if original content had one
-        if content.ends_with('\n') && !fixed.ends_with('\n') {
-            fixed.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-        Ok(fixed)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -641,6 +603,105 @@ mod tests {
         assert!(
             fixed.contains("    ---"),
             "fix() should preserve --- inside <div markdown>"
+        );
+    }
+
+    /// Helper: assert that fix() produces content with zero check() warnings
+    fn assert_fix_roundtrip(rule: &MD035HRStyle, content: &str, flavor: crate::config::MarkdownFlavor) {
+        let ctx = LintContext::new(content, flavor, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, flavor, None);
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "fix() output should produce zero check() warnings.\nOriginal:\n{content}\nFixed:\n{fixed}\nWarnings: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_consistent_style() {
+        let rule = MD035HRStyle::new("consistent".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n---\n\nMore\n\n***\n\nText\n\n---",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_specific_style() {
+        let rule = MD035HRStyle::new("***".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n---\n\nMore\n\n___\n\nText",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_indented_hr() {
+        let rule = MD035HRStyle::new("---".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n  ***\n\nMore\n\n   ___\n\nText",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_setext_headings() {
+        let rule = MD035HRStyle::new("***".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Heading 1\n=========\nHeading 2\n---\nContent\n\n---",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_frontmatter() {
+        let rule = MD035HRStyle::new("***".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "---\ntitle: Test\n---\n\n***\n\nContent",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_mkdocs_html_markdown() {
+        let rule = MD035HRStyle::new("***".to_string());
+        let content = "Some content\n\n---\n\n<div class=\"grid cards\" markdown>\n\n- Card content\n\n    ---\n\n    Card footer\n\n</div>\n";
+        assert_fix_roundtrip(&rule, content, crate::config::MarkdownFlavor::MkDocs);
+    }
+
+    #[test]
+    fn test_roundtrip_spaced_styles() {
+        let rule = MD035HRStyle::new("* * *".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n- - -\n\nMore\n\n_ _ _\n\nText",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_no_warnings() {
+        let rule = MD035HRStyle::new("---".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n---\n\nMore\n\n---\n\nText",
+            crate::config::MarkdownFlavor::Standard,
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_trailing_newline() {
+        let rule = MD035HRStyle::new("***".to_string());
+        assert_fix_roundtrip(
+            &rule,
+            "Content\n\n---\n\nMore\n",
+            crate::config::MarkdownFlavor::Standard,
         );
     }
 }
