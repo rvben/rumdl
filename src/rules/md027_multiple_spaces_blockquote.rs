@@ -101,12 +101,23 @@ impl Rule for MD027MultipleSpacesBlockquote {
                         .fold(0, |acc, ch| acc + ch.len_utf8());
 
                     if extra_spaces_bytes > 0 {
-                        let (start_line, start_col, end_line, end_col) = calculate_match_range(
-                            line_num,
-                            line_info.content(ctx.content),
-                            byte_pos,
-                            extra_spaces_bytes,
-                        );
+                        // When blockquote content is empty, remove all spaces
+                        // after the marker to avoid creating trailing whitespace
+                        let (fix_byte_pos, fix_bytes) = if blockquote.content.is_empty() {
+                            // Remove the first space too (byte_pos - 1 points to
+                            // the first space we skipped)
+                            let first_space_pos = byte_pos - 1;
+                            let all_spaces_bytes = line_info.content(ctx.content)[first_space_pos..]
+                                .chars()
+                                .take_while(|&c| c == ' ' || c == '\t')
+                                .fold(0, |acc, ch| acc + ch.len_utf8());
+                            (first_space_pos, all_spaces_bytes)
+                        } else {
+                            (byte_pos, extra_spaces_bytes)
+                        };
+
+                        let (start_line, start_col, end_line, end_col) =
+                            calculate_match_range(line_num, line_info.content(ctx.content), fix_byte_pos, fix_bytes);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -122,7 +133,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                                     let end_byte = ctx.line_index.line_col_to_byte_range(line_num, end_col).start;
                                     start_byte..end_byte
                                 },
-                                replacement: "".to_string(), // Remove the extra spaces
+                                replacement: "".to_string(),
                             }),
                         });
                     }
@@ -159,54 +170,17 @@ impl Rule for MD027MultipleSpacesBlockquote {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut result = Vec::with_capacity(ctx.lines.len());
-
-        for (line_idx, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = line_idx + 1;
-
-            // Skip lines where this rule is disabled by inline config
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                result.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            if let Some(blockquote) = &line_info.blockquote {
-                // Fix blockquotes with multiple spaces after the marker
-                // Skip if line is in a list block - extra spaces are list continuation indent
-                let is_likely_list_continuation =
-                    ctx.is_in_list_block(line_num) || self.previous_blockquote_line_had_list(ctx, line_idx);
-                if blockquote.has_multiple_spaces_after_marker && !is_likely_list_continuation {
-                    // Rebuild the line with exactly one space after the markers
-                    // But don't add a space if the content is empty to avoid MD009 conflicts
-                    let fixed_line = if blockquote.content.is_empty() {
-                        format!("{}{}", blockquote.indent, ">".repeat(blockquote.nesting_level))
-                    } else {
-                        format!(
-                            "{}{} {}",
-                            blockquote.indent,
-                            ">".repeat(blockquote.nesting_level),
-                            blockquote.content
-                        )
-                    };
-                    result.push(fixed_line);
-                } else {
-                    result.push(line_info.content(ctx.content).to_string());
-                }
-            } else {
-                // Check for malformed blockquote attempts
-                let malformed_attempts = self.detect_malformed_blockquote_attempts(line_info.content(ctx.content));
-                if !malformed_attempts.is_empty() {
-                    // Use the first fix (there should only be one per line)
-                    let (_, _, fixed_line, _) = &malformed_attempts[0];
-                    result.push(fixed_line.clone());
-                } else {
-                    result.push(line_info.content(ctx.content).to_string());
-                }
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Preserve trailing newline if original content had one
-        Ok(result.join("\n") + if ctx.content.ends_with('\n') { "\n" } else { "" })
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+            .map_err(crate::rule::LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

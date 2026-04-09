@@ -180,6 +180,87 @@ fn test_md027_style_tag_allows_blanks() {
 }
 
 /// Test: HTML block with script tag (can contain blank lines)
+// =============================================================================
+// Roundtrip safety: fix(check()) must produce identical results to fix()
+// =============================================================================
+
+/// Verify fix() produces the same result when applied twice (idempotency)
+#[test]
+fn test_md027_fix_idempotent() {
+    let rule = MD027MultipleSpacesBlockquote;
+    let cases = vec![
+        ">  Two spaces\n>   Three spaces\n",
+        ">  Two spaces\n> Normal\n>    Four spaces\n",
+        "  >  Indented with multiple spaces\n",
+        "> - Item\n>   continuation\n",
+        ">  \n",
+        "> Normal content\n",
+    ];
+
+    for content in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed_once = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed_once, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed_once, fixed_twice, "fix() not idempotent for input: {:?}", content);
+    }
+}
+
+/// Verify that every warning from check() has a Fix struct
+#[test]
+fn test_md027_all_warnings_have_fixes() {
+    let rule = MD027MultipleSpacesBlockquote;
+    let cases = vec![
+        ">  Two spaces\n",
+        ">   Three spaces\n",
+        ">    Four spaces\n",
+        "  >  Indented\n",
+        ">  \n",
+    ];
+
+    for content in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        for w in &warnings {
+            assert!(
+                w.fix.is_some(),
+                "Warning at line {} col {} has no fix for input: {:?}",
+                w.line,
+                w.column,
+                content
+            );
+        }
+    }
+}
+
+/// Verify that applying fixes from check() produces the same result as fix()
+#[test]
+fn test_md027_check_fix_roundtrip() {
+    use rumdl_lib::utils::fix_utils::apply_warning_fixes;
+
+    let rule = MD027MultipleSpacesBlockquote;
+    let cases = vec![
+        ">  Two spaces\n>   Three spaces\n",
+        ">  Two spaces\n> Normal\n>    Four spaces\n",
+        "  >  Indented with multiple spaces\n",
+        ">  \n",
+        "> Normal content\n",
+        ">  Two spaces",
+    ];
+
+    for content in cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fix_result = rule.fix(&ctx).unwrap();
+        let check_then_fix = apply_warning_fixes(content, &warnings).unwrap();
+        assert_eq!(
+            fix_result, check_then_fix,
+            "fix() and apply_warning_fixes(check()) differ for input: {:?}",
+            content
+        );
+    }
+}
+
 #[test]
 fn test_md027_script_tag_allows_blanks() {
     let rule = MD027MultipleSpacesBlockquote;
