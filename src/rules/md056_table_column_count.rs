@@ -189,8 +189,15 @@ impl Rule for MD056TableColumnCount {
                     fixed_table_lines.push(fixed_line);
                 }
             }
-            let table_replacement = fixed_table_lines.concat();
+            let mut table_replacement = fixed_table_lines.concat();
             let table_range = ctx.line_index.multi_line_range(table_start_line, table_end_line);
+
+            // Preserve trailing newline: if the original range ends with '\n' but
+            // the replacement does not, append '\n' so apply_warning_fixes does not
+            // strip it when the table is at the end of the document.
+            if content[table_range.clone()].ends_with('\n') && !table_replacement.ends_with('\n') {
+                table_replacement.push('\n');
+            }
 
             // Check all rows in the table
             for (i, &line_idx) in all_line_indices.iter().enumerate() {
@@ -225,50 +232,16 @@ impl Rule for MD056TableColumnCount {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        let flavor = ctx.flavor;
-        let lines = ctx.raw_lines();
-        let table_blocks = &ctx.table_blocks;
-
-        let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
-
-        for table_block in table_blocks {
-            // Collect all table lines
-            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
-                .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied())
-                .collect();
-
-            // Determine expected column count from header row (strip list/blockquote prefix first)
-            let header_content = TableUtils::extract_table_row_content(lines[table_block.header_line], table_block, 0);
-            let expected_count = TableUtils::count_cells_with_flavor(header_content, flavor);
-
-            if expected_count == 0 {
-                continue; // Skip invalid tables
-            }
-
-            // Fix all rows in the table
-            for (i, &line_idx) in all_line_indices.iter().enumerate() {
-                let line_num = line_idx + 1;
-                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                    continue;
-                }
-                let line = lines[line_idx];
-                let row_content = TableUtils::extract_table_row_content(line, table_block, i);
-                if let Some(fixed_line) =
-                    self.fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
-                {
-                    result_lines[line_idx] = fixed_line;
-                }
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let mut fixed = result_lines.join("\n");
-        // Preserve trailing newline if original content had one
-        if content.ends_with('\n') && !fixed.ends_with('\n') {
-            fixed.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-        Ok(fixed)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -661,5 +634,49 @@ Some text in between.
         assert!(fixed.lines().nth(2).unwrap().starts_with("> "));
         assert!(fixed.contains("> | 1 | 2 |"));
         assert!(!fixed.contains("| 3 |"));
+    }
+
+    // === Roundtrip safety tests ===
+
+    fn assert_fix_roundtrip(content: &str) {
+        let rule = MD056TableColumnCount;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx2).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "After fix(), check() should find 0 violations.\nOriginal: {content:?}\nFixed: {fixed:?}\nRemaining: {remaining:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_too_few_columns() {
+        assert_fix_roundtrip("| A | B | C |\n|---|---|---|\n| 1 | 2 |");
+    }
+
+    #[test]
+    fn test_roundtrip_too_many_columns() {
+        assert_fix_roundtrip("| A | B |\n|---|---|\n| 1 | 2 | 3 | 4 |");
+    }
+
+    #[test]
+    fn test_roundtrip_with_trailing_newline() {
+        assert_fix_roundtrip("| A | B | C |\n|---|---|---|\n| 1 | 2 |\n");
+    }
+
+    #[test]
+    fn test_roundtrip_blockquote_table() {
+        assert_fix_roundtrip("> | A | B | C |\n> |---|---|---|\n> | 1 | 2 |");
+    }
+
+    #[test]
+    fn test_roundtrip_clean_table() {
+        assert_fix_roundtrip("| A | B |\n|---|---|\n| 1 | 2 |");
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_tables() {
+        assert_fix_roundtrip("| A | B |\n|---|---|\n| 1 | 2 |\n\nText\n\n| C | D | E |\n|---|---|---|\n| 3 | 4 |");
     }
 }
