@@ -133,71 +133,16 @@ impl Rule for MD069NoDuplicateListMarkers {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut result = String::with_capacity(ctx.content.len());
-        let lines = ctx.raw_lines();
-
-        for (i, line) in lines.iter().enumerate() {
-            let line_num = i + 1; // 1-indexed for inline config
-
-            // Check if this line should be skipped (structural contexts)
-            let should_skip = ctx.lines.get(i).is_some_and(|info| {
-                info.in_front_matter
-                    || info.in_code_block
-                    || info.in_html_block
-                    || info.in_html_comment
-                    || info.in_mdx_comment
-            });
-
-            // Also check if rule is disabled via inline config comments
-            let rule_disabled = ctx.is_rule_disabled(self.name(), line_num);
-
-            if should_skip || rule_disabled {
-                result.push_str(line);
-                result.push('\n');
-                continue;
-            }
-
-            if let Some(caps) = DUPLICATE_MARKER_REGEX.captures(line) {
-                // Skip horizontal rules (e.g., "* * *", "- - -", "_ _ _")
-                // These are valid thematic breaks, not duplicate list markers
-                if is_horizontal_rule_line(line) {
-                    result.push_str(line);
-                    result.push('\n');
-                    continue;
-                }
-
-                let indent = caps.get(1).map_or("", |m| m.as_str());
-                let second_marker = caps.get(4).map_or("", |m| m.as_str());
-                let spaces_after_first = caps.get(3).map_or("", |m| m.as_str());
-                let spaces_after_second = caps.get(5).map_or("", |m| m.as_str());
-
-                // Calculate match length
-                let match_len = indent.len()
-                    + caps.get(2).map_or(0, |m| m.as_str().len())
-                    + spaces_after_first.len()
-                    + caps.get(4).map_or(0, |m| m.as_str().len())
-                    + spaces_after_second.len();
-
-                let rest = &line[match_len..];
-
-                // Write fixed line
-                result.push_str(indent);
-                result.push_str(second_marker);
-                result.push(' ');
-                result.push_str(rest);
-                result.push('\n');
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Handle trailing newline
-        if !ctx.content.ends_with('\n') && result.ends_with('\n') {
-            result.pop();
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn category(&self) -> RuleCategory {
@@ -537,5 +482,64 @@ mod tests {
         // Note: check() itself doesn't filter - that's done at a higher level in lib.rs
         // What we care about is that fix() respects the inline config
         assert_eq!(warnings.len(), 1); // check() still sees it
+    }
+
+    // === Roundtrip safety tests ===
+
+    fn assert_fix_roundtrip(content: &str) {
+        let rule = MD069NoDuplicateListMarkers::new();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx2).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "After fix(), check() should find 0 violations.\nOriginal: {content:?}\nFixed: {fixed:?}\nRemaining: {remaining:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_basic_duplicate() {
+        assert_fix_roundtrip("- - duplicate text");
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_duplicates() {
+        assert_fix_roundtrip("- - first\n- - second\n- normal");
+    }
+
+    #[test]
+    fn test_roundtrip_mixed_markers() {
+        assert_fix_roundtrip("- * mixed\n* - other\n+ + plus");
+    }
+
+    #[test]
+    fn test_roundtrip_indented() {
+        assert_fix_roundtrip("  - - indented\n    * * deeper");
+    }
+
+    #[test]
+    fn test_roundtrip_with_trailing_newline() {
+        assert_fix_roundtrip("- - duplicate\n");
+    }
+
+    #[test]
+    fn test_roundtrip_no_trailing_newline() {
+        assert_fix_roundtrip("- - duplicate");
+    }
+
+    #[test]
+    fn test_roundtrip_with_horizontal_rules() {
+        assert_fix_roundtrip("- - -\n* * *\n- - duplicate");
+    }
+
+    #[test]
+    fn test_roundtrip_with_code_blocks() {
+        assert_fix_roundtrip("```\n- - in code\n```\n- - outside");
+    }
+
+    #[test]
+    fn test_roundtrip_clean_content() {
+        assert_fix_roundtrip("- normal list\n- another item");
     }
 }
