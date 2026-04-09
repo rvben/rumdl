@@ -423,65 +423,16 @@ impl Rule for MD055TablePipeStyle {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let lines = ctx.raw_lines();
-
-        // Use the configured style but validate it first
-        let configured_style = match self.config.style.as_str() {
-            "leading_and_trailing" | "no_leading_or_trailing" | "leading_only" | "trailing_only" | "consistent" => {
-                self.config.style.as_str()
-            }
-            _ => {
-                // Invalid style provided, default to "leading_and_trailing"
-                "leading_and_trailing"
-            }
-        };
-
-        // Use pre-computed table blocks from context
-        let table_blocks = &ctx.table_blocks;
-
-        // Create a copy of lines that we can modify
-        let mut result_lines = lines.iter().map(|&s| s.to_string()).collect::<Vec<String>>();
-
-        // Process each table block
-        for table_block in table_blocks {
-            // First pass: determine the table's style for "consistent" mode
-            // Count all rows to determine most prevalent style (prevalence-based approach)
-            let table_style = if configured_style == "consistent" {
-                self.determine_table_style(table_block, lines)
-            } else {
-                None
-            };
-
-            // Determine target style for this table
-            let target_style = if configured_style == "consistent" {
-                table_style.unwrap_or("leading_and_trailing")
-            } else {
-                configured_style
-            };
-
-            // Fix all rows in the table with proper table line indices
-            let all_line_indices: Vec<usize> = std::iter::once(table_block.header_line)
-                .chain(std::iter::once(table_block.delimiter_line))
-                .chain(table_block.content_lines.iter().copied())
-                .collect();
-
-            for (table_line_idx, &line_idx) in all_line_indices.iter().enumerate() {
-                let line_num = line_idx + 1;
-                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                    continue;
-                }
-                let line = lines[line_idx];
-                let fixed_line = self.fix_table_row_with_context(line, target_style, table_block, table_line_idx);
-                result_lines[line_idx] = fixed_line;
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let mut fixed = result_lines.join("\n");
-        // Preserve trailing newline if original content had one
-        if ctx.content.ends_with('\n') && !fixed.ends_with('\n') {
-            fixed.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-        Ok(fixed)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -734,5 +685,60 @@ mod tests {
             result.contains("> | H3 | H4 |"),
             "Blockquote table should have pipes added with prefix preserved"
         );
+    }
+
+    // === Roundtrip safety tests ===
+
+    fn assert_fix_roundtrip(rule: &MD055TablePipeStyle, content: &str) {
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        let ctx2 = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let remaining = rule.check(&ctx2).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "After fix(), check() should find 0 violations.\nOriginal: {content:?}\nFixed: {fixed:?}\nRemaining: {remaining:?}"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_leading_and_trailing() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+        assert_fix_roundtrip(&rule, "H1 | H2\n---|---\na | b");
+    }
+
+    #[test]
+    fn test_roundtrip_no_leading_or_trailing() {
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
+        assert_fix_roundtrip(&rule, "| H1 | H2 |\n|---|---|\n| a | b |");
+    }
+
+    #[test]
+    fn test_roundtrip_consistent_mode() {
+        let rule = MD055TablePipeStyle::default();
+        assert_fix_roundtrip(&rule, "| H1 | H2 |\n|---|---|\nCell 1 | Cell 2");
+    }
+
+    #[test]
+    fn test_roundtrip_blockquote_table() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+        assert_fix_roundtrip(&rule, "> H1 | H2\n> ---|---\n> a | b");
+    }
+
+    #[test]
+    fn test_roundtrip_mixed_tables() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+        assert_fix_roundtrip(&rule, "H1 | H2\n---|---\na | b\n\n> H3 | H4\n> ---|---\n> c | d");
+    }
+
+    #[test]
+    fn test_roundtrip_with_surrounding_content() {
+        let rule = MD055TablePipeStyle::new("no_leading_or_trailing".to_string());
+        assert_fix_roundtrip(&rule, "# Title\n\n| H1 | H2 |\n|---|---|\n| a | b |\n\nMore text.");
+    }
+
+    #[test]
+    fn test_roundtrip_clean_content() {
+        let rule = MD055TablePipeStyle::new("leading_and_trailing".to_string());
+        assert_fix_roundtrip(&rule, "| H1 | H2 |\n|---|---|\n| a | b |");
     }
 }
