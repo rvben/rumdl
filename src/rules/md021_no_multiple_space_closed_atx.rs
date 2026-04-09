@@ -153,47 +153,16 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut lines = Vec::new();
-
-        for (i, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = i + 1;
-            // If rule is disabled for this line, keep original
-            if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                lines.push(line_info.content(ctx.content).to_string());
-                continue;
-            }
-
-            let mut fixed = false;
-
-            if let Some(heading) = &line_info.heading {
-                // Skip headings indented 4+ spaces (they're code blocks)
-                if line_info.visual_indent >= 4 {
-                    lines.push(line_info.content(ctx.content).to_string());
-                    continue;
-                }
-
-                // Fix closed ATX headings with multiple spaces
-                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX)
-                    && heading.has_closing_sequence
-                    && self.is_closed_atx_heading_with_multiple_spaces(line_info.content(ctx.content))
-                {
-                    lines.push(self.fix_closed_atx_heading(line_info.content(ctx.content)));
-                    fixed = true;
-                }
-            }
-
-            if !fixed {
-                lines.push(line_info.content(ctx.content).to_string());
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        // Reconstruct content preserving line endings
-        let mut result = lines.join("\n");
-        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing

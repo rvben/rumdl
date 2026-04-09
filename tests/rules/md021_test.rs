@@ -1,3 +1,4 @@
+use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD021NoMultipleSpaceClosedAtx;
@@ -149,4 +150,55 @@ fn test_multiple_spaces_at_end() {
     );
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, "# Heading 1 #\n## Heading 2 ##\n### Heading 3 ###");
+}
+
+#[test]
+fn test_fix_roundtrip_check_then_fix() {
+    let rule = MD021NoMultipleSpaceClosedAtx::new();
+    let content = "#  Heading 1  #\n##  Heading 2 ##\n###   Heading 3   ###\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(!warnings.is_empty(), "should detect violations");
+    for w in &warnings {
+        assert!(w.fix.is_some(), "every warning must carry a Fix");
+    }
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let warnings2 = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings2.is_empty(),
+        "fix must resolve all warnings, got: {warnings2:?}"
+    );
+}
+
+#[test]
+fn test_fix_idempotent() {
+    let rule = MD021NoMultipleSpaceClosedAtx::new();
+    let content = "#  Heading 1  #\n## Heading 2 ##\n###   Heading 3   ###\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed1 = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert_eq!(fixed1, fixed2, "fix must be idempotent");
+}
+
+#[test]
+fn test_fix_preserves_trailing_newline() {
+    let rule = MD021NoMultipleSpaceClosedAtx::new();
+    let content = "#  Heading  #\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(fixed.ends_with('\n'), "trailing newline must be preserved");
+    assert_eq!(fixed, "# Heading #\n");
+}
+
+#[test]
+fn test_fix_clean_content_unchanged() {
+    let rule = MD021NoMultipleSpaceClosedAtx::new();
+    let content = "# Heading 1 #\n## Heading 2 ##\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "clean content must pass through unchanged");
 }
