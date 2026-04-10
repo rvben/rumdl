@@ -904,18 +904,27 @@ impl Rule for MD044ProperNames {
         let warnings = violations
             .into_iter()
             .filter_map(|(line, column, found_name)| {
-                self.get_proper_name_for(&found_name).map(|proper_name| LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line,
-                    column,
-                    end_line: line,
-                    end_column: column + found_name.len(),
-                    message: format!("Proper name '{found_name}' should be '{proper_name}'"),
-                    severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(line, column, found_name.len()),
-                        replacement: proper_name,
-                    }),
+                self.get_proper_name_for(&found_name).map(|proper_name| {
+                    // `column` is a 1-indexed byte offset into the line (from regex .start() + 1).
+                    // Build the Fix range directly in bytes to avoid the character-based
+                    // line_col_to_byte_range_with_length function, which would misinterpret
+                    // the byte offset as a character count on lines with multi-byte content.
+                    let line_start = line_index.get_line_start_byte(line).unwrap_or(0);
+                    let byte_start = line_start + (column - 1);
+                    let byte_end = byte_start + found_name.len();
+                    LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line,
+                        column,
+                        end_line: line,
+                        end_column: column + found_name.len(),
+                        message: format!("Proper name '{found_name}' should be '{proper_name}'"),
+                        severity: Severity::Warning,
+                        fix: Some(Fix {
+                            range: byte_start..byte_end,
+                            replacement: proper_name,
+                        }),
+                    }
                 })
             })
             .collect();
