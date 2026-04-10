@@ -246,35 +246,9 @@ impl Rule for MD050StrongStyle {
         let html_code_ranges = Self::compute_html_code_ranges(&html_tags);
 
         let target_style = match self.config.style {
-            StrongStyle::Consistent => {
-                // Cheap style detection: count ** vs __ from parsed spans without
-                // expensive skip checking. A few false positives from spans in code/links
-                // won't affect the majority vote in real documents.
-                let mut asterisk_count = 0usize;
-                let mut underscore_count = 0usize;
-                for span in spans {
-                    if span.end - span.start < 4 {
-                        continue;
-                    }
-                    match span_style(span) {
-                        StrongStyle::Asterisk => asterisk_count += 1,
-                        StrongStyle::Underscore => underscore_count += 1,
-                        StrongStyle::Consistent => {}
-                    }
-                }
-                match (asterisk_count, underscore_count) {
-                    (0, 0) => StrongStyle::Asterisk,
-                    (_, 0) => StrongStyle::Asterisk,
-                    (0, _) => StrongStyle::Underscore,
-                    (a, u) => {
-                        if a >= u {
-                            StrongStyle::Asterisk
-                        } else {
-                            StrongStyle::Underscore
-                        }
-                    }
-                }
-            }
+            StrongStyle::Consistent => self
+                .detect_style_from_spans(ctx, &html_tags, &html_code_ranges, spans)
+                .unwrap_or(StrongStyle::Asterisk),
             _ => self.config.style,
         };
 
