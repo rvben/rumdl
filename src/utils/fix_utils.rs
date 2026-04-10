@@ -43,6 +43,14 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         .filter_map(|(i, w)| w.fix.as_ref().map(|fix| (i, fix)))
         .collect();
 
+    // No-op fast path: if there are no actual fixes to apply, return the
+    // content unchanged. This avoids unnecessary line-ending normalization
+    // when all warnings were filtered out (e.g., by inline config) or had
+    // no fix attached.
+    if fixes.is_empty() {
+        return Ok(content.to_string());
+    }
+
     // Deduplicate fixes that operate on the same range with the same replacement
     // This prevents double-application when multiple warnings target the same issue
     fixes.sort_by(|(_, fix_a), (_, fix_b)| {
