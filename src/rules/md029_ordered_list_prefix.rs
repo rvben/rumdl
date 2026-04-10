@@ -359,51 +359,16 @@ impl Rule for MD029OrderedListPrefix {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        // Use the same logic as check() - just apply the fixes from warnings
+        // Note: do not call self.should_skip() here — MD029's should_skip only covers
+        // unordered list markers (*, -, +), not ordered list markers (digits + . or )).
+        // check() has its own fast-path early-return for documents without ordered markers.
         let warnings = self.check(ctx)?;
-        let warnings =
-            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
-
         if warnings.is_empty() {
-            // No changes needed
             return Ok(ctx.content.to_string());
         }
-
-        // Collect fixes and sort by position
-        let mut fixes: Vec<&Fix> = Vec::new();
-        for warning in &warnings {
-            if let Some(ref fix) = warning.fix {
-                fixes.push(fix);
-            }
-        }
-        fixes.sort_by_key(|f| f.range.start);
-
-        let mut result = String::new();
-        let mut last_pos = 0;
-        let content_bytes = ctx.content.as_bytes();
-
-        for fix in fixes {
-            // Add content before the fix
-            if last_pos < fix.range.start {
-                let chunk = &content_bytes[last_pos..fix.range.start];
-                result.push_str(
-                    std::str::from_utf8(chunk).map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?,
-                );
-            }
-            // Add the replacement
-            result.push_str(&fix.replacement);
-            last_pos = fix.range.end;
-        }
-
-        // Add remaining content
-        if last_pos < content_bytes.len() {
-            let chunk = &content_bytes[last_pos..];
-            result.push_str(
-                std::str::from_utf8(chunk).map_err(|_| LintError::InvalidInput("Invalid UTF-8".to_string()))?,
-            );
-        }
-
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     /// Get the category of this rule for selective processing
@@ -572,6 +537,99 @@ mod tests {
         assert!(
             result.is_empty(),
             "Separate lists can use different styles in OneOrOrdered mode"
+        );
+    }
+
+    /// Core invariant: for every warning with a Fix, the replacement text must
+    /// match what fix() produces for the same byte range in the output.
+    #[test]
+    fn test_check_and_fix_produce_identical_replacements() {
+        let rule = MD029OrderedListPrefix::default();
+
+        let inputs = [
+            "1. First\n3. Skip\n5. Skip\n",
+            "1. First\n3. Third\n2. Second\n",
+            "1. A\n\n3. B\n",
+            "- Unordered\n\n1. A\n3. B\n",
+            "1. A\n   1. Nested wrong\n   3. Nested\n2. B\n",
+        ];
+
+        for input in &inputs {
+            let ctx = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+            let warnings = rule.check(&ctx).unwrap();
+            let fixed = rule.fix(&ctx).unwrap();
+
+            // fix() must be idempotent: applying it again produces the same output
+            let ctx2 = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            let fixed_twice = rule.fix(&ctx2).unwrap();
+            assert_eq!(
+                fixed, fixed_twice,
+                "fix() is not idempotent for input: {input:?}\nfirst:  {fixed:?}\nsecond: {fixed_twice:?}"
+            );
+
+            // After fixing, check() should produce no warnings
+            let warnings_after = rule.check(&ctx2).unwrap();
+            assert!(
+                warnings_after.is_empty(),
+                "check() should produce no warnings after fix() for input: {input:?}\nfixed: {fixed:?}\nremaining: {warnings_after:?}"
+            );
+
+            // For every warning with a Fix, applying the fix alone should match
+            // the content at the same range in the final fixed output
+            for warning in &warnings {
+                if let Some(ref fix) = warning.fix {
+                    assert!(
+                        fix.range.end <= input.len(),
+                        "Fix range exceeds input length for {input:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// fix(fix(x)) == fix(x)
+    #[test]
+    fn test_fix_idempotent() {
+        let rule = MD029OrderedListPrefix::default();
+
+        let inputs = [
+            "1. A\n3. B\n5. C\n",
+            "# Intro\n\n1. First\n3. Third\n",
+            "1. A\n1. B\n1. C\n",
+        ];
+
+        for input in &inputs {
+            let ctx1 = crate::lint_context::LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+            let fixed_once = rule.fix(&ctx1).unwrap();
+            let ctx2 =
+                crate::lint_context::LintContext::new(&fixed_once, crate::config::MarkdownFlavor::Standard, None);
+            let fixed_twice = rule.fix(&ctx2).unwrap();
+            assert_eq!(fixed_once, fixed_twice, "fix() is not idempotent for input: {input:?}");
+        }
+    }
+
+    /// Lists with explicit non-1 start values should not be auto-fixed
+    /// (to preserve user intent).
+    #[test]
+    fn test_fix_preserves_non_default_start_value() {
+        let rule = MD029OrderedListPrefix::default();
+
+        // List starts at 11 — CommonMark expects 11, 12, 13... Item "14" is wrong
+        // but user explicitly chose 11 so no auto-fix should be offered.
+        let content = "11. First\n14. Fourth\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        // Warning present but no fix
+        assert!(!warnings.is_empty(), "Should produce warnings for misnumbered list");
+        assert!(
+            warnings.iter().all(|w| w.fix.is_none()),
+            "Should not provide auto-fix for lists starting at non-1 values"
+        );
+        // fix() should leave content unchanged
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "Content should be unchanged when no fixes are available"
         );
     }
 }
