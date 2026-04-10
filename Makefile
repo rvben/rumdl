@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions fuzz fuzz-long check-links release-patch release-minor release-major
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links release-patch release-minor release-major
 
 # Development environment setup
 setup-mise:
@@ -135,6 +135,11 @@ fmt:
 
 lint-actions:
 	actionlint
+	uvx zizmor --min-severity=medium .github/workflows/
+
+lint-actions-all:
+	actionlint
+	uvx zizmor .github/workflows/
 
 lint:
 	CARGO_INCREMENTAL=1 cargo clippy --workspace --lib --bins --tests -- -D warnings -D clippy::uninlined_format_args

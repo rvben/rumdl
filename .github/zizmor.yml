@@ -1,0 +1,51 @@
+rules:
+  # All third-party actions in this repo come from GitHub itself (actions/*),
+  # Astral, Cloudflare, or long-standing high-reputation maintainers
+  # (dtolnay, Swatinem, jdx, taiki-e, softprops). Major-version tag pinning
+  # plus Dependabot security alerts cover the realistic threat model for a
+  # markdown linter. SHA pinning trades ongoing maintenance overhead for a
+  # marginal defense against tag force-push incidents — not worth it here.
+  unpinned-uses:
+    ignore:
+      - ci.yml
+      - docs.yml
+      - performance.yml
+      - release.yml
+      - sync-schemastore.yml
+      - test-action.yml
+
+  # GitHub Environments are not yet configured for the release and deploy jobs.
+  # Once created on github.com (with required reviewers on `release`), remove
+  # these ignores and add `environment:` fields to the corresponding jobs.
+  secrets-outside-env:
+    ignore:
+      - release.yml
+      - docs.yml
+      - sync-schemastore.yml
+
+  # actions/setup-node does not enable caching unless `cache: npm` is set.
+  # zizmor flags it defensively at low confidence; our usage sets no cache key.
+  # Swatinem/rust-cache and jdx/mise-action are also flagged for release builds;
+  # rust-cache uses target-scoped keys (per-matrix and `release-test` shared-key)
+  # that are isolated from CI's `ci` key, and mise fetches tools with upstream
+  # checksums. Disabling these caches would cost significant release time for a
+  # thin theoretical poisoning vector, so we accept the advisory.
+  cache-poisoning:
+    ignore:
+      - release.yml
+
+  # sync-schemastore uses workflow_run purely to chain off the Release workflow.
+  # It only checks out the default branch and never consumes PR context, so the
+  # common workflow_run attack vectors do not apply. Planned refactor: switch to
+  # repository_dispatch emitted from release.yml for stricter isolation.
+  dangerous-triggers:
+    ignore:
+      - sync-schemastore.yml
+
+  # `steps.*.outcome` can only take the enumerated values success/failure/
+  # cancelled/skipped, so embedding it in a shell comparison cannot produce
+  # attacker-controlled input. Moving it into an env var only obscures the
+  # intent without changing the security posture.
+  template-injection:
+    ignore:
+      - test-action.yml
