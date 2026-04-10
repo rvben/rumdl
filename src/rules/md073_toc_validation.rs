@@ -557,9 +557,12 @@ impl Rule for MD073TocValidation {
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
-        // Quick check: skip if no TOC markers
-        let has_toc_marker = ctx.content.contains("<!-- toc") || ctx.content.contains("<!--toc");
-        !has_toc_marker
+        // Quick check: skip if no TOC markers. detect_toc_region() is
+        // case-insensitive, so use a case-insensitive containment check here
+        // to avoid skipping fix() on documents with uppercase markers like
+        // `<!-- TOC -->`.
+        let lower = ctx.content.to_ascii_lowercase();
+        !(lower.contains("<!-- toc") || lower.contains("<!--toc"))
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
