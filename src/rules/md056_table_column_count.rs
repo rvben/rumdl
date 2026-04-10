@@ -170,47 +170,26 @@ impl Rule for MD056TableColumnCount {
                 continue; // Skip invalid tables
             }
 
-            // Build the whole-table fix once for all warnings in this table
-            // This ensures that applying Quick Fix on any row fixes the entire table
-            let table_start_line = table_block.start_line + 1; // Convert to 1-indexed
-            let table_end_line = table_block.end_line + 1; // Convert to 1-indexed
-
-            // Build the complete fixed table content
-            let mut fixed_table_lines: Vec<String> = Vec::with_capacity(all_line_indices.len());
-            for (i, &line_idx) in all_line_indices.iter().enumerate() {
-                let line = lines[line_idx];
-                let row_content = TableUtils::extract_table_row_content(line, table_block, i);
-                let fixed_line = self
-                    .fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
-                    .unwrap_or_else(|| line.to_string());
-                if line_idx < lines.len() - 1 {
-                    fixed_table_lines.push(format!("{fixed_line}\n"));
-                } else {
-                    fixed_table_lines.push(fixed_line);
-                }
-            }
-            let mut table_replacement = fixed_table_lines.concat();
-            let table_range = ctx.line_index.multi_line_range(table_start_line, table_end_line);
-
-            // Preserve trailing newline: if the original range ends with '\n' but
-            // the replacement does not, append '\n' so apply_warning_fixes does not
-            // strip it when the table is at the end of the document.
-            if content[table_range.clone()].ends_with('\n') && !table_replacement.ends_with('\n') {
-                table_replacement.push('\n');
-            }
-
-            // Check all rows in the table
+            // Check each row and emit a per-row fix. Per-row fixes ensure that
+            // inline-disabling one row does not cause the fix on another row to
+            // overwrite the disabled row's content.
             for (i, &line_idx) in all_line_indices.iter().enumerate() {
                 let line = lines[line_idx];
                 let row_content = TableUtils::extract_table_row_content(line, table_block, i);
                 let count = TableUtils::count_cells_with_flavor(row_content, flavor);
 
                 if count > 0 && count != expected_count {
-                    // Calculate precise character range for the entire table row
                     let (start_line, start_col, end_line, end_col) = calculate_line_range(line_idx + 1, line);
 
-                    // Each warning uses the same whole-table fix
-                    // This ensures Quick Fix on any row fixes the entire table
+                    // Build a per-row fix so inline-disabled rows are not
+                    // overwritten by fixes on other rows in the same table.
+                    let fixed_line = self
+                        .fix_table_row_content(row_content, expected_count, flavor, table_block, i, line)
+                        .unwrap_or_else(|| line.to_string());
+                    let row_range =
+                        ctx.line_index
+                            .line_col_to_byte_range_with_length(line_idx + 1, 1, line.chars().count());
+
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         message: format!("Table row has {count} cells, but expected {expected_count}"),
@@ -220,8 +199,8 @@ impl Rule for MD056TableColumnCount {
                         end_column: end_col,
                         severity: Severity::Warning,
                         fix: Some(Fix {
-                            range: table_range.clone(),
-                            replacement: table_replacement.clone(),
+                            range: row_range,
+                            replacement: fixed_line,
                         }),
                     });
                 }
