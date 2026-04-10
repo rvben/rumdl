@@ -179,7 +179,6 @@ fn test_md027_style_tag_allows_blanks() {
     assert!(result.is_empty(), "Content after style tag should not flag");
 }
 
-/// Test: HTML block with script tag (can contain blank lines)
 // =============================================================================
 // Roundtrip safety: fix(check()) must produce identical results to fix()
 // =============================================================================
@@ -202,7 +201,7 @@ fn test_md027_fix_idempotent() {
         let fixed_once = rule.fix(&ctx).unwrap();
         let ctx2 = LintContext::new(&fixed_once, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed_twice = rule.fix(&ctx2).unwrap();
-        assert_eq!(fixed_once, fixed_twice, "fix() not idempotent for input: {:?}", content);
+        assert_eq!(fixed_once, fixed_twice, "fix() not idempotent for input: {content:?}");
     }
 }
 
@@ -222,12 +221,11 @@ fn test_md027_all_warnings_have_fixes() {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
         for w in &warnings {
+            let line = w.line;
+            let column = w.column;
             assert!(
                 w.fix.is_some(),
-                "Warning at line {} col {} has no fix for input: {:?}",
-                w.line,
-                w.column,
-                content
+                "Warning at line {line} col {column} has no fix for input: {content:?}"
             );
         }
     }
@@ -255,8 +253,7 @@ fn test_md027_check_fix_roundtrip() {
         let check_then_fix = apply_warning_fixes(content, &warnings).unwrap();
         assert_eq!(
             fix_result, check_then_fix,
-            "fix() and apply_warning_fixes(check()) differ for input: {:?}",
-            content
+            "fix() and apply_warning_fixes(check()) differ for input: {content:?}"
         );
     }
 }
