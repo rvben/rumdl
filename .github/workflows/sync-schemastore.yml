@@ -15,6 +15,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     name: Sync schema to SchemaStore
@@ -24,6 +27,8 @@ jobs:
     steps:
       - name: Checkout rumdl
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Fetch SchemaStore schema
         id: fetch

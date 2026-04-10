@@ -30,18 +30,18 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  id-token: write    # Required for npm OIDC trusted publishing
-
-env:
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  contents: read
 
 jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # Toolchain setup
       - uses: jdx/mise-action@v4
@@ -84,6 +84,8 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: test
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -119,6 +121,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # Toolchain setup (mise installs rust, python, maturin, etc.)
       - uses: jdx/mise-action@v4
@@ -260,8 +264,12 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     needs: test
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: jdx/mise-action@v4
         with:
           experimental: true
@@ -284,8 +292,12 @@ jobs:
     name: Build WASM
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -314,6 +326,8 @@ jobs:
   test-python-package:
     name: Test Python Package (${{ matrix.os }})
     needs: build
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -326,6 +340,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -397,8 +413,12 @@ jobs:
     name: Build npm CLI packages
     needs: [build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v5
         with:
@@ -466,6 +486,8 @@ jobs:
   test-npm-cli:
     name: Test npm CLI (${{ matrix.os }})
     needs: build-npm-cli
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -526,6 +548,8 @@ jobs:
     needs: build-npm-cli
     runs-on: ubuntu-latest
     container: node:24-alpine
+    permissions:
+      contents: read
     steps:
       - name: Download npm packages
         uses: actions/download-artifact@v7
@@ -554,8 +578,14 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: [build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
+    permissions:
+      contents: write       # Create GitHub release + update major version tag
+      id-token: write       # npm OIDC trusted publishing + Sigstore attestations
+      attestations: write   # Generate build provenance attestations
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: jdx/mise-action@v4
         with:
           experimental: true
@@ -597,6 +627,16 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           path: artifacts
+
+      - name: Attest build provenance for wheels, sdist, and release archives
+        if: ${{ inputs.dry_run != true }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            artifacts/wheel-*/*.whl
+            artifacts/sdist/*.tar.gz
+            artifacts/release-*/rumdl-*.tar.gz
+            artifacts/release-*/rumdl-*.zip
 
       - name: Publish to PyPI
         id: publish-pypi
@@ -770,6 +810,8 @@ jobs:
         id: create-release
         if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           body_path: release-notes.md
           files: |
