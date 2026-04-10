@@ -657,30 +657,16 @@ impl Rule for MD073TocValidation {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        // Detect TOC region
-        let Some(region) = self.detect_toc_region(ctx) else {
-            // No TOC found - return unchanged
-            return Ok(ctx.content.to_string());
-        };
-
-        // Skip fix if rule is disabled via inline config at the TOC region
-        if ctx.is_rule_disabled(self.name(), region.start_line) {
+        if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
         }
-
-        // Build expected TOC from headings
-        let expected_entries = self.build_expected_toc(ctx, &region);
-
-        // Generate new TOC
-        let new_toc = self.generate_toc(&expected_entries);
-
-        // Replace the TOC content
-        let mut result = String::with_capacity(ctx.content.len());
-        result.push_str(&ctx.content[..region.content_start]);
-        result.push_str(&new_toc);
-        result.push_str(&ctx.content[region.content_end..]);
-
-        Ok(result)
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
+        }
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn category(&self) -> RuleCategory {
@@ -2066,5 +2052,72 @@ Content here.
         assert_eq!(expected[0].anchor, "faq");
         assert_eq!(expected[1].anchor, "faq-1");
         assert_eq!(expected[49].anchor, "faq-49");
+    }
+
+    /// Core invariant: for every warning with a Fix, fix() must produce
+    /// output consistent with applying that fix directly.
+    #[test]
+    fn test_roundtrip_check_and_fix_alignment() {
+        let rule = create_enabled_rule();
+
+        let inputs = [
+            // Stale entry
+            "# Title\n\n<!-- toc -->\n- [Old Section](#old-section)\n<!-- tocstop -->\n\n## New Section\n",
+            // Missing entry
+            "# Title\n\n<!-- toc -->\n<!-- tocstop -->\n\n## One\n\n## Two\n",
+            // Text mismatch
+            "# Title\n\n<!-- toc -->\n- [Wrong Text](#real-section)\n<!-- tocstop -->\n\n## Real Section\n",
+            // Already correct (no warnings, no change)
+            "# Title\n\n<!-- toc -->\n- [One](#one)\n- [Two](#two)\n<!-- tocstop -->\n\n## One\n\n## Two\n",
+        ];
+
+        for input in &inputs {
+            let ctx = create_ctx(input);
+            let fixed = rule.fix(&ctx).unwrap();
+
+            // Idempotency: fix(fix(x)) == fix(x)
+            let ctx2 = create_ctx(&fixed);
+            let fixed_twice = rule.fix(&ctx2).unwrap();
+            assert_eq!(
+                fixed, fixed_twice,
+                "fix() is not idempotent for input: {input:?}\nfirst:  {fixed:?}\nsecond: {fixed_twice:?}"
+            );
+
+            // After fix, check() should produce no warnings
+            let warnings_after = rule.check(&ctx2).unwrap();
+            assert!(
+                warnings_after.is_empty(),
+                "check() should return no warnings after fix() for input: {input:?}\nfixed: {fixed:?}\nwarnings: {warnings_after:?}"
+            );
+        }
+    }
+
+    /// If a TOC has no mismatches, check() emits no warnings and fix()
+    /// returns content unchanged.
+    #[test]
+    fn test_no_mismatch_preserves_content() {
+        let rule = create_enabled_rule();
+
+        let content = "# Title\n\n<!-- toc -->\n- [First Section](#first-section)\n- [Second Section](#second-section)\n<!-- tocstop -->\n\n## First Section\n\ntext\n\n## Second Section\n\ntext\n";
+        let ctx = create_ctx(content);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(warnings.is_empty(), "No mismatches should emit no warnings");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "Content should be unchanged when TOC matches headings");
+    }
+
+    /// Inline-disabled TOC should not be modified by fix().
+    #[test]
+    fn test_inline_disable_preserves_toc() {
+        let rule = create_enabled_rule();
+
+        // TOC with a stale entry, but MD073 disabled for the TOC region
+        let content = "# Title\n\n<!-- rumdl-disable MD073 -->\n<!-- toc -->\n- [Stale](#stale)\n<!-- tocstop -->\n<!-- rumdl-enable MD073 -->\n\n## Real\n";
+        let ctx = create_ctx(content);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "TOC in a disabled region should be preserved exactly");
     }
 }
