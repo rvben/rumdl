@@ -147,6 +147,23 @@ impl MD013LineLength {
         // Skip if no line exceeds the limit
         !ctx.lines.iter().any(|line| line.byte_len > config.line_length.get())
     }
+
+    fn normalize_mode_needs_reflow<'a, I>(&self, lines: I, config: &MD013Config) -> bool
+    where
+        I: IntoIterator<Item = &'a str>,
+    {
+        let mut line_count = 0;
+        let check_length = !config.line_length.is_unlimited();
+
+        for line in lines {
+            line_count += 1;
+            if check_length && self.calculate_effective_length(line) > config.line_length.get() {
+                return true;
+            }
+        }
+
+        line_count > 1
+    }
 }
 
 impl Rule for MD013LineLength {
@@ -694,7 +711,9 @@ impl MD013LineLength {
         }
 
         let needs_reflow = match config.reflow_mode {
-            ReflowMode::Normalize => line_data.len() > 1,
+            ReflowMode::Normalize => {
+                self.normalize_mode_needs_reflow(line_data.iter().map(|d| d.content.as_str()), config)
+            }
             ReflowMode::SentencePerLine => {
                 let sentences = split_into_sentences(&paragraph_text);
                 sentences.len() > 1 || line_data.len() > 1
@@ -1383,7 +1402,7 @@ impl MD013LineLength {
 
                 // Check if reflow is needed
                 let needs_reflow = match config.reflow_mode {
-                    ReflowMode::Normalize => container_lines.len() > 1,
+                    ReflowMode::Normalize => self.normalize_mode_needs_reflow(container_lines.iter().copied(), config),
                     ReflowMode::SentencePerLine => {
                         let sentences = split_into_sentences(&paragraph_text);
                         sentences.len() > 1 || container_lines.len() > 1
@@ -2978,10 +2997,7 @@ impl MD013LineLength {
 
             // Check if this paragraph needs reflowing
             let needs_reflow = match config.reflow_mode {
-                ReflowMode::Normalize => {
-                    // In normalize mode, reflow multi-line paragraphs
-                    paragraph_lines.len() > 1
-                }
+                ReflowMode::Normalize => self.normalize_mode_needs_reflow(paragraph_lines.iter().copied(), config),
                 ReflowMode::SentencePerLine => {
                     // In sentence-per-line mode, check if the JOINED paragraph has multiple sentences
                     // Note: we check the joined text because sentences can span multiple lines

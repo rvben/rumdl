@@ -26,6 +26,19 @@ fn create_mkdocs_config_with_reflow() -> Config {
     config
 }
 
+fn create_mkdocs_config_with_normalize_reflow() -> Config {
+    let mut config = create_mkdocs_config_with_reflow();
+    if let Some(rule_config) = config.rules.get_mut("MD013") {
+        rule_config
+            .values
+            .insert("reflow-mode".to_string(), toml::Value::String("normalize".to_string()));
+        rule_config
+            .values
+            .insert("line-length".to_string(), toml::Value::Integer(80));
+    }
+    config
+}
+
 #[test]
 fn test_mkdocs_admonition_content_detected_correctly() {
     // MkDocs admonition content should be detected as in_admonition, NOT as code block
@@ -94,6 +107,64 @@ fn test_mkdocs_admonition_long_content_reflowed_with_indent() {
     assert!(
         content_lines.len() > 1,
         "Long content should be wrapped into multiple lines, got: {content_lines:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_admonition_normalize_reflows_overlong_single_line() {
+    let content = r#"!!! note
+
+    This approach shares state between the composited efforts. This means that authentication, database pooling, and other things will be usable between components.
+"#;
+
+    let config = create_mkdocs_config_with_normalize_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Expected a single normalize warning");
+    assert!(warnings[0].fix.is_some(), "Normalize warning should include a fix");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let content_lines: Vec<_> = fixed
+        .lines()
+        .filter(|line| line.starts_with("    ") && !line.trim().is_empty())
+        .collect();
+
+    assert!(fixed.contains("!!! note"), "Admonition marker should be preserved");
+    assert!(content_lines.len() > 1, "Expected admonition content to be wrapped");
+    assert!(
+        content_lines.iter().all(|line| line.chars().count() <= 80),
+        "Wrapped admonition lines should respect the limit: {content_lines:?}"
+    );
+}
+
+#[test]
+fn test_mkdocs_tab_normalize_reflows_overlong_single_line() {
+    let content = r#"=== "Tab 1"
+
+    This tab content is long enough to exceed the configured line length in normalize mode and should be wrapped while preserving the required container indentation for every output line.
+"#;
+
+    let config = create_mkdocs_config_with_normalize_reflow();
+    let rule = MD013LineLength::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Expected a single normalize warning");
+    assert!(warnings[0].fix.is_some(), "Normalize warning should include a fix");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let content_lines: Vec<_> = fixed
+        .lines()
+        .filter(|line| line.starts_with("    ") && !line.trim().is_empty())
+        .collect();
+
+    assert!(fixed.contains("=== \"Tab 1\""), "Tab marker should be preserved");
+    assert!(content_lines.len() > 1, "Expected tab content to be wrapped");
+    assert!(
+        content_lines.iter().all(|line| line.chars().count() <= 80),
+        "Wrapped tab lines should respect the limit: {content_lines:?}"
     );
 }
 

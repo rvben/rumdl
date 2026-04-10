@@ -1474,7 +1474,7 @@ fn test_issue_76_use_case() {
 
 #[test]
 fn test_normalize_mode_single_line_unchanged() {
-    // Single lines should not be flagged or changed
+    // Short single lines should not be flagged or changed
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(100),
         reflow: true,
@@ -1491,6 +1491,41 @@ fn test_normalize_mode_single_line_unchanged() {
 
     let fixed = rule.fix(&ctx).unwrap();
     assert_eq!(fixed, content, "Single line should remain unchanged");
+}
+
+#[test]
+fn test_normalize_mode_reflows_overlong_single_line() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "Overlong single line should produce one paragraph warning"
+    );
+    assert!(
+        warnings[0].message.contains("normalized"),
+        "Expected normalize warning, got: {:?}",
+        warnings[0]
+    );
+    assert!(warnings[0].fix.is_some(), "Normalize warning should include a fix");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert!(lines.len() > 1, "Overlong single line should be reflowed");
+    assert!(
+        lines.iter().all(|line| line.len() <= 80),
+        "Reflowed lines should respect the limit: {lines:?}"
+    );
 }
 
 #[test]
@@ -3676,6 +3711,36 @@ fn test_blockquote_reflow_generates_fix_for_explicit_quote() {
     let fixed = rule.fix(&ctx).unwrap();
     assert_ne!(fixed, content);
     assert!(fixed.lines().all(|line| line.starts_with("> ")));
+}
+
+#[test]
+fn test_blockquote_normalize_reflows_overlong_single_line() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(60),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> This is a very long blockquote line that should be reflowed by MD013 in normalize mode when it exceeds the configured line length by a meaningful margin for testing.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Expected a single normalize warning");
+    assert!(warnings[0].fix.is_some(), "Normalize warning should include a fix");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert!(lines.len() > 1, "Expected blockquote to be wrapped");
+    assert!(
+        lines.iter().all(|line| line.starts_with("> ")),
+        "Expected blockquote prefix to be preserved: {lines:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 60),
+        "Wrapped blockquote lines should respect the limit: {lines:?}"
+    );
 }
 
 #[test]

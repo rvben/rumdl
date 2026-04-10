@@ -579,6 +579,71 @@ reflow = true
     assert_eq!(after_first, after_second);
 }
 
+#[test]
+fn test_md013_issue_566_normalize_single_line_reflow_regression() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("issue_566.md");
+
+    let content = r#"# Lorem
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed quam leo, rhoncus sodales erat sed.
+
+Lorem ipsum dolor sit amet, consectetur adipiscing elit.
+Sed quam leo, rhoncus sodales erat sed. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed
+quam leo, rhoncus sodales erat sed.
+"#;
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "normalize"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt");
+
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {exit_code}");
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+    let paragraphs: Vec<&str> = fixed.split("\n\n").collect();
+    assert_eq!(paragraphs.len(), 3, "Expected heading plus two paragraphs: {fixed}");
+
+    for paragraph in paragraphs.iter().skip(1) {
+        let lines: Vec<&str> = paragraph.lines().collect();
+        assert!(lines.len() > 1, "Paragraph should be wrapped: {paragraph}");
+        assert!(
+            lines.iter().all(|line| line.chars().count() <= 80),
+            "Wrapped lines should respect line length: {paragraph}"
+        );
+    }
+
+    let second_pass = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt on second pass");
+    let second_exit_code = second_pass.status.code().unwrap_or(-1);
+    assert!(
+        second_exit_code == 0 || second_exit_code == 1,
+        "Unexpected second-pass exit code: {second_exit_code}"
+    );
+
+    let after_second = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(fixed, after_second, "Normalize reflow should be idempotent");
+}
+
 /// Issue #493: Inline disable comments inside list items must be respected
 /// even when reflow mode groups the list item as a single paragraph.
 #[test]
