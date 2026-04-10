@@ -210,6 +210,17 @@ impl Rule for MD001HeadingIncrement {
 
             let level = heading.level as usize;
 
+            // Headings disabled via inline config keep their original level for
+            // successor tracking (the user explicitly opted out of fixing them),
+            // and no warning is emitted.
+            if ctx
+                .inline_config()
+                .is_rule_disabled(self.name(), valid_heading.line_num)
+            {
+                prev_level = Some(level);
+                continue;
+            }
+
             let (fix_info, new_prev) = Self::compute_heading_fix(prev_level, heading);
             prev_level = new_prev;
 
@@ -245,80 +256,16 @@ impl Rule for MD001HeadingIncrement {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let mut fixed_lines = Vec::new();
-
-        let mut prev_level: Option<usize> = if self.has_front_matter_title(ctx.content) {
-            Some(1)
-        } else {
-            None
-        };
-
-        let mut skip_next = false;
-        for (i, line_info) in ctx.lines.iter().enumerate() {
-            let line_num = i + 1;
-            if skip_next {
-                skip_next = false;
-                continue;
-            }
-
-            if let Some(heading) = line_info.heading.as_deref() {
-                if !heading.is_valid {
-                    fixed_lines.push(line_info.content(ctx.content).to_string());
-                    continue;
-                }
-
-                // If rule is disabled for this line, keep original and skip setext underline
-                if ctx.inline_config().is_rule_disabled(self.name(), line_num) {
-                    fixed_lines.push(line_info.content(ctx.content).to_string());
-                    let is_setext = matches!(
-                        heading.style,
-                        crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                    );
-                    if is_setext {
-                        skip_next = true;
-                    }
-                    // Still update prev_level so subsequent headings are computed correctly
-                    prev_level = Some(heading.level as usize);
-                    continue;
-                }
-
-                let is_setext = matches!(
-                    heading.style,
-                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
-                );
-
-                let (fix_info, new_prev) = Self::compute_heading_fix(prev_level, heading);
-                prev_level = new_prev;
-
-                if fix_info.needs_fix {
-                    let replacement = HeadingUtils::convert_heading_style(
-                        &heading.raw_text,
-                        fix_info.fixed_level as u32,
-                        fix_info.style,
-                    );
-                    let line = line_info.content(ctx.content);
-                    let original_indent = &line[..line_info.indent];
-                    fixed_lines.push(format!("{original_indent}{replacement}"));
-
-                    // Setext headings span two lines (text + underline). The replacement
-                    // already includes both lines, so skip the underline line.
-                    if is_setext {
-                        skip_next = true;
-                    }
-                } else {
-                    // Heading is valid — preserve original content exactly
-                    fixed_lines.push(line_info.content(ctx.content).to_string());
-                }
-            } else {
-                fixed_lines.push(line_info.content(ctx.content).to_string());
-            }
+        if self.should_skip(ctx) {
+            return Ok(ctx.content.to_string());
         }
-
-        let mut result = fixed_lines.join("\n");
-        if ctx.content.ends_with('\n') && !result.ends_with('\n') {
-            result.push('\n');
+        let warnings = self.check(ctx)?;
+        if warnings.is_empty() {
+            return Ok(ctx.content.to_string());
         }
-        Ok(result)
+        let warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings).map_err(LintError::InvalidInput)
     }
 
     fn category(&self) -> RuleCategory {
@@ -768,5 +715,60 @@ mod tests {
             fixed, content,
             "Valid Setext with short underline must be preserved exactly, got: {fixed}"
         );
+    }
+
+    /// Roundtrip safety: after fix(), check() must produce no warnings
+    /// across a variety of inputs covering frontmatter, setext, attribute
+    /// lists, cascading skips, and level decreases.
+    #[test]
+    fn test_roundtrip_fix_produces_no_warnings() {
+        let rule = MD001HeadingIncrement::default();
+
+        let inputs = [
+            "# H1\n### H3\n",
+            "# H1\n#### H4\n##### H5\n",
+            "# H1\n### H3\n# H1b\n### H3b\n",
+            "# H1\n\n### H3 { #custom-id }\n",
+            "---\ntitle: Doc\n---\n\n### Deep\n",
+            "Title\n=====\n\n#### Deep\n",
+            "Sub\n---\n\n#### Deep\n",
+            "# A\n### B\n# C\n### D\n##### E\n",
+            "# Title\n#### Deep\n##### Deeper\n###### Deepest\n",
+        ];
+
+        for input in &inputs {
+            let ctx = LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+
+            let ctx_fixed = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+            let warnings_after = rule.check(&ctx_fixed).unwrap();
+            assert!(
+                warnings_after.is_empty(),
+                "Fix should produce clean output for input: {input:?}\nfixed: {fixed:?}\nwarnings: {warnings_after:?}"
+            );
+
+            // Idempotency: fix(fix(x)) == fix(x)
+            let fixed_twice = rule.fix(&ctx_fixed).unwrap();
+            assert_eq!(
+                fixed, fixed_twice,
+                "fix() is not idempotent for input: {input:?}\nfirst:  {fixed:?}\nsecond: {fixed_twice:?}"
+            );
+        }
+    }
+
+    /// Disable-via-inline-config must still update prev_level tracking so that
+    /// subsequent headings are computed relative to the (unfixed) disabled heading.
+    #[test]
+    fn test_inline_disable_preserves_content() {
+        let rule = MD001HeadingIncrement::default();
+
+        // H1, then disabled H4 (kept as-is), then H5 (4+1=5 is valid after disabled H4)
+        let content = "# H1\n\n<!-- rumdl-disable-next-line MD001 -->\n#### H4\n\n##### H5\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        // The disabled H4 must remain, and H5 must also remain (valid after prev=4)
+        assert!(fixed.contains("#### H4"), "Disabled heading should be preserved");
+        assert!(fixed.contains("##### H5"), "Heading after disabled should be preserved");
     }
 }
