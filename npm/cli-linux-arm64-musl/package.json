@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-linux-arm64-musl",
-  "version": "0.1.69",
+  "version": "0.1.70",
   "description": "rumdl binary for Linux ARM64 (musl/Alpine)",
   "license": "MIT",
   "repository": {

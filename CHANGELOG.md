@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.70](https://github.com/rvben/rumdl/compare/v0.1.69...v0.1.70) - 2026-04-12
+
+### Fixed
+
+- **MD044**: do not flag proper names inside bare-domain link text ([56a45df](https://github.com/rvben/rumdl/commit/56a45dfa92eb271a56cc8a9d4dc187fa732f1650))
+
 ## [0.1.69](https://github.com/rvben/rumdl/compare/v0.1.68...v0.1.69) - 2026-04-10
 
 ### Fixed
