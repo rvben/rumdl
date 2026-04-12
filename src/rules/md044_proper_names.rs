@@ -411,9 +411,13 @@ impl MD044ProperNames {
                 };
                 let text_end = text_start + link.text.len();
 
-                // If position is within the text portion, skip only if text is a URL
+                // If position is within the text portion, skip only if text is a URL.
+                // WikiLinks use the page name as both text and url; never treat them
+                // as bare-domain URLs regardless of whether the name contains dots.
                 if byte_pos >= text_start && byte_pos < text_end {
-                    return Self::link_text_is_url(&link.text);
+                    let is_wikilink = matches!(link.link_type, LinkType::WikiLink { .. });
+                    return Self::link_text_is_url(&link.text)
+                        || (!is_wikilink && Self::link_text_matches_link_url(&link.text, &link.url));
                 }
                 // Position is in the URL/reference portion, skip it
                 return true;
@@ -443,10 +447,49 @@ impl MD044ProperNames {
     }
 
     /// Check if link text is a URL that should not have proper name corrections.
-    /// Matches markdownlint behavior: skip text starting with `http://`, `https://`, or `www.`.
     fn link_text_is_url(text: &str) -> bool {
         let lower = text.trim().to_ascii_lowercase();
-        lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("www.")
+        lower.starts_with("http://")
+            || lower.starts_with("https://")
+            || lower.starts_with("www.")
+            || lower.starts_with("//")
+    }
+
+    /// Check if link text is the bare hostname/path of its destination URL.
+    ///
+    /// When the display text is the URL with the scheme stripped (e.g.,
+    /// `[example.github.io](https://example.github.io)`), the text is a domain
+    /// label, not a prose reference to a product, and should not be corrected.
+    ///
+    /// Requires the text to contain a dot, which distinguishes domain-like display
+    /// text from single-word WikiLink targets (e.g. `[[javascript]]`) where
+    /// `url == text` but neither is a domain name. Dotted WikiLink targets are
+    /// excluded separately via the `!is_wikilink` guard in `is_in_link`. Comparison
+    /// is case-insensitive because URL schemes and hostnames are case-insensitive.
+    fn link_text_matches_link_url(text: &str, url: &str) -> bool {
+        let text = text.trim();
+        // Only domain-like text (containing a dot) can be a bare hostname.
+        if !text.contains('.') {
+            return false;
+        }
+        let url_lower = url.to_ascii_lowercase();
+        let url_without_scheme = url_lower
+            .strip_prefix("https://")
+            .or_else(|| url_lower.strip_prefix("http://"))
+            .or_else(|| url_lower.strip_prefix("//"))
+            .unwrap_or(&url_lower);
+        let text_lower = text.to_ascii_lowercase();
+        // Exact match: text equals the URL with the scheme removed.
+        if url_without_scheme == text_lower.as_str() {
+            return true;
+        }
+        // Prefix match: text is the hostname portion and the URL has a path/query/fragment.
+        url_without_scheme.len() > text_lower.len()
+            && url_without_scheme.starts_with(text_lower.as_str())
+            && matches!(
+                url_without_scheme.as_bytes().get(text_lower.len()),
+                Some(b'/') | Some(b'?') | Some(b'#')
+            )
     }
 
     /// Check if a position within a line falls inside an angle-bracket URL (`<scheme://...>`).
@@ -1781,7 +1824,9 @@ Regular javascript here.
     fn test_non_url_link_text_still_flagged() {
         let rule = MD044ProperNames::new(vec!["GitHub".to_string()], true);
 
-        // Link text that is NOT a URL should still be flagged
+        // Only prose descriptions in link text should be flagged.
+        // Bare-domain, protocol-relative, and scheme-prefixed link texts that
+        // match the destination URL are all URLs and must not be corrected.
         let content = r#"[github.com/org/repo](https://github.com/org/repo)
 
 [Visit github](https://github.com/org/repo)
@@ -1793,11 +1838,19 @@ Regular javascript here.
         let ctx = create_context(content);
         let result = rule.check(&ctx).unwrap();
 
-        assert_eq!(result.len(), 4, "Non-URL link text should be flagged, got: {result:?}");
-        assert!(result.iter().any(|w| w.line == 1)); // github.com (no protocol)
-        assert!(result.iter().any(|w| w.line == 3)); // Visit github
-        assert!(result.iter().any(|w| w.line == 5)); // //github.com (protocol-relative)
-        assert!(result.iter().any(|w| w.line == 7)); // ftp://github.com
+        // Line 1: bare-domain text matches destination — not flagged
+        // Line 3: prose description — flagged
+        // Line 5: protocol-relative URL text — not flagged
+        // Line 7: ftp:// URL text matches destination — not flagged
+        assert_eq!(
+            result.len(),
+            1,
+            "Only prose link text should be flagged, got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.line == 3),
+            "Expected 'Visit github' on line 3 to be flagged"
+        );
     }
 
     #[test]
@@ -3107,5 +3160,118 @@ Some javascript text.
         let ctx = create_context(content);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "Fix should be a no-op when content is already correct");
+    }
+
+    // --- Bare-domain link text: display text is the destination URL with scheme stripped ---
+
+    #[test]
+    fn test_bare_domain_link_text_not_flagged() {
+        // `[ravencentric.github.io](https://ravencentric.github.io)` — the display text
+        // is the URL with the scheme stripped; "github" here is a domain label, not a
+        // reference to "GitHub" the product, and must not be corrected.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "My site is [ravencentric.github.io](https://ravencentric.github.io).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag 'github' in a bare-domain link text that matches the link URL: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bare_domain_link_text_not_fixed() {
+        // fix() must not rewrite the link text when it is the bare URL hostname.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "My site is [ravencentric.github.io](https://ravencentric.github.io).\n";
+        let ctx = create_context(content);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "fix() must not alter bare-domain link text that matches the destination URL"
+        );
+    }
+
+    #[test]
+    fn test_bare_domain_link_text_with_path_not_flagged() {
+        // Display text is the hostname only; destination has a path.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "Visit [ravencentric.github.io](https://ravencentric.github.io/projects).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag 'github' when bare-domain text is the hostname of its destination URL: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bare_domain_link_text_full_path_not_flagged() {
+        // Display text is the full URL-without-scheme including a path.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "See [ravencentric.github.io/blog](https://ravencentric.github.io/blog).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag 'github' when link text is the full URL path without scheme: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_github_product_name_in_link_text_still_flagged() {
+        // `[github pages](https://pages.github.com)` — the display text is a human
+        // description, not a bare domain; "github" should still be corrected to "GitHub".
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "Hosted on [github pages](https://pages.github.com).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should still flag 'github' in descriptive link text that does not match the destination URL"
+        );
+    }
+
+    #[test]
+    fn test_protocol_relative_bare_domain_link_text_not_flagged() {
+        // Protocol-relative URL `[github.io](//github.io)`.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "See [github.io](//github.io).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag 'github' in bare-domain text matching a protocol-relative destination: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_dotted_wikilink_target_still_flagged() {
+        // `[[node.js]]` is a WikiLink whose page name contains a dot.
+        // The dot guard alone does not protect it because text == url == "node.js".
+        // The is_in_link WikiLink guard must prevent bare-domain suppression,
+        // so the improper capitalization is still caught.
+        let rule = MD044ProperNames::new(vec!["Node.js".to_string()], false);
+        let content = "See [[node.js]] for details.\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should flag 'node.js' in a dotted WikiLink target: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bare_domain_link_text_case_insensitive_url() {
+        // URL with uppercase scheme `[github.io](HTTPS://github.io)` — the scheme is
+        // case-insensitive, so the display text should still be recognised as a bare domain.
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let content = "See [github.io](HTTPS://github.io).\n";
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag bare-domain text when destination URL has an uppercase scheme: {result:?}"
+        );
     }
 }

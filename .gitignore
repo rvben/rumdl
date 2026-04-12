@@ -25,6 +25,7 @@ uv.lock
 site/
 docs/superpowers/
 docs/design/
+.claude/investigations/
 
 # npm platform package binaries
 npm/cli-*/rumdl
