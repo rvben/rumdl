@@ -35,6 +35,25 @@ fn test_flavor_display_is_consistent_between_config_and_config_get() {
     );
 }
 
+/// rumdl config --no-defaults must show non-default flavor in lowercase quoted form
+#[test]
+fn test_flavor_display_lowercase_in_no_defaults_mode() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join(".rumdl.toml"), "[global]\nflavor = \"mkdocs\"\n").unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "--no-defaults"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("flavor = \"mkdocs\""),
+        "`rumdl config --no-defaults` should show `flavor = \"mkdocs\"`, got:\n{stdout}"
+    );
+}
+
 /// Flavor value in rumdl config output must be lowercase regardless of which flavor is set
 #[test]
 fn test_flavor_display_lowercase_when_set_to_mkdocs() {
@@ -127,7 +146,7 @@ fn test_config_get_unknown_bare_name_errors_gracefully() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("MD999") || stderr.contains("Unknown"),
-        "Error message should mention the unknown key, got:\n{stderr}"
+        stderr.contains("MD999"),
+        "Error message should include the unknown rule name, got:\n{stderr}"
     );
 }

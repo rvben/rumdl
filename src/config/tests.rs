@@ -3116,3 +3116,47 @@ fn test_user_config_settings_apply_when_markdownlint_present() {
         "User config line-length should apply when markdownlint project config is present"
     );
 }
+
+#[serial_test::serial]
+#[test]
+fn test_markdownlint_config_overrides_user_config_on_conflict() {
+    // When user config and markdownlint project config set the same field,
+    // the markdownlint config (ProjectConfig, precedence 3) must win over
+    // user config (UserConfig, precedence 1) via merge_override.
+    //
+    // Scenario: user wants MD001 disabled; the project's markdownlint config
+    // disables MD013 instead. The project's disable list replaces the user's.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    let user_config_dir = temp_dir.path().join("user_config3");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+    fs::write(rumdl_config_dir.join("rumdl.toml"), "[global]\ndisable = [\"MD001\"]\n").unwrap();
+
+    // Markdownlint config disables MD013, does not mention MD001
+    let project_dir = temp_dir.path().join("project3");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(project_dir.join(".markdownlint.yaml"), "MD013: false\n").unwrap();
+
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    env::set_current_dir(&original_dir).unwrap();
+
+    // Markdownlint disable list has higher precedence and replaces the user config's list
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "Markdownlint config should disable MD013, got disable={:?}",
+        config.global.disable
+    );
+    assert!(
+        !config.global.disable.contains(&"MD001".to_string()),
+        "Markdownlint config's disable list replaces user config's; MD001 should not be disabled, got disable={:?}",
+        config.global.disable
+    );
+}
