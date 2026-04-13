@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.71](https://github.com/rvben/rumdl/compare/v0.1.70...v0.1.71) - 2026-04-13
+
+### Added
+
+- **config**: support bare rule name in rumdl config get ([8369fb1](https://github.com/rvben/rumdl/commit/8369fb1b4bec52649ea880556075e48845e0b833))
+
+### Fixed
+
+- **config**: move test module to end of flavor.rs to satisfy clippy items_after_test_module ([e30714d](https://github.com/rvben/rumdl/commit/e30714d0c2b9840dc13e1bde3dcc31a05f2226e1))
+- **config**: load user config alongside discovered markdownlint project config ([c0f79c1](https://github.com/rvben/rumdl/commit/c0f79c195ff6a7490072dc7209f9703ec99cb97e))
+- **config**: display global.flavor as lowercase quoted string in rumdl config output ([b162295](https://github.com/rvben/rumdl/commit/b16229569551ced22026508bc45b28c08a83a166))
+
 ## [0.1.70](https://github.com/rvben/rumdl/compare/v0.1.69...v0.1.70) - 2026-04-12
 
 ### Fixed
