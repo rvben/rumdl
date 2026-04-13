@@ -49,8 +49,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
 
     if should_show_change_message {
         println!(
-            "\n{} {} {}/{} issues in {} {} ({}ms)",
-            change_label, change_verb, summary_issues_fixed, total_issues, files_fixed, files_fixed_text, duration_ms
+            "\n{change_label} {change_verb} {summary_issues_fixed}/{total_issues} issues in {files_fixed} {files_fixed_text} ({duration_ms}ms)"
         );
     } else if has_issues {
         // In non-fix mode, show issues summary with simplified count when appropriate
