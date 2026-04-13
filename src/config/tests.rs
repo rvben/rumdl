@@ -1569,6 +1569,7 @@ enable = ["MD001"]
     );
 }
 
+#[serial_test::serial]
 #[test]
 fn test_user_config_as_fallback_when_no_project_config() {
     // Ruff model: User config is used as fallback when no project config exists
@@ -1621,6 +1622,7 @@ line-length = 88
     env::set_current_dir(original_dir).unwrap();
 }
 
+#[serial_test::serial]
 #[test]
 fn test_user_config_fallback_supports_extends() {
     // User fallback config should support extends chains
