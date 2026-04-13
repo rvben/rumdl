@@ -11,6 +11,7 @@ pub struct PrintResultsArgs<'a> {
     pub files_with_issues: usize,
     pub files_fixed: usize,
     pub total_issues: usize,
+    pub summary_issues_fixed: usize,
     pub total_issues_fixed: usize,
     pub total_fixable_issues: usize,
     pub total_files_processed: usize,
@@ -25,6 +26,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         files_with_issues,
         files_fixed,
         total_issues,
+        summary_issues_fixed,
         total_issues_fixed,
         total_fixable_issues,
         total_files_processed,
@@ -33,60 +35,46 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
     // Choose singular or plural form of "file" based on count
     let file_text = if total_files_processed == 1 { "file" } else { "files" };
     let files_fixed_text = if files_fixed == 1 { "file" } else { "files" };
+    let dry_run = args.diff || args.check;
+    let change_label = if dry_run {
+        "Would fix:".yellow().bold().to_string()
+    } else {
+        "Fixed:".green().bold().to_string()
+    };
+    let change_verb = if dry_run { "Would fix" } else { "Fixed" };
 
     // Show results summary
-    // In fix mode, show "Fixed" message if we fixed any issues, even if all are now resolved
-    let all_issues_fixed = total_issues > 0 && total_issues_fixed == total_issues;
-    let should_show_fixed_message = args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0;
+    // In fix/format mode, show a change summary whenever we changed files or would change them in dry-run mode.
+    let should_show_change_message = args.fix_mode != crate::FixMode::Check && total_issues_fixed > 0;
 
-    if has_issues {
-        // If fix mode is enabled, only show the fixed summary
-        if should_show_fixed_message {
-            println!(
-                "\n{} Fixed {}/{} issues in {} {} ({}ms)",
-                "Fixed:".green().bold(),
-                total_issues_fixed,
-                total_issues,
-                files_fixed,
-                files_fixed_text,
-                duration_ms
-            );
-        } else {
-            // In non-fix mode, show issues summary with simplified count when appropriate
-            let files_display = if files_with_issues == total_files_processed {
-                // Just show the number if all files have issues
-                format!("{files_with_issues}")
-            } else {
-                // Show the fraction if only some files have issues
-                format!("{files_with_issues}/{total_files_processed}")
-            };
-
-            println!(
-                "\n{} Found {} issues in {} {} ({}ms)",
-                "Issues:".yellow(),
-                total_issues,
-                files_display,
-                file_text,
-                duration_ms
-            );
-
-            if args.fix_mode == crate::FixMode::Check && total_fixable_issues > 0 {
-                // Display the exact count of fixable issues
-                println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
-            }
-        }
-    } else if all_issues_fixed {
-        // All issues were fixed - show success message with fix count
-        // This matches markdownlint behavior: show that fixes were applied, exit 0
+    if should_show_change_message {
         println!(
-            "\n{} Fixed {}/{} issues in {} {} ({}ms)",
-            "Fixed:".green().bold(),
-            total_issues_fixed,
+            "\n{} {} {}/{} issues in {} {} ({}ms)",
+            change_label, change_verb, summary_issues_fixed, total_issues, files_fixed, files_fixed_text, duration_ms
+        );
+    } else if has_issues {
+        // In non-fix mode, show issues summary with simplified count when appropriate
+        let files_display = if files_with_issues == total_files_processed {
+            // Just show the number if all files have issues
+            format!("{files_with_issues}")
+        } else {
+            // Show the fraction if only some files have issues
+            format!("{files_with_issues}/{total_files_processed}")
+        };
+
+        println!(
+            "\n{} Found {} issues in {} {} ({}ms)",
+            "Issues:".yellow(),
             total_issues,
-            files_fixed,
-            files_fixed_text,
+            files_display,
+            file_text,
             duration_ms
         );
+
+        if args.fix_mode == crate::FixMode::Check && total_fixable_issues > 0 {
+            // Display the exact count of fixable issues
+            println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
+        }
     } else {
         println!(
             "\n{} No issues found in {} {} ({}ms)",

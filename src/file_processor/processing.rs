@@ -24,6 +24,7 @@ pub struct FileProcessResult {
     pub has_issues: bool,
     pub issues_found: usize,
     pub issues_fixed: usize,
+    pub summary_issues_fixed: usize,
     pub fixable_issues: usize,
     /// In fix mode, contains only remaining (unfixed) warnings.
     /// In check mode, contains all warnings.
@@ -123,6 +124,7 @@ pub fn process_file_with_formatter(
             has_issues: false,
             issues_found: 0,
             issues_fixed: 0,
+            summary_issues_fixed: 0,
             fixable_issues: 0,
             warnings: Vec::new(),
             file_index,
@@ -146,6 +148,7 @@ pub fn process_file_with_formatter(
                 has_issues: false,
                 issues_found: 0,
                 issues_fixed: 0,
+                summary_issues_fixed: 0,
                 fixable_issues: 0,
                 warnings: Vec::new(),
                 file_index,
@@ -250,11 +253,19 @@ pub fn process_file_with_formatter(
             });
         }
 
+        let summary_issues_fixed = if total_warnings > 0 {
+            let remaining_warnings = relint_fixed_file_content(&content, file_path, rules, config);
+            count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings)
+        } else {
+            warnings_fixed
+        };
+
         // Don't actually write the file in diff mode, but report how many would be fixed
         return FileProcessResult {
             has_issues: total_warnings > 0 || warnings_fixed > 0,
             issues_found: total_warnings,
             issues_fixed: warnings_fixed,
+            summary_issues_fixed,
             fixable_issues: fixable_warnings,
             warnings: all_warnings,
             file_index,
@@ -334,49 +345,15 @@ pub fn process_file_with_formatter(
                 has_issues: false,
                 issues_found: 0,
                 issues_fixed: warnings_fixed,
+                summary_issues_fixed: warnings_fixed,
                 fixable_issues: 0,
                 warnings: Vec::new(),
                 file_index,
             };
         }
 
-        // Re-lint the fixed content to see which warnings remain
-        // This is needed both for display and to determine exit code (following Ruff's convention)
-        //
-        // Apply the same filtering as the original lint to ensure consistent behavior:
-        // 1. Per-file-ignores: filter rules based on config
-        // 2. Inline config: filter warnings based on inline directives
-        let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
-        let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
-            rules
-                .iter()
-                .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-                .collect()
-        } else {
-            rules.iter().collect()
-        };
-
-        // Use per-file flavor for re-lint (same as initial lint)
-        let flavor = config.get_flavor_for_file(Path::new(file_path));
-        let fixed_ctx = LintContext::new(&content, flavor, Some(PathBuf::from(file_path)));
-        let mut remaining_warnings = Vec::new();
-
-        for rule in &filtered_rules {
-            if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
-                // Filter warnings based on inline config directives
-                let filtered_warnings = rule_warnings.into_iter().filter(|warning| {
-                    let rule_name = warning.rule_name.as_deref().unwrap_or(rule.name());
-                    // Extract base rule name for sub-rules like "MD029-style" -> "MD029"
-                    let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
-                        &rule_name[..dash_pos]
-                    } else {
-                        rule_name
-                    };
-                    !fixed_ctx.inline_config().is_rule_disabled(base_rule_name, warning.line)
-                });
-                remaining_warnings.extend(filtered_warnings);
-            }
-        }
+        // Re-lint the fixed content to see which warnings remain.
+        let remaining_warnings = relint_fixed_file_content(&content, file_path, rules, config);
 
         // Compute per-warning fixed status by comparing pre-fix warnings
         // against post-fix remaining warnings
@@ -395,6 +372,7 @@ pub fn process_file_with_formatter(
                     })
             })
             .collect();
+        let summary_issues_fixed = fixed_status.iter().filter(|&&was_fixed| was_fixed).count();
 
         // Show fix results in streaming output
         if !silent {
@@ -456,6 +434,7 @@ pub fn process_file_with_formatter(
             has_issues: !remaining_warnings.is_empty(),
             issues_found: total_warnings,
             issues_fixed: warnings_fixed,
+            summary_issues_fixed,
             fixable_issues: fixable_warnings,
             warnings: remaining_warnings,
             file_index,
@@ -466,10 +445,72 @@ pub fn process_file_with_formatter(
         has_issues: true,
         issues_found: total_warnings,
         issues_fixed: warnings_fixed,
+        summary_issues_fixed: warnings_fixed,
         fixable_issues: fixable_warnings,
         warnings: all_warnings,
         file_index,
     }
+}
+
+fn relint_fixed_file_content(
+    content: &str,
+    file_path: &str,
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+) -> Vec<rumdl_lib::rule::LintWarning> {
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+    let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
+        rules
+            .iter()
+            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
+            .collect()
+    } else {
+        rules.iter().collect()
+    };
+
+    let flavor = config.get_flavor_for_file(Path::new(file_path));
+    let fixed_ctx = LintContext::new(content, flavor, Some(PathBuf::from(file_path)));
+    let mut remaining_warnings = Vec::new();
+
+    for rule in &filtered_rules {
+        if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
+            let filtered_warnings = rule_warnings.into_iter().filter(|warning| {
+                let rule_name = warning.rule_name.as_deref().unwrap_or(rule.name());
+                let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
+                    &rule_name[..dash_pos]
+                } else {
+                    rule_name
+                };
+                !fixed_ctx.inline_config().is_rule_disabled(base_rule_name, warning.line)
+            });
+            remaining_warnings.extend(filtered_warnings);
+        }
+    }
+
+    remaining_warnings
+}
+
+pub(crate) fn count_actually_fixed_warnings(
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    all_warnings: &[LintWarning],
+    remaining_warnings: &[LintWarning],
+) -> usize {
+    all_warnings
+        .iter()
+        .filter(|warning| {
+            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+            let is_fixable = is_rule_cli_fixable(rules, config, rule_name);
+            warning.fix.is_some()
+                && is_fixable
+                && !remaining_warnings.iter().any(|w| {
+                    w.line == warning.line
+                        && w.column == warning.column
+                        && w.rule_name == warning.rule_name
+                        && w.message == warning.message
+                })
+        })
+        .count()
 }
 
 /// Result type for file processing that includes index data for cross-file analysis

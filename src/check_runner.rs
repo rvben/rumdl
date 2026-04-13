@@ -177,6 +177,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         mut files_with_issues,
         files_fixed,
         mut total_issues,
+        summary_issues_fixed,
         total_issues_fixed,
         total_fixable_issues,
         total_files_processed,
@@ -213,6 +214,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut files_with_issues = 0;
         let mut files_fixed = 0;
         let mut total_issues = 0;
+        let mut summary_issues_fixed = 0;
         let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
         let total_files_processed = results.len();
@@ -222,11 +224,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 has_issues: file_has_issues,
                 issues_found,
                 issues_fixed,
+                summary_issues_fixed: file_summary_issues_fixed,
                 fixable_issues,
                 warnings,
                 file_index,
             } = result;
 
+            summary_issues_fixed += file_summary_issues_fixed;
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
             total_issues += issues_found;
@@ -280,6 +284,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             files_with_issues,
             files_fixed,
             total_issues,
+            summary_issues_fixed,
             total_issues_fixed,
             total_fixable_issues,
             total_files_processed,
@@ -292,6 +297,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut files_with_issues = 0;
         let mut files_fixed = 0;
         let mut total_issues = 0;
+        let mut summary_issues_fixed = 0;
         let mut total_issues_fixed = 0;
         let mut total_fixable_issues = 0;
         let mut total_files_processed = 0;
@@ -302,6 +308,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 has_issues: file_has_issues,
                 issues_found,
                 issues_fixed,
+                summary_issues_fixed: file_summary_issues_fixed,
                 fixable_issues,
                 warnings,
                 file_index,
@@ -328,6 +335,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             }
 
             total_files_processed += 1;
+            summary_issues_fixed += file_summary_issues_fixed;
             total_issues_fixed += issues_fixed;
             total_fixable_issues += fixable_issues;
             total_issues += issues_found;
@@ -376,6 +384,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             files_with_issues,
             files_fixed,
             total_issues,
+            summary_issues_fixed,
             total_issues_fixed,
             total_fixable_issues,
             total_files_processed,
@@ -538,6 +547,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             files_with_issues,
             files_fixed,
             total_issues,
+            summary_issues_fixed,
             total_issues_fixed,
             total_fixable_issues,
             total_files_processed,

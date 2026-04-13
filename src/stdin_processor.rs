@@ -176,7 +176,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         if has_issues {
             let mut fixed_content = content.clone();
             let file_path = args.stdin_filename.as_ref().map(std::path::Path::new);
-            let warnings_fixed = file_processor::apply_fixes_coordinated(
+            let _warnings_fixed = file_processor::apply_fixes_coordinated(
                 rules,
                 &all_warnings,
                 &mut fixed_content,
@@ -224,6 +224,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                     remaining_warnings.extend(filtered);
                 }
             }
+            let actual_warnings_fixed =
+                file_processor::count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings);
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, quiet, silent);
@@ -256,7 +258,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                         let mut output = String::new();
                         for warning in &all_warnings {
                             let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                            let was_fixed = warning.fix.is_some()
+                            let was_fixed = file_processor::is_rule_cli_fixable(rules, config, rule_name)
+                                && warning.fix.is_some()
                                 && !remaining_warnings.iter().any(|w| {
                                     w.line == warning.line
                                         && w.column == warning.column
@@ -308,7 +311,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                     fix_writer
                         .writeln(&format!(
                             "\n{} issue(s) fixed, {} issue(s) remaining",
-                            warnings_fixed,
+                            actual_warnings_fixed,
                             remaining_warnings.len()
                         ))
                         .ok();
