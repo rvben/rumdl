@@ -1,5 +1,6 @@
 mod check_runner_tests;
 mod cli_alias_test;
+mod cli_config_test;
 mod cli_duplication_test;
 mod cli_explain_test;
 mod cli_fail_on_test;

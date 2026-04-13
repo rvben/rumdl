@@ -154,7 +154,7 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
     }
     if g.flavor.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
-            format!("flavor = {:?}", g.flavor.value),
+            format!("flavor = \"{}\"", g.flavor.value),
             format!("[from {}]", format_provenance(g.flavor.source)),
         ));
         has_global_section = true;
@@ -321,7 +321,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
     // Add flavor if it's set
     let mut global_lines = global_lines;
     global_lines.push((
-        format!("flavor = {:?}", g.flavor.value),
+        format!("flavor = \"{}\"", g.flavor.value),
         format!("[from {}]", format_provenance(g.flavor.source)),
     ));
     global_lines.push((String::new(), String::new()));
