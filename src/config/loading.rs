@@ -766,14 +766,18 @@ impl SourcedConfig<ConfigLoaded> {
                 if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward() {
                     let path_str = markdownlint_path.display().to_string();
                     log::debug!("[rumdl-config] Found markdownlint config: {path_str}");
+                    // Load user config first as a base so rumdl-specific settings (e.g. flavor,
+                    // cache) take effect. Markdownlint configs cannot express these settings.
+                    // The markdownlint fragment uses ConfigSource::ProjectConfig (precedence 3)
+                    // vs UserConfig (precedence 1), so project settings always win on overlap.
+                    Self::load_user_config_as_fallback(&mut sourced_config, user_config_dir)?;
                     match parsers::load_from_markdownlint(&path_str) {
                         Ok(fragment) => {
                             sourced_config.merge(fragment);
                             sourced_config.loaded_files.push(path_str);
                         }
                         Err(_e) => {
-                            log::debug!("[rumdl-config] Failed to load markdownlint config, trying user config");
-                            Self::load_user_config_as_fallback(&mut sourced_config, user_config_dir)?;
+                            log::debug!("[rumdl-config] Failed to load markdownlint config");
                         }
                     }
                 } else {
