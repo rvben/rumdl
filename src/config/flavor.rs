@@ -169,6 +169,17 @@ pub fn normalize_key(key: &str) -> String {
     }
 }
 
+/// Warns if a per-file-ignores pattern contains a comma but no braces.
+/// This is a common mistake where users expect "A.md,B.md" to match both files,
+/// but glob syntax requires "{A.md,B.md}" for brace expansion.
+pub(super) fn warn_comma_without_brace_in_pattern(pattern: &str, config_file: &str) {
+    if pattern.contains(',') && !pattern.contains('{') {
+        eprintln!("Warning: Pattern \"{pattern}\" in {config_file} contains a comma but no braces.");
+        eprintln!("  To match multiple files, use brace expansion: \"{{{pattern}}}\"");
+        eprintln!("  Or use separate entries for each file.");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,16 +233,5 @@ mod tests {
                 "Display(\"{displayed}\") for {variant:?} round-trips to a different variant: {parsed:?}"
             );
         }
-    }
-}
-
-/// Warns if a per-file-ignores pattern contains a comma but no braces.
-/// This is a common mistake where users expect "A.md,B.md" to match both files,
-/// but glob syntax requires "{A.md,B.md}" for brace expansion.
-pub(super) fn warn_comma_without_brace_in_pattern(pattern: &str, config_file: &str) {
-    if pattern.contains(',') && !pattern.contains('{') {
-        eprintln!("Warning: Pattern \"{pattern}\" in {config_file} contains a comma but no braces.");
-        eprintln!("  To match multiple files, use brace expansion: \"{{{pattern}}}\"");
-        eprintln!("  Or use separate entries for each file.");
     }
 }
