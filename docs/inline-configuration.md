@@ -144,6 +144,7 @@ Previous configuration state is restored.
 The API follows standard REST conventions.
 
 <!-- rumdl-disable MD013 -->
+
 ```bash
 curl -X POST <https://api.example.com/v1/users/create> -H "Authorization: Bearer very-long-token-that-would-normally-violate-line-length" -d '{"name": "John Doe"}'
 ```

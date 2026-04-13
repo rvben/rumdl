@@ -19,6 +19,7 @@ puts "Hello"
 
 > Blockquote content
 {:#special-quote .emphasized}
+
 ```
 
 ### Span IALs
