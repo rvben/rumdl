@@ -3160,3 +3160,43 @@ fn test_markdownlint_config_overrides_user_config_on_conflict() {
         config.global.disable
     );
 }
+
+#[serial_test::serial]
+#[test]
+fn test_user_config_applies_when_markdownlint_config_is_malformed() {
+    // When the discovered markdownlint config fails to parse, the user config
+    // that was already loaded as a base layer must still apply.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    let user_config_dir = temp_dir.path().join("user_config_malformed");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+    fs::write(rumdl_config_dir.join("rumdl.toml"), "[global]\nflavor = \"obsidian\"\n").unwrap();
+
+    let project_dir = temp_dir.path().join("project_malformed");
+    fs::create_dir_all(&project_dir).unwrap();
+    // Unclosed YAML mapping — guaranteed parse failure
+    fs::write(project_dir.join(".markdownlint.yaml"), "{ not: [valid yaml\n").unwrap();
+
+    env::set_current_dir(&project_dir).unwrap();
+
+    let result = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir));
+
+    env::set_current_dir(&original_dir).unwrap();
+
+    // Load must succeed — a bad markdownlint file is not a fatal error
+    let config: Config = result
+        .expect("load_with_discovery_impl should succeed even with malformed markdownlint config")
+        .into_validated_unchecked()
+        .into();
+
+    // User config flavor must still apply because it was loaded before the parse attempt
+    assert_eq!(
+        config.global.flavor,
+        MarkdownFlavor::Obsidian,
+        "User config flavor should apply when markdownlint config is malformed"
+    );
+}

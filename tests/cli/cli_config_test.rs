@@ -150,3 +150,59 @@ fn test_config_get_unknown_bare_name_errors_gracefully() {
         "Error message should include the unknown rule name, got:\n{stderr}"
     );
 }
+
+/// rumdl config get must accept lowercase rule names (normalize_key handles case)
+#[test]
+fn test_config_get_bare_rule_name_is_case_insensitive() {
+    let temp_dir = tempdir().unwrap();
+
+    let lower = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "md076", "--no-config"])
+        .output()
+        .unwrap();
+
+    let upper = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "MD076", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(
+        lower.status.success(),
+        "`rumdl config get md076` (lowercase) should succeed, stderr:\n{}",
+        String::from_utf8_lossy(&lower.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&lower.stdout),
+        String::from_utf8_lossy(&upper.stdout),
+        "`rumdl config get md076` and `rumdl config get MD076` must produce identical output"
+    );
+}
+
+/// Fields in bare-rule output must be sorted alphabetically
+#[test]
+fn test_config_get_bare_rule_name_output_is_sorted() {
+    let temp_dir = tempdir().unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "MD076", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // MD076 has two fields: allow-loose-continuation and style.
+    // Alphabetically, allow-loose-continuation < style, so it must appear first.
+    let pos_allow = stdout
+        .find("allow-loose-continuation")
+        .expect("Output should contain allow-loose-continuation");
+    let pos_style = stdout.find("MD076.style").expect("Output should contain MD076.style");
+
+    assert!(
+        pos_allow < pos_style,
+        "Fields must be sorted alphabetically: allow-loose-continuation ({pos_allow}) should precede style ({pos_style})"
+    );
+}
