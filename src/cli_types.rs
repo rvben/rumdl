@@ -1,4 +1,5 @@
 use clap::{Args, ValueEnum};
+use std::ops::{Deref, DerefMut};
 
 /// Fix mode determines exit code behavior: Check/CheckFix exit 1 on violations, Format exits 0
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -24,67 +25,52 @@ pub enum FailOn {
 }
 
 #[derive(Args, Debug)]
-pub struct CheckArgs {
-    /// Files or directories to lint (use '-' for stdin)
-    #[arg(required = false)]
-    pub paths: Vec<String>,
-
-    /// Fix issues automatically where possible
-    #[arg(short, long, default_value = "false")]
-    pub fix: bool,
-
-    /// Show diff of what would be fixed instead of fixing files
-    #[arg(long, help = "Show diff of what would be fixed instead of fixing files")]
-    pub diff: bool,
-
-    /// Exit with code 1 if any formatting changes would be made (like rustfmt --check)
-    #[arg(long, help = "Exit with code 1 if any formatting changes would be made (for CI)")]
-    pub check: bool,
-
-    /// List all available rules
-    #[arg(short, long, default_value = "false")]
-    pub list_rules: bool,
-
+pub struct SharedCliArgs {
     /// Disable specific rules (comma-separated)
-    #[arg(short, long)]
+    #[arg(short, long, help = "Disable specific rules (comma-separated)")]
     pub disable: Option<String>,
 
     /// Enable only specific rules (comma-separated)
-    #[arg(short, long, visible_alias = "rules")]
+    #[arg(
+        short,
+        long,
+        visible_alias = "rules",
+        help = "Enable only specific rules (comma-separated)"
+    )]
     pub enable: Option<String>,
 
     /// Extend the list of enabled rules (additive with config)
-    #[arg(long)]
+    #[arg(long, help = "Extend the list of enabled rules (additive with config)")]
     pub extend_enable: Option<String>,
 
     /// Extend the list of disabled rules (additive with config)
-    #[arg(long)]
+    #[arg(long, help = "Extend the list of disabled rules (additive with config)")]
     pub extend_disable: Option<String>,
 
-    /// Only allow these rules to be fixed (comma-separated). When specified,
-    /// only listed rules will be auto-fixed; all others are treated as unfixable.
-    #[arg(long)]
+    /// Only allow these rules to be fixed (comma-separated)
+    #[arg(long, help = "Only allow these rules to be fixed (comma-separated)")]
     pub fixable: Option<String>,
 
-    /// Prevent these rules from being fixed (comma-separated). Takes precedence
-    /// over --fixable.
-    #[arg(long)]
+    /// Prevent these rules from being fixed (comma-separated)
+    #[arg(long, help = "Prevent these rules from being fixed (comma-separated)")]
     pub unfixable: Option<String>,
 
     /// Exclude specific files or directories (comma-separated glob patterns)
-    #[arg(long)]
+    #[arg(long, help = "Exclude specific files or directories (comma-separated glob patterns)")]
     pub exclude: Option<String>,
 
-    /// Disable all exclude patterns (lint all files regardless of exclude configuration)
+    /// Disable all exclude patterns
     #[arg(long, help = "Disable all exclude patterns")]
     pub no_exclude: bool,
 
-    /// Include only specific files or directories (comma-separated glob patterns).
-    #[arg(long)]
+    /// Include only specific files or directories (comma-separated glob patterns)
+    #[arg(
+        long,
+        help = "Include only specific files or directories (comma-separated glob patterns)"
+    )]
     pub include: Option<String>,
 
     /// Respect .gitignore files when scanning directories
-    /// When not specified, uses config file value (default: true)
     #[arg(
         long,
         num_args(0..=1),
@@ -94,41 +80,94 @@ pub struct CheckArgs {
     )]
     pub respect_gitignore: Option<bool>,
 
-    /// Show detailed output
-    #[arg(short, long)]
-    pub verbose: bool,
-
-    /// Show profiling information
-    #[arg(long)]
-    pub profile: bool,
-
-    /// Show statistics summary of rule violations
-    #[arg(long)]
-    pub statistics: bool,
-
-    /// Print diagnostics, but nothing else
-    #[arg(short, long, help = "Print diagnostics, but nothing else")]
+    /// Print diagnostics, but suppress summary lines
+    #[arg(short, long, help = "Print diagnostics, but suppress summary lines")]
     pub quiet: bool,
-
-    /// Output format: text (default) or json
-    #[arg(long, short = 'o', default_value_t, value_enum)]
-    pub output: Output,
-
-    /// Output format for linting results (default: text).
-    ///
-    /// Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text
-    #[arg(long, value_enum)]
-    pub output_format: Option<OutputFormat>,
 
     /// Show absolute file paths instead of project-relative paths
     #[arg(long, help = "Show absolute file paths in output instead of relative paths")]
     pub show_full_path: bool,
 
+    /// Filename to use for stdin input (for context and error messages)
+    #[arg(long, help = "Filename to use when reading from stdin (e.g., README.md)")]
+    pub stdin_filename: Option<String>,
+
+    /// Output diagnostics to stderr instead of stdout
+    #[arg(long, help = "Output diagnostics to stderr instead of stdout")]
+    pub stderr: bool,
+
+    /// Disable caching (re-check all files)
+    #[arg(long, help = "Disable caching (re-check all files)")]
+    pub no_cache: bool,
+
+    /// Directory to store cache files
+    #[arg(
+        long,
+        help = "Directory to store cache files (default: .rumdl_cache, or $RUMDL_CACHE_DIR, or cache-dir in config)"
+    )]
+    pub cache_dir: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct CheckArgs {
+    /// Files or directories to check (use '-' for stdin)
+    #[arg(required = false)]
+    pub paths: Vec<String>,
+
+    /// Fix issues automatically where possible
+    #[arg(short, long, default_value = "false")]
+    pub fix: bool,
+
+    /// Show diff of what would be fixed instead of fixing files
+    #[arg(
+        long,
+        alias = "dry-run",
+        help = "Show diff of what would be fixed instead of fixing files"
+    )]
+    pub diff: bool,
+
+    /// Exit with code 1 if any formatting changes would be made (like rustfmt --check)
+    #[arg(
+        long,
+        hide = true,
+        help = "Exit with code 1 if any formatting changes would be made (for CI)"
+    )]
+    pub check: bool,
+
+    /// List all available rules
+    #[arg(short, long, default_value = "false")]
+    pub list_rules: bool,
+
+    #[command(flatten)]
+    pub shared: SharedCliArgs,
+
+    /// Show detailed output
+    #[arg(short, long, help = "Show detailed output")]
+    pub verbose: bool,
+
+    /// Show profiling information
+    #[arg(long, help = "Show profiling information")]
+    pub profile: bool,
+
+    /// Show statistics summary of rule violations
+    #[arg(long, help = "Show statistics summary of rule violations")]
+    pub statistics: bool,
+
+    /// Legacy alias for --output-format: text (default) or json
+    #[arg(long, short = 'o', default_value_t, value_enum, hide = true)]
+    pub output: Output,
+
+    /// Output format for diagnostics (default: text).
+    ///
+    /// Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text
+    #[arg(long, value_enum)]
+    pub output_format: Option<OutputFormat>,
+
     /// Markdown flavor to use for linting
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor: standard/gfm/commonmark (default), mkdocs, mdx, quarto, obsidian, or kramdown"
+        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, quarto, obsidian, or kramdown"
     )]
     pub flavor: Option<Flavor>,
 
@@ -136,20 +175,8 @@ pub struct CheckArgs {
     #[arg(long, help = "Read from stdin instead of files")]
     pub stdin: bool,
 
-    /// Filename to use for stdin input (for context and error messages)
-    #[arg(long, help = "Filename to use when reading from stdin (e.g., README.md)")]
-    pub stdin_filename: Option<String>,
-
-    /// Output linting results to stderr instead of stdout
-    #[arg(long, help = "Output diagnostics to stderr instead of stdout")]
-    pub stderr: bool,
-
-    /// Disable all logging (but still exit with status code upon detecting diagnostics)
-    #[arg(
-        short,
-        long,
-        help = "Disable all logging (but still exit with status code upon detecting diagnostics)"
-    )]
+    /// Suppress diagnostics and summaries
+    #[arg(short, long, help = "Suppress diagnostics and summaries")]
     pub silent: bool,
 
     /// Run in watch mode by re-running whenever files change
@@ -162,17 +189,6 @@ pub struct CheckArgs {
     /// This is useful for pre-commit, which explicitly passes all changed files.
     #[arg(long, help = "Enforce exclude patterns even for explicitly specified files")]
     pub force_exclude: bool,
-
-    /// Disable caching of lint results
-    #[arg(long, help = "Disable caching (re-check all files)")]
-    pub no_cache: bool,
-
-    /// Directory to store cache files
-    #[arg(
-        long,
-        help = "Directory to store cache files (default: .rumdl_cache, or $RUMDL_CACHE_DIR, or cache-dir in config)"
-    )]
-    pub cache_dir: Option<String>,
 
     /// Control when to exit with code 1: any (default), warning, error, or never
     #[arg(
@@ -188,6 +204,143 @@ pub struct CheckArgs {
 
     #[arg(skip)]
     pub fail_on_mode: FailOn,
+}
+
+#[derive(Args, Debug)]
+pub struct FmtArgs {
+    /// Files or directories to format (use '-' for stdin)
+    #[arg(required = false)]
+    pub paths: Vec<String>,
+
+    /// Show diff of what would be formatted instead of rewriting files
+    #[arg(
+        long,
+        alias = "dry-run",
+        help = "Show diff of what would be formatted instead of rewriting files"
+    )]
+    pub diff: bool,
+
+    /// Exit with code 1 if any formatting changes would be made (for CI)
+    #[arg(long, help = "Exit with code 1 if any formatting changes would be made (for CI)")]
+    pub check: bool,
+
+    /// Hidden compatibility flag from check
+    #[arg(short, long, hide = true, default_value = "false")]
+    pub list_rules: bool,
+
+    #[command(flatten)]
+    pub shared: SharedCliArgs,
+
+    /// Show detailed formatter output
+    #[arg(short, long, help = "Show detailed formatter output")]
+    pub verbose: bool,
+
+    /// Hidden compatibility flag from check
+    #[arg(long, hide = true)]
+    pub profile: bool,
+
+    /// Hidden compatibility flag from check
+    #[arg(long, hide = true)]
+    pub statistics: bool,
+
+    /// Hidden legacy alias for --output-format
+    #[arg(long, short = 'o', default_value_t, value_enum, hide = true)]
+    pub output: Output,
+
+    /// Output format for remaining diagnostics (default: text).
+    ///
+    /// Precedence: --output-format > $RUMDL_OUTPUT_FORMAT > config file > text
+    #[arg(long, value_enum)]
+    pub output_format: Option<OutputFormat>,
+
+    /// Markdown flavor to use while formatting
+    #[arg(
+        long,
+        value_enum,
+        help = "Markdown flavor to use while formatting: standard (also accepts gfm/github/commonmark), mkdocs, mdx, quarto, obsidian, or kramdown"
+    )]
+    pub flavor: Option<Flavor>,
+
+    /// Read Markdown from stdin instead of files
+    #[arg(long, help = "Read Markdown from stdin instead of files")]
+    pub stdin: bool,
+
+    /// Suppress diagnostics and summaries; only formatted content is emitted in stdin/stdout mode
+    #[arg(
+        short,
+        long,
+        help = "Suppress diagnostics and summaries; only formatted content is emitted in stdin/stdout mode"
+    )]
+    pub silent: bool,
+
+    /// Re-run formatting whenever files change
+    #[arg(short, long, help = "Re-run formatting whenever files change")]
+    pub watch: bool,
+
+    /// Hidden deprecated compatibility flag from check
+    #[arg(long, hide = true)]
+    pub force_exclude: bool,
+
+    /// Hidden compatibility flag; fmt always exits with formatter-style semantics
+    #[arg(long, value_enum, default_value_t, hide = true)]
+    pub fail_on: FailOn,
+}
+
+impl From<FmtArgs> for CheckArgs {
+    fn from(args: FmtArgs) -> Self {
+        Self {
+            paths: args.paths,
+            // `fmt` activates fixing via `FixMode::Format` set in main, not via this flag.
+            // The flag is intentionally `false` so the check-dispatch path does not
+            // independently enable `FixMode::CheckFix`.
+            fix: false,
+            diff: args.diff,
+            check: args.check,
+            list_rules: args.list_rules,
+            shared: args.shared,
+            verbose: args.verbose,
+            profile: args.profile,
+            statistics: args.statistics,
+            output: args.output,
+            output_format: args.output_format,
+            flavor: args.flavor,
+            stdin: args.stdin,
+            silent: args.silent,
+            watch: args.watch,
+            force_exclude: args.force_exclude,
+            fail_on: args.fail_on,
+            fix_mode: FixMode::default(),
+            fail_on_mode: FailOn::default(),
+        }
+    }
+}
+
+impl Deref for CheckArgs {
+    type Target = SharedCliArgs;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shared
+    }
+}
+
+impl DerefMut for CheckArgs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.shared
+    }
+}
+
+impl Deref for FmtArgs {
+    type Target = SharedCliArgs;
+
+    fn deref(&self) -> &Self::Target {
+        &self.shared
+    }
+}
+
+impl DerefMut for FmtArgs {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.shared
+    }
 }
 
 #[derive(Clone, Debug, Default, ValueEnum)]

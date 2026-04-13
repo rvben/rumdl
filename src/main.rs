@@ -9,7 +9,7 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod cli_types;
-pub use cli_types::{CheckArgs, FailOn, FixMode};
+pub use cli_types::{CheckArgs, FailOn, FixMode, FmtArgs};
 
 mod cli_utils;
 pub use cli_utils::{apply_cli_overrides, load_config_with_cli_error_handling_with_dir, read_file_efficiently};
@@ -53,7 +53,7 @@ struct Cli {
     #[arg(
         long,
         global = true,
-        help = "Ignore all configuration files and use built-in defaults"
+        help = "Ignore all configuration files and use built-in defaults (--isolated is also accepted)"
     )]
     no_config: bool,
 
@@ -61,6 +61,7 @@ struct Cli {
     #[arg(
         long,
         global = true,
+        hide = true,
         help = "Ignore all configuration files (alias for --no-config)",
         conflicts_with = "no_config"
     )]
@@ -81,8 +82,8 @@ pub enum SchemaAction {
 enum Commands {
     /// Lint Markdown files and print warnings/errors
     Check(CheckArgs),
-    /// Format Markdown files (alias for check --fix)
-    Fmt(CheckArgs),
+    /// Format Markdown files and apply fixes with formatter-style exit codes
+    Fmt(FmtArgs),
     /// Initialize a new configuration file
     Init {
         /// Generate configuration for pyproject.toml instead of .rumdl.toml
@@ -138,8 +139,8 @@ enum Commands {
         /// TCP port to listen on (for debugging)
         #[arg(long)]
         port: Option<u16>,
-        /// Use stdio for communication (default)
-        #[arg(long)]
+        /// Compatibility flag; stdio is the default when --port is not set
+        #[arg(long, hide = true)]
         stdio: bool,
         /// Enable verbose logging
         #[arg(short, long)]
@@ -155,7 +156,7 @@ enum Commands {
     },
     /// Import and convert markdownlint configuration files
     Import {
-        /// Path to markdownlint config file (JSON/YAML)
+        /// Path to markdownlint config file (JSON/JSONC/YAML)
         file: String,
         /// Output file path (default: .rumdl.toml)
         #[arg(short, long)]
@@ -276,7 +277,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
                 commands::check::run_check(&args, config_path, cli.no_config || cli.isolated);
             }
-            Commands::Fmt(mut args) => {
+            Commands::Fmt(args) => {
+                let mut args: CheckArgs = args.into();
                 args.fix_mode = FixMode::Format;
                 args.fail_on_mode = args.fail_on;
 
