@@ -11,6 +11,73 @@ use std::fs;
 #[derive(Debug, Deserialize)]
 pub struct MarkdownlintConfig(pub HashMap<String, serde_yml::Value>);
 
+fn strip_jsonc_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut chars = content.chars().peekable();
+    let mut in_string = false;
+    let mut escape = false;
+    let mut line_comment = false;
+    let mut block_comment = false;
+
+    while let Some(ch) = chars.next() {
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+                result.push('\n');
+            }
+            continue;
+        }
+
+        if block_comment {
+            if ch == '*' && matches!(chars.peek(), Some('/')) {
+                chars.next();
+                block_comment = false;
+            } else if ch == '\n' {
+                result.push('\n');
+            }
+            continue;
+        }
+
+        if in_string {
+            result.push(ch);
+            if escape {
+                escape = false;
+            } else if ch == '\\' {
+                escape = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            continue;
+        }
+
+        if ch == '/' {
+            match chars.peek() {
+                Some('/') => {
+                    chars.next();
+                    line_comment = true;
+                    continue;
+                }
+                Some('*') => {
+                    chars.next();
+                    block_comment = true;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        result.push(ch);
+    }
+
+    result
+}
+
 /// Load a markdownlint config file (JSON or YAML) from the given path.
 /// Supports both flat markdownlint format and markdownlint-cli2 format
 /// where rules are nested under a top-level `config:` key.
@@ -18,11 +85,17 @@ pub fn load_markdownlint_config(path: &str) -> Result<MarkdownlintConfig, String
     let content = fs::read_to_string(path).map_err(|e| format!("Failed to read config file {path}: {e}"))?;
 
     let config: MarkdownlintConfig = if path.ends_with(".json") || path.ends_with(".jsonc") {
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse JSON: {e}"))?
+        let json_content = if path.ends_with(".jsonc") {
+            strip_jsonc_comments(&content)
+        } else {
+            content.clone()
+        };
+        serde_json::from_str(&json_content).map_err(|e| format!("Failed to parse JSON: {e}"))?
     } else if path.ends_with(".yaml") || path.ends_with(".yml") {
         serde_yml::from_str(&content).map_err(|e| format!("Failed to parse YAML: {e}"))?
     } else {
-        serde_json::from_str(&content)
+        let json_candidate = strip_jsonc_comments(&content);
+        serde_json::from_str(&json_candidate)
             .or_else(|_| serde_yml::from_str(&content))
             .map_err(|e| format!("Failed to parse config as JSON or YAML: {e}"))?
     };
@@ -457,6 +530,74 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    // ---- strip_jsonc_comments unit tests ----
+
+    #[test]
+    fn strip_jsonc_line_comment_removed() {
+        let input = r#"{ "key": 1 } // trailing comment"#;
+        assert_eq!(strip_jsonc_comments(input), r#"{ "key": 1 } "#);
+    }
+
+    #[test]
+    fn strip_jsonc_block_comment_removed() {
+        let input = r#"{ /* comment */ "key": 1 }"#;
+        assert_eq!(strip_jsonc_comments(input), r#"{  "key": 1 }"#);
+    }
+
+    #[test]
+    fn strip_jsonc_preserves_slash_slash_in_string() {
+        // `//` inside a string literal must not be treated as a comment
+        let input = r#"{ "url": "https://example.com" }"#;
+        assert_eq!(strip_jsonc_comments(input), input);
+    }
+
+    #[test]
+    fn strip_jsonc_preserves_block_comment_markers_in_string() {
+        // `/*` and `*/` inside a string literal must not start/end a block comment
+        let input = r#"{ "regex": "/* not a comment */" }"#;
+        assert_eq!(strip_jsonc_comments(input), input);
+    }
+
+    #[test]
+    fn strip_jsonc_slash_slash_inside_block_comment_is_ignored() {
+        // `//` appearing inside a block comment must not end the block comment prematurely
+        let input = "{ /* // still in block */ \"k\": 1 }";
+        assert_eq!(strip_jsonc_comments(input), "{  \"k\": 1 }");
+    }
+
+    #[test]
+    fn strip_jsonc_block_comment_newlines_preserved() {
+        // Newlines inside block comments are kept so line numbers remain intact
+        let input = "{\n/* line1\nline2 */\n\"k\": 1\n}";
+        let result = strip_jsonc_comments(input);
+        assert_eq!(result.lines().count(), input.lines().count());
+    }
+
+    #[test]
+    fn strip_jsonc_unterminated_block_comment_drops_to_eof() {
+        // Unterminated `/* ...` silently drops everything from the opener to EOF.
+        // This produces invalid JSON, which the caller will detect and report.
+        let input = r#"{ "k": 1 /* unclosed"#;
+        let result = strip_jsonc_comments(input);
+        assert!(
+            !result.contains("unclosed"),
+            "trailing content after /* should be dropped"
+        );
+        assert!(
+            result.starts_with("{ \"k\": 1 "),
+            "content before /* should be preserved"
+        );
+    }
+
+    #[test]
+    fn strip_jsonc_escaped_quote_in_string() {
+        // Escaped `\"` inside a string must not end the string prematurely
+        let input = r#"{ "msg": "say \"hi\" // still string" }"#;
+        assert_eq!(strip_jsonc_comments(input), input);
+    }
+
+    // ---- markdownlint_to_rumdl_rule_key tests ----
 
     #[test]
     fn test_markdownlint_to_rumdl_rule_key() {
