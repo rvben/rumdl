@@ -249,3 +249,147 @@ fn test_config_get_bare_rule_name_output_is_sorted() {
         "Fields must be sorted alphabetically: allow-loose-continuation ({pos_allow}) should precede style ({pos_style})"
     );
 }
+
+/// `rumdl config get <alias>` must produce identical output to `rumdl config get <MDxxx>`.
+/// heading-increment is the canonical alias for MD001.
+#[test]
+fn test_config_get_bare_alias_matches_canonical_rule_name() {
+    let temp_dir = tempdir().unwrap();
+
+    let alias_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "heading-increment", "--no-config"])
+        .output()
+        .unwrap();
+
+    let canonical_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "MD001", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(
+        alias_output.status.success(),
+        "`rumdl config get heading-increment` should succeed, stderr:\n{}",
+        String::from_utf8_lossy(&alias_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&alias_output.stdout),
+        String::from_utf8_lossy(&canonical_output.stdout),
+        "`rumdl config get heading-increment` and `rumdl config get MD001` must produce identical output"
+    );
+}
+
+/// `rumdl config get <alias>.<field>` must resolve the alias to its canonical rule.
+/// line-length is the alias for MD013; `line-length.line-length` queries the line-length field.
+#[test]
+fn test_config_get_dotted_alias_field_resolves_rule() {
+    let temp_dir = tempdir().unwrap();
+
+    let alias_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "line-length.line-length", "--no-config"])
+        .output()
+        .unwrap();
+
+    let canonical_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "MD013.line-length", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(
+        alias_output.status.success(),
+        "`rumdl config get line-length.line-length` should succeed, stderr:\n{}",
+        String::from_utf8_lossy(&alias_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&alias_output.stdout),
+        String::from_utf8_lossy(&canonical_output.stdout),
+        "`rumdl config get line-length.line-length` and `rumdl config get MD013.line-length` must produce identical output"
+    );
+}
+
+/// Underscore aliases (e.g. line_length) must work the same as hyphen aliases (line-length).
+#[test]
+fn test_config_get_underscore_alias_is_normalized() {
+    let temp_dir = tempdir().unwrap();
+
+    let underscore_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "line_length", "--no-config"])
+        .output()
+        .unwrap();
+
+    let hyphen_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "line-length", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(
+        underscore_output.status.success(),
+        "`rumdl config get line_length` should succeed, stderr:\n{}",
+        String::from_utf8_lossy(&underscore_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&underscore_output.stdout),
+        String::from_utf8_lossy(&hyphen_output.stdout),
+        "`rumdl config get line_length` and `rumdl config get line-length` must produce identical output"
+    );
+}
+
+/// Aliases must be case-insensitive; HEADING-INCREMENT and heading-increment both map to MD001.
+#[test]
+fn test_config_get_alias_is_case_insensitive() {
+    let temp_dir = tempdir().unwrap();
+
+    let upper_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "HEADING-INCREMENT", "--no-config"])
+        .output()
+        .unwrap();
+
+    let lower_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "heading-increment", "--no-config"])
+        .output()
+        .unwrap();
+
+    assert!(
+        upper_output.status.success(),
+        "`rumdl config get HEADING-INCREMENT` should succeed, stderr:\n{}",
+        String::from_utf8_lossy(&upper_output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&upper_output.stdout),
+        String::from_utf8_lossy(&lower_output.stdout),
+        "Alias lookup must be case-insensitive"
+    );
+}
+
+/// When the config overrides a rule by its MDxxx name, querying via alias must show
+/// the overridden value with the correct provenance.
+#[test]
+fn test_config_get_alias_reflects_project_config_override() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join(".rumdl.toml"), "[MD013]\nline-length = 120\n").unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "line-length.line-length"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("120"),
+        "Alias query should show overridden line-length value, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("[from project config]"),
+        "Alias query should show project config provenance, got:\n{stdout}"
+    );
+}

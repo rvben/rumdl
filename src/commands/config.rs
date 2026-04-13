@@ -142,9 +142,11 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool) {
                 exit::tool_error();
             }
         }
-        // Handle RULE keys (MDxxx.field)
+        // Handle RULE keys (MDxxx.field or alias.field)
         else {
-            let normalized_rule_name = normalize_key(section_part);
+            let normalized_rule_name = rumdl_config::resolve_rule_name_alias(section_part)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| normalize_key(section_part));
 
             // Try to get the value from the final config first
             let final_value: Option<&toml::Value> = final_config
@@ -178,8 +180,10 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool) {
             }
         }
     } else {
-        // Handle bare rule name (e.g. "MD076") — return all config keys for the rule.
-        let normalized_rule_name = normalize_key(key);
+        // Handle bare rule name or alias (e.g. "MD076", "heading-style") — return all config keys for the rule.
+        let normalized_rule_name = rumdl_config::resolve_rule_name_alias(key)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| normalize_key(key));
         let registry = rumdl_config::default_registry();
 
         if registry.rule_schemas.contains_key(&normalized_rule_name) {
