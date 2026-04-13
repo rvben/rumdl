@@ -748,7 +748,9 @@ impl SourcedConfig<ConfigLoaded> {
 
             // Try to discover project config first
             if let Some((config_file, project_root)) = Self::discover_config_upward() {
-                // Project config found - use ONLY this (standalone, no user config)
+                // Project config found - use ONLY this (standalone, no user config).
+                // Rumdl project configs can express all settings directly, so user config
+                // is not needed and omitting it ensures CI and local runs are identical.
                 log::debug!("[rumdl-config] Found project config: {}", config_file.display());
                 log::debug!("[rumdl-config] Project root: {}", project_root.display());
 

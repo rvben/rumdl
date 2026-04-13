@@ -1423,10 +1423,7 @@ line_length = 123
 
     let (success, _stdout, stderr) = run_cmd(&["config", "get", "notavalidkey"]);
     assert!(!success, "config get notavalidkey should fail");
-    assert!(
-        stderr.contains("Key must be in the form global.key or MDxxx.key"),
-        "Unexpected stderr: {stderr}"
-    );
+    assert!(stderr.contains("notavalidkey"), "Unexpected stderr: {stderr}");
 }
 
 #[test]

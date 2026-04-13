@@ -124,7 +124,7 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool) {
                     }
                 }
                 "flavor" => Some((
-                    toml::Value::String(format!("{:?}", final_config.global.flavor).to_lowercase()),
+                    toml::Value::String(final_config.global.flavor.to_string()),
                     sourced.global.flavor.source,
                 )),
                 _ => None,
@@ -178,8 +178,60 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool) {
             }
         }
     } else {
-        eprintln!("Key must be in the form global.key or MDxxx.key");
-        exit::tool_error();
+        // Handle bare rule name (e.g. "MD076") — return all config keys for the rule.
+        let normalized_rule_name = normalize_key(key);
+        let registry = rumdl_config::default_registry();
+
+        if registry.rule_schemas.contains_key(&normalized_rule_name) {
+            let sourced = match rumdl_config::SourcedConfig::load_with_discovery(config_path, None, no_config) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("{}: {}", "Config error".red().bold(), e);
+                    exit::tool_error();
+                }
+            };
+            let final_config: rumdl_config::Config = sourced.clone().into_validated_unchecked().into();
+
+            let schema = &registry.rule_schemas[&normalized_rule_name];
+            let mut fields: Vec<&String> = schema.keys().collect();
+            fields.sort();
+
+            for field in fields {
+                let normalized_field = normalize_key(field);
+
+                let final_value = final_config
+                    .rules
+                    .get(&normalized_rule_name)
+                    .and_then(|rule_cfg| rule_cfg.values.get(&normalized_field));
+
+                let (value, source) = if let Some(v) = final_value {
+                    let provenance = sourced
+                        .rules
+                        .get(&normalized_rule_name)
+                        .and_then(|sc| sc.values.get(&normalized_field))
+                        .map_or(rumdl_config::ConfigSource::Default, |sv| sv.source);
+                    (v, provenance)
+                } else if let Some(v) = registry.expected_value_for(&normalized_rule_name, &normalized_field) {
+                    (v, rumdl_config::ConfigSource::Default)
+                } else {
+                    // Nullable sentinel field — no displayable default, skip
+                    continue;
+                };
+
+                println!(
+                    "{}.{} = {} [from {}]",
+                    normalized_rule_name,
+                    normalized_field,
+                    formatter::format_toml_value(value),
+                    formatter::format_provenance(source)
+                );
+            }
+        } else {
+            eprintln!(
+                "Unknown key: {key}. Must be in the form global.key, MDxxx.key, or MDxxx (rule name for all keys)"
+            );
+            exit::tool_error();
+        }
     }
 }
 
