@@ -54,6 +54,49 @@ fn test_flavor_display_lowercase_in_no_defaults_mode() {
     );
 }
 
+/// Both rumdl config and rumdl config get must agree on the flavor value for non-default flavors.
+/// This is the exact scenario from the original bug: formatter.rs used {:?} (Debug) which
+/// produced "MkDocs" while config get used Debug + to_lowercase() producing "mkdocs".
+#[test]
+fn test_flavor_display_consistent_for_non_default_flavor() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join(".rumdl.toml"), "[global]\nflavor = \"mkdocs\"\n").unwrap();
+
+    let config_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config"])
+        .output()
+        .unwrap();
+
+    let get_output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["config", "get", "global.flavor"])
+        .output()
+        .unwrap();
+
+    let config_stdout = String::from_utf8_lossy(&config_output.stdout);
+    let get_stdout = String::from_utf8_lossy(&get_output.stdout);
+
+    assert!(
+        config_stdout.contains("flavor = \"mkdocs\""),
+        "`rumdl config` should show `flavor = \"mkdocs\"`, got:\n{config_stdout}"
+    );
+    assert!(
+        get_stdout.contains("\"mkdocs\""),
+        "`rumdl config get global.flavor` should contain `\"mkdocs\"`, got:\n{get_stdout}"
+    );
+    // Both must use the same lowercase quoted format — the original bug produced
+    // "MkDocs" (Debug) from rumdl config and "mkdocs" from rumdl config get.
+    assert!(
+        !config_stdout.contains("MkDocs"),
+        "`rumdl config` must not use Debug format (MkDocs), got:\n{config_stdout}"
+    );
+    assert!(
+        !get_stdout.contains("MkDocs"),
+        "`rumdl config get` must not use Debug format (MkDocs), got:\n{get_stdout}"
+    );
+}
+
 /// Flavor value in rumdl config output must be lowercase regardless of which flavor is set
 #[test]
 fn test_flavor_display_lowercase_when_set_to_mkdocs() {
