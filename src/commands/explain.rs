@@ -13,8 +13,10 @@ pub fn handle_explain(rule_query: &str) {
 
     // Find the rule
     let rule_query_upper = rule_query.to_ascii_uppercase();
+    let resolved_rule_query = rumdl_config::resolve_rule_name(rule_query);
     let found = all_rules.iter().find(|r| {
-        r.name().eq_ignore_ascii_case(&rule_query_upper)
+        r.name().eq_ignore_ascii_case(&resolved_rule_query)
+            || r.name().eq_ignore_ascii_case(&rule_query_upper)
             || r.name().replace("MD", "") == rule_query_upper.replace("MD", "")
     });
 

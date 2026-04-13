@@ -112,8 +112,10 @@ pub fn handle_rule(
     // Build RuleInfo for all or a specific rule
     let mut rule_infos: Vec<RuleInfo> = if let Some(rule_query) = &rule {
         let rule_query_upper = rule_query.to_ascii_uppercase();
+        let resolved_rule_query = rumdl_config::resolve_rule_name(rule_query);
         let found = all_rules.iter().find(|r| {
-            r.name().eq_ignore_ascii_case(&rule_query_upper)
+            r.name().eq_ignore_ascii_case(&resolved_rule_query)
+                || r.name().eq_ignore_ascii_case(&rule_query_upper)
                 || r.name().replace("MD", "") == rule_query_upper.replace("MD", "")
         });
         if let Some(r) = found {
