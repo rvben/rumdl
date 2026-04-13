@@ -9,3 +9,4 @@ Thank you to all our sponsors who support rumdl development!
 ## Supporters
 
 - [Luke W. Johnston](https://github.com/lwjohnst86)
+- [张君一](https://github.com/Sha1rholder)
