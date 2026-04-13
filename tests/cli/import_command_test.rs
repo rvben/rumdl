@@ -111,3 +111,25 @@ fn test_import_sections_separated_by_blank_lines() {
         "Output should have blank lines between sections, got: {stdout:?}"
     );
 }
+
+#[test]
+fn test_import_jsonc_with_comments() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+
+    let input = temp_dir.path().join("input.jsonc");
+    fs::write(
+        &input,
+        r#"{
+  // markdownlint-style comment
+  "MD013": false
+}"#,
+    )
+    .expect("Failed to write input");
+
+    let mut cmd = cargo_bin_cmd!("rumdl");
+    cmd.arg("import").arg(input.to_str().unwrap()).arg("--dry-run");
+
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("disable = [\"MD013\"]"));
+}

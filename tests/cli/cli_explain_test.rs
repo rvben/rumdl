@@ -36,6 +36,16 @@ fn test_explain_command_without_md_prefix() {
 }
 
 #[test]
+fn test_explain_command_with_rule_alias() {
+    let mut cmd = cargo_bin_cmd!("rumdl");
+    cmd.arg("explain").arg("line-length");
+
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("MD013 - Line length"));
+}
+
+#[test]
 fn test_explain_command_with_invalid_rule() {
     let mut cmd = cargo_bin_cmd!("rumdl");
     cmd.arg("explain").arg("MD999");

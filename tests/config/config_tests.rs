@@ -714,7 +714,7 @@ line-length:
         let temp_dir = tempdir().unwrap();
         let config_path = temp_dir.path().join("config.jsonc");
 
-        // Valid JSONC with comments (should be parsed as JSON)
+        // Valid JSONC with comments should be parsed successfully.
         let config_content = r#"{
             // This is a comment
             "MD004": { "style": "dash" }
@@ -722,15 +722,7 @@ line-length:
         fs::write(&config_path, config_content).unwrap();
 
         let result = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true);
-        // Note: This might fail if our JSON parser doesn't support comments
-        // If it fails, that's actually expected behavior - JSONC requires special handling
-        if let Err(error) = result {
-            let error_msg = error.to_string();
-            assert!(
-                error_msg.contains("Failed to parse JSON"),
-                "JSONC parsing should attempt JSON first"
-            );
-        }
+        assert!(result.is_ok(), "JSONC config with comments should load successfully");
     }
 
     #[test]

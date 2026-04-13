@@ -1001,6 +1001,102 @@ fn test_rule_command_shows_specific_rule() {
 }
 
 #[test]
+fn test_rule_command_accepts_rule_alias() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["rule", "line-length"])
+        .output()
+        .expect("Failed to execute 'rumdl rule line-length'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        output.status.success(),
+        "'rumdl rule line-length' did not exit successfully"
+    );
+    assert!(stdout.contains("MD013"), "Alias should resolve to MD013");
+    assert!(stdout.contains("Line length"), "Output should describe MD013");
+}
+
+#[test]
+fn test_fmt_help_is_formatter_focused() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["fmt", "--help"])
+        .output()
+        .expect("Failed to execute 'rumdl fmt --help'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(output.status.success(), "'rumdl fmt --help' did not exit successfully");
+    assert!(
+        stdout.contains("Files or directories to format"),
+        "fmt help should describe formatting targets"
+    );
+    assert!(
+        !stdout.contains("-f, --fix"),
+        "fmt help should not expose the implementation-detail --fix flag"
+    );
+    assert!(
+        !stdout.contains("--fail-on"),
+        "fmt help should not expose irrelevant fail-on behavior"
+    );
+}
+
+#[test]
+fn test_check_help_prefers_canonical_lint_flags() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--help"])
+        .output()
+        .expect("Failed to execute 'rumdl check --help'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        output.status.success(),
+        "'rumdl check --help' did not exit successfully"
+    );
+    assert!(
+        stdout.contains("Files or directories to check"),
+        "check help should describe lint targets"
+    );
+    assert!(
+        !stdout.contains("Files or directories to check or format"),
+        "check help should no longer describe formatting targets"
+    );
+    assert!(
+        !stdout.contains("-o, --output <OUTPUT>"),
+        "check help should hide the legacy --output alias"
+    );
+    assert!(
+        !stdout.contains("--check"),
+        "check help should hide the formatter-style compatibility flag"
+    );
+    assert!(
+        !stdout.contains("\n      --isolated"),
+        "check help should not expose --isolated as its own option line"
+    );
+}
+
+#[test]
+fn test_server_help_hides_stdio_compat_flag() {
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["server", "--help"])
+        .output()
+        .expect("Failed to execute 'rumdl server --help'");
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(
+        output.status.success(),
+        "'rumdl server --help' did not exit successfully"
+    );
+    assert!(
+        !stdout.contains("--stdio"),
+        "server help should not expose the default stdio compatibility flag"
+    );
+    assert!(stdout.contains("--port"), "server help should still expose TCP mode");
+}
+
+#[test]
 fn test_rule_command_json_output_all_rules() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
     let output = Command::new(rumdl_exe)
@@ -2005,6 +2101,57 @@ fn test_fmt_vs_check_fix_exit_codes() {
         "check --fix should exit 1 when unfixable violations remain"
     );
     assert_eq!(output.status.code(), Some(1), "check --fix should exit with code 1");
+}
+
+#[test]
+fn test_fmt_check_reports_would_fix_without_modifying_file() {
+    let temp_dir = tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(&test_file, "#Title\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--check", test_file.to_str().unwrap(), "--color", "never"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let content = fs::read_to_string(&test_file).unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "fmt --check should exit 1 when changes are needed"
+    );
+    assert!(
+        stdout.contains("Would fix: Would fix 1/1 issues"),
+        "Dry-run formatting should report 'Would fix: Would fix 1/1 issues'. Got:\n{stdout}"
+    );
+    assert_eq!(content, "#Title\n", "fmt --check should not modify the file");
+}
+
+#[test]
+fn test_fmt_dry_run_alias_is_accepted() {
+    let temp_dir = tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    fs::write(&test_file, "#Title\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .args(["fmt", "--dry-run", test_file.to_str().unwrap(), "--color", "never"])
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let content = fs::read_to_string(&test_file).unwrap();
+
+    assert!(
+        output.status.success(),
+        "fmt --dry-run should be accepted and complete successfully"
+    );
+    assert!(
+        stdout.contains("---") && stdout.contains("+++"),
+        "fmt --dry-run should show a diff. Got:\n{stdout}"
+    );
+    assert_eq!(content, "#Title\n", "fmt --dry-run should not modify the file");
 }
 
 /// Test that --include allows checking files with non-standard extensions (issue #127)
