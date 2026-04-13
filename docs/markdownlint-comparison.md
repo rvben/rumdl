@@ -4,20 +4,20 @@ This document provides a detailed comparison between rumdl and markdownlint, cov
 
 ## Quick Summary
 
-rumdl is **fully compatible** with markdownlint while offering significant performance improvements and design enhancements. All 53 markdownlint rules are implemented, making migration seamless.
+rumdl offers **high markdownlint compatibility with intentional differences** while also adding performance improvements and newer features. All 53 markdownlint rules are implemented, but rumdl prefers predictable CommonMark-oriented behavior over bug-for-bug compatibility in a few documented areas.
 
 **Key Differences:**
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
-- **Rule Coverage**: 100% compatible - all 53 markdownlint rules are implemented with the same behavior
-- **Unique Features**: 14 additional rules (MD057, MD061-MD073), built-in LSP server, VS Code extension, 6 Markdown flavors
+- **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
+- **Unique Features**: 18 additional rules (MD057, MD061-MD077), built-in LSP server, VS Code extension, 6 Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **68 rules total**: all 53 markdownlint rules plus 15 unique rules.
+rumdl implements **71 rules total**: all 53 markdownlint rules plus 18 unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 
@@ -25,7 +25,7 @@ rumdl implements **68 rules total**: all 53 markdownlint rules plus 15 unique ru
 
 ### Rules Unique to rumdl
 
-rumdl implements 14 additional rules not found in markdownlint:
+rumdl implements 18 additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |
@@ -43,8 +43,12 @@ rumdl implements 14 additional rules not found in markdownlint:
 | MD071  | Blank line after frontmatter   | Frontmatter should be followed by a blank line             |
 | MD072  | Frontmatter key sort           | Frontmatter keys should be sorted (opt-in)                 |
 | MD073  | TOC validation                 | Table of Contents should match headings (opt-in)           |
+| MD074  | MkDocs nav validation          | Validates MkDocs nav entries against the docs tree         |
+| MD075  | Orphaned table rows            | Detects headerless pipe tables and orphaned table rows     |
+| MD076  | List item spacing              | Enforces consistent blank lines between list items         |
+| MD077  | List continuation indent       | Enforces indentation for list continuation content         |
 
-**Opt-in rules:** MD060, MD063, MD070, MD072, and MD073 are disabled by default. Enable them explicitly in your configuration.
+**Opt-in rules:** MD060, MD063, MD070, MD072, MD073, and MD074 are disabled by default. Enable them explicitly in your configuration.
 
 ## Intentional Design Differences
 
@@ -366,9 +370,9 @@ If you encounter other compatibility issues, please [file an issue](https://gith
 | Feature                  | markdownlint       | rumdl                       |
 | ------------------------ | ------------------ | --------------------------- |
 | **Core Functionality**   |                    |                             |
-| Rule count               | 53 implemented     | 68 (53 compatible + 15 new) |
+| Rule count               | 53 implemented     | 71 (53 compatible + 18 new) |
 | Auto-fix                 | ✅                 | ✅                          |
-| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/YAML/cli2      |
+| Configuration file       | ✅ JSON/YAML       | ✅ TOML/JSON/JSONC/YAML/cli2 |
 | Inline config            | ✅                 | ✅ (compatible)             |
 | Custom rules             | ✅ (JavaScript)    | ❌                          |
 | Markdown flavors         | ❌                 | ✅ 6 flavors                |

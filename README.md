@@ -307,30 +307,33 @@ rumdl supports formatting via stdin/stdout, making it ideal for editor integrati
 
 ```bash
 # Format content from stdin and output to stdout
-cat README.md | rumdl fmt - > README_formatted.md
-# Alternative: cat README.md | rumdl fmt --stdin > README_formatted.md
+cat README.md | rumdl fmt --silent - > README_formatted.md
+# Alternative: cat README.md | rumdl fmt --silent --stdin > README_formatted.md
 
 # Use in a pipeline
-echo "# Title   " | rumdl fmt -
+echo "# Title   " | rumdl fmt --silent -
 # Output: # Title
 
 # Format clipboard content (macOS example)
-pbpaste | rumdl fmt - | pbcopy
+pbpaste | rumdl fmt --silent - | pbcopy
 
 # Provide filename context for better error messages (useful for editor integrations)
 cat README.md | rumdl check - --stdin-filename README.md
 ```
 
+Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
+
 ### Editor Integration
 
-For editor integration, use stdin/stdout mode with the `--quiet` flag to suppress diagnostic messages:
+For editor integration, use stdin/stdout mode with the `--silent` flag when you want pure formatted output on stdout.
+Use `--quiet` if you still want diagnostics but want to suppress summary lines:
 
 ```bash
 # Format selection in editor (example for vim)
-:'<,'>!rumdl fmt - --quiet
+:'<,'>!rumdl fmt - --silent
 
 # Format entire buffer
-:%!rumdl fmt - --quiet
+:%!rumdl fmt - --silent
 ```
 
 ## Pre-commit Integration
@@ -386,7 +389,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: rvben/rumdl@0.1.0v0
+      - uses: rvben/rumdl@v0
 ```
 
 The `v0` tag always points to the latest stable release, following GitHub Actions conventions.
@@ -405,22 +408,23 @@ The `v0` tag always points to the latest stable release, following GitHub Action
 **Lint specific directory with pinned version:**
 
 ```yaml
-- uses: rvben/rumdl@0.1.0v0
+- uses: rvben/rumdl@v0
   with:
-    version: "0.0.189"
+    version: "0.1.71"
     path: docs/
 ```
 
 **Use custom config and show annotations in PR:**
 
 ```yaml
-- uses: rvben/rumdl@0.1.0v0
+- uses: rvben/rumdl@v0
   with:
     config: .rumdl.toml
     report-type: annotations
 ```
 
 The `annotations` report type displays issues directly in the PR's "Files changed" tab with error/warning severity levels and precise locations.
+The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the optional `version` input pins the `rumdl` CLI version installed inside the workflow.
 
 ## Rules
 
@@ -509,13 +513,13 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `-v, --verbose`: Show detailed output
 - `--profile`: Show profiling information
 - `--statistics`: Show rule violation statistics summary
-- `-q, --quiet`: Quiet mode
-- `-o, --output <format>`: Output format: `text` (default) or `json`
+- `-q, --quiet`: Print diagnostics, but suppress summary lines
+- `--output-format <format>`: Output format for diagnostics
 - `--stdin`: Read from stdin instead of files
 
 #### `fmt [PATHS...]`
 
-Format Markdown files and output the result. Always exits with code 0 on successful formatting, making it ideal for editor integration.
+Format Markdown files and apply fixes. Unlike `check --fix`, `fmt` keeps formatter-style exit codes and exits 0 after successful formatting, making it ideal for editor integration.
 
 **Arguments:**
 
@@ -529,7 +533,8 @@ All the same options as `check` are available (except `--fix` which is always en
 - `-d, --disable <rules>`: Disable specific rules during formatting
 - `-e, --enable <rules>`: Format using only specific rules
 - `--exclude/--include`: Control which files to format
-- `-q, --quiet`: Suppress diagnostic output
+- `-q, --quiet`: Print diagnostics, but suppress summary lines
+- `-s, --silent`: Suppress diagnostics and summaries for pure formatter output
 
 **Examples:**
 
@@ -541,8 +546,8 @@ rumdl fmt
 rumdl fmt README.md
 
 # Format from stdin (using dash syntax)
-cat README.md | rumdl fmt - > formatted.md
-# Alternative: cat README.md | rumdl fmt --stdin > formatted.md
+cat README.md | rumdl fmt --silent - > formatted.md
+# Alternative: cat README.md | rumdl fmt --silent --stdin > formatted.md
 ```
 
 #### `init [OPTIONS]`
@@ -559,7 +564,7 @@ Import and convert markdownlint configuration files to rumdl format
 
 **Arguments:**
 
-- `<FILE>`: Path to markdownlint config file (JSON/YAML)
+- `<FILE>`: Path to markdownlint config file (JSON/JSONC/YAML)
 
 **Options:**
 
@@ -574,6 +579,13 @@ Show information about a rule or list all rules
 **Arguments:**
 
 - `[rule]`: Rule name or ID (optional). If provided, shows details for that rule. If omitted, lists all available rules
+
+**Useful options:**
+
+- `--list-categories`: List available rule categories and exit
+- `--category <name>`: Filter rules by category when listing
+- `--output-format <format>`: Emit structured output such as `json` or `json-lines`
+- `--explain`: Include full documentation in `json` and `json-lines` output
 
 #### `config [OPTIONS] [COMMAND]`
 
@@ -597,7 +609,6 @@ Start the Language Server Protocol server for editor integration
 **Options:**
 
 - `--port <PORT>`: TCP port to listen on (for debugging)
-- `--stdio`: Use stdio for communication (default)
 - `-v, --verbose`: Enable verbose logging
 
 #### `vscode [OPTIONS]`
@@ -607,6 +618,7 @@ Install the rumdl VS Code extension
 **Options:**
 
 - `--force`: Force reinstall even if already installed
+- `--update`: Update to the latest version (only if newer version is available)
 - `--status`: Show installation status without installing
 
 #### `version`
@@ -620,6 +632,7 @@ These options are available for all commands:
 - `--color <mode>`: Control colored output: `auto` (default), `always`, `never`
 - `--config <file>`: Path to configuration file
 - `--no-config`: Ignore all configuration files and use built-in defaults
+- `--isolated`: Hidden compatibility alias for `--no-config`
 
 ### Exit Codes
 
@@ -682,7 +695,7 @@ rumdl config --no-defaults
 echo "# My Heading" | rumdl check --stdin
 
 # Get JSON output for integration with other tools
-rumdl check --output json README.md
+rumdl check --output-format json README.md
 
 # Show statistics summary of rule violations
 rumdl check --statistics .
@@ -699,7 +712,13 @@ rumdl version
 
 ## LSP
 
-rumdle is also available as LSP server for editor integration.
+rumdl is also available as an LSP server for editor integration.
+
+For editors that support generic LSP configuration, the minimal stdio setup is:
+
+```toml
+command = ["rumdl", "server"]
+```
 
 For editor-specific information on setting up the LSP, refer to our [LSP documentation](https://rumdl.dev/lsp/)
 
@@ -747,16 +766,16 @@ extends = "../.rumdl.toml"
 line-length = 120
 ```
 
-Per-directory resolution is disabled when `--config`, `--isolated`, or `--no-config` is used.
+Per-directory resolution is disabled when `--config` or `--no-config` is used (`--isolated` is still accepted as a compatibility alias).
 
-To disable all configuration discovery and use only built-in defaults, use the `--isolated` flag:
+To disable all configuration discovery and use only built-in defaults, use the `--no-config` flag:
 
 ```bash
 # Use discovered configuration (default behavior)
 rumdl check .
 
 # Ignore all configuration files
-rumdl check --isolated .
+rumdl check --no-config .
 ```
 
 ### Editor Support (JSON Schema)
@@ -773,11 +792,9 @@ The schema is registered with [SchemaStore](https://www.schemastore.org/), so ed
 
 **Manual Schema Association:**
 
-If your editor doesn't support SchemaStore, add this comment to your config file:
+If your editor doesn't support SchemaStore, associate this schema URL with `.rumdl.toml` or `rumdl.toml` in the editor's TOML schema settings:
 
-```toml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/rvben/rumdl/main/rumdl.schema.json
-```
+`https://raw.githubusercontent.com/rvben/rumdl/main/rumdl.schema.json`
 
 ### Global Configuration
 
@@ -855,14 +872,12 @@ For complete documentation on inline configuration options, see our [Inline Conf
 Here's an example `.rumdl.toml` configuration file:
 
 ```toml
-# Global settings
+[global]
 line-length = 100
 exclude = ["node_modules", "build", "dist"]
 respect-gitignore = true
 flavor = "mkdocs"  # Use MkDocs flavor (see Flavors section)
-
-# Disable specific rules
-disabled-rules = ["MD013", "MD033"]
+disable = ["MD013", "MD033"]
 
 # Per-file flavor overrides
 [per-file-flavor]
@@ -942,7 +957,7 @@ line-length = 100
 disable = ["MD033"]
 include = ["docs/*.md", "README.md"]
 exclude = [".git", "node_modules"]
-ignore-gitignore = false
+respect-gitignore = true
 
 # Rule-specific configuration
 [tool.rumdl.MD013]
@@ -953,7 +968,7 @@ tables = false
 names = ["rumdl", "Markdown", "GitHub"]
 ```
 
-Both kebab-case (`line-length`, `ignore-gitignore`) and snake_case (`line_length`, `ignore_gitignore`) formats are supported for compatibility with different Python tooling conventions.
+Both kebab-case (`line-length`, `respect-gitignore`) and snake_case (`line_length`, `respect_gitignore`) formats are supported for compatibility with different Python tooling conventions.
 
 ### Configuration Output
 
@@ -1078,10 +1093,10 @@ The output is colorized by default:
 
 #### JSON Output
 
-For integration with other tools and automation, use `--output json`:
+For integration with other tools and automation, use `--output-format json`:
 
 ```bash
-rumdl check --output json README.md
+rumdl check --output-format json README.md
 ```
 
 This produces structured JSON output:

@@ -1056,7 +1056,7 @@ line-length = 120          # Override just this setting; inherit everything else
 Per-directory resolution only activates during **auto-discovery mode**. It is disabled when:
 
 - `--config <file>` is used (the explicit config applies to all files)
-- `--isolated` or `--no-config` is used (built-in defaults apply to all files)
+- `--no-config` is used (built-in defaults apply to all files; `--isolated` is still accepted as a compatibility alias)
 - No project root is found (no `.git` directory)
 
 ### Example: monorepo with different standards
@@ -1329,7 +1329,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 ```yaml
 - name: Lint Markdown
   run: |
-    rumdl check --output json . > lint-results.json
+    rumdl check --output-format json . > lint-results.json
     rumdl check .  # Also show human-readable output
 ```
 

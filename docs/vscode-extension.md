@@ -17,6 +17,9 @@ rumdl vscode
 # Check installation status
 rumdl vscode --status
 
+# Update to the latest available version
+rumdl vscode --update
+
 # Force reinstall if needed
 rumdl vscode --force
 ```
@@ -38,7 +41,7 @@ code --install-extension rvben.rumdl
 
 - **Real-time Linting**: Get instant feedback on Markdown issues as you type
 - **Quick Fixes**: One-click fixes for auto-fixable violations
-- **Full Rule Coverage**: All 50+ rumdl rules with proper categorization
+- **Full Rule Coverage**: Full rumdl rule coverage with proper categorization
 - **High Performance**: 5x faster than markdownlint
 - **Configuration Support**: Respects your `.rumdl.toml` configuration files
 - **Easy Installation**: Install directly from the CLI with `rumdl vscode`

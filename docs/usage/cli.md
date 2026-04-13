@@ -30,27 +30,35 @@ rumdl check --fix .              # Lint and auto-fix issues
 | `--include <PATTERNS>` | Include only files matching patterns                 |
 | `--watch`              | Watch for changes and re-lint                        |
 | `--verbose`            | Show detailed output                                 |
-| `--quiet`              | Suppress output except errors                        |
+| `--quiet`              | Print diagnostics, but suppress summaries            |
+| `--silent`             | Suppress diagnostics and summaries                   |
 | `--no-exclude`         | Disable exclude patterns defined in config           |
 
 ### `fmt [PATHS...]`
 
-Format Markdown files (same as `rumdl check --fix`, but always exits 0).
+Format Markdown files (applies fixes like `rumdl check --fix`, but keeps formatter-style exit codes).
 
 ```bash
 rumdl fmt .                      # Format all files
 rumdl fmt README.md              # Format specific file
-rumdl fmt -                      # Format stdin to stdout
+rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 ```
 
 **Options:**
 
-| Option                    | Description                             |
-| ------------------------- | --------------------------------------- |
-| `--config <PATH>`         | Path to configuration file              |
-| `--stdin`                 | Read from stdin                         |
-| `--stdin-filename <NAME>` | Filename for stdin (for error messages) |
-| `--quiet`                 | Suppress diagnostic output              |
+| Option                    | Description                                                 |
+| ------------------------- | ----------------------------------------------------------- |
+| `--config <PATH>`         | Path to configuration file                                  |
+| `--diff`                  | Show a diff of what would change instead of rewriting files |
+| `--check`                 | Exit 1 if formatting changes would be needed                |
+| `--stdin`                 | Read from stdin                                             |
+| `--stdin-filename <NAME>` | Filename for stdin (for error messages)                     |
+| `--output-format <FMT>`   | Output format for any remaining diagnostics                 |
+| `--watch`                 | Re-run formatting when files change                         |
+| `--quiet`                 | Print diagnostics, but suppress summaries                   |
+| `--silent`                | Suppress diagnostics and summaries                          |
+
+Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
 
 ### `init [OPTIONS]`
 
@@ -75,9 +83,20 @@ rumdl init --output custom.toml  # Custom output path
 Import configuration from markdownlint.
 
 ```bash
-rumdl import .markdownlint.json     # Import from markdownlint config
-rumdl import .markdownlint.yaml     # Supports JSON and YAML
+rumdl import .markdownlint.json      # Import from markdownlint config
+rumdl import .markdownlint.jsonc     # JSONC comments are supported
+rumdl import .markdownlint.yaml      # YAML also works
+rumdl import --dry-run .markdownlint.json
+rumdl import --format json .markdownlint.yaml --output rumdl-config.json
 ```
+
+**Options:**
+
+| Option            | Description                               |
+| ----------------- | ----------------------------------------- |
+| `--dry-run`       | Show the converted config without writing |
+| `--format <FMT>`  | Output format: `toml` or `json`           |
+| `--output <PATH>` | Output file path (default: `.rumdl.toml`) |
 
 ### `rule [<RULE>]`
 
@@ -87,7 +106,20 @@ Show rule documentation.
 rumdl rule                       # List all rules
 rumdl rule MD013                 # Show details for specific rule
 rumdl rule line-length           # Use rule alias
+rumdl rule --list-categories     # Discover rule categories
+rumdl rule MD013 --output-format json
+rumdl rule MD013 --output-format json --explain
 ```
+
+**Options:**
+
+| Option                  | Description                                      |
+| ----------------------- | ------------------------------------------------ |
+| `--list-categories`     | List rule categories and exit                    |
+| `--category <NAME>`     | Filter listed rules by category                  |
+| `--fixable`             | Show only fixable rules                          |
+| `--output-format <FMT>` | Structured output such as `json` or `json-lines` |
+| `--explain`             | Include full documentation in JSON-based output  |
 
 ### `config [OPTIONS]`
 
@@ -116,6 +148,7 @@ Install VS Code extension.
 ```bash
 rumdl vscode                     # Install extension
 rumdl vscode --status            # Check installation
+rumdl vscode --update            # Update the installed extension
 rumdl vscode --force             # Force reinstall
 ```
 
@@ -130,16 +163,17 @@ rumdl version                    # Detailed version info
 
 ## Global Options
 
-These options work with all commands:
+These options are commonly used with `check` and `fmt`:
 
-| Option                  | Description                                            |
-| ----------------------- | ------------------------------------------------------ |
-| `--help`, `-h`          | Show help                                              |
-| `--version`, `-V`       | Show version                                           |
-| `--verbose`, `-v`       | Verbose output                                         |
-| `--quiet`, `-q`         | Quiet output                                           |
-| `--color <WHEN>`        | Color output (`auto`, `always`, `never`)               |
-| `--output-format <FMT>` | Output format (see [Output Formats](#output-formats))  |
+| Option                  | Description                                               |
+| ----------------------- | --------------------------------------------------------- |
+| `--help`, `-h`          | Show help                                                 |
+| `--version`, `-V`       | Show version                                              |
+| `--verbose`, `-v`       | Verbose output                                            |
+| `--quiet`, `-q`         | Print diagnostics, but suppress summaries                 |
+| `--color <WHEN>`        | Color output (`auto`, `always`, `never`)                  |
+| `--no-config`           | Ignore discovered configuration and use built-in defaults |
+| `--output-format <FMT>` | Output format (see [Output Formats](#output-formats))     |
 
 ## Exit Codes
 
@@ -202,13 +236,13 @@ rumdl check --watch docs/
 
 ```bash
 # Format from stdin
-cat README.md | rumdl fmt -
+cat README.md | rumdl fmt --silent -
 
 # With filename context
 cat README.md | rumdl check - --stdin-filename README.md
 
 # Format clipboard (macOS)
-pbpaste | rumdl fmt - | pbcopy
+pbpaste | rumdl fmt --silent - | pbcopy
 ```
 
 ### Output Formats

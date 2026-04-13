@@ -35,10 +35,10 @@ rumdl check --fix .
 
 ```bash
 # Format from stdin
-echo "# Hello  World" | rumdl fmt -
+echo "# Hello  World" | rumdl fmt --silent -
 
 # Pipe through rumdl
-cat README.md | rumdl fmt - > README.fixed.md
+cat README.md | rumdl fmt --silent - > README.fixed.md
 ```
 
 ## Create a Configuration File

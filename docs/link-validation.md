@@ -32,10 +32,10 @@ MD057 checks that relative links in your markdown files point to files that actu
 exist. This catches broken links from typos, moved files, or deleted documents.
 
 ```markdown
-[Installation Guide](install.md)          <!-- Validated: does install.md exist? -->
-[Contributing](../CONTRIBUTING.md)         <!-- Validated: does ../CONTRIBUTING.md exist? -->
-[GitHub](https://github.com/org/repo)      <!-- Skipped: external URL -->
-[Email](mailto:help@example.com)           <!-- Skipped: non-file scheme -->
+[Installation Guide](install.md) <!-- Validated: does install.md exist? -->
+[Contributing](../CONTRIBUTING.md) <!-- Validated: does ../CONTRIBUTING.md exist? -->
+[GitHub](https://github.com/org/repo) <!-- Skipped: external URL -->
+[Email](mailto:help@example.com) <!-- Skipped: non-file scheme -->
 ```
 
 **What gets validated:**
@@ -87,8 +87,8 @@ same-document anchors and cross-file fragments:
 
 [Back to top](#introduction)                <!-- Same-file: validated -->
 [Next section](#getting-started)            <!-- Same-file: validated -->
-[See install guide](install.md#quickstart)  <!-- Cross-file: validated -->
-[See FAQ](#faq)                             <!-- Invalid: no FAQ heading -->
+[See install guide](install.md#quickstart) <!-- Cross-file: validated -->
+[See FAQ](#faq) <!-- Invalid: no FAQ heading -->
 ```
 
 Cross-file fragment validation requires linting multiple files together (the default
@@ -183,7 +183,7 @@ Documentation generators compile `.md` to `.html` during build. MD057 automatica
 checks for a corresponding markdown source when a link points to `.html` or `.htm`:
 
 ```markdown
-[Guide](guide.html)   <!-- Passes if guide.md exists -->
+[Guide](guide.html) <!-- Passes if guide.md exists -->
 ```
 
 ### Documentation generators with non-standard layouts
