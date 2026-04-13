@@ -699,7 +699,7 @@ impl SourcedConfig<ConfigLoaded> {
         if let Some(user_config_path) = user_config_path {
             let path_str = user_config_path.display().to_string();
 
-            log::debug!("[rumdl-config] Loading user config as fallback: {path_str}");
+            log::debug!("[rumdl-config] Loading user config: {path_str}");
 
             // User config fallback also supports extends chains.
             // Use a uniform source across the chain so child overrides are determined by chain order.

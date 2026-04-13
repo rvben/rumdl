@@ -59,7 +59,7 @@ fn test_config_get_bare_rule_name_returns_all_keys() {
     // rumdl config get MD076 must return all config keys for rule MD076
     let temp_dir = tempdir().unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+    let output = Command::new(rumdl_bin())
         .current_dir(temp_dir.path())
         .args(["config", "get", "MD076", "--no-config"])
         .output()
@@ -92,7 +92,7 @@ fn test_config_get_bare_rule_name_shows_overridden_value() {
     let temp_dir = tempdir().unwrap();
     fs::write(temp_dir.path().join(".rumdl.toml"), "[MD076]\nstyle = \"sublist\"\n").unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+    let output = Command::new(rumdl_bin())
         .current_dir(temp_dir.path())
         .args(["config", "get", "MD076"])
         .output()
@@ -115,7 +115,7 @@ fn test_config_get_bare_rule_name_shows_overridden_value() {
 fn test_config_get_unknown_bare_name_errors_gracefully() {
     let temp_dir = tempdir().unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+    let output = Command::new(rumdl_bin())
         .current_dir(temp_dir.path())
         .args(["config", "get", "MD999", "--no-config"])
         .output()
