@@ -24,13 +24,13 @@ Global settings are configured in the `[global]` section of your configuration f
 | [`per-file-ignores`](#per-file-ignores)   | `table`    | `{}`           | Disable specific rules for specific files |
 | [`exclude`](#exclude)                     | `string[]` | `[]`           | Files/directories to exclude              |
 | [`include`](#include)                     | `string[]` | `[]`           | Files/directories to include              |
-| [`respect_gitignore`](#respect_gitignore) | `boolean`  | `true`         | Respect .gitignore files                  |
-| [`line_length`](#line_length)             | `integer`  | `80`           | Default line length for rules             |
+| [`respect-gitignore`](#respect-gitignore) | `boolean`  | `true`         | Respect .gitignore files                  |
+| [`line-length`](#line-length)             | `integer`  | `80`           | Default line length for rules             |
 | [`flavor`](#flavor)                       | `string`   | `"standard"`   | Markdown flavor to use                    |
 | [`per-file-flavor`](#per-file-flavor)     | `table`    | `{}`           | Per-file flavor overrides                 |
 | [`output-format`](#output-format)         | `string`   | `"text"`       | Output format for linting results         |
 | [`cache`](#cache)                         | `boolean`  | `true`         | Enable result caching                     |
-| [`cache_dir`](#cache_dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
+| [`cache-dir`](#cache-dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
 
 ## Configuration Examples
 
@@ -61,10 +61,10 @@ include = [
 ]
 
 # Don't respect .gitignore files
-respect_gitignore = false
+respect-gitignore = false
 
 # Set global line length (used by MD013 and other line-length rules)
-line_length = 120
+line-length = 120
 
 # Set markdown flavor (standard, mkdocs)
 flavor = "mkdocs"
@@ -90,8 +90,8 @@ disable = ["MD013", "MD033"]
 extend-enable = ["MD060"]
 exclude = ["node_modules", "build", "dist"]
 include = ["docs/*.md", "README.md"]
-respect_gitignore = true
-line_length = 120
+respect-gitignore = true
+line-length = 120
 flavor = "standard"
 
 # Per-file rule ignores (both snake_case and kebab-case supported)
@@ -115,7 +115,7 @@ respect-gitignore = true
 style = "dash"
 
 [MD013]
-line_length = 88
+line-length = 88
 code_blocks = false
 ```
 
@@ -132,7 +132,7 @@ respect-gitignore = true
 style = "dash"
 
 [MD013]
-line_length = 88
+line-length = 88
 code_blocks = false
 ```
 
@@ -664,7 +664,7 @@ include = [
 rumdl check --include "docs/**/*.md,README.md" .
 ```
 
-### `respect_gitignore`
+### `respect-gitignore`
 
 **Type**: `boolean`
 **Default**: `true`
@@ -674,9 +674,9 @@ Controls whether rumdl respects `.gitignore` files when scanning for Markdown fi
 
 ```toml
 [global]
-respect_gitignore = true   # Default: respect .gitignore
+respect-gitignore = true   # Default: respect .gitignore
 # or
-respect_gitignore = false  # Ignore .gitignore files
+respect-gitignore = false  # Ignore .gitignore files
 ```
 
 **Behavior**:
@@ -705,7 +705,7 @@ Both file types use the same gitignore pattern syntax and are respected at any l
 rumdl check --respect-gitignore=false .
 ```
 
-### `line_length`
+### `line-length`
 
 **Type**: `integer`
 **Default**: `80`
@@ -715,7 +715,7 @@ Sets the global default line length used by rules that check line length (primar
 
 ```toml
 [global]
-line_length = 120  # Set global line length to 120 characters
+line-length = 120  # Set global line length to 120 characters
 ```
 
 **Behavior**:
@@ -735,10 +735,10 @@ line_length = 120  # Set global line length to 120 characters
 
 ```toml
 [global]
-line_length = 100  # Global default
+line-length = 100  # Global default
 
 [MD013]
-line_length = 120  # MD013 uses 120, overriding global setting
+line-length = 120  # MD013 uses 120, overriding global setting
 ```
 
 ### `flavor`
@@ -956,7 +956,7 @@ cache = false  # Disable caching
 rumdl check --no-cache .
 ```
 
-### `cache_dir`
+### `cache-dir`
 
 **Type**: `string`
 **Default**: `.rumdl_cache`
@@ -967,9 +967,9 @@ Specifies the directory where rumdl stores cache files.
 
 ```toml
 [global]
-cache_dir = ".rumdl_cache"      # Default location
+cache-dir = ".rumdl_cache"      # Default location
 # or
-cache_dir = "/tmp/rumdl-cache"  # Custom location
+cache-dir = "/tmp/rumdl-cache"  # Custom location
 ```
 
 **Behavior**:
@@ -1137,7 +1137,7 @@ rumdl processes files using the following logic:
     - If paths are provided via CLI: use those files/directories
     - Otherwise: recursively scan current directory for `.md` and `.markdown` files
 
-2. **Apply .gitignore filtering** (if `respect_gitignore = true`):
+2. **Apply .gitignore filtering** (if `respect-gitignore = true`):
 
     - Skip files/directories listed in `.gitignore` files
 
@@ -1161,7 +1161,7 @@ Given this configuration:
 [global]
 include = ["docs/**/*.md", "README.md"]
 exclude = ["docs/temp/**", "*.draft.md"]
-respect_gitignore = true
+respect-gitignore = true
 ```
 
 File selection process:
@@ -1197,7 +1197,7 @@ include = [
 ]
 
 # Set consistent line length for documentation
-line_length = 100
+line-length = 100
 
 # Exclude generated or temporary content
 exclude = [
@@ -1283,7 +1283,7 @@ exclude = [
 ]
 
 # Don't respect .gitignore to catch uncommitted docs
-respect_gitignore = false
+respect-gitignore = false
 ```
 
 ## Validation and Debugging
@@ -1317,7 +1317,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 
 ### Common Configuration Issues
 
-1. **No files found**: Check your `include`/`exclude` patterns and `respect_gitignore` setting
+1. **No files found**: Check your `include`/`exclude` patterns and `respect-gitignore` setting
 2. **Too many files**: Add more specific `exclude` patterns or limit `include` patterns
 3. **Rules not applying**: Verify rule names in `enable`/`disable` lists (case-insensitive but check spelling)
 4. **Performance issues**: Exclude large directories like `node_modules`, `vendor`, or build outputs
