@@ -139,6 +139,109 @@ pub(super) fn scan_mkdocs_container_code_spans(
     build_code_spans_from_ranges(content, lines, &extra_ranges)
 }
 
+/// Scan JSX block content lines for code spans that pulldown-cmark missed.
+///
+/// When pulldown-cmark processes MDX content, it sees `<ComponentName ...>` and starts
+/// an HTML block. Inside HTML blocks pulldown-cmark does not parse inline content, so
+/// backtick code spans within JSX component bodies are invisible to the initial parse.
+///
+/// This function extracts the content lines of each `in_jsx_block` run (skipping the
+/// opening and closing tag lines that would re-trigger HTML block parsing), re-parses
+/// each run with pulldown-cmark in isolation, and translates the resulting code-span
+/// byte offsets back to the original document.
+pub(super) fn scan_jsx_block_code_spans(
+    content: &str,
+    lines: &[LineInfo],
+    existing_ranges: &[(usize, usize)],
+) -> Vec<CodeSpan> {
+    let mut extra_ranges: Vec<(usize, usize)> = Vec::new();
+
+    let mut i = 0;
+    while i < lines.len() {
+        if !lines[i].in_jsx_block || lines[i].in_code_block {
+            i += 1;
+            continue;
+        }
+
+        // Collect the contiguous in_jsx_block run.
+        let run_start = i;
+        while i < lines.len() && lines[i].in_jsx_block {
+            i += 1;
+        }
+        let run_end = i;
+
+        // Quick exit: no backticks anywhere in this run.
+        let has_backticks = lines[run_start..run_end]
+            .iter()
+            .any(|li| li.content(content).contains('`'));
+        if !has_backticks {
+            continue;
+        }
+
+        // Build an extracted string from non-tag content lines with an offset line map.
+        // Tag lines (those whose trimmed content starts with `<`) are excluded because
+        // including them would cause pulldown-cmark to start an HTML block again.
+        // Each entry: (byte offset in extracted string, byte offset in original document)
+        let mut extracted = String::new();
+        let mut line_map: Vec<(usize, usize)> = Vec::new();
+
+        for li in &lines[run_start..run_end] {
+            if li.in_code_block {
+                continue;
+            }
+            let line_content = li.content(content);
+            let trimmed = line_content.trim_start();
+
+            // Skip opening/closing JSX component tag lines — they would trigger HTML
+            // block parsing. Only JSX components have uppercase-initial names, so we
+            // match `<Component...>` and `</Component>` but leave lowercase HTML like
+            // `<br>` in the extracted string where it belongs.
+            {
+                let after_bracket = trimmed.strip_prefix('<').unwrap_or("");
+                let tag_start = after_bracket.strip_prefix('/').unwrap_or(after_bracket);
+                if tag_start.as_bytes().first().map_or(false, |c| c.is_ascii_uppercase()) {
+                    continue;
+                }
+            }
+
+            // If the content is indented 4+ spaces, strip down to 3 to stay below
+            // pulldown-cmark's indented-code-block threshold (≥ 4 spaces).
+            let bytes_to_strip = if li.indent >= 4 { li.indent - 3 } else { 0 };
+            let stripped = &line_content[bytes_to_strip..];
+            let original_start = li.byte_offset + bytes_to_strip;
+
+            line_map.push((extracted.len(), original_start));
+            extracted.push_str(stripped);
+            extracted.push('\n');
+        }
+
+        if extracted.is_empty() || !extracted.contains('`') {
+            continue;
+        }
+
+        // Parse the isolated content — no preceding JSX tag means no HTML block context.
+        let parser = Parser::new(&extracted).into_offset_iter();
+        for (event, range) in parser {
+            if let Event::Code(_) = event {
+                let orig_start = dedented_to_original(range.start, &line_map);
+                let orig_end = dedented_to_original(range.end, &line_map);
+
+                let overlaps = existing_ranges.iter().any(|&(s, e)| s < orig_end && e > orig_start);
+                if !overlaps {
+                    extra_ranges.push((orig_start, orig_end));
+                }
+            }
+        }
+    }
+
+    if extra_ranges.is_empty() {
+        return Vec::new();
+    }
+
+    extra_ranges.sort_unstable_by_key(|&(start, _)| start);
+    build_code_spans_from_ranges(content, lines, &extra_ranges)
+}
+
 /// Convert a byte offset in the dedented string back to the original document offset.
 ///
 /// `line_map` entries are `(dedented_line_start, original_line_start)`.

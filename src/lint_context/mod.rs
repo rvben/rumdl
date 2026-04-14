@@ -412,6 +412,22 @@ impl<'a> LintContext<'a> {
             }
         }
 
+        // Supplement code spans for MDX JSX component body content that pulldown-cmark missed.
+        // pulldown-cmark treats JSX component opening tags (e.g. `<ParamField>`) as HTML block
+        // starters, so backtick code spans within component bodies are invisible to the initial
+        // parse.
+        if flavor == MarkdownFlavor::MDX {
+            let extra = profile_section!(
+                "MDX JSX code spans",
+                profile,
+                element_parsers::scan_jsx_block_code_spans(content, &lines, &code_span_ranges)
+            );
+            if !extra.is_empty() {
+                code_spans.extend(extra);
+                code_spans.sort_by_key(|span| span.byte_offset);
+            }
+        }
+
         // Mark lines that are continuations of multi-line code spans
         // This is needed for parse_list_blocks to correctly handle list items with multi-line code spans
         for span in &code_spans {

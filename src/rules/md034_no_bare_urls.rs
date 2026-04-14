@@ -601,4 +601,73 @@ mod tests {
             "[URL] followed by comma should be treated as shortcut ref: {result:?}"
         );
     }
+
+    #[test]
+    fn test_url_in_backticks_inside_mdx_component_not_flagged() {
+        // Exact reproduction from issue #572: URL inside inline code within an MDX
+        // component body must not be flagged. The same URL in backticks outside the
+        // component is already handled correctly and serves as a control.
+        let rule = MD034NoBareUrls;
+        let content = "# Test\n\nControl: `https://rumdl.example.com/` is fine here.\n\n<ParamField path=\"--stuff\">\n  This URL `https://rumdl.example.com/` must not be flagged.\n</ParamField>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in backticks inside MDX component must not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_bare_url_inside_mdx_component_still_flagged() {
+        // A bare URL (not in backticks) inside an MDX component body must still be flagged.
+        // This ensures the fix for issue #572 only suppresses properly code-spanned URLs.
+        let rule = MD034NoBareUrls;
+        let content =
+            "# Test\n\n<ParamField path=\"--stuff\">\n  Visit https://rumdl.example.com/ for details.\n</ParamField>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Bare URL in MDX component body must still be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_url_in_backticks_inside_nested_mdx_component_not_flagged() {
+        // Nested MDX components must also respect code spans.
+        let rule = MD034NoBareUrls;
+        let content = "<Outer>\n  <Inner>\n    Check `https://example.com/` here.\n  </Inner>\n</Outer>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in backticks inside nested MDX component must not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_url_in_backticks_after_fenced_code_block_inside_mdx_not_flagged() {
+        // A fenced code block inside a JSX component must not misalign the code-span
+        // offset map. The URL in backticks that appears *after* the code block must
+        // still be recognised as being inside a code span.
+        let rule = MD034NoBareUrls;
+        let content = "\
+<Component>
+Some intro text.
+
+```
+example code here
+```
+
+Check `https://example.com/` here.
+</Component>
+";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in backticks after a fenced code block inside MDX must not be flagged: {result:?}"
+        );
+    }
 }
