@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.72](https://github.com/rvben/rumdl/compare/v0.1.71...v0.1.72) - 2026-04-14
+
+### Added
+
+- **config**: resolve rule aliases in config get command ([69058cd](https://github.com/rvben/rumdl/commit/69058cd8085cad805fd421785b8a4a805b07c956))
+- **import**: support JSONC comments in markdownlint config files ([26ae457](https://github.com/rvben/rumdl/commit/26ae4570b5a1e9b622994506216b08e40c5a2011))
+- **cli**: introduce FmtArgs with formatter-appropriate interface ([dce2b40](https://github.com/rvben/rumdl/commit/dce2b40f90767a8c48ee65322108bb237f6b2f60))
+
+### Fixed
+
+- **md034**: detect code spans inside MDX JSX component bodies ([d881713](https://github.com/rvben/rumdl/commit/d881713f87f8439c2c478d094f9946ef4bc386c0))
+- **md025**: cascade level adjustment to subordinate headings when demoting duplicate title ([2399dca](https://github.com/rvben/rumdl/commit/2399dcada39b6dd367a25d3d81437248553555f2))
+- **formatter**: inline format args to satisfy clippy ([250a194](https://github.com/rvben/rumdl/commit/250a1940d6d26d6ff9b3c54158e9f492d3fb9748))
+- **commands**: resolve rule aliases in explain and rule commands ([5d04351](https://github.com/rvben/rumdl/commit/5d0435139d275e1485b832c3608e230f1278e63c))
+- use verified fix counts in summaries and correct dry-run label ([cd55dc1](https://github.com/rvben/rumdl/commit/cd55dc10f5a946cf42fdc79167dc7d50a8022ca9))
+
 ## [0.1.71](https://github.com/rvben/rumdl/compare/v0.1.70...v0.1.71) - 2026-04-13
 
 ### Added

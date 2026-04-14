@@ -199,7 +199,7 @@ pub(super) fn scan_jsx_block_code_spans(
             {
                 let after_bracket = trimmed.strip_prefix('<').unwrap_or("");
                 let tag_start = after_bracket.strip_prefix('/').unwrap_or(after_bracket);
-                if tag_start.as_bytes().first().map_or(false, |c| c.is_ascii_uppercase()) {
+                if tag_start.as_bytes().first().is_some_and(|c| c.is_ascii_uppercase()) {
                     continue;
                 }
             }
