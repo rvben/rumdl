@@ -347,7 +347,103 @@ impl Rule for MD025SingleTitle {
         }
         let warnings =
             crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
-        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &warnings)
+
+        // Build the full fix set: each flagged heading plus every subordinate heading
+        // in its section, all demoted by the same +1 delta. Wrapping cascade fixes in
+        // synthetic LintWarning objects lets apply_warning_fixes handle range sorting
+        // and deduplication automatically.
+        let mut all_warnings = warnings.clone();
+
+        let target_level = self.config.level.as_usize();
+
+        for warning in &warnings {
+            // warning.line is 1-indexed; convert to 0-indexed for ctx.lines access.
+            let heading_line = warning.line - 1;
+
+            // Section boundary: the next heading at or above target_level, or end of doc.
+            let section_end = ctx
+                .lines
+                .iter()
+                .enumerate()
+                .skip(heading_line + 1)
+                .find(|(_, li)| {
+                    li.heading.as_ref().is_some_and(|h| {
+                        h.level as usize <= target_level && h.is_valid && !li.in_code_block && li.visual_indent < 4
+                    })
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(ctx.lines.len());
+
+            // Emit a cascade Fix for each subordinate heading inside [heading_line+1, section_end).
+            for line_num in (heading_line + 1)..section_end {
+                let line_info = &ctx.lines[line_num];
+                let Some(heading) = &line_info.heading else {
+                    continue;
+                };
+                if !heading.is_valid || line_info.in_code_block || line_info.visual_indent >= 4 {
+                    continue;
+                }
+
+                let new_level = heading.level as usize + 1;
+                if new_level > 6 {
+                    // Heading is already at the maximum depth; no fix possible.
+                    continue;
+                }
+
+                let line_content = line_info.content(ctx.content);
+
+                // For Setext headings the fix range must cover both the text line and its
+                // underline so they are replaced atomically with an ATX heading.
+                let is_setext = matches!(
+                    heading.style,
+                    crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                );
+                let fix_range = if is_setext && line_num + 2 <= ctx.lines.len() {
+                    let text_range = ctx.line_index.line_content_range(line_num + 1);
+                    let underline_range = ctx.line_index.line_content_range(line_num + 2);
+                    text_range.start..underline_range.end
+                } else {
+                    ctx.line_index.line_content_range(line_num + 1)
+                };
+
+                let leading_spaces = line_content.len() - line_content.trim_start().len();
+                let indentation = " ".repeat(leading_spaces);
+                let hashes = "#".repeat(new_level);
+                let raw = &heading.raw_text;
+                let closing = if heading.has_closing_sequence {
+                    format!(" {}", "#".repeat(new_level))
+                } else {
+                    String::new()
+                };
+                let replacement = if raw.is_empty() {
+                    format!("{indentation}{hashes}{closing}")
+                } else {
+                    format!("{indentation}{hashes} {raw}{closing}")
+                };
+
+                all_warnings.push(crate::rule::LintWarning {
+                    rule_name: Some(self.name().to_string()),
+                    message: String::new(),
+                    line: line_num + 1,
+                    column: 1,
+                    end_line: line_num + 1,
+                    end_column: line_content.chars().count(),
+                    severity: crate::rule::Severity::Error,
+                    fix: Some(Fix {
+                        range: fix_range,
+                        replacement,
+                    }),
+                });
+            }
+        }
+
+        // Filter cascade warnings through the same inline-disable logic applied to the
+        // original warnings. This ensures that a subordinate heading on a disabled line
+        // (e.g., `<!-- markdownlint-disable-line MD025 -->`) is not cascade-demoted.
+        let all_warnings =
+            crate::utils::fix_utils::filter_warnings_by_inline_config(all_warnings, ctx.inline_config(), self.name());
+
+        crate::utils::fix_utils::apply_warning_fixes(ctx.content, &all_warnings)
             .map_err(crate::rule::LintError::InvalidInput)
     }
 
@@ -786,6 +882,116 @@ mod tests {
         assert!(
             rule.should_skip(&ctx),
             "should_skip should return true with no frontmatter title and single H1"
+        );
+    }
+
+    #[test]
+    fn test_fix_cascades_subheadings_after_demoting_duplicate_h1() {
+        let rule = MD025SingleTitle::default();
+
+        // Exact reproduction from issue #573
+        let content = "abcd\n\n# 1_1\n\n# 1_2\n\n## 1_2-2_1\n\n# 1_3\n\n## 1_3-2_1\n\n### 1_3-2_1-3_1\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("# 1_1"), "First H1 must be preserved: {fixed}");
+        assert!(
+            fixed.contains("## 1_2\n"),
+            "Duplicate H1 must be demoted to H2: {fixed}"
+        );
+        assert!(
+            fixed.contains("### 1_2-2_1"),
+            "H2 under demoted H1 must cascade to H3: {fixed}"
+        );
+        assert!(fixed.contains("## 1_3\n"), "Third H1 must be demoted to H2: {fixed}");
+        assert!(
+            fixed.contains("### 1_3-2_1"),
+            "H2 under third demoted H1 must cascade to H3: {fixed}"
+        );
+        assert!(
+            fixed.contains("#### 1_3-2_1-3_1"),
+            "H3 under third demoted H1 must cascade to H4: {fixed}"
+        );
+    }
+
+    #[test]
+    fn test_fix_cascades_single_section_only() {
+        let rule = MD025SingleTitle::default();
+
+        // Sub-headings of a demoted section must not affect sub-headings of other sections
+        let content = "# Main\n\n# Alpha\n\n## Alpha Sub\n\n# Beta\n\n## Beta Sub\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("# Main\n"), "First H1 preserved: {fixed}");
+        assert!(fixed.contains("## Alpha\n"), "Alpha H1 demoted to H2: {fixed}");
+        assert!(fixed.contains("### Alpha Sub"), "Alpha Sub cascades to H3: {fixed}");
+        assert!(fixed.contains("## Beta\n"), "Beta H1 demoted to H2: {fixed}");
+        assert!(fixed.contains("### Beta Sub"), "Beta Sub cascades to H3: {fixed}");
+    }
+
+    #[test]
+    fn test_fix_cascade_stops_at_next_same_level() {
+        let rule = MD025SingleTitle::default();
+
+        // H2 under first demoted section must not bleed into content after the next H1
+        // (which is itself demoted). The cascade boundary is the next heading at or above
+        // the original target level.
+        let content = "# Main\n\n# A\n\n## A1\n\n# B\n\n## B1\n\n### B1a\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("## A\n"), "A demoted to H2: {fixed}");
+        assert!(fixed.contains("### A1"), "A1 cascades to H3: {fixed}");
+        assert!(fixed.contains("## B\n"), "B demoted to H2: {fixed}");
+        assert!(fixed.contains("### B1"), "B1 cascades to H3: {fixed}");
+        assert!(fixed.contains("#### B1a"), "B1a cascades to H4: {fixed}");
+        // Original first H1 still at level 1
+        assert!(fixed.contains("# Main"), "Main preserved at H1: {fixed}");
+    }
+
+    #[test]
+    fn test_fix_cascade_does_not_exceed_level_6() {
+        // A heading at level 6 under a demoted section cannot go deeper; it stays at 6.
+        let rule = MD025SingleTitle::default();
+
+        // Build a chain: H1, H1, H2, H3, H4, H5, H6 under the second H1
+        let content = "# Title\n\n# Section\n\n## L2\n\n### L3\n\n#### L4\n\n##### L5\n\n###### L6\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("# Title"), "First H1 preserved: {fixed}");
+        assert!(fixed.contains("## Section"), "Section demoted to H2: {fixed}");
+        assert!(fixed.contains("### L2"), "L2 cascades to H3: {fixed}");
+        assert!(fixed.contains("#### L3"), "L3 cascades to H4: {fixed}");
+        assert!(fixed.contains("##### L4"), "L4 cascades to H5: {fixed}");
+        assert!(fixed.contains("###### L5"), "L5 cascades to H6: {fixed}");
+        // L6 cannot go to H7 — stays at H6
+        assert!(fixed.contains("###### L6"), "L6 at max depth stays at H6: {fixed}");
+    }
+
+    #[test]
+    fn test_fix_cascade_respects_inline_disable_on_subordinate() {
+        // A subordinate heading on a markdownlint-disable-line MD025 line must not
+        // be cascade-fixed: the inline disable explicitly opts that line out.
+        let rule = MD025SingleTitle::default();
+
+        let content = "# Title\n# Demote\n## Skip <!-- markdownlint-disable-line MD025 -->\n## Cascade\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(fixed.contains("## Demote"), "Duplicate H1 should be demoted: {fixed}");
+        // ## Skip has an inline disable — cascade must not touch it.
+        // Use exact-prefix matching to avoid "## Skip" matching inside "### Skip".
+        let skip_line = fixed.lines().find(|l| l.contains("Skip")).unwrap_or("");
+        assert!(
+            skip_line.starts_with("## Skip"),
+            "Inline-disabled subordinate should stay at level 2, got line: {skip_line:?}"
+        );
+        // ## Cascade has no disable — it falls in the section and must cascade
+        assert!(
+            fixed.contains("### Cascade"),
+            "Non-disabled subordinate should cascade to level 3: {fixed}"
         );
     }
 

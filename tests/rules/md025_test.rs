@@ -154,8 +154,8 @@ fn test_md025_fix() {
     let content = "# Title 1\n# Title 2\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // Only the duplicate H1 is demoted; child headings are not cascaded
-    assert_eq!(result, "# Title 1\n## Title 2\n## Heading\n");
+    // Duplicate H1 is demoted and subordinate headings in its section cascade by +1
+    assert_eq!(result, "# Title 1\n## Title 2\n### Heading\n");
 }
 
 #[test]
@@ -164,8 +164,8 @@ fn test_md025_fix_multiple() {
     let content = "# Title 1\n# Title 2\n# Title 3\n## Heading\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // Only duplicate H1s are demoted; child headings are not cascaded
-    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n## Heading\n");
+    // Duplicate H1s are demoted; subordinate headings in each section cascade by +1
+    assert_eq!(result, "# Title 1\n## Title 2\n## Title 3\n### Heading\n");
 }
 
 #[test]
@@ -190,15 +190,16 @@ fn test_md025_fix_with_indentation() {
 
 #[test]
 fn test_md025_fix_demotes_duplicates_only() {
-    // Fix demotes only the duplicate top-level headings, not their children
+    // Fix demotes duplicate top-level headings and cascades the adjustment to all
+    // subordinate headings in each flagged section, preserving relative hierarchy.
     let rule = MD025SingleTitle::default();
 
     let content = "# 1_1\n# 1_2\n## 1_2-2_1\n# 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
-        result, "# 1_1\n## 1_2\n## 1_2-2_1\n## 1_3\n## 1_3-2_1\n### 1_3-2_1-3_1\n",
-        "Fix should only demote duplicate top-level headings"
+        result, "# 1_1\n## 1_2\n### 1_2-2_1\n## 1_3\n### 1_3-2_1\n#### 1_3-2_1-3_1\n",
+        "Fix cascades level adjustments to subordinate headings in each section"
     );
 }
 
@@ -216,7 +217,7 @@ fn test_md025_fix_preserves_non_duplicate_headings() {
 
 #[test]
 fn test_md025_fix_multiple_duplicates_with_children() {
-    // Only the duplicate H1s are demoted; children stay at their original level
+    // Duplicate H1s are demoted and subordinate headings in each section cascade by +1
     let rule = MD025SingleTitle::default();
 
     let content = "# Keep\n# Demote1\n## Child1\n## Child2\n# Demote2\n## Child3\n";
@@ -224,19 +225,20 @@ fn test_md025_fix_multiple_duplicates_with_children() {
     let result = rule.fix(&ctx).unwrap();
     assert_eq!(
         result,
-        "# Keep\n## Demote1\n## Child1\n## Child2\n## Demote2\n## Child3\n"
+        "# Keep\n## Demote1\n### Child1\n### Child2\n## Demote2\n### Child3\n"
     );
 }
 
 #[test]
 fn test_md025_fix_deep_hierarchy_unchanged() {
-    // Only the duplicate H1 is demoted; deeper headings are untouched
+    // Duplicate H1 is demoted and all subordinate headings cascade by +1, preserving
+    // relative depth. Heading at level 6 cannot cascade further and stays at level 6.
     let rule = MD025SingleTitle::default();
 
     let content = "# Main\n# Other\n## H2\n### H3\n#### H4\n##### H5\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Main\n## Other\n## H2\n### H3\n#### H4\n##### H5\n");
+    assert_eq!(result, "# Main\n## Other\n### H2\n#### H3\n##### H4\n###### H5\n");
 }
 
 #[test]
@@ -251,8 +253,11 @@ fn test_md025_fix_with_frontmatter_title_demotes_h1() {
         result.contains("## Body H1"),
         "Body H1 should be demoted when frontmatter has title, got: {result}"
     );
-    // ## Sub is not a duplicate H1, so it stays as-is
-    assert!(result.contains("## Sub"), "## Sub should stay unchanged, got: {result}");
+    // ## Sub is subordinate to the demoted # Body H1, so it cascades to ###
+    assert!(
+        result.contains("### Sub"),
+        "## Sub should cascade to ### Sub, got: {result}"
+    );
 }
 
 #[test]
@@ -264,8 +269,9 @@ fn test_md025_fix_allowed_section_not_demoted() {
     let content = "# Main\n# Other\n## Child\n# References\n## Ref1\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // "Other" demoted to ##, "Child" stays at ##, "References" is allowed (kept as #)
-    assert_eq!(result, "# Main\n## Other\n## Child\n# References\n## Ref1\n");
+    // "Other" demoted to ##, "Child" cascades to ### (section ends at # References),
+    // "References" is allowed (kept as #), "Ref1" is under allowed section (unchanged)
+    assert_eq!(result, "# Main\n## Other\n### Child\n# References\n## Ref1\n");
 }
 
 #[test]
@@ -295,19 +301,19 @@ fn test_md025_check_has_per_warning_fix() {
 
 #[test]
 fn test_md025_fix_setext_child_preserved() {
-    // Setext child headings at level 2 are not duplicate H1s, so they stay as-is
+    // The setext H2 is subordinate to # Other (the demoted duplicate H1), so it
+    // cascades from level 2 to level 3 and is rewritten as an ATX heading.
     let rule = MD025SingleTitle::default();
     let content = "# Title\n# Other\nSetext Child\n-------------\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // Only # Other gets demoted; the setext H2 is not a duplicate H1
     assert!(
         result.contains("## Other"),
         "Duplicate H1 should be demoted, got: {result}"
     );
     assert!(
-        result.contains("Setext Child\n-------------"),
-        "Setext H2 should be preserved as-is, got: {result}"
+        result.contains("### Setext Child"),
+        "Setext H2 in demoted section should cascade to ### (ATX), got: {result}"
     );
 }
 
@@ -317,18 +323,19 @@ fn test_md025_fix_level2_config() {
     let content = "# H1\n## First\n### Child1\n## Dup\n### Child2\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    // ## First kept, ## Dup demoted to ###, ### Child2 stays as-is (not a duplicate H2)
-    assert_eq!(result, "# H1\n## First\n### Child1\n### Dup\n### Child2\n");
+    // ## First kept, ## Dup demoted to ###, ### Child2 cascades to #### in Dup's section
+    assert_eq!(result, "# H1\n## First\n### Child1\n### Dup\n#### Child2\n");
 }
 
 #[test]
 fn test_md025_fix_atx_closed_child_preserved() {
-    // ATX-closed child headings are not duplicate H1s, so they stay as-is
+    // ATX-closed child heading cascades by +1 in the demoted section; closing hashes
+    // are updated to match the new level.
     let rule = MD025SingleTitle::default();
     let content = "# Keep\n# Demote\n## Child ##\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
-    assert_eq!(result, "# Keep\n## Demote\n## Child ##\n");
+    assert_eq!(result, "# Keep\n## Demote\n### Child ###\n");
 }
 
 #[test]
@@ -342,9 +349,10 @@ fn test_md025_fix_code_block_preserved() {
         result.contains("## Not a heading"),
         "Heading in code block must not be demoted, got: {result}"
     );
+    // ## Real Child is subordinate to the demoted # Demote, so it cascades to ###
     assert!(
-        result.contains("## Real Child"),
-        "Non-duplicate child heading should stay as-is, got: {result}"
+        result.contains("### Real Child"),
+        "Non-duplicate child heading should cascade to ###, got: {result}"
     );
 }
 
@@ -355,15 +363,22 @@ fn test_md025_fix_inline_disable_respected() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.fix(&ctx).unwrap();
     // # Dup demoted to ##, ## Child stays as-is (not a duplicate H1)
+    // # Dup demoted to ## Dup; ## Child is in its section and cascades to ### Child
     assert!(result.contains("## Dup"), "Dup should be demoted, got: {result}");
-    assert!(result.contains("## Child"), "Child should stay as ##, got: {result}");
+    assert!(
+        result.contains("### Child"),
+        "Child should cascade to ### Child, got: {result}"
+    );
     // # Preserved is in a disabled region, kept as-is
     assert!(
         result.contains("# Preserved"),
         "Preserved heading must stay as-is, got: {result}"
     );
-    // ## Under stays as-is (not a duplicate H1)
-    assert!(result.contains("## Under"), "Under should stay as ##, got: {result}");
+    // ## Under is under # Preserved (not demoted), so it stays unchanged
+    assert!(
+        result.contains("## Under"),
+        "Under should stay as ## Under, got: {result}"
+    );
 }
 
 #[test]
