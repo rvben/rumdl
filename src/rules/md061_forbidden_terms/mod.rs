@@ -5,7 +5,7 @@ use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleC
 use crate::rule_config_serde::RuleConfig;
 
 mod md061_config;
-pub use md061_config::MD061Config;
+pub(super) use md061_config::MD061Config;
 
 /// Rule MD061: Forbidden terms
 ///

@@ -9,7 +9,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 mod md032_config;
-pub use md032_config::MD032Config;
+pub(super) use md032_config::MD032Config;
 
 // Detects ordered list items starting with a number other than 1
 static ORDERED_LIST_NON_ONE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*([2-9]|\d{2,})\.\s").unwrap());

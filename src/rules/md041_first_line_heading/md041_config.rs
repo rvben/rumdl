@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Configuration for MD041 (First line heading)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub struct MD041Config {
+pub(crate) struct MD041Config {
     /// The required heading level (default: 1)
     #[serde(default)]
     pub level: HeadingLevel,

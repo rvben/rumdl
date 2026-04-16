@@ -1,6 +1,6 @@
 mod md041_config;
 
-pub use md041_config::MD041Config;
+pub(super) use md041_config::MD041Config;
 
 use crate::lint_context::HeadingStyle;
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, Severity};

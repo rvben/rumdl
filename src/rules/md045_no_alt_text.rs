@@ -1,6 +1,6 @@
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
-pub mod md045_config;
+pub(super) mod md045_config;
 use md045_config::MD045Config;
 
 /// Rule MD045: Images should have alt text

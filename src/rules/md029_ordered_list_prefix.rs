@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use toml;
 
 mod md029_config;
-pub use md029_config::{ListStyle, MD029Config};
+pub use md029_config::ListStyle;
+pub(super) use md029_config::MD029Config;
 
 /// Type alias for grouped list items: (list_id, items) where items are (line_num, LineInfo, ListItemInfo)
 type ListItemGroup<'a> = (

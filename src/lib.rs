@@ -1,3 +1,5 @@
+#![warn(unreachable_pub)]
+
 pub mod code_block_tools;
 pub mod config;
 pub mod doc_comment_lint;

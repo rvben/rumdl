@@ -29,7 +29,7 @@ pub enum ListItemSpacingStyle {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct MD076Config {
+pub(super) struct MD076Config {
     pub style: ListItemSpacingStyle,
     /// When true, blank lines around continuation paragraphs within a list item
     /// are permitted even in tight mode. This allows tight inter-item spacing

@@ -3,7 +3,7 @@
 /// See [docs/md018.md](../../docs/md018.md) for full documentation, configuration, and examples.
 mod md018_config;
 
-pub use md018_config::MD018Config;
+pub(super) use md018_config::MD018Config;
 
 use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};

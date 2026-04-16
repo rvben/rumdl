@@ -19,7 +19,7 @@ use std::ops::Range;
 use std::sync::LazyLock;
 
 mod md063_config;
-pub use md063_config::{HeadingCapStyle, MD063Config};
+pub(super) use md063_config::{HeadingCapStyle, MD063Config};
 
 // Regex to match inline code spans (backticks)
 static INLINE_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+[^`]+`+").unwrap());

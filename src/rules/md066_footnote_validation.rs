@@ -6,20 +6,21 @@ use std::sync::LazyLock;
 /// Pattern to match footnote definitions: [^id]: content
 /// Matches at start of line, with 0-3 leading spaces, caret in brackets
 /// Also handles definitions inside blockquotes (after stripping > prefixes)
-pub static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
+pub(super) static FOOTNOTE_DEF_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[ ]{0,3}\[\^([^\]]+)\]:").unwrap());
 
 /// Pattern to match footnote references in text: [^id]
 /// Callers must manually check that the match is NOT followed by `:` (which would make it a definition)
-pub static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^([^\]]+)\]").unwrap());
+pub(super) static FOOTNOTE_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\^([^\]]+)\]").unwrap());
 
 /// Strip blockquote prefixes from a line to check for footnote definitions
 /// Handles nested blockquotes like `> > > ` and variations with/without spaces
-pub use crate::utils::blockquote::strip_blockquote_prefix;
+pub(super) use crate::utils::blockquote::strip_blockquote_prefix;
 
 /// Find the (column, end_column) of a footnote definition marker `[^id]:` on a line.
 /// Returns 1-indexed column positions pointing to `[^id]:`, not leading whitespace.
 /// Handles blockquote prefixes and uses character counting for multi-byte support.
-pub fn footnote_def_position(line: &str) -> (usize, usize) {
+pub(super) fn footnote_def_position(line: &str) -> (usize, usize) {
     let stripped = strip_blockquote_prefix(line);
     if let Some(caps) = FOOTNOTE_DEF_PATTERN.captures(stripped) {
         let prefix_chars = line.chars().count() - stripped.chars().count();

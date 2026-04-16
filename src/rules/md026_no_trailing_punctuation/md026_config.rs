@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Default punctuation to check for MD026
 /// Matches markdownlint's default: ".,;:!。，；：！"
 /// We only include ASCII punctuation for now
-pub const DEFAULT_PUNCTUATION: &str = ".,;:!";
+pub(super) const DEFAULT_PUNCTUATION: &str = ".,;:!";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MD026Config {

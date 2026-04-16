@@ -6,7 +6,7 @@ use std::collections::HashSet;
 /// These tags can execute scripts, load external content, or otherwise pose security risks.
 ///
 /// Reference: <https://github.github.com/gfm/#disallowed-raw-html-extension->
-pub const GFM_DISALLOWED_TAGS: &[&str] = &[
+pub(super) const GFM_DISALLOWED_TAGS: &[&str] = &[
     "title",
     "textarea",
     "style",
@@ -20,7 +20,7 @@ pub const GFM_DISALLOWED_TAGS: &[&str] = &[
 
 /// HTML tags that have unambiguous Markdown equivalents and can be safely auto-fixed.
 /// These conversions are lossless for simple cases (no attributes, no nesting).
-pub const SAFE_FIXABLE_TAGS: &[&str] = &[
+pub(super) const SAFE_FIXABLE_TAGS: &[&str] = &[
     "em", "i", // italic: *text*
     "strong", "b",    // bold: **text**
     "code", // inline code: `text`
@@ -32,14 +32,14 @@ pub const SAFE_FIXABLE_TAGS: &[&str] = &[
 
 /// Tags that require attribute extraction for conversion (unlike simple tags like em/strong).
 /// These tags are fixable only when they have the required attributes.
-pub const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
+pub(super) const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
 
 /// URL schemes that are safe to convert to Markdown links.
 /// Dangerous schemes like javascript: or data: are rejected.
-pub const SAFE_URL_SCHEMES: &[&str] = &["http://", "https://", "mailto:", "tel:", "ftp://", "ftps://"];
+pub(super) const SAFE_URL_SCHEMES: &[&str] = &["http://", "https://", "mailto:", "tel:", "ftp://", "ftps://"];
 
 /// URL schemes that are explicitly dangerous and must not be converted.
-pub const DANGEROUS_URL_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:", "about:", "blob:", "file:"];
+pub(super) const DANGEROUS_URL_SCHEMES: &[&str] = &["javascript:", "vbscript:", "data:", "about:", "blob:", "file:"];
 
 /// Style for converting `<br>` tags to Markdown line breaks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
