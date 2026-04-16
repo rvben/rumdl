@@ -377,12 +377,14 @@ fn test_performance_md051() {
     // Add links section
     content.push_str("# Links Section\n\n");
 
-    // Add 100 links, some valid, some invalid
+    // Add 100 links, some valid, some invalid. MD051 only validates fragment-only
+    // links (those starting with `#`); links with a path component are treated as
+    // external and skipped, so the test URLs must omit the path.
     for i in 0..100 {
         if i % 3 == 0 {
-            content.push_str(&format!("[Link to invalid heading](somepath#heading-{})\n", i + 100));
+            content.push_str(&format!("[Link to invalid heading](#heading-{})\n", i + 100));
         } else {
-            content.push_str(&format!("[Link to heading {}](somepath#heading-{})\n", i % 50, i % 50));
+            content.push_str(&format!("[Link to heading {}](#heading-{})\n", i % 50, i % 50));
         }
     }
 
