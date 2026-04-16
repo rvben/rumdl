@@ -11,7 +11,6 @@ pub mod header_id_utils;
 pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;
-pub mod markdown_elements;
 pub mod mkdocs_abbreviations;
 pub mod mkdocs_admonitions;
 pub mod mkdocs_attr_list;
@@ -47,7 +46,6 @@ pub use line_ending::{
     LineEnding, detect_line_ending, detect_line_ending_enum, ensure_consistent_line_endings, get_line_ending_str,
     normalize_line_ending,
 };
-pub use markdown_elements::{ElementQuality, ElementType, MarkdownElement, MarkdownElements};
 pub use parser_options::rumdl_parser_options;
 pub use range_utils::LineIndex;
 
