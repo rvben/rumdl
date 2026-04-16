@@ -363,6 +363,31 @@ mod tests {
         assert!(is_in_tilde_markup(line2, 10)); // "i"
     }
 
+    #[test]
+    fn test_find_strikethrough_spans_triple_tilde() {
+        // ~~~a~~~ should match ~~a~~ (strikethrough) — the regex should find
+        // the leftmost valid pairing, not fail on extra tildes at the boundaries.
+        let line = "~~~a~~~";
+        let spans = find_strikethrough_spans(line);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&line[spans[0].0..spans[0].1], "~~a~~");
+    }
+
+    #[test]
+    fn test_find_strikethrough_spans_internal_single_tilde() {
+        // ~~a~b~~ must match as one strikethrough span, not split into
+        // strikethrough + subscript — the regex must allow single tildes
+        // inside the strikethrough body.
+        let line = "~~a~b~~";
+        let spans = find_strikethrough_spans(line);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(&line[spans[0].0..spans[0].1], "~~a~b~~");
+
+        // And no inner subscript should be detected for the same line.
+        let sub_spans = find_single_delim_spans(line, '~', &spans);
+        assert!(sub_spans.is_empty());
+    }
+
     // =========================================================================
     // Mark tests
     // =========================================================================
