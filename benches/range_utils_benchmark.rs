@@ -1,7 +1,6 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use rand::Rng;
-use rand::rng;
+use criterion::{Criterion, criterion_group, criterion_main};
 use rumdl_lib::utils::range_utils::LineIndex;
+use std::hint::black_box;
 
 // Naive implementation that doesn't use the optimized function
 fn naive_line_col_to_byte_range(content: &str, line: usize, column: usize) -> std::ops::Range<usize> {
@@ -71,25 +70,28 @@ fn bench_range_utils(c: &mut Criterion) {
         })
     });
 
-    // Benchmark with random accesses
-    let mut rng = rng();
+    // Benchmark scattered accesses with a deterministic pattern so runs are
+    // reproducible (rand would give non-reproducible bench output).
+    let scattered: Vec<(usize, usize)> = (0..20)
+        .map(|i| {
+            let line = 1 + (i * 499) % line_count; // 499 is coprime with line_count, good spread
+            let col = 1 + (i * 7) % 40;
+            (line, col)
+        })
+        .collect();
 
-    c.bench_function("random_access_optimized", |b| {
+    c.bench_function("scattered_access_optimized", |b| {
         b.iter(|| {
-            for _ in 0..20 {
-                let line = rng.random_range(1..=line_count);
-                let col = rng.random_range(1..=40);
-                black_box(line_index.line_col_to_byte_range(line, col));
+            for (line, col) in &scattered {
+                black_box(line_index.line_col_to_byte_range(*line, *col));
             }
         })
     });
 
-    c.bench_function("random_access_naive", |b| {
+    c.bench_function("scattered_access_naive", |b| {
         b.iter(|| {
-            for _ in 0..20 {
-                let line = rng.random_range(1..=line_count);
-                let col = rng.random_range(1..=40);
-                black_box(naive_line_col_to_byte_range(black_box(&content), line, col));
+            for (line, col) in &scattered {
+                black_box(naive_line_col_to_byte_range(black_box(&content), *line, *col));
             }
         })
     });

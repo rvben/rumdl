@@ -1,7 +1,8 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::*;
+use std::hint::black_box;
 
 /// Generate test content with various markdown issues that need fixing
 fn generate_problematic_content(size: usize) -> String {
@@ -11,11 +12,6 @@ fn generate_problematic_content(size: usize) -> String {
         // MD001 - Heading increment issues
         if i % 10 == 0 {
             content.push_str(&format!("### Heading {i} (should be H1)\n\n"));
-        }
-
-        // MD002 - First heading should be H1
-        if i == 1 {
-            content.push_str("## First heading (should be H1)\n\n");
         }
 
         // MD003 - Heading style inconsistency
@@ -35,11 +31,6 @@ fn generate_problematic_content(size: usize) -> String {
         if i % 12 == 0 {
             content.push_str(&format!("* Item {i}\n"));
             content.push_str(&format!("   * Badly indented item {i}\n\n"));
-        }
-
-        // MD006 - Start bullets at beginning
-        if i % 20 == 0 {
-            content.push_str(&format!("  * Indented bullet {i}\n\n"));
         }
 
         // MD007 - Unordered list indentation
@@ -206,13 +197,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD001 - Heading increment
     c.bench_function("MD001 fix", |b| {
-        let rule = MD001HeadingIncrement;
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
-
-    // MD002 - First heading H1
-    c.bench_function("MD002 fix", |b| {
-        let rule = MD002FirstHeadingH1::default();
+        let rule = MD001HeadingIncrement::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -231,12 +216,6 @@ fn bench_fix_performance(c: &mut Criterion) {
     // MD005 - List indentation
     c.bench_function("MD005 fix", |b| {
         let rule = MD005ListIndent::default();
-        b.iter(|| rule.fix(black_box(&ctx)))
-    });
-
-    // MD006 - Start bullets at beginning
-    c.bench_function("MD006 fix", |b| {
-        let rule = MD006StartBullets;
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -266,7 +245,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD018 - No space after hash
     c.bench_function("MD018 fix", |b| {
-        let rule = MD018NoMissingSpaceAtx;
+        let rule = MD018NoMissingSpaceAtx::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -326,7 +305,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD032 - Blanks around lists
     c.bench_function("MD032 fix", |b| {
-        let rule = MD032BlanksAroundLists;
+        let rule = MD032BlanksAroundLists::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -362,7 +341,7 @@ fn bench_fix_performance(c: &mut Criterion) {
 
     // MD040 - Fenced code language
     c.bench_function("MD040 fix", |b| {
-        let rule = MD040FencedCodeLanguage;
+        let rule = MD040FencedCodeLanguage::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 
@@ -415,7 +394,7 @@ fn bench_fix_performance_large(c: &mut Criterion) {
     });
 
     c.bench_function("MD018 fix large", |b| {
-        let rule = MD018NoMissingSpaceAtx;
+        let rule = MD018NoMissingSpaceAtx::default();
         b.iter(|| rule.fix(black_box(&ctx)))
     });
 

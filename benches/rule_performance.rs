@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
@@ -6,6 +6,7 @@ use rumdl_lib::rules::{
     MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
     MD053LinkImageReferenceDefinitions,
 };
+use std::hint::black_box;
 
 fn make_ctx(content: &str) -> LintContext<'_> {
     LintContext::new(content, MarkdownFlavor::Standard, None)

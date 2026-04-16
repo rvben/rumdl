@@ -90,22 +90,22 @@ fn parse_links_pulldown_cmark(content: &str) -> Vec<LinkInfo> {
                 }
             }
             Event::End(tag) => {
-                if matches!(tag, pulldown_cmark::TagEnd::Link) {
-                    if let Some((start_pos, url, link_type)) = link_stack.pop() {
-                        let is_reference = matches!(
-                            link_type,
-                            LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
-                        );
+                if matches!(tag, pulldown_cmark::TagEnd::Link)
+                    && let Some((start_pos, url, link_type)) = link_stack.pop()
+                {
+                    let is_reference = matches!(
+                        link_type,
+                        LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut
+                    );
 
-                        links.push(LinkInfo {
-                            _text: text_buffer.clone(),
-                            _url: url,
-                            _byte_offset: start_pos,
-                            _byte_end: range.end,
-                            _is_reference: is_reference,
-                        });
-                        text_buffer.clear();
-                    }
+                    links.push(LinkInfo {
+                        _text: text_buffer.clone(),
+                        _url: url,
+                        _byte_offset: start_pos,
+                        _byte_end: range.end,
+                        _is_reference: is_reference,
+                    });
+                    text_buffer.clear();
                 }
             }
             _ => {}
