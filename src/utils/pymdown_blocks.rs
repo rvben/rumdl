@@ -98,11 +98,6 @@ impl BlockTracker {
     pub fn is_inside_block(&self) -> bool {
         !self.indent_stack.is_empty()
     }
-
-    /// Get current nesting depth
-    pub fn depth(&self) -> usize {
-        self.indent_stack.len()
-    }
 }
 
 /// Detect PyMdown block ranges in content
@@ -154,39 +149,6 @@ pub fn is_within_block_ranges(ranges: &[ByteRange], position: usize) -> bool {
     ranges.iter().any(|r| position >= r.start && position < r.end)
 }
 
-/// Extract the block type from an opening line
-/// Returns the block type like "caption", "details", "admonition", etc.
-pub fn extract_block_type(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with("///") {
-        return None;
-    }
-
-    let after_marker = trimmed[3..].trim_start();
-    // Block type is the first word (before any | or whitespace)
-    after_marker
-        .split(|c: char| c.is_whitespace() || c == '|')
-        .next()
-        .filter(|s| !s.is_empty())
-}
-
-/// Extract arguments from a block opening line (text after |)
-pub fn extract_block_args(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    if !trimmed.starts_with("///") {
-        return None;
-    }
-
-    // Find the | separator
-    if let Some(pipe_pos) = trimmed.find('|') {
-        let args = trimmed[pipe_pos + 1..].trim();
-        if !args.is_empty() {
-            return Some(args);
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +191,6 @@ mod tests {
         // Enter a block
         assert!(tracker.process_line("/// caption"));
         assert!(tracker.is_inside_block());
-        assert_eq!(tracker.depth(), 1);
 
         // Inside content
         assert!(tracker.process_line("This is content."));
@@ -238,7 +199,6 @@ mod tests {
         // Exit the block
         assert!(!tracker.process_line("///"));
         assert!(!tracker.is_inside_block());
-        assert_eq!(tracker.depth(), 0);
     }
 
     #[test]
@@ -247,11 +207,11 @@ mod tests {
 
         // Outer block
         assert!(tracker.process_line("/// details | Outer"));
-        assert_eq!(tracker.depth(), 1);
+        assert!(tracker.is_inside_block());
 
         // Inner block
         assert!(tracker.process_line("  /// caption"));
-        assert_eq!(tracker.depth(), 2);
+        assert!(tracker.is_inside_block());
 
         // Content
         assert!(tracker.process_line("    Content"));
@@ -259,11 +219,11 @@ mod tests {
 
         // Close inner
         assert!(tracker.process_line("  ///"));
-        assert_eq!(tracker.depth(), 1);
+        assert!(tracker.is_inside_block());
 
         // Close outer
         assert!(!tracker.process_line("///"));
-        assert_eq!(tracker.depth(), 0);
+        assert!(!tracker.is_inside_block());
     }
 
     #[test]
@@ -292,29 +252,6 @@ Hidden content.
         let second_block_content = &content[ranges[1].start..ranges[1].end];
         assert!(second_block_content.contains("details"));
         assert!(second_block_content.contains("Hidden content"));
-    }
-
-    #[test]
-    fn test_extract_block_type() {
-        assert_eq!(extract_block_type("/// caption"), Some("caption"));
-        assert_eq!(extract_block_type("/// details | Summary"), Some("details"));
-        assert_eq!(extract_block_type("/// figure-caption"), Some("figure-caption"));
-        assert_eq!(extract_block_type("/// admonition | Title"), Some("admonition"));
-        assert_eq!(extract_block_type("  /// html | div"), Some("html"));
-
-        assert_eq!(extract_block_type("///"), None);
-        assert_eq!(extract_block_type("Regular text"), None);
-    }
-
-    #[test]
-    fn test_extract_block_args() {
-        assert_eq!(extract_block_args("/// details | Summary Title"), Some("Summary Title"));
-        assert_eq!(extract_block_args("/// caption | <"), Some("<"));
-        assert_eq!(extract_block_args("/// figure-caption | 12"), Some("12"));
-        assert_eq!(extract_block_args("/// html | div"), Some("div"));
-
-        assert_eq!(extract_block_args("/// caption"), None);
-        assert_eq!(extract_block_args("///"), None);
     }
 
     #[test]
@@ -354,9 +291,6 @@ Caption above the image
 "#;
         let ranges = detect_block_ranges(content);
         assert_eq!(ranges.len(), 1);
-
-        let args = extract_block_args("/// caption | <");
-        assert_eq!(args, Some("<"));
     }
 
     #[test]
@@ -367,9 +301,6 @@ Figure 12: Description
 "#;
         let ranges = detect_block_ranges(content);
         assert_eq!(ranges.len(), 1);
-
-        let block_type = extract_block_type("/// figure-caption | 12");
-        assert_eq!(block_type, Some("figure-caption"));
     }
 }
 

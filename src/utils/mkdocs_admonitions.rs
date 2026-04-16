@@ -150,31 +150,6 @@ pub fn is_within_admonition(content: &str, position: usize) -> bool {
     false
 }
 
-/// Get the range of an admonition block starting at the given line index
-pub fn get_admonition_range(lines: &[&str], start_line_idx: usize) -> Option<(usize, usize)> {
-    if start_line_idx >= lines.len() {
-        return None;
-    }
-
-    let start_line = lines[start_line_idx];
-    if !is_admonition_start(start_line) {
-        return None;
-    }
-
-    let base_indent = get_admonition_indent(start_line).unwrap_or(0);
-    let mut end_line_idx = start_line_idx;
-
-    // Find where the admonition ends
-    for (idx, line) in lines.iter().enumerate().skip(start_line_idx + 1) {
-        if !line.trim().is_empty() && !is_admonition_content(line, base_indent) {
-            break;
-        }
-        end_line_idx = idx;
-    }
-
-    Some((start_line_idx, end_line_idx))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

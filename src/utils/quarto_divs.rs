@@ -111,11 +111,6 @@ impl DivTracker {
     pub fn is_inside_div(&self) -> bool {
         !self.indent_stack.is_empty()
     }
-
-    /// Get current nesting depth
-    pub fn depth(&self) -> usize {
-        self.indent_stack.len()
-    }
 }
 
 /// Detect Quarto div block ranges in content
@@ -165,53 +160,6 @@ pub fn detect_div_block_ranges(content: &str) -> Vec<ByteRange> {
 /// Check if a byte position is within a div block
 pub fn is_within_div_block_ranges(ranges: &[ByteRange], position: usize) -> bool {
     ranges.iter().any(|r| position >= r.start && position < r.end)
-}
-
-/// Extract class names from a Pandoc attribute block
-/// Returns classes like "callout-note", "bordered", etc.
-pub fn extract_classes(line: &str) -> Vec<String> {
-    let mut classes = Vec::new();
-
-    // Look for {.class ...} patterns
-    if let Some(captures) = PANDOC_ATTR_PATTERN.find(line) {
-        let attr_block = captures.as_str();
-        // Strip the braces to get the inner content
-        let inner = attr_block.trim_start_matches('{').trim_end_matches('}').trim();
-
-        // Extract each .class by splitting on whitespace and looking for . prefix
-        for part in inner.split_whitespace() {
-            if let Some(class) = part.strip_prefix('.') {
-                // Clean up any trailing = if followed by attribute value
-                let class = class.split('=').next().unwrap_or(class);
-                if !class.is_empty() {
-                    classes.push(class.to_string());
-                }
-            }
-        }
-    }
-
-    classes
-}
-
-/// Extract the ID from a Pandoc attribute block
-pub fn extract_id(line: &str) -> Option<String> {
-    if let Some(captures) = PANDOC_ATTR_PATTERN.find(line) {
-        let attr_block = captures.as_str();
-        // Strip the braces to get the inner content
-        let inner = attr_block.trim_start_matches('{').trim_end_matches('}').trim();
-
-        // Extract #id by splitting on whitespace and looking for # prefix
-        for part in inner.split_whitespace() {
-            if let Some(id) = part.strip_prefix('#') {
-                // Clean up any trailing = if followed by attribute value
-                let id = id.split('=').next().unwrap_or(id);
-                if !id.is_empty() {
-                    return Some(id.to_string());
-                }
-            }
-        }
-    }
-    None
 }
 
 // ============================================================================
@@ -278,19 +226,6 @@ pub fn find_citation_ranges(content: &str) -> Vec<ByteRange> {
     ranges
 }
 
-/// Check if a byte position is within a citation
-pub fn is_in_citation(ranges: &[ByteRange], position: usize) -> bool {
-    ranges.iter().any(|r| position >= r.start && position < r.end)
-}
-
-/// Extract citation key from a citation string (removes @ prefix)
-pub fn extract_citation_key(citation: &str) -> Option<&str> {
-    citation.strip_prefix('@').or_else(|| {
-        // Handle [-@key] format
-        citation.strip_prefix("[-@").and_then(|s| s.strip_suffix(']'))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,7 +282,6 @@ mod tests {
         // Enter a div
         assert!(tracker.process_line("::: {.callout-note}"));
         assert!(tracker.is_inside_div());
-        assert_eq!(tracker.depth(), 1);
 
         // Inside content
         assert!(tracker.process_line("This is content."));
@@ -356,7 +290,6 @@ mod tests {
         // Exit the div
         assert!(!tracker.process_line(":::"));
         assert!(!tracker.is_inside_div());
-        assert_eq!(tracker.depth(), 0);
     }
 
     #[test]
@@ -365,11 +298,11 @@ mod tests {
 
         // Outer div
         assert!(tracker.process_line("::: {.outer}"));
-        assert_eq!(tracker.depth(), 1);
+        assert!(tracker.is_inside_div());
 
         // Inner div
         assert!(tracker.process_line("  ::: {.inner}"));
-        assert_eq!(tracker.depth(), 2);
+        assert!(tracker.is_inside_div());
 
         // Content
         assert!(tracker.process_line("    Content"));
@@ -377,11 +310,11 @@ mod tests {
 
         // Close inner
         assert!(tracker.process_line("  :::"));
-        assert_eq!(tracker.depth(), 1);
+        assert!(tracker.is_inside_div());
 
         // Close outer
         assert!(!tracker.process_line(":::"));
-        assert_eq!(tracker.depth(), 0);
+        assert!(!tracker.is_inside_div());
     }
 
     #[test]
@@ -410,32 +343,6 @@ Content here.
         let second_div_content = &content[ranges[1].start..ranges[1].end];
         assert!(second_div_content.contains("bordered"));
         assert!(second_div_content.contains("Content here"));
-    }
-
-    #[test]
-    fn test_extract_classes() {
-        assert_eq!(extract_classes("::: {.callout-note}"), vec!["callout-note"]);
-        assert_eq!(
-            extract_classes("::: {#myid .bordered .highlighted}"),
-            vec!["bordered", "highlighted"]
-        );
-        assert_eq!(
-            extract_classes("::: {.callout-warning title=\"Alert\"}"),
-            vec!["callout-warning"]
-        );
-
-        assert!(extract_classes("Regular text").is_empty());
-        assert!(extract_classes("::: classname").is_empty()); // No braces
-    }
-
-    #[test]
-    fn test_extract_id() {
-        assert_eq!(extract_id("::: {#myid}"), Some("myid".to_string()));
-        assert_eq!(extract_id("::: {#myid .class}"), Some("myid".to_string()));
-        assert_eq!(extract_id("::: {.class #custom-id}"), Some("custom-id".to_string()));
-
-        assert_eq!(extract_id("::: {.class}"), None);
-        assert_eq!(extract_id("Regular text"), None);
     }
 
     #[test]
@@ -548,26 +455,6 @@ Warning content here.
         assert_eq!(&content[ranges[0].start..ranges[0].end], "@smith2020");
         // Bracketed citation
         assert_eq!(&content[ranges[1].start..ranges[1].end], "[@jones2021]");
-    }
-
-    #[test]
-    fn test_citation_key_extraction() {
-        assert_eq!(extract_citation_key("@smith2020"), Some("smith2020"));
-        assert_eq!(extract_citation_key("@Smith_2020"), Some("Smith_2020"));
-        assert_eq!(extract_citation_key("@key:with:colons"), Some("key:with:colons"));
-        assert_eq!(extract_citation_key("not-a-citation"), None);
-    }
-
-    #[test]
-    fn test_is_in_citation() {
-        let content = "See [@smith2020] here.";
-        let ranges = find_citation_ranges(content);
-
-        // Position inside citation
-        assert!(is_in_citation(&ranges, 5)); // Inside [@smith2020]
-        // Position outside citation
-        assert!(!is_in_citation(&ranges, 0)); // "See "
-        assert!(!is_in_citation(&ranges, 17)); // " here."
     }
 
     #[test]

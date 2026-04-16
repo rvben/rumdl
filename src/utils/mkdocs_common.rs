@@ -1,37 +1,11 @@
-/// Common utilities and constants for MkDocs pattern detection
-///
-/// This module provides shared functionality used across all MkDocs feature
-/// detection modules to reduce code duplication and improve maintainability.
-use crate::config::MarkdownFlavor;
+//! Common utilities and constants for MkDocs pattern detection
+//!
+//! This module provides shared functionality used across all MkDocs feature
+//! detection modules to reduce code duplication and improve maintainability.
 
 /// Standard indentation size for MkDocs content blocks
 /// Most MkDocs features require content to be indented by 4 spaces
 pub const MKDOCS_CONTENT_INDENT: usize = 4;
-
-/// Maximum reasonable length for references and identifiers
-pub const MAX_REFERENCE_LENGTH: usize = 200;
-
-/// Maximum reasonable length for individual path components
-pub const MAX_COMPONENT_LENGTH: usize = 50;
-
-/// Trait for MkDocs pattern detection implementations
-/// All MkDocs features should implement this trait for consistency
-pub trait MkDocsPattern: Send + Sync {
-    /// Check if a line matches the pattern's start marker
-    fn is_marker(&self, line: &str) -> bool;
-
-    /// Get the base indentation level of a marker line
-    fn get_indent(&self, line: &str) -> Option<usize>;
-
-    /// Check if a line is part of the pattern's content area
-    fn is_content(&self, line: &str, base_indent: usize) -> bool;
-
-    /// Check if a byte position is within this pattern's context
-    fn is_within_context(&self, content: &str, position: usize) -> bool;
-
-    /// Get a descriptive name for this pattern (for debugging)
-    fn name(&self) -> &'static str;
-}
 
 /// Utility for tracking byte positions through document lines
 /// Reduces duplication of line-by-line byte position tracking logic
@@ -75,28 +49,12 @@ impl<'a> BytePositionTracker<'a> {
     }
 }
 
-/// Check if we should process MkDocs patterns for the given flavor
-#[inline]
-pub fn should_check_mkdocs(flavor: MarkdownFlavor) -> bool {
-    matches!(flavor, MarkdownFlavor::MkDocs)
-}
-
 /// Extract indentation from a line (counts spaces and tabs)
 pub fn get_line_indent(line: &str) -> usize {
     line.chars()
         .take_while(|&c| c == ' ' || c == '\t')
         .map(|c| if c == '\t' { 4 } else { 1 }) // Treat tabs as 4 spaces
         .sum()
-}
-
-/// Check if a line is indented enough to be content
-pub fn is_indented_content(line: &str, base_indent: usize, required_indent: usize) -> bool {
-    // Empty lines are handled separately by callers
-    if line.trim().is_empty() {
-        return false;
-    }
-
-    get_line_indent(line) >= base_indent + required_indent
 }
 
 /// State machine for tracking nested context boundaries
@@ -163,15 +121,6 @@ mod tests {
         assert_eq!(get_line_indent("\tone tab"), 4);
         assert_eq!(get_line_indent("\t\ttwo tabs"), 8);
         assert_eq!(get_line_indent("  \tmixed"), 6); // 2 spaces + 1 tab
-    }
-
-    #[test]
-    fn test_is_indented_content() {
-        assert!(is_indented_content("    content", 0, 4));
-        assert!(!is_indented_content("  content", 0, 4));
-        assert!(is_indented_content("      content", 2, 4));
-        assert!(!is_indented_content("", 0, 4)); // Empty line
-        assert!(!is_indented_content("   ", 0, 4)); // Only whitespace
     }
 
     #[test]
