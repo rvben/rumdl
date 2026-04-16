@@ -1,9 +1,15 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use rumdl_lib::config::MarkdownFlavor;
+use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
     MD013LineLength, MD033NoInlineHtml, MD037NoSpaceInEmphasis, MD044ProperNames, MD051LinkFragments,
     MD053LinkImageReferenceDefinitions,
 };
+
+fn make_ctx(content: &str) -> LintContext<'_> {
+    LintContext::new(content, MarkdownFlavor::Standard, None)
+}
 
 /// Benchmark MD013 rule on a large content with long lines
 fn bench_md013(c: &mut Criterion) {
@@ -14,26 +20,11 @@ fn bench_md013(c: &mut Criterion) {
     }
 
     let rule = MD013LineLength::default();
+    let ctx = make_ctx(&content);
 
-    c.bench_function("MD013 check 100 long lines", |b| {
-        b.iter(|| {
-            rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
-    });
+    c.bench_function("MD013 check 100 long lines", |b| b.iter(|| rule.check(black_box(&ctx))));
 
-    c.bench_function("MD013 fix 100 long lines", |b| {
-        b.iter(|| {
-            rule.fix(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
-    });
+    c.bench_function("MD013 fix 100 long lines", |b| b.iter(|| rule.fix(black_box(&ctx))));
 }
 
 /// Benchmark MD033 rule on a large content with HTML tags
@@ -47,16 +38,9 @@ fn bench_md033(c: &mut Criterion) {
     }
 
     let rule = MD033NoInlineHtml::default();
+    let ctx = make_ctx(&content);
 
-    c.bench_function("MD033 check 500 HTML tags", |b| {
-        b.iter(|| {
-            rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
-    });
+    c.bench_function("MD033 check 500 HTML tags", |b| b.iter(|| rule.check(black_box(&ctx))));
 }
 
 /// Benchmark MD037 rule on a large content with emphasis
@@ -77,25 +61,14 @@ fn bench_md037(c: &mut Criterion) {
     }
 
     let rule = MD037NoSpaceInEmphasis;
+    let ctx = make_ctx(&content);
 
     c.bench_function("MD037 check 500 emphasis markers", |b| {
-        b.iter(|| {
-            rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| rule.check(black_box(&ctx)))
     });
 
     c.bench_function("MD037 fix 500 emphasis markers", |b| {
-        b.iter(|| {
-            rule.fix(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| rule.fix(black_box(&ctx)))
     });
 }
 
@@ -128,25 +101,14 @@ fn bench_md044(c: &mut Criterion) {
 
     // Create a rule with the proper names to check
     let rule = MD044ProperNames::new(proper_names, true); // true = exclude code blocks
+    let ctx = make_ctx(&content);
 
     c.bench_function("MD044 check 500 proper name occurrences", |b| {
-        b.iter(|| {
-            rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| rule.check(black_box(&ctx)))
     });
 
     c.bench_function("MD044 fix 500 proper name occurrences", |b| {
-        b.iter(|| {
-            rule.fix(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| rule.fix(black_box(&ctx)))
     });
 }
 
@@ -172,15 +134,10 @@ fn bench_md051(c: &mut Criterion) {
     }
 
     let rule = MD051LinkFragments::new();
+    let ctx = make_ctx(&content);
 
     c.bench_function("MD051 check 500 link fragments", |b| {
-        b.iter(|| {
-            rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| rule.check(black_box(&ctx)))
     });
 }
 
@@ -207,50 +164,23 @@ fn bench_md053(c: &mut Criterion) {
     }
 
     let rule = MD053LinkImageReferenceDefinitions::default();
+    let ctx = make_ctx(&content);
 
-    // First call to benchmark cold cache
+    // Cold cache: fresh rule instance each iteration, pre-built context
     c.bench_function("MD053 check cold cache", |b| {
-        b.iter_with_setup(
-            MD053LinkImageReferenceDefinitions::default, // Create a new instance for each iteration
-            |r| {
-                r.check(&rumdl_lib::lint_context::LintContext::new(
-                    &content,
-                    rumdl_lib::config::MarkdownFlavor::Standard,
-                    None,
-                ))
-            },
-        )
+        b.iter_with_setup(MD053LinkImageReferenceDefinitions::default, |r| {
+            r.check(black_box(&ctx))
+        })
     });
 
-    // Using the same instance to benchmark warm cache
+    // Warm cache: prime the rule's internal cache once, then measure
+    let primed_rule = rule.clone();
+    let _ = primed_rule.check(&ctx);
     c.bench_function("MD053 check warm cache", |b| {
-        // First, prime the cache
-        let primed_rule = rule.clone();
-        let _ = primed_rule.check(&rumdl_lib::lint_context::LintContext::new(
-            &content,
-            rumdl_lib::config::MarkdownFlavor::Standard,
-            None,
-        ));
-
-        // Then benchmark with warm cache
-        b.iter(|| {
-            primed_rule.check(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
+        b.iter(|| primed_rule.check(black_box(&ctx)))
     });
 
-    c.bench_function("MD053 fix unused references", |b| {
-        b.iter(|| {
-            rule.fix(&rumdl_lib::lint_context::LintContext::new(
-                &content,
-                rumdl_lib::config::MarkdownFlavor::Standard,
-                None,
-            ))
-        })
-    });
+    c.bench_function("MD053 fix unused references", |b| b.iter(|| rule.fix(black_box(&ctx))));
 }
 
 criterion_group!(

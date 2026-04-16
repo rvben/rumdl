@@ -141,28 +141,13 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     (String::new(), line.to_string())
 }
 
-// Helper functions for MD013 line length rule
+/// Check if a line is a horizontal rule (thematic break).
+///
+/// Expects the raw, untrimmed line so the CommonMark indentation rule can be
+/// enforced: up to 3 spaces of leading indentation are allowed; 4 or more
+/// spaces mark an indented code block.
 pub(crate) fn is_horizontal_rule(line: &str) -> bool {
-    if line.len() < 3 {
-        return false;
-    }
-    // Check if line consists only of -, _, or * characters (at least 3)
-    let chars: Vec<char> = line.chars().collect();
-    if chars.is_empty() {
-        return false;
-    }
-    let first_char = chars[0];
-    if first_char != '-' && first_char != '_' && first_char != '*' {
-        return false;
-    }
-    // All characters should be the same (allowing spaces between)
-    for c in &chars {
-        if *c != first_char && *c != ' ' {
-            return false;
-        }
-    }
-    // Must have at least 3 of the marker character
-    chars.iter().filter(|c| **c == first_char).count() >= 3
+    crate::utils::thematic_break::is_thematic_break(line)
 }
 
 pub(crate) fn is_numbered_list_item(line: &str) -> bool {
@@ -459,6 +444,36 @@ mod tests {
             extract_list_marker_and_content("99. [x] multi-digit ordered"),
             ("99. [x] ".to_string(), "multi-digit ordered".to_string())
         );
+    }
+
+    #[test]
+    fn test_is_horizontal_rule_commonmark_indent() {
+        // Up to 3 spaces of leading indent is allowed (CommonMark thematic break).
+        assert!(is_horizontal_rule("---"));
+        assert!(is_horizontal_rule(" ---"));
+        assert!(is_horizontal_rule("  ---"));
+        assert!(is_horizontal_rule("   ---"));
+        assert!(is_horizontal_rule("   ***"));
+        assert!(is_horizontal_rule("   - - -"));
+
+        // 4+ spaces of leading indent is an indented code block, not a thematic break.
+        assert!(!is_horizontal_rule("    ---"));
+        assert!(!is_horizontal_rule("     ---"));
+        assert!(!is_horizontal_rule("        ***"));
+        assert!(!is_horizontal_rule("    - - -"));
+
+        // Trailing whitespace is still allowed.
+        assert!(is_horizontal_rule("---   "));
+        assert!(is_horizontal_rule("  ---  "));
+
+        // Basic shapes still match.
+        assert!(is_horizontal_rule("----"));
+        assert!(is_horizontal_rule("***"));
+        assert!(is_horizontal_rule("___"));
+        assert!(is_horizontal_rule("- - -"));
+        assert!(!is_horizontal_rule("--"));
+        assert!(!is_horizontal_rule("text"));
+        assert!(!is_horizontal_rule(""));
     }
 
     #[test]

@@ -6,11 +6,21 @@
 /// 2. Spaced: 3+ single markers separated by whitespace
 ///    Examples: `- - -`, `* * *`, `_  _  _`
 ///
+/// Per CommonMark, up to 3 spaces of leading indentation are allowed; 4 or
+/// more spaces mark an indented code block, so such lines are not thematic
+/// breaks.
+///
 /// Does NOT match multi-char groups with spaces (e.g., `---- ------`)
 /// even though CommonMark treats them as valid thematic breaks. This avoids
 /// false positives on table separators in unformatted output.
 pub fn is_thematic_break(line: &str) -> bool {
-    let line = line.trim();
+    // Strip CRLF but preserve leading indent so the indent check is meaningful.
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    let leading_spaces = line.bytes().take_while(|b| *b == b' ').count();
+    if leading_spaces >= 4 {
+        return false;
+    }
+    let line = line[leading_spaces..].trim_end();
     if line.len() < 3 {
         return false;
     }
@@ -145,6 +155,22 @@ mod tests {
         assert!(!is_thematic_break(""));
         assert!(!is_thematic_break("   "));
         assert!(!is_thematic_break("\t"));
+    }
+
+    #[test]
+    fn test_indent_rule_commonmark() {
+        // Up to 3 leading spaces are allowed.
+        assert!(is_thematic_break("---"));
+        assert!(is_thematic_break(" ---"));
+        assert!(is_thematic_break("  ---"));
+        assert!(is_thematic_break("   ---"));
+        assert!(is_thematic_break("   - - -"));
+
+        // 4+ leading spaces are not thematic breaks (indented code block).
+        assert!(!is_thematic_break("    ---"));
+        assert!(!is_thematic_break("     ---"));
+        assert!(!is_thematic_break("    - - -"));
+        assert!(!is_thematic_break("        ***"));
     }
 
     #[test]
