@@ -5,7 +5,6 @@
 
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::rules::list_utils::ListType;
 use crate::utils::blockquote::{effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::range_utils::calculate_match_range;
@@ -13,6 +12,12 @@ use toml;
 
 mod md030_config;
 use md030_config::MD030Config;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListType {
+    Unordered,
+    Ordered,
+}
 
 #[derive(Clone, Default)]
 pub struct MD030ListMarkerSpace {

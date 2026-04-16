@@ -1,6 +1,4 @@
-use regex::Regex;
 use std::fmt;
-use std::sync::LazyLock;
 
 /// The style for code fence markers (MD048)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
@@ -21,21 +19,6 @@ impl fmt::Display for CodeFenceStyle {
             CodeFenceStyle::Tilde => write!(f, "tilde"),
             CodeFenceStyle::Consistent => write!(f, "consistent"),
         }
-    }
-}
-
-/// Get regex pattern for finding code fence markers
-pub fn get_code_fence_pattern() -> &'static Regex {
-    static CODE_FENCE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(```|~~~)").unwrap());
-    &CODE_FENCE_PATTERN
-}
-
-/// Determine the code fence style from a marker
-pub fn get_fence_style(marker: &str) -> Option<CodeFenceStyle> {
-    match marker {
-        "```" => Some(CodeFenceStyle::Backtick),
-        "~~~" => Some(CodeFenceStyle::Tilde),
-        _ => None,
     }
 }
 
@@ -82,84 +65,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_code_fence_pattern() {
-        let pattern = get_code_fence_pattern();
-
-        // Test matching backtick fences
-        assert!(pattern.is_match("```"));
-        assert!(pattern.is_match("```rust"));
-        assert!(pattern.is_match("```\n"));
-
-        // Test matching tilde fences
-        assert!(pattern.is_match("~~~"));
-        assert!(pattern.is_match("~~~python"));
-        assert!(pattern.is_match("~~~\n"));
-
-        // Test non-matching cases
-        assert!(!pattern.is_match("  ```")); // Indented
-        assert!(!pattern.is_match("text```")); // Not at start
-        assert!(!pattern.is_match("``")); // Too few markers
-        assert!(pattern.is_match("````")); // Four backticks still matches (first 3)
-
-        // Test that it only matches at start of line
-        let captures = pattern.captures("```rust");
-        assert!(captures.is_some());
-        assert_eq!(captures.unwrap().get(1).unwrap().as_str(), "```");
-
-        let captures = pattern.captures("~~~yaml");
-        assert!(captures.is_some());
-        assert_eq!(captures.unwrap().get(1).unwrap().as_str(), "~~~");
-    }
-
-    #[test]
-    fn test_get_fence_style() {
-        // Valid styles
-        assert_eq!(get_fence_style("```"), Some(CodeFenceStyle::Backtick));
-        assert_eq!(get_fence_style("~~~"), Some(CodeFenceStyle::Tilde));
-
-        // Invalid inputs
-        assert_eq!(get_fence_style("``"), None);
-        assert_eq!(get_fence_style("````"), None);
-        assert_eq!(get_fence_style("~~"), None);
-        assert_eq!(get_fence_style("~~~~"), None);
-        assert_eq!(get_fence_style(""), None);
-        assert_eq!(get_fence_style("random"), None);
-        assert_eq!(get_fence_style("```rust"), None); // Full fence line
-        assert_eq!(get_fence_style("~~~yaml"), None); // Full fence line
-    }
-
-    #[test]
-    fn test_pattern_singleton() {
-        // Ensure the lazy_static pattern is the same instance
-        let pattern1 = get_code_fence_pattern();
-        let pattern2 = get_code_fence_pattern();
-
-        // Compare pointers
-        assert_eq!(pattern1 as *const _, pattern2 as *const _);
-    }
-
-    #[test]
-    fn test_edge_cases() {
-        let pattern = get_code_fence_pattern();
-
-        // Empty string
-        assert!(!pattern.is_match(""));
-
-        // Unicode in fence
-        assert!(pattern.is_match("```中文"));
-        assert!(pattern.is_match("~~~émoji🦀"));
-
-        // Tabs and spaces after fence
-        assert!(pattern.is_match("```\t"));
-        assert!(pattern.is_match("~~~   "));
-
-        // Mixed markers (should match first set)
-        let captures = pattern.captures("```~~~");
-        assert!(captures.is_some());
-        assert_eq!(captures.unwrap().get(1).unwrap().as_str(), "```");
-    }
-
-    #[test]
     fn test_code_fence_style_hash() {
         use std::collections::HashSet;
 
@@ -172,36 +77,5 @@ mod tests {
         assert!(set.contains(&CodeFenceStyle::Backtick));
         assert!(set.contains(&CodeFenceStyle::Tilde));
         assert!(set.contains(&CodeFenceStyle::Consistent));
-    }
-
-    #[test]
-    fn test_pattern_usage_examples() {
-        let pattern = get_code_fence_pattern();
-
-        // Typical markdown code fence lines
-        let test_cases = vec![
-            ("```rust", true, "```"),
-            ("```", true, "```"),
-            ("~~~python", true, "~~~"),
-            ("~~~", true, "~~~"),
-            ("```json\n", true, "```"),
-            ("~~~yaml\n", true, "~~~"),
-            ("    ```", false, ""),       // Indented code fence
-            ("Some text ```", false, ""), // Not at start
-        ];
-
-        for (input, should_match, expected_capture) in test_cases {
-            let is_match = pattern.is_match(input);
-            assert_eq!(is_match, should_match, "Failed for input: {input}");
-
-            if should_match {
-                let captures = pattern.captures(input).unwrap();
-                assert_eq!(
-                    captures.get(1).unwrap().as_str(),
-                    expected_capture,
-                    "Failed capture for input: {input}"
-                );
-            }
-        }
     }
 }

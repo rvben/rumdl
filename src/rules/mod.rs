@@ -2,7 +2,6 @@ pub mod code_fence_utils;
 pub mod emphasis_style;
 pub mod front_matter_utils;
 pub mod heading_utils;
-pub mod list_utils;
 pub mod strong_style;
 
 mod md001_heading_increment;
