@@ -62,7 +62,6 @@ pulldown-cmark = "0.13.0"
 regex = "1.12"
 toml_edit = "0.25"
 dyn-clone = "1"
-url = { version = "2", features = ["serde"] }
 unicode-normalization = "0.1"
 schemars = "1.1"
 unicode-width = "0.2"
@@ -115,6 +114,7 @@ unicode-segmentation = "1.12"
 serial_test = "3.2"
 jsonschema = "0.44"
 ureq = "3.1"
+url = "2"
 
 [target.'cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))'.dependencies]
 tikv-jemallocator = "0.6"
