@@ -505,7 +505,7 @@ impl MD032BlanksAroundLists {
         lines: &[&str],
         list_blocks: &[(usize, usize, String)],
         line_index: &LineIndex,
-    ) -> LintResult {
+    ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
         let num_lines = lines.len();
 
@@ -726,7 +726,7 @@ impl MD032BlanksAroundLists {
                 }
             }
         }
-        Ok(warnings)
+        warnings
     }
 }
 
@@ -754,7 +754,7 @@ impl Rule for MD032BlanksAroundLists {
             return Ok(Vec::new());
         }
 
-        let mut warnings = self.perform_checks(ctx, lines, &list_blocks, line_index)?;
+        let mut warnings = self.perform_checks(ctx, lines, &list_blocks, line_index);
 
         // When lazy continuation is not allowed, detect and warn about lazy continuation
         // lines WITHIN list blocks (text that continues a list item but with less
@@ -805,7 +805,7 @@ impl Rule for MD032BlanksAroundLists {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        self.fix_with_structure_impl(ctx)
+        Ok(self.fix_with_structure_impl(ctx))
     }
 
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
@@ -850,16 +850,16 @@ impl Rule for MD032BlanksAroundLists {
 
 impl MD032BlanksAroundLists {
     /// Helper method for fixing implementation
-    fn fix_with_structure_impl(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
+    fn fix_with_structure_impl(&self, ctx: &crate::lint_context::LintContext) -> String {
         let lines = ctx.raw_lines();
         let num_lines = lines.len();
         if num_lines == 0 {
-            return Ok(String::new());
+            return String::new();
         }
 
         let list_blocks = self.convert_list_blocks(ctx);
         if list_blocks.is_empty() {
-            return Ok(ctx.content.to_string());
+            return ctx.content.to_string();
         }
 
         // Phase 0: Collect lazy continuation line fixes (if not allowed)
@@ -999,7 +999,7 @@ impl MD032BlanksAroundLists {
         if ctx.content.ends_with('\n') {
             result.push('\n');
         }
-        Ok(result)
+        result
     }
 }
 

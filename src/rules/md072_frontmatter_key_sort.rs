@@ -269,12 +269,14 @@ impl Rule for MD072FrontmatterKeySort {
                     None
                 } else {
                     // Compute the actual fix: full content replacement
-                    match self.fix_yaml(content) {
-                        Ok(fixed_content) if fixed_content != content => Some(Fix {
+                    let fixed_content = self.fix_yaml(content);
+                    if fixed_content != content {
+                        Some(Fix {
                             range: 0..content.len(),
                             replacement: fixed_content,
-                        }),
-                        _ => None,
+                        })
+                    } else {
+                        None
                     }
                 };
 
@@ -320,12 +322,14 @@ impl Rule for MD072FrontmatterKeySort {
                     None
                 } else {
                     // Compute the actual fix: full content replacement
-                    match self.fix_toml(content) {
-                        Ok(fixed_content) if fixed_content != content => Some(Fix {
+                    let fixed_content = self.fix_toml(content);
+                    if fixed_content != content {
+                        Some(Fix {
                             range: 0..content.len(),
                             replacement: fixed_content,
-                        }),
-                        _ => None,
+                        })
+                    } else {
+                        None
                     }
                 };
 
@@ -363,12 +367,14 @@ impl Rule for MD072FrontmatterKeySort {
                 };
 
                 // Compute the actual fix: full content replacement
-                let fix = match self.fix_json(content) {
-                    Ok(fixed_content) if fixed_content != content => Some(Fix {
+                let fixed_content = self.fix_json(content);
+                let fix = if fixed_content != content {
+                    Some(Fix {
                         range: 0..content.len(),
                         replacement: fixed_content,
-                    }),
-                    _ => None,
+                    })
+                } else {
+                    None
                 };
 
                 let message = format!(
@@ -404,12 +410,12 @@ impl Rule for MD072FrontmatterKeySort {
 
         let fm_type = FrontMatterUtils::detect_front_matter_type(content);
 
-        match fm_type {
+        Ok(match fm_type {
             FrontMatterType::Yaml => self.fix_yaml(content),
             FrontMatterType::Toml => self.fix_toml(content),
             FrontMatterType::Json => self.fix_json(content),
-            _ => Ok(content.to_string()),
-        }
+            _ => content.to_string(),
+        })
     }
 
     fn category(&self) -> RuleCategory {
@@ -440,21 +446,21 @@ impl Rule for MD072FrontmatterKeySort {
 }
 
 impl MD072FrontmatterKeySort {
-    fn fix_yaml(&self, content: &str) -> Result<String, LintError> {
+    fn fix_yaml(&self, content: &str) -> String {
         let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
         if frontmatter_lines.is_empty() {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         // Cannot fix if comments present
         if Self::has_comments(&frontmatter_lines) {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         let keys = Self::extract_yaml_keys(&frontmatter_lines);
         let key_order = self.config.key_order.as_deref();
         if Self::are_indexed_keys_sorted(&keys, key_order) {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         // Line-based reordering to preserve original formatting (indentation, etc.)
@@ -495,24 +501,24 @@ impl MD072FrontmatterKeySort {
             result.push_str(&content_lines[fm_end..].join("\n"));
         }
 
-        Ok(result)
+        result
     }
 
-    fn fix_toml(&self, content: &str) -> Result<String, LintError> {
+    fn fix_toml(&self, content: &str) -> String {
         let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
         if frontmatter_lines.is_empty() {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         // Cannot fix if comments present
         if Self::has_comments(&frontmatter_lines) {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         let keys = Self::extract_toml_keys(&frontmatter_lines);
         let key_order = self.config.key_order.as_deref();
         if Self::are_indexed_keys_sorted(&keys, key_order) {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         // Line-based reordering to preserve original formatting
@@ -553,20 +559,20 @@ impl MD072FrontmatterKeySort {
             result.push_str(&content_lines[fm_end..].join("\n"));
         }
 
-        Ok(result)
+        result
     }
 
-    fn fix_json(&self, content: &str) -> Result<String, LintError> {
+    fn fix_json(&self, content: &str) -> String {
         let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
         if frontmatter_lines.is_empty() {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         let keys = Self::extract_json_keys(&frontmatter_lines);
         let key_order = self.config.key_order.as_deref();
 
         if keys.is_empty() || Self::are_keys_sorted(&keys, key_order) {
-            return Ok(content.to_string());
+            return content.to_string();
         }
 
         // Reconstruct JSON content including braces for parsing
@@ -605,12 +611,12 @@ impl MD072FrontmatterKeySort {
                             result.push_str(&lines[fm_end..].join("\n"));
                         }
 
-                        Ok(result)
+                        result
                     }
-                    Err(_) => Ok(content.to_string()),
+                    Err(_) => content.to_string(),
                 }
             }
-            _ => Ok(content.to_string()),
+            _ => content.to_string(),
         }
     }
 }

@@ -484,10 +484,7 @@ impl MD046CodeBlockStyle {
         (is_misplaced, contains_fences)
     }
 
-    fn check_unclosed_code_blocks(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-    ) -> Result<Vec<LintWarning>, LintError> {
+    fn check_unclosed_code_blocks(&self, ctx: &crate::lint_context::LintContext) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
 
@@ -503,7 +500,7 @@ impl MD046CodeBlockStyle {
         // Skip unclosed block detection if document contains markdown documentation blocks
         // (they have nested fence examples that pulldown-cmark misparses)
         if has_markdown_doc_block {
-            return Ok(warnings);
+            return warnings;
         }
 
         for detail in &ctx.code_block_details {
@@ -580,7 +577,7 @@ impl MD046CodeBlockStyle {
             }
         }
 
-        Ok(warnings)
+        warnings
     }
 
     fn detect_style(&self, lines: &[&str], is_mkdocs: bool, ictx: &IndentContext) -> Option<CodeBlockStyle> {
@@ -655,7 +652,7 @@ impl Rule for MD046CodeBlockStyle {
         }
 
         // First, always check for unclosed code blocks
-        let unclosed_warnings = self.check_unclosed_code_blocks(ctx)?;
+        let unclosed_warnings = self.check_unclosed_code_blocks(ctx);
 
         // If we found unclosed blocks, return those warnings first
         if !unclosed_warnings.is_empty() {
@@ -1008,7 +1005,7 @@ impl Rule for MD046CodeBlockStyle {
         if let Some((fence_char, opener_len)) = fenced_fence_opener
             && in_fenced_block
         {
-            let has_unclosed_violation = self.check_unclosed_code_blocks(ctx).is_ok_and(|w| !w.is_empty());
+            let has_unclosed_violation = !self.check_unclosed_code_blocks(ctx).is_empty();
             if has_unclosed_violation {
                 let closer: String = std::iter::repeat_n(fence_char, opener_len).collect();
                 result.push_str(&closer);

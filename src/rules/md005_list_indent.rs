@@ -622,7 +622,7 @@ impl MD005ListIndent {
         cache: &LineCacheInfo,
         group: &[&crate::lint_context::ListBlock],
         warnings: &mut Vec<LintWarning>,
-    ) -> Result<(), LintError> {
+    ) {
         // First pass: collect all candidate items without filtering
         // We need to process in line order so parents are seen before children
         let mut candidate_items: Vec<(
@@ -688,7 +688,7 @@ impl MD005ListIndent {
         }
 
         if all_list_items.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Sort by line number to process in order
@@ -818,22 +818,20 @@ impl MD005ListIndent {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Migrated to use centralized list blocks for better performance and accuracy
-    fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+    fn check_optimized(&self, ctx: &crate::lint_context::LintContext) -> Vec<LintWarning> {
         let content = ctx.content;
 
         // Early returns for common cases
         if content.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         // Quick check for any list blocks before processing
         if ctx.list_blocks.is_empty() {
-            return Ok(Vec::new());
+            return Vec::new();
         }
 
         let mut warnings = Vec::new();
@@ -846,10 +844,10 @@ impl MD005ListIndent {
         let block_groups = self.group_related_list_blocks(&ctx.list_blocks);
 
         for group in block_groups {
-            self.check_list_block_group(ctx, &cache, &group, &mut warnings)?;
+            self.check_list_block_group(ctx, &cache, &group, &mut warnings);
         }
 
-        Ok(warnings)
+        warnings
     }
 }
 
@@ -864,7 +862,7 @@ impl Rule for MD005ListIndent {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Use optimized version
-        self.check_optimized(ctx)
+        Ok(self.check_optimized(ctx))
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {

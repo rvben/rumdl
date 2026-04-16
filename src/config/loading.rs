@@ -22,8 +22,8 @@ const MAX_EXTENDS_DEPTH: usize = 10;
 /// - `~/` prefix: expanded to home directory
 /// - Relative paths: resolved against the config file's parent directory
 /// - Absolute paths: used as-is
-fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<PathBuf, ConfigError> {
-    let path = if let Some(suffix) = extends_value.strip_prefix("~/") {
+fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> PathBuf {
+    if let Some(suffix) = extends_value.strip_prefix("~/") {
         // Expand tilde to home directory
         #[cfg(feature = "native")]
         {
@@ -45,9 +45,7 @@ fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<
             let config_dir = config_file_path.parent().unwrap_or(Path::new("."));
             config_dir.join(extends_value)
         }
-    };
-
-    Ok(path)
+    }
 }
 
 /// Determine ConfigSource from a config filename.
@@ -116,7 +114,7 @@ fn load_config_with_extends(
 
     // If this fragment has `extends`, load the base config first
     if let Some(ref extends_value) = fragment.extends {
-        let base_path = resolve_extends_path(extends_value, config_file_path)?;
+        let base_path = resolve_extends_path(extends_value, config_file_path);
 
         if !base_path.exists() {
             return Err(ConfigError::ExtendsNotFound {

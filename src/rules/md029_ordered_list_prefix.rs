@@ -57,7 +57,7 @@ impl MD029OrderedListPrefix {
         // For explicit style configurations, always use the configured style
         let style = match self.config.style {
             ListStyle::OneOrOrdered | ListStyle::Consistent => detected_style.unwrap_or(ListStyle::OneOne),
-            _ => self.config.style.clone(),
+            _ => self.config.style,
         };
 
         match style {
@@ -223,7 +223,7 @@ impl MD029OrderedListPrefix {
             }
 
             // Determine style for this group
-            let detected_style = if let Some(doc_style) = document_wide_style.clone() {
+            let detected_style = if let Some(doc_style) = document_wide_style {
                 Some(doc_style)
             } else if self.config.style == ListStyle::OneOrOrdered {
                 Some(Self::detect_list_style(&items, start_value))
@@ -234,7 +234,7 @@ impl MD029OrderedListPrefix {
             // Check each item using the CommonMark start value
             for (idx, (line_num, line_info, list_item)) in items.iter().enumerate() {
                 if let Some(actual_num) = Self::parse_marker_number(&list_item.marker) {
-                    let expected_num = self.get_expected_number(idx, detected_style.clone(), start_value);
+                    let expected_num = self.get_expected_number(idx, detected_style, start_value);
 
                     if actual_num != expected_num {
                         let marker_start = line_info.byte_offset + list_item.marker_column;
@@ -350,7 +350,7 @@ impl Rule for MD029OrderedListPrefix {
         // Process each CommonMark-defined list group with its start value
         for (list_id, items) in list_groups {
             let start_value = ctx.list_start_values.get(&list_id).copied().unwrap_or(1);
-            self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style.clone(), start_value);
+            self.check_commonmark_list_group(ctx, &items, &mut warnings, document_wide_style, start_value);
         }
 
         // Sort warnings by line number for deterministic output
