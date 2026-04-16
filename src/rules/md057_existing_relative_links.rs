@@ -140,7 +140,7 @@ impl MD057ExistingRelativeLinks {
     pub fn with_path<P: AsRef<Path>>(self, path: P) -> Self {
         let path = path.as_ref();
         let dir_path = if path.is_file() {
-            path.parent().map(|p| p.to_path_buf())
+            path.parent().map(std::path::Path::to_path_buf)
         } else {
             Some(path.to_path_buf())
         };
@@ -482,7 +482,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 let resolved_file = source_file.canonicalize().unwrap_or_else(|_| source_file.clone());
                 resolved_file
                     .parent()
-                    .map(|p| p.to_path_buf())
+                    .map(std::path::Path::to_path_buf)
                     .or_else(|| Some(CURRENT_DIR.clone()))
             } else {
                 // No source file available - cannot validate relative links
@@ -1074,7 +1074,7 @@ impl Rule for MD057ExistingRelativeLinks {
         let file_dir = file_path.parent();
 
         // Compute additional search paths for fallback link resolution
-        let base_path = file_dir.map(|d| d.to_path_buf()).unwrap_or_else(|| CURRENT_DIR.clone());
+        let base_path = file_dir.map_or_else(|| CURRENT_DIR.clone(), std::path::Path::to_path_buf);
         let extra_search_paths = self.compute_search_paths(self.flavor, Some(file_path), &base_path);
 
         for cross_link in &file_index.cross_file_links {

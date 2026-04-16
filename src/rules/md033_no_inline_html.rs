@@ -558,8 +558,7 @@ impl MD033NoInlineHtml {
         // Find first whitespace to skip tag name
         let attr_start = tag_content
             .find(|c: char| c.is_whitespace())
-            .map(|i| i + 1)
-            .unwrap_or(tag_content.len());
+            .map_or(tag_content.len(), |i| i + 1);
 
         if attr_start >= tag_content.len() {
             return attrs;
@@ -1066,7 +1065,7 @@ impl Rule for MD033NoInlineHtml {
             }
 
             // Skip JSX components in MDX files (e.g., <Chart />, <MyComponent>)
-            if ctx.flavor.supports_jsx() && html_tag.tag_name.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if ctx.flavor.supports_jsx() && html_tag.tag_name.chars().next().is_some_and(char::is_uppercase) {
                 continue;
             }
 
@@ -1593,8 +1592,8 @@ Regular text with <div>content</div> HTML tag.
 
         let flagged_tags: Vec<&str> = result
             .iter()
-            .filter_map(|w| w.message.split("<").nth(1))
-            .filter_map(|s| s.split(">").next())
+            .filter_map(|w| w.message.split('<').nth(1))
+            .filter_map(|s| s.split('>').next())
             .filter_map(|s| s.split_whitespace().next())
             .collect();
 

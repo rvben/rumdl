@@ -183,25 +183,25 @@ impl Rule for MD013LineLength {
         let effective_config = if let Some(json_config) = config_override {
             if let Some(obj) = json_config.as_object() {
                 let mut config = self.config.clone();
-                if let Some(line_length) = obj.get("line_length").and_then(|v| v.as_u64()) {
+                if let Some(line_length) = obj.get("line_length").and_then(serde_json::Value::as_u64) {
                     config.line_length = crate::types::LineLength::new(line_length as usize);
                 }
-                if let Some(code_blocks) = obj.get("code_blocks").and_then(|v| v.as_bool()) {
+                if let Some(code_blocks) = obj.get("code_blocks").and_then(serde_json::Value::as_bool) {
                     config.code_blocks = code_blocks;
                 }
-                if let Some(tables) = obj.get("tables").and_then(|v| v.as_bool()) {
+                if let Some(tables) = obj.get("tables").and_then(serde_json::Value::as_bool) {
                     config.tables = tables;
                 }
-                if let Some(headings) = obj.get("headings").and_then(|v| v.as_bool()) {
+                if let Some(headings) = obj.get("headings").and_then(serde_json::Value::as_bool) {
                     config.headings = headings;
                 }
-                if let Some(blockquotes) = obj.get("blockquotes").and_then(|v| v.as_bool()) {
+                if let Some(blockquotes) = obj.get("blockquotes").and_then(serde_json::Value::as_bool) {
                     config.blockquotes = blockquotes;
                 }
-                if let Some(strict) = obj.get("strict").and_then(|v| v.as_bool()) {
+                if let Some(strict) = obj.get("strict").and_then(serde_json::Value::as_bool) {
                     config.strict = strict;
                 }
-                if let Some(reflow) = obj.get("reflow").and_then(|v| v.as_bool()) {
+                if let Some(reflow) = obj.get("reflow").and_then(serde_json::Value::as_bool) {
                     config.reflow = reflow;
                 }
                 if let Some(reflow_mode) = obj.get("reflow_mode").and_then(|v| v.as_str()) {
@@ -411,7 +411,7 @@ impl Rule for MD013LineLength {
                         || ctx.line_info(line_number).is_some_and(|info| info.in_mdx_comment)
                         || ctx
                             .line_info(line_number)
-                            .is_some_and(|info| info.in_mkdocs_container());
+                            .is_some_and(super::super::lint_context::types::LineInfo::in_mkdocs_container);
 
                     // Skip regular paragraph text when paragraphs = false
                     if !is_special_block {
@@ -801,8 +801,7 @@ impl MD013LineLength {
                 let violating_line = collected
                     .iter()
                     .find(|line| self.calculate_effective_length(lines[line.line_idx]) > config.line_length.get())
-                    .map(|line| line.line_idx + 1)
-                    .unwrap_or(paragraph_start + 1);
+                    .map_or(paragraph_start + 1, |line| line.line_idx + 1);
                 (violating_line, violating_line)
             }
         };
@@ -1331,7 +1330,10 @@ impl MD013LineLength {
             }
 
             // Handle MkDocs container content (admonitions and tabs) with indent-preserving reflow
-            if ctx.line_info(line_num).is_some_and(|info| info.in_mkdocs_container()) {
+            if ctx
+                .line_info(line_num)
+                .is_some_and(super::super::lint_context::types::LineInfo::in_mkdocs_container)
+            {
                 // Skip admonition/tab marker lines — only reflow their indented content
                 let current_line = lines[i];
                 if mkdocs_admonitions::is_admonition_start(current_line) || mkdocs_tabs::is_tab_marker(current_line) {
@@ -1354,7 +1356,7 @@ impl MD013LineLength {
                     let line_info = ctx.line_info(current_line_num);
 
                     // Stop if we leave the MkDocs container
-                    if !line_info.is_some_and(|info| info.in_mkdocs_container()) {
+                    if !line_info.is_some_and(super::super::lint_context::types::LineInfo::in_mkdocs_container) {
                         break;
                     }
 
@@ -2462,8 +2464,7 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
-                                    {
+                                    if should_add_blank && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                         result.push(String::new());
                                     }
                                 }
@@ -2494,7 +2495,7 @@ impl MD013LineLength {
                             Block::SemanticLine(content) => {
                                 // Preserve semantic lines (NOTE:, WARNING:, etc.) as-is on their own line.
                                 // Only add blank before if not already ending with one.
-                                if !is_first_block && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true) {
+                                if !is_first_block && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                     result.push(String::new());
                                 }
 
@@ -2518,8 +2519,7 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
-                                    {
+                                    if should_add_blank && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                         result.push(String::new());
                                     }
                                 }
@@ -2582,8 +2582,7 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true, // For all other blocks, add blank line
                                     };
-                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
-                                    {
+                                    if should_add_blank && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                         result.push(String::new());
                                     }
                                 }
@@ -2597,7 +2596,7 @@ impl MD013LineLength {
                                 // and body content reflowed to fit within the line length limit
 
                                 // Add blank line before admonition if not first block
-                                if !is_first_block && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true) {
+                                if !is_first_block && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                     result.push(String::new());
                                 }
 
@@ -2619,8 +2618,7 @@ impl MD013LineLength {
                                 let body_indent = admon_lines
                                     .iter()
                                     .find(|(content, _)| !content.is_empty())
-                                    .map(|(_, indent)| *indent)
-                                    .unwrap_or(header_indent + 4);
+                                    .map_or(header_indent + 4, |(_, indent)| *indent);
                                 let body_indent_str = " ".repeat(body_indent);
 
                                 // Segment body content into code blocks (verbatim) and
@@ -2771,8 +2769,7 @@ impl MD013LineLength {
                                         Block::SnippetLine(_) | Block::DivMarker(_) => false,
                                         _ => true,
                                     };
-                                    if should_add_blank && result.last().map(|s: &String| !s.is_empty()).unwrap_or(true)
-                                    {
+                                    if should_add_blank && result.last().is_none_or(|s: &String| !s.is_empty()) {
                                         result.push(String::new());
                                     }
                                 }
@@ -2900,7 +2897,7 @@ impl MD013LineLength {
                     || ctx.line_info(next_line_num).is_some_and(|info| info.in_mdx_comment)
                     || ctx
                         .line_info(next_line_num)
-                        .is_some_and(|info| info.in_mkdocs_container())
+                        .is_some_and(super::super::lint_context::types::LineInfo::in_mkdocs_container)
                     || (next_line_num > 0
                         && next_line_num <= ctx.lines.len()
                         && ctx.lines[next_line_num - 1].blockquote.is_some())

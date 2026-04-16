@@ -206,8 +206,7 @@ impl MD074MkDocsNav {
         let mut warnings = Vec::new();
         let mkdocs_file = mkdocs_path
             .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "mkdocs.yml".to_string());
+            .map_or_else(|| "mkdocs.yml".to_string(), |n| n.to_string_lossy().to_string());
 
         // Get docs_dir relative to mkdocs.yml location
         let mkdocs_dir = mkdocs_path.parent().unwrap_or(Path::new("."));

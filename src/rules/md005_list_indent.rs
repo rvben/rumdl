@@ -71,7 +71,7 @@ impl LineCacheInfo {
             indentation.push(line_indent);
 
             // Store blockquote level for blockquote-aware indent calculation
-            let bq_level = line_info.blockquote.as_ref().map(|bq| bq.nesting_level).unwrap_or(0);
+            let bq_level = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
             blockquote_levels.push(bq_level);
 
             // Store line content for blockquote-aware indent calculation
@@ -314,8 +314,7 @@ impl MD005ListIndent {
             let marker_column = line_info
                 .list_item
                 .as_ref()
-                .map(|li| li.marker_column)
-                .unwrap_or(actual_indent);
+                .map_or(actual_indent, |li| li.marker_column);
 
             // Calculate where the marker starts
             for (i, ch) in line_info.content(ctx.content).chars().enumerate() {
@@ -407,7 +406,7 @@ impl MD005ListIndent {
         if indents.len() > 1 {
             // Items have inconsistent indentation
             // Use the first established indent as the expected value
-            let expected_indent = sorted_items.first().map(|(_, i, _)| *i).unwrap_or(0);
+            let expected_indent = sorted_items.first().map_or(0, |(_, i, _)| *i);
 
             for (line_num, indent, line_info) in items {
                 if *indent != expected_indent {
@@ -524,8 +523,8 @@ impl MD005ListIndent {
             let parent_content_column = parent_list_item.content_column;
 
             // Get parent's blockquote info for blockquote-aware continuation detection
-            let parent_bq_level = line_info.blockquote.as_ref().map(|bq| bq.nesting_level).unwrap_or(0);
-            let parent_bq_prefix_len = line_info.blockquote.as_ref().map(|bq| bq.prefix.len()).unwrap_or(0);
+            let parent_bq_level = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
+            let parent_bq_prefix_len = line_info.blockquote.as_ref().map_or(0, |bq| bq.prefix.len());
 
             // Check if there are continuation lines between parent and current list
             let continuation_indent = cache.find_continuation_indent(

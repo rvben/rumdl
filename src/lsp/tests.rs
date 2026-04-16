@@ -2974,8 +2974,7 @@ reflow-mode = "semantic-line-breaks"
         .filter(|d| {
             d.code
                 .as_ref()
-                .map(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
-                .unwrap_or(false)
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
         })
         .collect();
 
@@ -3033,8 +3032,7 @@ reflow-mode = "semantic-line-breaks"
         .filter(|d| {
             d.code
                 .as_ref()
-                .map(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
-                .unwrap_or(false)
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
         })
         .collect();
 
@@ -3104,8 +3102,7 @@ reflow-mode = "semantic-line-breaks"
         .filter(|d| {
             d.code
                 .as_ref()
-                .map(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
-                .unwrap_or(false)
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
         })
         .collect();
 
@@ -3245,8 +3242,7 @@ reflow-mode = "semantic-line-breaks"
         .filter(|d| {
             d.code
                 .as_ref()
-                .map(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
-                .unwrap_or(false)
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "MD013"))
         })
         .collect();
 

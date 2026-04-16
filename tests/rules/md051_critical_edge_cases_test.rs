@@ -365,7 +365,10 @@ fn test_performance_bounds_comprehensive() {
 fn get_memory_usage_estimate() -> usize {
     // This is a simple heuristic - in production you'd use proper memory profiling
     // For now, we'll just return a placeholder that allows the test to run
-    std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1) * 1000
+    std::thread::available_parallelism()
+        .map(std::num::NonZero::get)
+        .unwrap_or(1)
+        * 1000
 }
 
 /// Integration test combining multiple edge cases

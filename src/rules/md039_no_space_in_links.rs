@@ -27,14 +27,12 @@ impl MD039NoSpaceInLinks {
         let start = text
             .char_indices()
             .find(|&(_, c)| !c.is_whitespace())
-            .map(|(i, _)| i)
-            .unwrap_or(text.len());
+            .map_or(text.len(), |(i, _)| i);
         let end = text
             .char_indices()
             .rev()
             .find(|&(_, c)| !c.is_whitespace())
-            .map(|(i, c)| i + c.len_utf8())
-            .unwrap_or(0);
+            .map_or(0, |(i, c)| i + c.len_utf8());
         if start >= end { "" } else { &text[start..end] }
     }
 
@@ -134,8 +132,7 @@ impl Rule for MD039NoSpaceInLinks {
                 let dest_start = original
                     .find("](")
                     .or_else(|| original.find("]["))
-                    .map(|p| p + 1)
-                    .unwrap_or(original.len());
+                    .map_or(original.len(), |p| p + 1);
                 let dest_portion = &original[dest_start..];
 
                 let fixed = if get_cached_regex(ALL_WHITESPACE_STR)
@@ -204,8 +201,7 @@ impl Rule for MD039NoSpaceInLinks {
                 let dest_start = original
                     .find("](")
                     .or_else(|| original.find("]["))
-                    .map(|p| p + 1)
-                    .unwrap_or(original.len());
+                    .map_or(original.len(), |p| p + 1);
                 let dest_portion = &original[dest_start..];
 
                 let fixed = if get_cached_regex(ALL_WHITESPACE_STR)

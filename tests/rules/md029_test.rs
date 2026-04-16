@@ -286,7 +286,7 @@ fn test_lists_with_mathematical_expressions() {
         "Should detect wrong number despite math expressions"
     );
     assert!(
-        result.iter().any(|w| w.message.contains("4")),
+        result.iter().any(|w| w.message.contains('4')),
         "Should detect that 4 should be 3"
     );
 }
@@ -312,7 +312,7 @@ fn test_deeply_nested_lists() {
     // Should handle deep nesting and detect the wrong number
     assert!(!result.is_empty(), "Should detect wrong number at deep level");
     assert!(
-        result.iter().any(|w| w.message.contains("3")),
+        result.iter().any(|w| w.message.contains('3')),
         "Should detect that 3 should be 2 at deep level"
     );
 }
@@ -395,7 +395,7 @@ fn test_lists_with_continuation_paragraphs() {
     // Continuation paragraphs should not break sequences
     assert!(!result.is_empty(), "Should detect wrong number despite continuations");
     assert!(
-        result.iter().any(|w| w.message.contains("4")),
+        result.iter().any(|w| w.message.contains('4')),
         "Should detect that 4 should be 3"
     );
 }
@@ -478,7 +478,7 @@ fn test_md029_multiline_3_space_indent() {
 
     // Should have warning for second "1." since it should be "2."
     assert_eq!(result.len(), 1, "3-space indentation should be treated as continuation");
-    assert!(result[0].message.contains("1") && result[0].message.contains("expected 2"));
+    assert!(result[0].message.contains('1') && result[0].message.contains("expected 2"));
 }
 
 #[test]
@@ -496,7 +496,7 @@ fn test_md029_multiline_4_space_indent() {
 
     // Should have warning for second "1." since it should be "2."
     assert_eq!(result.len(), 1);
-    assert!(result[0].message.contains("1") && result[0].message.contains("expected 2"));
+    assert!(result[0].message.contains('1') && result[0].message.contains("expected 2"));
 }
 
 #[test]
@@ -743,12 +743,12 @@ fn test_md029_nested_ordered_lists_issue_52() {
     assert!(line_8_error.is_some(), "Should have error on line 8");
 
     assert!(
-        line_5_error.unwrap().message.contains("1") && line_5_error.unwrap().message.contains("expected 2"),
+        line_5_error.unwrap().message.contains('1') && line_5_error.unwrap().message.contains("expected 2"),
         "Line 5 should expect 2, got: {}",
         line_5_error.unwrap().message
     );
     assert!(
-        line_8_error.unwrap().message.contains("1") && line_8_error.unwrap().message.contains("expected 2"),
+        line_8_error.unwrap().message.contains('1') && line_8_error.unwrap().message.contains("expected 2"),
         "Line 8 should expect 2, got: {}",
         line_8_error.unwrap().message
     );
@@ -839,13 +839,13 @@ fn test_md029_nested_ordered_lists_bug() {
     assert!(
         result
             .iter()
-            .any(|w| w.line == 5 && w.message.contains("1") && w.message.contains("expected 2")),
+            .any(|w| w.line == 5 && w.message.contains('1') && w.message.contains("expected 2")),
         "Line 5 (1. Sub 2) should be flagged as needing to be 2"
     );
     assert!(
         result
             .iter()
-            .any(|w| w.line == 8 && w.message.contains("1") && w.message.contains("expected 2")),
+            .any(|w| w.line == 8 && w.message.contains('1') && w.message.contains("expected 2")),
         "Line 8 (1. Sub 4) should be flagged as needing to be 2"
     );
 
@@ -897,8 +897,8 @@ fn test_md029_triple_nested_ordered_lists() {
     assert!(line_7_error.is_some(), "Should have error on line 7");
     assert!(line_11_error.is_some(), "Should have error on line 11");
 
-    assert!(line_7_error.unwrap().message.contains("1") && line_7_error.unwrap().message.contains("expected 2"));
-    assert!(line_11_error.unwrap().message.contains("3") && line_11_error.unwrap().message.contains("expected 2"));
+    assert!(line_7_error.unwrap().message.contains('1') && line_7_error.unwrap().message.contains("expected 2"));
+    assert!(line_11_error.unwrap().message.contains('3') && line_11_error.unwrap().message.contains("expected 2"));
 }
 
 #[test]
@@ -1052,7 +1052,7 @@ mod starting_numbers {
 
         // Expects 0, 1, 2
         assert_eq!(result.len(), 3);
-        assert!(result[0].message.contains("1") && result[0].message.contains("expected 0"));
+        assert!(result[0].message.contains('1') && result[0].message.contains("expected 0"));
     }
 
     #[test]
@@ -1113,8 +1113,8 @@ mod list_style_behaviors {
 
         // Expects all 1s
         assert_eq!(result.len(), 2);
-        assert!(result[0].message.contains("2") && result[0].message.contains("expected 1"));
-        assert!(result[1].message.contains("3") && result[1].message.contains("expected 1"));
+        assert!(result[0].message.contains('2') && result[0].message.contains("expected 1"));
+        assert!(result[1].message.contains('3') && result[1].message.contains("expected 1"));
     }
 
     #[test]
@@ -1161,8 +1161,8 @@ mod list_style_behaviors {
 
         // Expects 1, 2, 3
         assert_eq!(result.len(), 2);
-        assert!(result[0].message.contains("1") && result[0].message.contains("expected 2"));
-        assert!(result[1].message.contains("1") && result[1].message.contains("expected 3"));
+        assert!(result[0].message.contains('1') && result[0].message.contains("expected 2"));
+        assert!(result[1].message.contains('1') && result[1].message.contains("expected 3"));
     }
 
     #[test]
@@ -1443,8 +1443,8 @@ mod edge_cases {
 
         // Should expect continuous numbering
         assert_eq!(result.len(), 2);
-        assert!(result[0].message.contains("3") && result[0].message.contains("expected 2"));
-        assert!(result[1].message.contains("5") && result[1].message.contains("expected 3"));
+        assert!(result[0].message.contains('3') && result[0].message.contains("expected 2"));
+        assert!(result[1].message.contains('5') && result[1].message.contains("expected 3"));
     }
 
     #[test]

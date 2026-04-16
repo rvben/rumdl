@@ -286,24 +286,16 @@ impl MD030ListMarkerSpace {
                 let line_content = lines.get(next_line_num - 1).unwrap_or(&"");
                 if !line_content.trim().is_empty() {
                     // Get blockquote level from the current list item's line
-                    let bq_level = current_line_info
-                        .blockquote
-                        .as_ref()
-                        .map(|bq| bq.nesting_level)
-                        .unwrap_or(0);
+                    let bq_level = current_line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
 
                     // For blockquote lists, min continuation indent is just the marker width
                     // (not the full content_column which includes blockquote prefix)
                     let min_continuation_indent = if bq_level > 0 {
                         // For lists in blockquotes, use marker width (2 for "* " or "- ")
                         // content_column includes blockquote prefix, so subtract that
-                        current_list.content_column.saturating_sub(
-                            current_line_info
-                                .blockquote
-                                .as_ref()
-                                .map(|bq| bq.prefix.len())
-                                .unwrap_or(0),
-                        )
+                        current_list
+                            .content_column
+                            .saturating_sub(current_line_info.blockquote.as_ref().map_or(0, |bq| bq.prefix.len()))
                     } else {
                         current_list.content_column
                     };

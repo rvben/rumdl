@@ -199,7 +199,7 @@ pub(super) fn scan_jsx_block_code_spans(
             {
                 let after_bracket = trimmed.strip_prefix('<').unwrap_or("");
                 let tag_start = after_bracket.strip_prefix('/').unwrap_or(after_bracket);
-                if tag_start.as_bytes().first().is_some_and(|c| c.is_ascii_uppercase()) {
+                if tag_start.as_bytes().first().is_some_and(u8::is_ascii_uppercase) {
                     continue;
                 }
             }
@@ -457,7 +457,7 @@ pub(super) fn parse_html_tags(
             let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
 
             // Skip JSX components in MDX files (tags starting with uppercase letter)
-            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(char::is_uppercase) {
                 continue;
             }
 
@@ -684,7 +684,7 @@ pub(super) fn detect_lazy_continuation_lines(
             Event::Start(Tag::Item) => {
                 let line_num = byte_to_line(line_offsets, range.start);
                 let line_info = lines.get(line_num.saturating_sub(1));
-                let line_content = line_info.map(|li| li.content(content)).unwrap_or("");
+                let line_content = line_info.map_or("", |li| li.content(content));
 
                 // Determine blockquote level from the line content
                 let bq_level = line_content
@@ -698,14 +698,12 @@ pub(super) fn detect_lazy_continuation_lines(
                     // For blockquote lists, expected indent is the marker width
                     line_info
                         .and_then(|li| li.list_item.as_ref())
-                        .map(|item| item.content_column.saturating_sub(item.marker_column))
-                        .unwrap_or(2)
+                        .map_or(2, |item| item.content_column.saturating_sub(item.marker_column))
                 } else {
                     // For regular lists, use content_column directly
                     line_info
                         .and_then(|li| li.list_item.as_ref())
-                        .map(|item| item.content_column)
-                        .unwrap_or(0)
+                        .map_or(0, |item| item.content_column)
                 };
 
                 item_stack.push((expected_indent, bq_level));
@@ -733,8 +731,8 @@ pub(super) fn detect_lazy_continuation_lines(
                 if let Some(&(expected_indent, expected_bq_level)) = item_stack.last() {
                     let line_num = byte_to_line(line_offsets, range.start);
                     let line_info = lines.get(line_num.saturating_sub(1));
-                    let line_content = line_info.map(|li| li.content(content)).unwrap_or("");
-                    let fallback_indent = line_info.map(|li| li.indent).unwrap_or(0);
+                    let line_content = line_info.map_or("", |li| li.content(content));
+                    let fallback_indent = line_info.map_or(0, |li| li.indent);
 
                     let actual_indent =
                         effective_indent_in_blockquote(line_content, expected_bq_level, fallback_indent);

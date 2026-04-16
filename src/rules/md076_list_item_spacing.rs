@@ -200,8 +200,7 @@ impl MD076ListItemSpacing {
         let parent_content_col = ctx
             .line_info(first)
             .and_then(|li| li.list_item.as_ref())
-            .map(|item| item.content_column)
-            .unwrap_or(2);
+            .map_or(2, |item| item.content_column);
         if scan > first && Self::is_continuation_content(ctx, scan, parent_content_col) {
             return GapKind::ContinuationLoose;
         }
@@ -249,8 +248,7 @@ impl MD076ListItemSpacing {
             .filter(|&line_num| {
                 ctx.line_info(line_num)
                     .and_then(|li| li.list_item.as_ref())
-                    .map(|item| item.marker_column / 2 == block.nesting_level)
-                    .unwrap_or(false)
+                    .is_some_and(|item| item.marker_column / 2 == block.nesting_level)
             })
             .collect();
 
@@ -336,10 +334,7 @@ impl Rule for MD076ListItemSpacing {
                 if is_loose_violation {
                     let blanks = Self::inter_item_blanks(ctx, analysis.items[i], analysis.items[i + 1]);
                     if let Some(&blank_line) = blanks.first() {
-                        let line_content = ctx
-                            .line_info(blank_line)
-                            .map(|li| li.content(ctx.content))
-                            .unwrap_or("");
+                        let line_content = ctx.line_info(blank_line).map_or("", |li| li.content(ctx.content));
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: blank_line,
@@ -353,7 +348,7 @@ impl Rule for MD076ListItemSpacing {
                     }
                 } else if gap == GapKind::Tight && analysis.warn_tight_gaps {
                     let next_item = analysis.items[i + 1];
-                    let line_content = ctx.line_info(next_item).map(|li| li.content(ctx.content)).unwrap_or("");
+                    let line_content = ctx.line_info(next_item).map_or("", |li| li.content(ctx.content));
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: next_item,

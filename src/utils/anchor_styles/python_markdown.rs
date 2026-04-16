@@ -78,7 +78,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     let input = CODE_PATTERN
         .replace_all(input, |caps: &regex::Captures| {
             let idx = code_extracts.len();
-            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let content = caps.get(1).map_or("", |m| m.as_str());
             code_extracts.push(content.to_string());
             format!("\x00CODE{idx}\x00")
         })
@@ -92,7 +92,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // Step 1: NFKD normalization, then ASCII-only
     // Python-Markdown: unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode()
     let nfkd: String = input.nfkd().collect();
-    let ascii_only: String = nfkd.chars().filter(|c| c.is_ascii()).collect();
+    let ascii_only: String = nfkd.chars().filter(char::is_ascii).collect();
 
     // Step 2: Remove non-word, non-whitespace, non-hyphen characters
     // Python-Markdown: re.sub(r'[^\w\s-]', '', value)

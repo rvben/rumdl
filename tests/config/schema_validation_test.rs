@@ -271,21 +271,23 @@ fn test_schema_file_is_up_to_date() {
             .zip(generated.lines())
             .enumerate()
             .find(|(_, (a, b))| a != b)
-            .map(|(i, (a, b))| {
-                format!(
-                    "First difference at line {}:\n  disk:      {}\n  generated: {}",
-                    i + 1,
-                    a,
-                    b
-                )
-            })
-            .unwrap_or_else(|| {
-                format!(
-                    "Line count differs: {} (disk) vs {} (generated)",
-                    on_disk.lines().count(),
-                    generated.lines().count()
-                )
-            });
+            .map_or_else(
+                || {
+                    format!(
+                        "Line count differs: {} (disk) vs {} (generated)",
+                        on_disk.lines().count(),
+                        generated.lines().count()
+                    )
+                },
+                |(i, (a, b))| {
+                    format!(
+                        "First difference at line {}:\n  disk:      {}\n  generated: {}",
+                        i + 1,
+                        a,
+                        b
+                    )
+                },
+            );
         panic!(
             "rumdl.schema.json is out of date. Run 'rumdl schema generate' (or 'make schema') to update it.\n{first_diff}"
         );

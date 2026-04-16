@@ -110,7 +110,9 @@ impl FileParallelProcessor {
         }
 
         // Check if we have enough CPU cores
-        let cpu_cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+        let cpu_cores = std::thread::available_parallelism()
+            .map(std::num::NonZero::get)
+            .unwrap_or(1);
         if cpu_cores < 2 {
             return false;
         }

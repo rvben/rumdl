@@ -1832,7 +1832,7 @@ mod issue_251_emphasis_continuation {
         // Last line should have closing emphasis with quote and footnote
         let last_line = lines.last().unwrap();
         assert!(
-            last_line.contains("\"_") || last_line.ends_with("_"),
+            last_line.contains("\"_") || last_line.ends_with('_'),
             "Last line should have closing emphasis: {last_line:?}"
         );
     }
@@ -2654,7 +2654,7 @@ fn test_utf8_blockquote_with_arabic() {
     let result = reflow_markdown(input, &options);
 
     assert!(result.contains("مرحبا"), "Arabic text should be preserved");
-    assert!(result.starts_with(">"), "Blockquote marker should be preserved");
+    assert!(result.starts_with('>'), "Blockquote marker should be preserved");
 }
 
 #[test]
@@ -2669,7 +2669,7 @@ fn test_utf8_blockquote_with_leading_spaces_and_unicode() {
     let result = reflow_markdown(input, &options);
 
     assert!(result.contains("日本語"), "Japanese should be preserved");
-    assert!(result.contains(">"), "Blockquote marker should be preserved");
+    assert!(result.contains('>'), "Blockquote marker should be preserved");
 }
 
 #[test]
@@ -3799,7 +3799,7 @@ fn test_semantic_break_word_boundary_check() {
     // Verify none of the lines break mid-word
     for line in &result {
         assert!(
-            !line.ends_with("auth") && !line.ends_with("f") && !line.ends_with("inf"),
+            !line.ends_with("auth") && !line.ends_with('f') && !line.ends_with("inf"),
             "Should not break inside words: {result:?}"
         );
     }

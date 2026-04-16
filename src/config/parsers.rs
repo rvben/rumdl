@@ -387,8 +387,7 @@ pub(super) fn parse_pyproject_toml(
                             sv.push_override(toml_val, source, file.clone(), None);
                         }
                     }
-                } else if rule_name.to_ascii_uppercase().starts_with("MD")
-                    || rule_name.chars().any(|c| c.is_alphabetic())
+                } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
                     // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
@@ -432,8 +431,7 @@ pub(super) fn parse_pyproject_toml(
                             sv.push_override(toml_val, source, file.clone(), None);
                         }
                     }
-                } else if rule_name.to_ascii_uppercase().starts_with("MD")
-                    || rule_name.chars().any(|c| c.is_alphabetic())
+                } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
                     // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
@@ -511,7 +509,7 @@ fn parse_global_key(
                 let values: Vec<String> = formatted_array
                     .iter()
                     .filter_map(|item| item.as_str())
-                    .map(|s| s.to_string())
+                    .map(std::string::ToString::to_string)
                     .collect();
 
                 let is_rule_list = matches!(norm_key, "enable" | "disable" | "extend-enable" | "extend-disable");

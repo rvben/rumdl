@@ -171,9 +171,9 @@ impl MD063HeadingCapitalization {
                 };
 
                 // Require word boundaries
-                let before_ok = abs_pos == 0 || !text[..abs_pos].chars().last().is_some_and(|c| c.is_alphanumeric());
+                let before_ok = abs_pos == 0 || !text[..abs_pos].chars().last().is_some_and(char::is_alphanumeric);
                 let after_ok =
-                    end_pos >= text.len() || !text[end_pos..].chars().next().is_some_and(|c| c.is_alphanumeric());
+                    end_pos >= text.len() || !text[end_pos..].chars().next().is_some_and(char::is_alphanumeric);
 
                 if before_ok && after_ok {
                     // Map each word in the matched region to its canonical form.
@@ -197,7 +197,7 @@ impl MD063HeadingCapitalization {
 
                 // Advance by one Unicode scalar value to allow overlapping matches
                 // while staying on a UTF-8 char boundary.
-                search_start = abs_pos + text[abs_pos..].chars().next().map_or(1, |c| c.len_utf8());
+                search_start = abs_pos + text[abs_pos..].chars().next().map_or(1, char::len_utf8);
             }
         }
 
@@ -672,18 +672,12 @@ impl MD063HeadingCapitalization {
         // Determine if the first segment overall is a text segment
         // For sentence case: if heading starts with code/link, the first text segment
         // should NOT capitalize its first word (the heading already has a "first element")
-        let first_segment_is_text = segments
-            .first()
-            .map(|s| matches!(s, HeadingSegment::Text(_)))
-            .unwrap_or(false);
+        let first_segment_is_text = segments.first().is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
 
         // Determine if the last segment overall is a text segment
         // If the last segment is Code or Link, then the last text segment should NOT
         // treat its last word as the heading's last word (for lowercase-words respect)
-        let last_segment_is_text = segments
-            .last()
-            .map(|s| matches!(s, HeadingSegment::Text(_)))
-            .unwrap_or(false);
+        let last_segment_is_text = segments.last().is_some_and(|s| matches!(s, HeadingSegment::Text(_)));
 
         // Apply capitalization to each segment
         let mut result_parts: Vec<String> = Vec::new();

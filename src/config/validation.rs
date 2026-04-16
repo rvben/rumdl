@@ -18,10 +18,10 @@ pub fn validate_cli_rule_names(
     unfixable: Option<&str>,
 ) -> Vec<ConfigValidationWarning> {
     let mut warnings = Vec::new();
-    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
 
     let validate_list = |input: &str, flag_name: &str, warnings: &mut Vec<ConfigValidationWarning>| {
-        for name in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        for name in input.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             // Check for special "all" value (case-insensitive)
             if name.eq_ignore_ascii_case("all") {
                 continue;
@@ -77,7 +77,7 @@ pub(super) fn validate_config_sourced_internal<S>(
     let mut warnings = validate_config_sourced_impl(&sourced.rules, &sourced.unknown_keys, registry);
 
     // Validate enable/disable arrays in [global] section
-    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+    let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
 
     for rule_name in &sourced.global.enable.value {
         if !is_valid_rule_name(rule_name) {
@@ -214,7 +214,7 @@ fn validate_config_sourced_impl(
     for rule in rules.keys() {
         if !known_rules.contains(rule) {
             // Include both canonical names AND aliases for fuzzy matching
-            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
             let message = if let Some(suggestion) = suggest_similar_key(rule, &all_rule_names) {
                 // Convert alias suggestions to lowercase for better UX (MD001 stays uppercase, ul-style becomes lowercase)
                 let formatted_suggestion = if suggestion.starts_with("MD") {
@@ -317,7 +317,7 @@ fn validate_config_sourced_impl(
         } else {
             // Unknown rule section - suggest similar rule names
             let rule_name = section.trim_matches(|c| c == '[' || c == ']');
-            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(|s| s.to_string()).collect();
+            let all_rule_names: Vec<String> = RULE_ALIAS_MAP.keys().map(std::string::ToString::to_string).collect();
             let message = if let Some(suggestion) = suggest_similar_key(rule_name, &all_rule_names) {
                 // Convert alias suggestions to lowercase for better UX (MD001 stays uppercase, ul-style becomes lowercase)
                 let formatted_suggestion = if suggestion.starts_with("MD") {

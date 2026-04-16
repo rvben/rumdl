@@ -87,7 +87,7 @@ impl MD031BlanksAroundFences {
 
             // Check for ordered list (number followed by . or ))
             if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-                let mut chars = trimmed.chars().skip_while(|c| c.is_ascii_digit());
+                let mut chars = trimmed.chars().skip_while(char::is_ascii_digit);
                 if let Some(next) = chars.next()
                     && (next == '.' || next == ')')
                     && chars.next() == Some(' ')
@@ -169,7 +169,7 @@ impl MD031BlanksAroundFences {
                     && content_after_bq
                         .chars()
                         .skip_while(|&c| c == '`' || c == '~')
-                        .all(|c| c.is_whitespace());
+                        .all(char::is_whitespace);
 
                 if is_closing_fence {
                     (start_line, end_line)

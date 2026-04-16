@@ -87,8 +87,7 @@ impl MD003HeadingStyle {
                     other => other,
                 }
             })
-            .map(|(style, _)| style)
-            .unwrap_or(HeadingStyle::Atx)
+            .map_or(HeadingStyle::Atx, |(style, _)| style)
     }
 }
 

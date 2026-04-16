@@ -2396,8 +2396,7 @@ pub fn resolve_canonical(alias: &str) -> Option<&'static str> {
 pub fn is_valid_alias(canonical: &str, alias: &str) -> bool {
     CANONICAL_TO_ALIASES
         .get(canonical)
-        .map(|aliases| aliases.contains(alias.to_lowercase().as_str()))
-        .unwrap_or(false)
+        .is_some_and(|aliases| aliases.contains(alias.to_lowercase().as_str()))
 }
 
 /// Get the preferred default alias for a language

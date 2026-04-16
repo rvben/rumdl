@@ -264,7 +264,7 @@ mod tests {
 
         // Each line should follow the pattern: file:line:col: [RULE] message
         for line in lines {
-            assert!(line.contains(":"));
+            assert!(line.contains(':'));
             assert!(line.contains(" [MD"));
             assert!(line.contains("] "));
         }

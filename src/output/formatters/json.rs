@@ -371,7 +371,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify pretty printing works
-        assert!(output.contains("\n"));
+        assert!(output.contains('\n'));
         assert!(output.contains("  "));
     }
 

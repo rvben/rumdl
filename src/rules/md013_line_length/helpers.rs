@@ -153,7 +153,7 @@ pub(crate) fn is_horizontal_rule(line: &str) -> bool {
 pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     let mut chars = line.chars();
     // Must start with a digit
-    if !chars.next().is_some_and(|c| c.is_numeric()) {
+    if !chars.next().is_some_and(char::is_numeric) {
         return false;
     }
     // Can have more digits

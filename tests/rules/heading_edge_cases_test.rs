@@ -46,7 +46,7 @@ fn test_md001_edge_cases() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 1, "Should detect large heading jump");
-    assert!(result[0].message.contains("5"));
+    assert!(result[0].message.contains('5'));
 
     // Test 4: Heading level resets
     let content = "\

@@ -319,7 +319,7 @@ impl MD027MultipleSpacesBlockquote {
         }
 
         // 3. Content should contain some alphabetic characters (not just symbols)
-        if !content_after_markers.chars().any(|c| c.is_alphabetic()) {
+        if !content_after_markers.chars().any(char::is_alphabetic) {
             return false;
         }
 

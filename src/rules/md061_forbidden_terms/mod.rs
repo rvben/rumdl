@@ -52,8 +52,7 @@ impl MD061ForbiddenTerms {
             content[..start]
                 .chars()
                 .last()
-                .map(|c| !c.is_alphanumeric() && c != '_')
-                .unwrap_or(true)
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
         };
 
         let after_ok = if end >= content.len() {
@@ -62,8 +61,7 @@ impl MD061ForbiddenTerms {
             content[end..]
                 .chars()
                 .next()
-                .map(|c| !c.is_alphanumeric() && c != '_')
-                .unwrap_or(true)
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_')
         };
 
         before_ok && after_ok

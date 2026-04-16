@@ -178,7 +178,7 @@ fn test_md060_empty_cells() {
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("|"), "Table structure should be preserved");
+    assert!(fixed.contains('|'), "Table structure should be preserved");
 
     let lines: Vec<&str> = fixed.lines().collect();
     assert_eq!(lines.len(), 3, "All rows should be present");
@@ -794,7 +794,7 @@ fn test_md060_mismatched_column_counts_more_in_header() {
     // 3. Formatting based on max column count
     // We just verify it doesn't panic
     assert!(
-        fixed.contains("A") || fixed.contains("X"),
+        fixed.contains('A') || fixed.contains('X'),
         "Content should be preserved"
     );
 }
@@ -813,7 +813,7 @@ fn test_md060_mismatched_column_counts_more_in_content() {
 
     let fixed = result.unwrap();
     assert!(
-        fixed.contains("A") || fixed.contains("X"),
+        fixed.contains('A') || fixed.contains('X'),
         "Content should be preserved"
     );
 }
@@ -937,7 +937,7 @@ fn test_md060_tables_in_blockquotes() {
         "Table in blockquote should be present"
     );
     assert!(
-        fixed.contains("A") && fixed.contains("B"),
+        fixed.contains('A') && fixed.contains('B'),
         "Normal table should be present"
     );
 }
@@ -1013,7 +1013,7 @@ fn test_md060_blockquote_table_compact_prefix() {
 
     // Should preserve the >| prefix style (no space)
     for (i, line) in lines.iter().enumerate() {
-        assert!(line.starts_with(">"), "Line {i} should start with >, got: {line}");
+        assert!(line.starts_with('>'), "Line {i} should start with >, got: {line}");
     }
 }
 
@@ -1050,7 +1050,7 @@ fn test_md060_multiple_blockquote_tables() {
     for (i, line) in lines.iter().enumerate() {
         if !line.is_empty() {
             assert!(
-                line.starts_with(">"),
+                line.starts_with('>'),
                 "Line {i} should have blockquote prefix, got: {line}"
             );
         }
@@ -1058,11 +1058,11 @@ fn test_md060_multiple_blockquote_tables() {
 
     // Both tables should have content preserved
     assert!(
-        fixed.contains("1") && fixed.contains("2"),
+        fixed.contains('1') && fixed.contains('2'),
         "First table content preserved"
     );
     assert!(
-        fixed.contains("3") && fixed.contains("4"),
+        fixed.contains('3') && fixed.contains('4'),
         "Second table content preserved"
     );
 }
@@ -1083,11 +1083,11 @@ fn test_md060_adjacent_tables_without_blank_line() {
     let fixed = result.unwrap();
     // Content should be preserved in some form
     assert!(
-        fixed.contains("1") && fixed.contains("2"),
+        fixed.contains('1') && fixed.contains('2'),
         "First table content should be preserved"
     );
     assert!(
-        fixed.contains("3") && fixed.contains("4"),
+        fixed.contains('3') && fixed.contains('4'),
         "Second table content should be preserved"
     );
 }
@@ -1596,8 +1596,8 @@ fn test_md060_empty_and_whitespace_only_cells_mixed() {
     assert_eq!(lines[1].len(), lines[2].len());
     assert_eq!(lines[2].len(), lines[3].len());
 
-    assert!(fixed.contains("X"));
-    assert!(fixed.contains("Y"));
+    assert!(fixed.contains('X'));
+    assert!(fixed.contains('Y'));
 }
 
 // ISSUE #164: Already-aligned tables with short separators should not be reformatted

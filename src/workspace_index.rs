@@ -215,7 +215,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
                 let file_path = strip_query_and_fragment(file_path);
 
                 // Get fragment from capture group 2 (includes # prefix)
-                let fragment = caps.get(2).map(|m| m.as_str().trim_start_matches('#')).unwrap_or("");
+                let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
 
                 // Only index markdown file links for cross-file validation
                 if is_markdown_file(file_path) {
@@ -473,10 +473,7 @@ impl WorkspaceIndex {
     ///
     /// Returns `true` if the file is not in the index or has a different hash.
     pub fn is_file_stale(&self, path: &Path, current_hash: &str) -> bool {
-        self.files
-            .get(path)
-            .map(|f| f.content_hash != current_hash)
-            .unwrap_or(true)
+        self.files.get(path).is_none_or(|f| f.content_hash != current_hash)
     }
 
     /// Retain only files that exist in the given set, removing deleted files

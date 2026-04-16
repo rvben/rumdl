@@ -136,8 +136,8 @@ impl Rule for MD068EmptyFootnoteDefinition {
 
             // Extract the content after the colon
             if let Some(caps) = FOOTNOTE_DEF_WITH_CONTENT.captures(line_stripped) {
-                let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let content = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                let id = caps.get(1).map_or("", |m| m.as_str());
+                let content = caps.get(2).map_or("", |m| m.as_str());
 
                 // Check if content is empty or whitespace-only
                 if content.trim().is_empty() {

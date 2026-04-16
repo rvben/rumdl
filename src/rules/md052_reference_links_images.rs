@@ -169,7 +169,7 @@ impl MD052ReferenceLinkImages {
         }
 
         // Skip very short non-word patterns (likely operators or syntax)
-        if text.len() <= 2 && !text.chars().all(|c| c.is_alphabetic()) {
+        if text.len() <= 2 && !text.chars().all(char::is_alphabetic) {
             return true;
         }
 

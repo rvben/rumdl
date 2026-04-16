@@ -812,7 +812,7 @@ fn test_reflow_numbered_lists() {
     // Verify structure is preserved but be lenient with continuation lines
     for (i, line) in fixed.lines().enumerate() {
         // List item lines start with number
-        if line.trim_start().chars().next().is_some_and(|c| c.is_numeric()) {
+        if line.trim_start().chars().next().is_some_and(char::is_numeric) {
             // First line of list items should be under limit
             assert!(
                 line.chars().count() <= 40, // Allow a bit more for the marker
@@ -850,8 +850,8 @@ fn test_reflow_blockquotes() {
     }
 
     // Verify content is preserved
-    let content_without_markers = fixed.replace("> ", "").replace(">", "");
-    let original_content = content.replace("> ", "").replace(">", "");
+    let content_without_markers = fixed.replace("> ", "").replace('>', "");
+    let original_content = content.replace("> ", "").replace('>', "");
     assert_eq!(
         content_without_markers.split_whitespace().collect::<Vec<_>>(),
         original_content.split_whitespace().collect::<Vec<_>>()

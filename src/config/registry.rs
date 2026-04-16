@@ -154,7 +154,7 @@ impl RuleRegistry {
         }
 
         // Try static alias resolution (O(1) perfect hash lookup)
-        resolve_rule_name_alias(name).map(|s| s.to_string())
+        resolve_rule_name_alias(name).map(std::string::ToString::to_string)
     }
 }
 
@@ -340,9 +340,7 @@ pub fn resolve_rule_name_alias(key: &str) -> Option<&'static str> {
 ///
 /// For unknown names, falls back to normalization (uppercase for MDxxx pattern, otherwise kebab-case).
 pub fn resolve_rule_name(name: &str) -> String {
-    resolve_rule_name_alias(name)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| normalize_key(name))
+    resolve_rule_name_alias(name).map_or_else(|| normalize_key(name), std::string::ToString::to_string)
 }
 
 /// Resolves a comma-separated list of rule names to canonical IDs.
@@ -351,7 +349,7 @@ pub fn resolve_rule_name(name: &str) -> String {
 pub fn resolve_rule_names(input: &str) -> std::collections::HashSet<String> {
     input
         .split(',')
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(resolve_rule_name)
         .collect()

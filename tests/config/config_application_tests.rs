@@ -41,8 +41,7 @@ fn apply_rule_configs(rules_in: &Vec<Box<dyn Rule>>, config: &Config) -> Vec<Box
         // Apply MD013 configuration
         if rule_name == "MD013" {
             let line_length = rumdl_lib::config::get_rule_config_value::<u64>(config, "MD013", "line_length")
-                .map(|v| v as usize)
-                .unwrap_or(80);
+                .map_or(80, |v| v as usize);
             let code_blocks =
                 rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "code_blocks").unwrap_or(true);
             let tables = rumdl_lib::config::get_rule_config_value::<bool>(config, "MD013", "tables").unwrap_or(false);

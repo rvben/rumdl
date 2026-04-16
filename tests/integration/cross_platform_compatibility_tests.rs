@@ -215,10 +215,10 @@ fn test_platform_specific_newlines_in_fixes() {
                     let has_proper_line_endings = if platform == "windows" {
                         // For Windows content, we expect the fix to use the detected line ending style
                         // The current implementation may normalize to \n for simplicity, which is acceptable
-                        fixed_content.contains(expected_line_ending) || fixed_content.contains("\n")
+                        fixed_content.contains(expected_line_ending) || fixed_content.contains('\n')
                     } else {
                         // For Unix content, we expect LF line endings
-                        fixed_content.contains("\n")
+                        fixed_content.contains('\n')
                     };
 
                     assert!(

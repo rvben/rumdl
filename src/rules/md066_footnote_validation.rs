@@ -216,8 +216,7 @@ impl Rule for MD066FootnoteValidation {
                     let (col, end_col) = ctx
                         .lines
                         .get(*line - 1)
-                        .map(|li| footnote_def_position(li.content(ctx.content)))
-                        .unwrap_or((1, 1));
+                        .map_or((1, 1), |li| footnote_def_position(li.content(ctx.content)));
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: *line,
@@ -247,13 +246,15 @@ impl Rule for MD066FootnoteValidation {
                 let (col, end_col) = if let Some(line_info) = ctx.lines.get(line - 1) {
                     let line_content = line_info.content(ctx.content);
                     let byte_pos = byte_offset.saturating_sub(line_info.byte_offset);
-                    let char_col = line_content.get(..byte_pos).map(|s| s.chars().count()).unwrap_or(0);
+                    let char_col = line_content.get(..byte_pos).map_or(0, |s| s.chars().count());
                     // Find the actual [^...] marker in the source at this position
                     let marker_chars = line_content
                         .get(byte_pos..)
                         .and_then(|rest| rest.find(']'))
-                        .map(|end| line_content[byte_pos..byte_pos + end + 1].chars().count())
-                        .unwrap_or_else(|| format!("[^{ref_id}]").chars().count());
+                        .map_or_else(
+                            || format!("[^{ref_id}]").chars().count(),
+                            |end| line_content[byte_pos..byte_pos + end + 1].chars().count(),
+                        );
                     (char_col + 1, char_col + marker_chars + 1)
                 } else {
                     (1, 1)
@@ -280,8 +281,7 @@ impl Rule for MD066FootnoteValidation {
                 let (col, end_col) = ctx
                     .lines
                     .get(line - 1)
-                    .map(|li| footnote_def_position(li.content(ctx.content)))
-                    .unwrap_or((1, 1));
+                    .map_or((1, 1), |li| footnote_def_position(li.content(ctx.content)));
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line,

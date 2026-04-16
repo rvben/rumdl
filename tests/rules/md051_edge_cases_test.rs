@@ -1008,7 +1008,7 @@ Edge cases:
         let word_pattern = "word ".repeat(100);
         let hyphen_pattern = "-".repeat(50);
         let emoji_pattern = "🎉".repeat(20);
-        let word_fragment = "word".repeat(100).replace(" ", "-");
+        let word_fragment = "word".repeat(100).replace(' ', "-");
         let hyphen_fragment = "hyphen".repeat(10);
 
         let complex_content = format!(

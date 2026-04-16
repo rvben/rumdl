@@ -181,7 +181,7 @@ async fn test_formatting_no_issues() {
     assert!(result.is_ok(), "Formatting should succeed even with no issues");
     let edits = result.unwrap();
     assert!(
-        edits.as_ref().is_some_and(|e| e.is_empty()),
+        edits.as_ref().is_some_and(std::vec::Vec::is_empty),
         "Should return empty edits array for perfect document"
     );
 }
@@ -396,7 +396,7 @@ async fn test_formatting_empty_document() {
     assert!(result.is_ok(), "Formatting empty document should not error");
     let edits = result.unwrap();
     assert!(
-        edits.as_ref().is_some_and(|e| e.is_empty()),
+        edits.as_ref().is_some_and(std::vec::Vec::is_empty),
         "Empty document should return empty edits array"
     );
 }

@@ -312,7 +312,7 @@ impl CodeBlockUtils {
             || trimmed.starts_with("***")
             || trimmed.starts_with("___")
             || crate::utils::skip_context::is_table_line(trimmed)
-            || trimmed.starts_with(">") // Blockquotes
+            || trimmed.starts_with('>') // Blockquotes
     }
 
     /// Detect fenced code blocks with markdown/md language tag.
@@ -341,8 +341,7 @@ impl CodeBlockUtils {
                         let block_start = range.start;
                         let content_start = content[block_start..]
                             .find('\n')
-                            .map(|i| block_start + i + 1)
-                            .unwrap_or(content.len());
+                            .map_or(content.len(), |i| block_start + i + 1);
 
                         current_block = Some(MarkdownCodeBlockBuilder { content_start });
                     }
@@ -360,8 +359,7 @@ impl CodeBlockUtils {
                         let search_range = &content[builder.content_start..block_end.min(content.len())];
                         let content_end = search_range
                             .rfind('\n')
-                            .map(|i| builder.content_start + i)
-                            .unwrap_or(builder.content_start);
+                            .map_or(builder.content_start, |i| builder.content_start + i);
 
                         // Only add block if it has valid content range
                         if content_end >= builder.content_start {

@@ -147,8 +147,7 @@ impl Rule for MD067FootnoteDefinitionOrder {
                         let (col, end_col) = ctx
                             .lines
                             .get(*def_line - 1)
-                            .map(|li| footnote_def_position(li.content(ctx.content)))
-                            .unwrap_or((1, 1));
+                            .map_or((1, 1), |li| footnote_def_position(li.content(ctx.content)));
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: *def_line,

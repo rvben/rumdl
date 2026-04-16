@@ -218,7 +218,7 @@ tables = true
             // Allow slightly more for list items and lines with URLs
             let is_list_item = line.trim_start().starts_with("- ")
                 || line.trim_start().starts_with("* ")
-                || line.trim_start().chars().next().is_some_and(|c| c.is_numeric());
+                || line.trim_start().chars().next().is_some_and(char::is_numeric);
             let contains_url = line.contains("http://") || line.contains("https://");
             let limit = if is_list_item || contains_url { 80 } else { 50 };
 

@@ -208,7 +208,7 @@ impl RumdlLanguageServer {
                 .iter()
                 .find(|(k, _)| k.eq_ignore_ascii_case(canonical))
                 .map(|(_, v)| v.clone())
-                .or_else(|| default_alias(canonical).map(|s| s.to_string()))
+                .or_else(|| default_alias(canonical).map(std::string::ToString::to_string))
                 .unwrap_or_else(|| (*canonical).to_string());
 
             // Add the preferred alias as primary completion

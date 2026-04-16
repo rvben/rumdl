@@ -109,8 +109,7 @@ impl MarkdownFlavor {
     pub fn from_path(path: &std::path::Path) -> Self {
         path.extension()
             .and_then(|e| e.to_str())
-            .map(Self::from_extension)
-            .unwrap_or(Self::Standard)
+            .map_or(Self::Standard, Self::from_extension)
     }
 
     /// Check if this flavor supports ESM imports/exports (MDX-specific)

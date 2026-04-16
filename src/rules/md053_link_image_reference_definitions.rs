@@ -132,7 +132,7 @@ impl MD053LinkImageReferenceDefinitions {
 
         // Skip very short non-word patterns (likely operators or syntax)
         // But allow single digits (could be footnotes) and single letters
-        if text.len() <= 2 && !text.chars().all(|c| c.is_alphanumeric()) {
+        if text.len() <= 2 && !text.chars().all(char::is_alphanumeric) {
             return true;
         }
 
@@ -180,7 +180,7 @@ impl MD053LinkImageReferenceDefinitions {
     /// Returns the unescaped reference string.
     fn unescape_reference(reference: &str) -> String {
         // Remove backslashes before special characters
-        reference.replace("\\", "")
+        reference.replace('\\', "")
     }
 
     /// Check if a reference definition is likely a comment-style reference.
@@ -489,7 +489,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
                     if i > 0 {
                         // Skip the first occurrence, report all others
                         let line_num = start_line + 1;
-                        let line_content = ctx.lines.get(start_line).map(|l| l.content(ctx.content)).unwrap_or("");
+                        let line_content = ctx.lines.get(start_line).map_or("", |l| l.content(ctx.content));
                         let (start_line_1idx, start_col, end_line, end_col) =
                             calculate_line_range(line_num, line_content);
 
@@ -546,7 +546,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         // Create warnings for unused references
         for (definition, start, _end) in unused_refs {
             let line_num = start + 1; // 1-indexed line numbers
-            let line_content = ctx.lines.get(start).map(|l| l.content(ctx.content)).unwrap_or("");
+            let line_content = ctx.lines.get(start).map_or("", |l| l.content(ctx.content));
 
             // Calculate precise character range for the entire reference definition line
             let (start_line, start_col, end_line, end_col) = calculate_line_range(line_num, line_content);

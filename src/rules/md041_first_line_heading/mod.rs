@@ -632,9 +632,7 @@ impl Rule for MD041FirstLineHeading {
 
         // Respect inline disable comments — use the same first-content-line
         // logic as check() so both paths agree on which line to check.
-        let first_content_line = Self::first_content_line_idx(ctx)
-            .map(|i| i + 1) // 1-indexed
-            .unwrap_or(1);
+        let first_content_line = Self::first_content_line_idx(ctx).map_or(1, |i| i + 1);
         if ctx.inline_config().is_rule_disabled(self.name(), first_content_line) {
             return Ok(ctx.content.to_string());
         }

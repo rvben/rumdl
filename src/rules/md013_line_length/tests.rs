@@ -974,17 +974,17 @@ And a bullet list:
             if i + 1 < lines.len()
                 && !lines[i + 1].trim().is_empty()
                 && !lines[i + 1].trim().starts_with(char::is_numeric)
-                && !lines[i + 1].trim().starts_with("-")
+                && !lines[i + 1].trim().starts_with('-')
             {
                 // Numbered list continuation lines should have 3 spaces
                 assert!(lines[i + 1].starts_with("   ") || lines[i + 1].trim().is_empty());
             }
-        } else if line.trim().starts_with("-") {
+        } else if line.trim().starts_with('-') {
             // Check if next line is a continuation (should be indented with 2 spaces for dash lists)
             if i + 1 < lines.len()
                 && !lines[i + 1].trim().is_empty()
                 && !lines[i + 1].trim().starts_with(char::is_numeric)
-                && !lines[i + 1].trim().starts_with("-")
+                && !lines[i + 1].trim().starts_with('-')
             {
                 // Dash list continuation lines should have 2 spaces
                 assert!(lines[i + 1].starts_with("  ") || lines[i + 1].trim().is_empty());
@@ -1469,7 +1469,7 @@ fn test_issue_76_use_case() {
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
     assert_eq!(lines.len(), 1, "Should combine into single line with high limit");
-    assert!(!fixed.contains("\n"), "Should remove all line breaks within paragraph");
+    assert!(!fixed.contains('\n'), "Should remove all line breaks within paragraph");
 }
 
 #[test]

@@ -284,7 +284,7 @@ MD013:
     assert!(config.rules.contains_key("MD013"), "MD013 should be configured");
     let md013 = &config.rules["MD013"];
     assert_eq!(
-        md013.values.get("line-length").and_then(|v| v.as_integer()),
+        md013.values.get("line-length").and_then(toml::Value::as_integer),
         Some(120),
         "MD013 line-length should be 120"
     );
@@ -326,7 +326,7 @@ MD013:
     assert!(config.rules.contains_key("MD013"), "MD013 should be configured");
     let md013 = &config.rules["MD013"];
     assert_eq!(
-        md013.values.get("line-length").and_then(|v| v.as_integer()),
+        md013.values.get("line-length").and_then(toml::Value::as_integer),
         Some(120),
         "MD013 line-length should be 120"
     );

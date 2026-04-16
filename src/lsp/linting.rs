@@ -184,7 +184,10 @@ impl RumdlLanguageServer {
             let processor = CodeBlockToolProcessor::new(&rumdl_config.code_block_tools, flavor);
             match processor.lint(text) {
                 Ok(diagnostics) => {
-                    let tool_warnings: Vec<_> = diagnostics.iter().map(|d| d.to_lint_warning()).collect();
+                    let tool_warnings: Vec<_> = diagnostics
+                        .iter()
+                        .map(super::super::code_block_tools::processor::CodeBlockDiagnostic::to_lint_warning)
+                        .collect();
                     all_warnings.extend(tool_warnings);
                 }
                 Err(e) => {
@@ -381,11 +384,7 @@ impl RumdlLanguageServer {
 
         // 1. Trim trailing whitespace from each line (if requested)
         if options.trim_trailing_whitespace.unwrap_or(false) {
-            result = result
-                .lines()
-                .map(|line| line.trim_end())
-                .collect::<Vec<_>>()
-                .join("\n");
+            result = result.lines().map(str::trim_end).collect::<Vec<_>>().join("\n");
             // Preserve final newline status for next steps
             if original_ended_with_newline && !result.ends_with('\n') {
                 result.push('\n');
@@ -492,8 +491,7 @@ impl RumdlLanguageServer {
                                 filtered_rules
                                     .iter()
                                     .find(|r| r.name() == rule_name)
-                                    .map(|r| r.fix_capability() != FixCapability::Unfixable)
-                                    .unwrap_or(false)
+                                    .is_some_and(|r| r.fix_capability() != FixCapability::Unfixable)
                             } else {
                                 false
                             }

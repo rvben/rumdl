@@ -108,7 +108,7 @@ reflow-mode = "normalize"
 
     // Check the last line before code block contains only whitespace (the indent before fence)
     assert!(
-        lines_before.last().map(|l| l.trim().is_empty()).unwrap_or(false),
+        lines_before.last().is_some_and(|l| l.trim().is_empty()),
         "Should have whitespace/indent line immediately before code block marker"
     );
 

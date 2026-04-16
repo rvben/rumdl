@@ -370,7 +370,7 @@ fn property_fuzz_like_testing() {
         // ASCII printable characters
         (0..128)
             .map(|i| char::from(i as u8))
-            .filter(|c| c.is_ascii_graphic())
+            .filter(char::is_ascii_graphic)
             .collect::<String>(),
         // Unicode punctuation
         "!@#$%^&*()[]{}|\\:;\"'<>?,./-=+_`~".to_string(),

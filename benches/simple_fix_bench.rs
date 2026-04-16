@@ -81,13 +81,7 @@ fn bench_string_approaches(c: &mut Criterion) {
 
     // Approach 1: trim_end + collect
     c.bench_function("trim_end_collect", |b| {
-        b.iter(|| {
-            content
-                .lines()
-                .map(|line| line.trim_end())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+        b.iter(|| content.lines().map(str::trim_end).collect::<Vec<_>>().join("\n"))
     });
 
     // Approach 2: manual iteration with capacity

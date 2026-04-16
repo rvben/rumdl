@@ -59,7 +59,7 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
         let new_line = format!("{}{}{}", before, fix.replacement, after);
 
         // Reconstruct the full content
-        let mut result_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        let mut result_lines: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
         result_lines[warning_start_line - 1] = new_line;
 
         Ok(result_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })
@@ -82,7 +82,7 @@ fn simulate_vscode_fix(content: &str, rule: &dyn Rule) -> Result<String, String>
         let after = &end_line_content[end_byte..];
         let new_line = format!("{}{}{}", before, fix.replacement, after);
 
-        let mut result_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        let mut result_lines: Vec<String> = lines.iter().map(std::string::ToString::to_string).collect();
         result_lines.splice((warning_start_line - 1)..warning_end_line, std::iter::once(new_line));
 
         Ok(result_lines.join("\n") + if content.ends_with('\n') { "\n" } else { "" })

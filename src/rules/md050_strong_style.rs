@@ -149,8 +149,7 @@ impl MD050StrongStyle {
         // Skip matches in front matter or mkdocstrings blocks
         if ctx
             .line_info(line_num)
-            .map(|info| info.in_front_matter || info.in_mkdocstrings)
-            .unwrap_or(false)
+            .is_some_and(|info| info.in_front_matter || info.in_mkdocstrings)
         {
             return true;
         }

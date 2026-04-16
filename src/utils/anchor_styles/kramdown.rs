@@ -102,8 +102,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
                 .char_indices()
                 .take_while(|(i, _)| *i < MAX_INPUT_SIZE)
                 .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(0);
+                .map_or(0, |(i, c)| i + c.len_utf8());
         }
 
         return heading_to_fragment(&heading[..truncate_pos]);
@@ -126,7 +125,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     let normalized = CODE_PATTERN
         .replace_all(&normalized, |caps: &regex::Captures| {
             let idx = code_extracts.len();
-            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let content = caps.get(1).map_or("", |m| m.as_str());
             code_extracts.push(content.to_string());
             format!("\x00CODE{idx}\x00")
         })

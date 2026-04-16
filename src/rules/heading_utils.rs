@@ -170,9 +170,8 @@ impl HeadingUtils {
     /// Convert a heading text to a valid ID for fragment links
     pub fn heading_to_fragment(text: &str) -> String {
         // Remove any HTML tags
-        let text_no_html = get_cached_regex(HTML_TAG_REGEX_STR)
-            .map(|re| re.replace_all(text, ""))
-            .unwrap_or_else(|_| text.into());
+        let text_no_html =
+            get_cached_regex(HTML_TAG_REGEX_STR).map_or_else(|_| text.into(), |re| re.replace_all(text, ""));
 
         // Convert to lowercase and trim
         let text_lower = text_no_html.trim().to_lowercase();

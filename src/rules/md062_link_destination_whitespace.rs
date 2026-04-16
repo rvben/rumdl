@@ -121,10 +121,10 @@ impl MD062LinkDestinationWhitespace {
         let first_char = full_dest.chars().next();
         let last_char = full_dest.chars().last();
 
-        let has_leading = first_char.is_some_and(|c| c.is_whitespace());
+        let has_leading = first_char.is_some_and(char::is_whitespace);
 
         // Check for trailing whitespace - either at the end or before title
-        let has_trailing = if last_char.is_some_and(|c| c.is_whitespace()) {
+        let has_trailing = if last_char.is_some_and(char::is_whitespace) {
             true
         } else if let Some(title_start) = full_dest.find(['"', '\'']) {
             let url_portion = &full_dest[..title_start];

@@ -415,13 +415,7 @@ fn bench_string_operations(c: &mut Criterion) {
 
     // Test different approaches to removing trailing spaces
     c.bench_function("trim_end approach", |b| {
-        b.iter(|| {
-            content
-                .lines()
-                .map(|line| line.trim_end())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+        b.iter(|| content.lines().map(str::trim_end).collect::<Vec<_>>().join("\n"))
     });
 
     c.bench_function("regex replace approach", |b| {
@@ -470,13 +464,7 @@ fn bench_memory_patterns(c: &mut Criterion) {
     });
 
     c.bench_function("collect_approach", |b| {
-        b.iter(|| {
-            content
-                .lines()
-                .map(|line| line.trim_end())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+        b.iter(|| content.lines().map(str::trim_end).collect::<Vec<_>>().join("\n"))
     });
 }
 

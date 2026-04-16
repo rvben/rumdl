@@ -92,7 +92,7 @@ impl MD051LinkFragments {
                     || rest_trimmed
                         .as_bytes()
                         .get(hash_start - 1)
-                        .is_some_and(|b| b.is_ascii_whitespace())
+                        .is_some_and(u8::is_ascii_whitespace)
                 {
                     rest = rest_trimmed[..hash_start].trim_end().to_string();
                 }
@@ -710,7 +710,7 @@ impl Rule for MD051LinkFragments {
 
             // Extract attribute anchors { #id } on non-heading lines
             // Headings already have custom_id extracted via heading.custom_id
-            if line_info.heading.is_none() && content.contains("{") && content.contains("#") {
+            if line_info.heading.is_none() && content.contains('{') && content.contains('#') {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
                         file_index.add_attribute_anchor(id_match.as_str().to_string());

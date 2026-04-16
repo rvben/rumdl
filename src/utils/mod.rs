@@ -83,7 +83,7 @@ pub fn calculate_indentation_width_default(indent_str: &str) -> usize {
 pub fn is_definition_list_item(line: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.starts_with(": ")
-        || (trimmed.starts_with(':') && trimmed.len() > 1 && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace()))
+        || (trimmed.starts_with(':') && trimmed.len() > 1 && trimmed.chars().nth(1).is_some_and(char::is_whitespace))
 }
 
 /// Check if a line consists only of a template directive with no surrounding text.

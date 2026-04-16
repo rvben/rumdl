@@ -101,7 +101,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
     text = CODE_PATTERN
         .replace_all(&text, |caps: &regex::Captures| {
             let idx = code_extracts.len();
-            let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let content = caps.get(1).map_or("", |m| m.as_str());
             code_extracts.push(content.to_string());
             format!("\x00CODE{idx}\x00")
         })

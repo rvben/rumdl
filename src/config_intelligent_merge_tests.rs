@@ -13,13 +13,13 @@ mod tests {
 
     /// Helper to create a SourcedValue with a vec
     fn make_sourced_vec(values: Vec<&str>, source: ConfigSource) -> SourcedValue<Vec<String>> {
-        SourcedValue::new(values.iter().map(|s| s.to_string()).collect(), source)
+        SourcedValue::new(values.iter().map(std::string::ToString::to_string).collect(), source)
     }
 
     /// Helper to assert vec contents without caring about order
     fn assert_vec_eq(actual: &[String], expected: &[&str]) {
         let actual_set: HashSet<_> = actual.iter().collect();
-        let expected_set: HashSet<_> = expected.iter().map(|s| s.to_string()).collect();
+        let expected_set: HashSet<_> = expected.iter().map(std::string::ToString::to_string).collect();
         assert_eq!(
             actual_set.len(),
             expected_set.len(),

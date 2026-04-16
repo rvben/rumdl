@@ -168,7 +168,7 @@ pub(super) fn detect_headings_and_blockquotes(
             let is_valid = !spaces_after.is_empty()
                 || rest.is_empty()
                 || level > 1
-                || rest.trim().chars().next().is_some_and(|c| c.is_uppercase());
+                || rest.trim().chars().next().is_some_and(char::is_uppercase);
 
             lines[i].heading = Some(Box::new(HeadingInfo {
                 level,
@@ -212,7 +212,7 @@ pub(super) fn detect_headings_and_blockquotes(
                 if let Some(first_char) = content_line.chars().next()
                     && first_char.is_ascii_digit()
                 {
-                    let num_end = content_line.chars().take_while(|c| c.is_ascii_digit()).count();
+                    let num_end = content_line.chars().take_while(char::is_ascii_digit).count();
                     if num_end < content_line.len() {
                         let next = content_line.chars().nth(num_end);
                         if next == Some('.') || next == Some(')') {

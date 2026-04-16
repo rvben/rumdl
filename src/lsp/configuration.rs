@@ -197,7 +197,7 @@ impl RumdlLanguageServer {
 
         // Check existing config state
         let existing_rule = config.rules.get(&rule_key);
-        let has_existing_values = existing_rule.map(|r| !r.values.is_empty()).unwrap_or(false);
+        let has_existing_values = existing_rule.is_some_and(|r| !r.values.is_empty());
         let has_existing_severity = existing_rule.and_then(|r| r.severity).is_some();
 
         // Apply LSP settings, respecting file config

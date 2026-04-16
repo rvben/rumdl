@@ -211,10 +211,14 @@ impl MarkdownlintConfig {
     /// Map to a SourcedConfig, tracking provenance as Markdownlint for all values.
     pub fn map_to_sourced_rumdl_config(&self, file_path: Option<&str>) -> SourcedConfig {
         let mut sourced_config = SourcedConfig::default();
-        let file = file_path.map(|s| s.to_string());
+        let file = file_path.map(std::string::ToString::to_string);
 
         // Extract the `default` key
-        let default_enabled = self.0.get("default").and_then(|v| v.as_bool()).unwrap_or(true);
+        let default_enabled = self
+            .0
+            .get("default")
+            .and_then(serde_yml::Value::as_bool)
+            .unwrap_or(true);
 
         let mut disabled_rules = Vec::new();
         let mut enabled_rules = Vec::new();
@@ -359,12 +363,16 @@ impl MarkdownlintConfig {
         file_path: Option<&str>,
     ) -> crate::config::SourcedConfigFragment {
         let mut fragment = crate::config::SourcedConfigFragment::default();
-        let file = file_path.map(|s| s.to_string());
+        let file = file_path.map(std::string::ToString::to_string);
 
         // Extract the `default` key: controls whether rules are enabled by default.
         // When true (or absent), all rules are enabled unless explicitly disabled.
         // When false, only rules explicitly set to true or configured with an object are enabled.
-        let default_enabled = self.0.get("default").and_then(|v| v.as_bool()).unwrap_or(true);
+        let default_enabled = self
+            .0
+            .get("default")
+            .and_then(serde_yml::Value::as_bool)
+            .unwrap_or(true);
 
         // Accumulate disabled and enabled rules
         let mut disabled_rules = Vec::new();

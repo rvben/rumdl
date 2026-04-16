@@ -145,8 +145,10 @@ impl MD040FencedCodeLanguage {
                     // Tie-break: use curated default if available, otherwise alphabetically first
                     default_alias(&canonical)
                         .filter(|default| winners.contains(default))
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| winners.into_iter().min().unwrap().to_string())
+                        .map_or_else(
+                            || winners.into_iter().min().unwrap().to_string(),
+                            std::string::ToString::to_string,
+                        )
                 }
             };
 
@@ -536,8 +538,7 @@ fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
     let label_end_rel = after_label
         .char_indices()
         .find(|&(_, ch)| ch.is_whitespace())
-        .map(|(idx, _)| label_start_rel + idx)
-        .unwrap_or(after_fence.len());
+        .map_or(after_fence.len(), |(idx, _)| label_start_rel + idx);
 
     Some((
         trimmed_start + fence_marker.len() + label_start_rel,

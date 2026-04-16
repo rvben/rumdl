@@ -42,7 +42,7 @@ pub async fn start_tcp_server(port: u16, config_path: Option<&str>) -> Result<()
     log::info!("rumdl LSP server listening on 127.0.0.1:{port}");
 
     // Clone config_path to owned String so we can move it into the spawned task
-    let config_path_owned = config_path.map(|s| s.to_string());
+    let config_path_owned = config_path.map(std::string::ToString::to_string);
 
     loop {
         let (stream, _) = listener.accept().await?;

@@ -174,8 +174,7 @@ impl MD032BlanksAroundLists {
     fn should_apply_lazy_fix(ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
         ctx.lines
             .get(line_num.saturating_sub(1))
-            .map(|li| !li.in_code_block && !li.in_front_matter && !li.in_html_comment && !li.in_mdx_comment)
-            .unwrap_or(false)
+            .is_some_and(|li| !li.in_code_block && !li.in_front_matter && !li.in_html_comment && !li.in_mdx_comment)
     }
 
     /// Calculate the fix for a lazy continuation line.
@@ -329,8 +328,7 @@ impl MD032BlanksAroundLists {
                 let line_content = ctx.lines[line_num - 1].content(ctx.content);
                 BLOCKQUOTE_PREFIX_RE
                     .find(line_content)
-                    .map(|m| m.as_str().chars().filter(|&c| c == '>').count())
-                    .unwrap_or(0)
+                    .map_or(0, |m| m.as_str().chars().filter(|&c| c == '>').count())
             };
 
             let mut prev_bq_level = 0;
@@ -440,8 +438,7 @@ impl MD032BlanksAroundLists {
                         ctx.lines
                             .get(*end - 1)
                             .and_then(|line_info| line_info.list_item.as_ref())
-                            .map(|item| item.content_column)
-                            .unwrap_or(2)
+                            .map_or(2, |item| item.content_column)
                     };
 
                     for check_line in (*end + 1)..=block.end_line {

@@ -303,9 +303,9 @@ impl LanguageServer for RumdlLanguageServer {
         let version = env!("CARGO_PKG_VERSION");
 
         // Get binary path and build time
-        let (binary_path, build_time) = std::env::current_exe()
-            .ok()
-            .map(|path| {
+        let (binary_path, build_time) = std::env::current_exe().ok().map_or_else(
+            || ("unknown".to_string(), "unknown".to_string()),
+            |path| {
                 let path_str = path.to_str().unwrap_or("unknown").to_string();
                 let build_time = std::fs::metadata(&path)
                     .ok()
@@ -318,12 +318,12 @@ impl LanguageServer for RumdlLanguageServer {
                     })
                     .unwrap_or_else(|| "unknown".to_string());
                 (path_str, build_time)
-            })
-            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+            },
+        );
 
         let working_dir = std::env::current_dir()
             .ok()
-            .and_then(|p| p.to_str().map(|s| s.to_string()))
+            .and_then(|p| p.to_str().map(std::string::ToString::to_string))
             .unwrap_or_else(|| "unknown".to_string());
 
         log::info!("rumdl Language Server v{version} initialized (built: {build_time}, binary: {binary_path})");
@@ -417,11 +417,7 @@ impl LanguageServer for RumdlLanguageServer {
                 let line_num = position.line as usize;
                 // Scan the whole line — no byte-slicing at a UTF-16 offset needed.
                 // A line without `](` anywhere cannot contain a link target.
-                !text
-                    .lines()
-                    .nth(line_num)
-                    .map(|line| line.contains("]("))
-                    .unwrap_or(false)
+                !text.lines().nth(line_num).is_some_and(|line| line.contains("]("))
             };
 
             if !skip_link_check && let Some(link_info) = Self::detect_link_target_position(&text, position) {
@@ -1060,8 +1056,7 @@ impl LanguageServer for RumdlLanguageServer {
                                     filtered_rules
                                         .iter()
                                         .find(|r| r.name() == rule_name)
-                                        .map(|r| r.fix_capability() != FixCapability::Unfixable)
-                                        .unwrap_or(false)
+                                        .is_some_and(|r| r.fix_capability() != FixCapability::Unfixable)
                                 } else {
                                     false
                                 }

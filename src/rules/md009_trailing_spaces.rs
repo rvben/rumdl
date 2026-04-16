@@ -44,8 +44,7 @@ impl MD009TrailingSpaces {
         line.as_bytes()
             .iter()
             .rposition(|b| !b.is_ascii_whitespace())
-            .map(|idx| idx + 1)
-            .unwrap_or(0)
+            .map_or(0, |idx| idx + 1)
     }
 
     fn calculate_trailing_range_ascii(

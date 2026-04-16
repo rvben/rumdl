@@ -840,7 +840,7 @@ mod tests {
         let masked = mask_pymdown_markup(line);
         assert!(!masked.contains("~2~"));
         assert!(!masked.contains("~~deleted~~"));
-        assert!(masked.contains("H"));
+        assert!(masked.contains('H'));
         assert!(masked.contains("O is"));
         assert!(masked.contains("water"));
         assert_eq!(masked.len(), line.len());

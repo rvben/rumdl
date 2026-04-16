@@ -412,7 +412,7 @@ fn is_numbered_list_item(line: &str) -> bool {
     let mut chars = line.chars();
 
     // Must start with a digit
-    if !chars.next().is_some_and(|c| c.is_numeric()) {
+    if !chars.next().is_some_and(char::is_numeric) {
         return false;
     }
 
@@ -1062,9 +1062,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 // Pattern 1: [![alt](img)](link) - inline image in inline link
                 "linked_image_ii" => {
                     if let Some(caps) = LINKED_IMAGE_INLINE_INLINE.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let img_url = caps.get(2).map_or("", |m| m.as_str());
+                        let link_url = caps.get(3).map_or("", |m| m.as_str());
                         elements.push(Element::LinkedImage {
                             alt: alt.to_string(),
                             img_source: LinkedImageSource::Inline(img_url.to_string()),
@@ -1079,9 +1079,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 // Pattern 2: [![alt][ref]](link) - reference image in inline link
                 "linked_image_ri" => {
                     if let Some(caps) = LINKED_IMAGE_REF_INLINE.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        let link_url = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let img_ref = caps.get(2).map_or("", |m| m.as_str());
+                        let link_url = caps.get(3).map_or("", |m| m.as_str());
                         elements.push(Element::LinkedImage {
                             alt: alt.to_string(),
                             img_source: LinkedImageSource::Reference(img_ref.to_string()),
@@ -1096,9 +1096,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 // Pattern 3: [![alt](img)][ref] - inline image in reference link
                 "linked_image_ir" => {
                     if let Some(caps) = LINKED_IMAGE_INLINE_REF.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let img_url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let img_url = caps.get(2).map_or("", |m| m.as_str());
+                        let link_ref = caps.get(3).map_or("", |m| m.as_str());
                         elements.push(Element::LinkedImage {
                             alt: alt.to_string(),
                             img_source: LinkedImageSource::Inline(img_url.to_string()),
@@ -1113,9 +1113,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 // Pattern 4: [![alt][ref]][ref] - reference image in reference link
                 "linked_image_rr" => {
                     if let Some(caps) = LINKED_IMAGE_REF_REF.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let img_ref = caps.get(2).map(|m| m.as_str()).unwrap_or("");
-                        let link_ref = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let img_ref = caps.get(2).map_or("", |m| m.as_str());
+                        let link_ref = caps.get(3).map_or("", |m| m.as_str());
                         elements.push(Element::LinkedImage {
                             alt: alt.to_string(),
                             img_source: LinkedImageSource::Reference(img_ref.to_string()),
@@ -1129,8 +1129,8 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "inline_image" => {
                     if let Some(caps) = INLINE_IMAGE_REGEX.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let url = caps.get(2).map_or("", |m| m.as_str());
                         elements.push(Element::InlineImage {
                             alt: alt.to_string(),
                             url: url.to_string(),
@@ -1143,8 +1143,8 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "ref_image" => {
                     if let Some(caps) = REF_IMAGE_REGEX.captures(remaining) {
-                        let alt = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let alt = caps.get(1).map_or("", |m| m.as_str());
+                        let reference = caps.get(2).map_or("", |m| m.as_str());
 
                         if reference.is_empty() {
                             elements.push(Element::EmptyReferenceImage { alt: alt.to_string() });
@@ -1162,7 +1162,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "footnote_ref" => {
                     if let Some(caps) = FOOTNOTE_REF_REGEX.captures(remaining) {
-                        let note = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let note = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::FootnoteReference { note: note.to_string() });
                         remaining = &remaining[match_end..];
                     } else {
@@ -1172,8 +1172,8 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "inline_link" => {
                     if let Ok(Some(caps)) = INLINE_LINK_FANCY_REGEX.captures(remaining) {
-                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let url = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let text = caps.get(1).map_or("", |m| m.as_str());
+                        let url = caps.get(2).map_or("", |m| m.as_str());
                         elements.push(Element::Link {
                             text: text.to_string(),
                             url: url.to_string(),
@@ -1187,8 +1187,8 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "ref_link" => {
                     if let Ok(Some(caps)) = REF_LINK_REGEX.captures(remaining) {
-                        let text = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                        let reference = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+                        let text = caps.get(1).map_or("", |m| m.as_str());
+                        let reference = caps.get(2).map_or("", |m| m.as_str());
 
                         if reference.is_empty() {
                             // Empty reference link [text][]
@@ -1209,7 +1209,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "shortcut_ref" => {
                     if let Ok(Some(caps)) = SHORTCUT_REF_REGEX.captures(remaining) {
-                        let reference = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let reference = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::ShortcutReference {
                             reference: reference.to_string(),
                         });
@@ -1222,7 +1222,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "wiki_link" => {
                     if let Some(caps) = WIKI_LINK_REGEX.captures(remaining) {
-                        let content = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let content = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::WikiLink(content.to_string()));
                         remaining = &remaining[match_end..];
                     } else {
@@ -1232,7 +1232,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "display_math" => {
                     if let Some(caps) = DISPLAY_MATH_REGEX.captures(remaining) {
-                        let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let math = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::DisplayMath(math.to_string()));
                         remaining = &remaining[match_end..];
                     } else {
@@ -1242,7 +1242,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 }
                 "inline_math" => {
                     if let Ok(Some(caps)) = INLINE_MATH_REGEX.captures(remaining) {
-                        let math = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let math = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::InlineMath(math.to_string()));
                         remaining = &remaining[match_end..];
                     } else {
@@ -1253,7 +1253,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 // Note: "strikethrough" case removed - now handled by pulldown-cmark
                 "emoji" => {
                     if let Some(caps) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
-                        let emoji = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let emoji = caps.get(1).map_or("", |m| m.as_str());
                         elements.push(Element::EmojiShortcode(emoji.to_string()));
                         remaining = &remaining[match_end..];
                     } else {
@@ -2437,7 +2437,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             let mut marker_end = indent;
             let mut content_start = indent;
 
-            if trimmed.chars().next().is_some_and(|c| c.is_numeric()) {
+            if trimmed.chars().next().is_some_and(char::is_numeric) {
                 // Numbered list: find the period
                 if let Some(period_pos) = line[indent..].find('.') {
                     marker_end = indent + period_pos + 1; // Include the period
@@ -2820,8 +2820,7 @@ pub fn dominant_blockquote_prefix(lines: &[BlockquoteLineData], fallback: &str) 
         .max_by(|(_, (count_a, first_idx_a)), (_, (count_b, first_idx_b))| {
             count_a.cmp(count_b).then_with(|| first_idx_b.cmp(first_idx_a))
         })
-        .map(|(prefix, _)| prefix)
-        .unwrap_or_else(|| fallback.to_string())
+        .map_or_else(|| fallback.to_string(), |(prefix, _)| prefix)
 }
 
 /// Whether a reflowed blockquote content line must carry an explicit prefix.

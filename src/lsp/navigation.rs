@@ -656,11 +656,10 @@ impl RumdlLanguageServer {
 
                 let character = source_lines
                     .get(line as usize)
-                    .map(|line_text| {
+                    .map_or(byte_col_0indexed as u32, |line_text| {
                         let clamped = byte_col_0indexed.min(line_text.len());
                         byte_to_utf16_offset(line_text, clamped)
-                    })
-                    .unwrap_or(byte_col_0indexed as u32);
+                    });
 
                 locations.push(Location {
                     uri: source_uri.clone(),
@@ -766,11 +765,10 @@ impl RumdlLanguageServer {
                 // Convert byte column to UTF-16 code units using the actual line text
                 let character = source_lines
                     .get(line as usize)
-                    .map(|line_text| {
+                    .map_or(byte_col_0indexed as u32, |line_text| {
                         let clamped = byte_col_0indexed.min(line_text.len());
                         byte_to_utf16_offset(line_text, clamped)
-                    })
-                    .unwrap_or(byte_col_0indexed as u32);
+                    });
 
                 locations.push(Location {
                     uri: source_uri.clone(),

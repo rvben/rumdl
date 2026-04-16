@@ -295,7 +295,7 @@ impl Rule for MD001HeadingIncrement {
                 .values
                 .get("front-matter-title")
                 .or_else(|| rule_config.values.get("front_matter_title"))
-                .and_then(|v| v.as_bool())
+                .and_then(toml::Value::as_bool)
                 .unwrap_or(true);
 
             let pattern = rule_config

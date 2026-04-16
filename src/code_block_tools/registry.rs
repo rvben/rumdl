@@ -33,7 +33,7 @@ impl ToolRegistry {
 
     /// List all available tool IDs.
     pub fn list_tools(&self) -> Vec<&str> {
-        let mut tools: Vec<&str> = self.user_tools.keys().map(|s| s.as_str()).collect();
+        let mut tools: Vec<&str> = self.user_tools.keys().map(std::string::String::as_str).collect();
         for key in BUILTIN_TOOLS.keys() {
             if !self.user_tools.contains_key(*key) {
                 tools.push(key);

@@ -321,8 +321,7 @@ pub fn lint_and_index(
         // Use recreated rule if inline config overrides exist for this rule
         let effective_rule: &dyn crate::rule::Rule = recreated_rules
             .get(rule.name())
-            .map(|r| r.as_ref())
-            .unwrap_or(rule.as_ref());
+            .map_or(rule.as_ref(), std::convert::AsRef::as_ref);
 
         // Run single-file check with the effective rule (possibly with inline config applied)
         let result = effective_rule.check(&lint_ctx);

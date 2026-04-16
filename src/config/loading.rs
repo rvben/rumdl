@@ -28,9 +28,7 @@ fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<
         #[cfg(feature = "native")]
         {
             use etcetera::{BaseStrategy, choose_base_strategy};
-            let home = choose_base_strategy()
-                .map(|s| s.home_dir().to_path_buf())
-                .unwrap_or_else(|_| PathBuf::from("~"));
+            let home = choose_base_strategy().map_or_else(|_| PathBuf::from("~"), |s| s.home_dir().to_path_buf());
             home.join(suffix)
         }
         #[cfg(not(feature = "native"))]
@@ -385,9 +383,7 @@ impl SourcedConfig<ConfigLoaded> {
     fn find_project_root_from(start_dir: &Path) -> std::path::PathBuf {
         // Convert relative paths to absolute to ensure correct traversal
         let mut current = if start_dir.is_relative() {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(start_dir))
-                .unwrap_or_else(|_| start_dir.to_path_buf())
+            std::env::current_dir().map_or_else(|_| start_dir.to_path_buf(), |cwd| cwd.join(start_dir))
         } else {
             start_dir.to_path_buf()
         };

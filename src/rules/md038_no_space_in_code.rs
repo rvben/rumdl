@@ -187,10 +187,7 @@ impl MD038NoSpaceInCode {
                 // Convert character positions to byte offsets for string slicing
                 let char_indices: Vec<(usize, char)> = line_content.char_indices().collect();
                 let start_byte = char_indices.get(start_char).map(|(i, _)| *i);
-                let end_byte = char_indices
-                    .get(end_char)
-                    .map(|(i, _)| *i)
-                    .unwrap_or(line_content.len());
+                let end_byte = char_indices.get(end_char).map_or(line_content.len(), |(i, _)| *i);
 
                 if let Some(start_byte) = start_byte
                     && start_byte < end_byte
@@ -254,8 +251,8 @@ impl Rule for MD038NoSpaceInCode {
             }
 
             // Early check: if no leading/trailing whitespace, skip
-            let has_leading_space = code_content.chars().next().is_some_and(|c| c.is_whitespace());
-            let has_trailing_space = code_content.chars().last().is_some_and(|c| c.is_whitespace());
+            let has_leading_space = code_content.chars().next().is_some_and(char::is_whitespace);
+            let has_trailing_space = code_content.chars().last().is_some_and(char::is_whitespace);
 
             if !has_leading_space && !has_trailing_space {
                 continue;
@@ -296,7 +293,7 @@ impl Rule for MD038NoSpaceInCode {
                 if ctx.flavor == crate::config::MarkdownFlavor::Quarto
                     && trimmed.starts_with('r')
                     && trimmed.len() > 1
-                    && trimmed.chars().nth(1).is_some_and(|c| c.is_whitespace())
+                    && trimmed.chars().nth(1).is_some_and(char::is_whitespace)
                 {
                     continue;
                 }

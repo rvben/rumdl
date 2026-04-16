@@ -42,7 +42,7 @@ pub fn is_tab_marker(line: &str) -> bool {
     let trimmed = line.trim();
 
     // Must have content after ===
-    if trimmed.len() <= 3 || !trimmed.chars().nth(3).is_some_and(|c| c.is_whitespace()) {
+    if trimmed.len() <= 3 || !trimmed.chars().nth(3).is_some_and(char::is_whitespace) {
         return false;
     }
 

@@ -167,7 +167,7 @@ impl MD029OrderedListPrefix {
             items.sort_by_key(|(line_num, _, _)| *line_num);
         }
         // Sort groups by their first item's line number for deterministic output
-        result.sort_by_key(|(_, items)| items.first().map(|(ln, _, _)| *ln).unwrap_or(0));
+        result.sort_by_key(|(_, items)| items.first().map_or(0, |(ln, _, _)| *ln));
 
         result
     }
@@ -462,8 +462,8 @@ mod tests {
         assert_eq!(result.len(), 2); // Should have warnings for items 3 and 2
 
         // Verify the warnings have correct content
-        assert!(result[0].message.contains("3") && result[0].message.contains("expected 2"));
-        assert!(result[1].message.contains("2") && result[1].message.contains("expected 3"));
+        assert!(result[0].message.contains('3') && result[0].message.contains("expected 2"));
+        assert!(result[1].message.contains('2') && result[1].message.contains("expected 3"));
     }
 
     #[test]
@@ -486,7 +486,7 @@ mod tests {
         assert_eq!(result.len(), 99, "Should have warnings for items 2-100 (99 items)");
 
         // First wrong item: "5. Item 2" (expected 2)
-        assert!(result[0].message.contains("5") && result[0].message.contains("expected 2"));
+        assert!(result[0].message.contains('5') && result[0].message.contains("expected 2"));
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Mixed style should produce one warning");
-        assert!(result[0].message.contains("1") && result[0].message.contains("expected 3"));
+        assert!(result[0].message.contains('1') && result[0].message.contains("expected 3"));
     }
 
     #[test]

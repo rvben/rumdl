@@ -573,7 +573,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                                         .map_or(String::new(), |m| m.as_str().to_string());
                                     let between_bq_level = between_bq_prefix.chars().filter(|&c| c == '>').count();
                                     let blockquote_level_changed =
-                                        trimmed.starts_with(">") && between_bq_level != block_bq_level;
+                                        trimmed.starts_with('>') && between_bq_level != block_bq_level;
                                     // Tables indented at list continuation level are content, not separators
                                     let table_breaks = crate::utils::skip_context::is_table_line(trimmed)
                                         && between_line.indent < root_cont;
@@ -622,7 +622,7 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
 
                 let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
                 let current_bq_level = blockquote_prefix.chars().filter(|&c| c == '>').count();
-                let blockquote_level_changed = line_content.starts_with(">") && current_bq_level != block_bq_level;
+                let blockquote_level_changed = line_content.starts_with('>') && current_bq_level != block_bq_level;
 
                 // For lines in the same blockquote context, compute indent after
                 // stripping the blockquote prefix and adjust min_required_indent

@@ -371,8 +371,7 @@ impl Rule for MD025SingleTitle {
                         h.level as usize <= target_level && h.is_valid && !li.in_code_block && li.visual_indent < 4
                     })
                 })
-                .map(|(i, _)| i)
-                .unwrap_or(ctx.lines.len());
+                .map_or(ctx.lines.len(), |(i, _)| i);
 
             // Emit a cascade Fix for each subordinate heading inside [heading_line+1, section_end).
             for line_num in (heading_line + 1)..section_end {

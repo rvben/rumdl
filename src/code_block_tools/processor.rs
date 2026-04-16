@@ -325,8 +325,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     // Find content start (after opening fence line)
                     let content_start = content[range.start..]
                         .find('\n')
-                        .map(|i| range.start + i + 1)
-                        .unwrap_or(content.len());
+                        .map_or(content.len(), |i| range.start + i + 1);
 
                     // Detect fence character and length from the line
                     let fence_line = lines.get(start_line).unwrap_or(&"");
@@ -360,8 +359,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                         let content_end = if search_start < range.end {
                             content[search_start..range.end]
                                 .rfind('\n')
-                                .map(|i| search_start + i)
-                                .unwrap_or(search_start)
+                                .map_or(search_start, |i| search_start + i)
                         } else {
                             search_start
                         };
@@ -697,7 +695,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 };
 
                 // Check if tool binary exists before running
-                let tool_name = tool_def.command.first().map(String::as_str).unwrap_or("");
+                let tool_name = tool_def.command.first().map_or("", String::as_str);
                 if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
                     match self.config.on_missing_tool_binary {
                         OnMissing::Ignore => {
@@ -863,7 +861,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
                 };
 
                 // Check if tool binary exists before running
-                let tool_name = tool_def.command.first().map(String::as_str).unwrap_or("");
+                let tool_name = tool_def.command.first().map_or("", String::as_str);
                 if !tool_name.is_empty() && !self.executor.is_tool_available(tool_name) {
                     match self.config.on_missing_tool_binary {
                         OnMissing::Ignore => {
@@ -1046,7 +1044,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
 
         // If no diagnostics parsed but tool failed, use combined output as fallback
         if diagnostics.is_empty() && !output.success {
-            let lines: Vec<&str> = combined.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            let lines: Vec<&str> = combined.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
 
             if lines.is_empty() {
                 let exit_code = output.exit_code;
@@ -1214,7 +1212,7 @@ impl<'a> CodeBlockToolProcessor<'a> {
     ) -> Option<CodeBlockDiagnostic> {
         let sc_pos = line.find("SC")?;
         let after_sc = &line[sc_pos + 2..];
-        let code_len = after_sc.chars().take_while(|c| c.is_ascii_digit()).count();
+        let code_len = after_sc.chars().take_while(char::is_ascii_digit).count();
         if code_len == 0 {
             return None;
         }
@@ -1284,13 +1282,13 @@ impl<'a> CodeBlockToolProcessor<'a> {
     fn infer_severity(&self, message: &str) -> DiagnosticSeverity {
         let lower = message.to_lowercase();
         if lower.contains("error")
-            || lower.starts_with("e") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
-            || lower.starts_with("f") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+            || lower.starts_with('e') && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+            || lower.starts_with('f') && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
         {
             DiagnosticSeverity::Error
         } else if lower.contains("warning")
             || lower.contains("warn")
-            || lower.starts_with("w") && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+            || lower.starts_with('w') && lower.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
         {
             DiagnosticSeverity::Warning
         } else {

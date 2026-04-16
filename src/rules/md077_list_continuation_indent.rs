@@ -131,8 +131,7 @@ impl Rule for MD077ListContinuationIndent {
                 .iter()
                 .skip(item_idx + 1)
                 .find(|&&(_, mc, _)| mc <= marker_col)
-                .map(|&(ln, _, _)| ln - 1)
-                .unwrap_or(total_lines);
+                .map_or(total_lines, |&(ln, _, _)| ln - 1);
 
             let mut saw_blank = false;
             // Track nested child items so we don't check their continuation

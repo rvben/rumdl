@@ -147,7 +147,7 @@ fn heading_to_fragment_internal(heading: &str) -> String {
             .replace_all(&text, |caps: &regex::Captures| {
                 let idx = code_extracts.len();
                 // Group 1 is the double-backtick match, group 2 is the single-backtick match
-                let content = caps.get(1).or_else(|| caps.get(2)).map(|m| m.as_str()).unwrap_or("");
+                let content = caps.get(1).or_else(|| caps.get(2)).map_or("", |m| m.as_str());
                 code_extracts.push(content.to_string());
                 format!("\x00CODE{idx}\x00")
             })
@@ -243,7 +243,7 @@ fn heading_to_fragment_internal(heading: &str) -> String {
     text = COPYRIGHT_WITH_SPACES.replace_all(&text, "--").to_string();
 
     // Remove ampersand and copyright without spaces
-    text = text.replace("&", "");
+    text = text.replace('&', "");
     text = text.replace("©", "");
 
     // Step 9.5: Remaining angle brackets (from code span content) are handled

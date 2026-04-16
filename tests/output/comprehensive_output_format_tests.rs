@@ -171,7 +171,7 @@ fn test_gitlab_output_format() {
     let stdout = String::from_utf8_lossy(&output);
 
     // GitLab format is a JSON array
-    assert!(stdout.starts_with("["));
+    assert!(stdout.starts_with('['));
     assert!(stdout.contains(r#""check_name": "MD022""#));
     assert!(stdout.contains(r#""check_name": "MD009""#));
 }

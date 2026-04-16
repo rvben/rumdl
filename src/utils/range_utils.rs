@@ -150,8 +150,7 @@ impl<'a> LineIndex<'a> {
         let byte_offset = current_line
             .char_indices()
             .nth(safe_char_col)
-            .map(|(idx, _)| idx)
-            .unwrap_or(current_line.len());
+            .map_or(current_line.len(), |(idx, _)| idx);
 
         let start = line_start + byte_offset;
         start..start
@@ -188,16 +187,14 @@ impl<'a> LineIndex<'a> {
         let mut char_indices = current_line.char_indices();
         let start_byte = char_indices
             .nth(safe_char_col)
-            .map(|(idx, _)| idx)
-            .unwrap_or(current_line.len());
+            .map_or(current_line.len(), |(idx, _)| idx);
 
         // Calculate end position (start + length in characters)
         let end_char_col = (safe_char_col + length).min(char_count);
         let end_byte = current_line
             .char_indices()
             .nth(end_char_col)
-            .map(|(idx, _)| idx)
-            .unwrap_or(current_line.len());
+            .map_or(current_line.len(), |(idx, _)| idx);
 
         let start = line_start + start_byte;
         let end = line_start + end_byte;
@@ -249,14 +246,12 @@ impl<'a> LineIndex<'a> {
         let mut char_indices = current_line.char_indices();
         let start_byte = char_indices
             .nth(start_char_col)
-            .map(|(idx, _)| idx)
-            .unwrap_or(current_line.len());
+            .map_or(current_line.len(), |(idx, _)| idx);
 
         let end_byte = current_line
             .char_indices()
             .nth(end_char_col)
-            .map(|(idx, _)| idx)
-            .unwrap_or(current_line.len());
+            .map_or(current_line.len(), |(idx, _)| idx);
 
         let start = line_start + start_byte;
         let end = line_start + end_byte.max(start_byte);

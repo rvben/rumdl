@@ -80,7 +80,7 @@ impl MD054LinkImageStyle {
     /// Only called for disallowed links (cold path), so O(line_length) is fine.
     fn byte_to_char_col(content: &str, byte_offset: usize) -> usize {
         let before = &content[..byte_offset];
-        let last_newline = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let last_newline = before.rfind('\n').map_or(0, |i| i + 1);
         before[last_newline..].chars().count() + 1
     }
 

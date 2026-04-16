@@ -228,10 +228,8 @@ impl FixCoordinator {
 
             // Create fresh context for this iteration
             // Use per-file flavor if file_path is provided, otherwise fall back to global flavor
-            let flavor = file_path
-                .map(|p| config.get_flavor_for_file(p))
-                .unwrap_or_else(|| config.markdown_flavor());
-            let ctx = LintContext::new(content, flavor, file_path.map(|p| p.to_path_buf()));
+            let flavor = file_path.map_or_else(|| config.markdown_flavor(), |p| config.get_flavor_for_file(p));
+            let ctx = LintContext::new(content, flavor, file_path.map(std::path::Path::to_path_buf));
             total_ctx_creations += 1;
 
             let mut any_fix_applied = false;
@@ -311,7 +309,7 @@ impl FixCoordinator {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
-                        fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
+                        fixed_rule_names: fixed_rule_names.iter().map(std::string::ToString::to_string).collect(),
                         converged: true,
                         conflicting_rules: Vec::new(),
                         conflict_cycle: Vec::new(),
@@ -332,13 +330,13 @@ impl FixCoordinator {
                         .filter(|r| !r.is_empty())
                         .collect::<HashSet<&str>>()
                         .into_iter()
-                        .map(|s| s.to_string())
+                        .map(std::string::ToString::to_string)
                         .collect();
                     return Ok(FixResult {
                         rules_fixed: total_fixed,
                         iterations,
                         context_creations: total_ctx_creations,
-                        fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
+                        fixed_rule_names: fixed_rule_names.iter().map(std::string::ToString::to_string).collect(),
                         converged: false,
                         conflicting_rules,
                         conflict_cycle,
@@ -355,7 +353,7 @@ impl FixCoordinator {
                     rules_fixed: total_fixed,
                     iterations,
                     context_creations: total_ctx_creations,
-                    fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
+                    fixed_rule_names: fixed_rule_names.iter().map(std::string::ToString::to_string).collect(),
                     converged: true,
                     conflicting_rules: Vec::new(),
                     conflict_cycle: Vec::new(),
@@ -368,7 +366,7 @@ impl FixCoordinator {
             rules_fixed: total_fixed,
             iterations,
             context_creations: total_ctx_creations,
-            fixed_rule_names: fixed_rule_names.iter().map(|s| s.to_string()).collect(),
+            fixed_rule_names: fixed_rule_names.iter().map(std::string::ToString::to_string).collect(),
             converged: false,
             conflicting_rules: Vec::new(),
             conflict_cycle: Vec::new(),
@@ -636,13 +634,13 @@ mod tests {
         let rules: Vec<Box<dyn Rule>> = vec![
             Box::new(ConditionalFixRule {
                 name: "MD001",
-                check_fn: |content| content.contains("A"),
-                fix_fn: |content| content.replace("A", "X"),
+                check_fn: |content| content.contains('A'),
+                fix_fn: |content| content.replace('A', "X"),
             }),
             Box::new(ConditionalFixRule {
                 name: "MD002",
-                check_fn: |content| content.contains("B"),
-                fix_fn: |content| content.replace("B", "Y"),
+                check_fn: |content| content.contains('B'),
+                fix_fn: |content| content.replace('B', "Y"),
             }),
         ];
 
@@ -897,13 +895,13 @@ mod tests {
         let rules: Vec<Box<dyn Rule>> = vec![
             Box::new(ConditionalFixRule {
                 name: "Rule1",
-                check_fn: |content| content.contains("A"),
-                fix_fn: |content| content.replace("A", "B"),
+                check_fn: |content| content.contains('A'),
+                fix_fn: |content| content.replace('A', "B"),
             }),
             Box::new(ConditionalFixRule {
                 name: "Rule2",
-                check_fn: |content| content.contains("B") && !content.contains("C"),
-                fix_fn: |content| content.replace("B", "BC"),
+                check_fn: |content| content.contains('B') && !content.contains('C'),
+                fix_fn: |content| content.replace('B', "BC"),
             }),
         ];
 

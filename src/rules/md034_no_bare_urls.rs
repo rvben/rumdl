@@ -531,7 +531,7 @@ impl Rule for MD034NoBareUrls {
             crate::utils::fix_utils::filter_warnings_by_inline_config(warnings, ctx.inline_config(), self.name());
 
         // Sort warnings by position to ensure consistent fix application
-        warnings.sort_by_key(|w| w.fix.as_ref().map(|f| f.range.start).unwrap_or(0));
+        warnings.sort_by_key(|w| w.fix.as_ref().map_or(0, |f| f.range.start));
 
         // Apply fixes in reverse order to maintain positions
         for warning in warnings.iter().rev() {

@@ -698,7 +698,7 @@ impl MD060TableFormat {
 
         if table_lines.iter().any(|line| Self::contains_problematic_chars(line)) {
             return TableFormatResult {
-                lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                 auto_compacted: false,
                 aligned_width: None,
             };
@@ -747,7 +747,7 @@ impl MD060TableFormat {
                 let detected_style = Self::detect_table_style(&stripped_lines, flavor);
                 if detected_style.is_none() {
                     return TableFormatResult {
-                        lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                        lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                         auto_compacted: false,
                         aligned_width: None,
                     };
@@ -813,7 +813,7 @@ impl MD060TableFormat {
 
                 if !needs_reformat && Self::is_table_already_aligned(&stripped_lines, flavor, compact_delimiter) {
                     return TableFormatResult {
-                        lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                        lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                         auto_compacted: false,
                         aligned_width: None,
                     };
@@ -864,7 +864,7 @@ impl MD060TableFormat {
             }
             _ => {
                 return TableFormatResult {
-                    lines: table_lines.iter().map(|s| s.to_string()).collect(),
+                    lines: table_lines.iter().map(std::string::ToString::to_string).collect(),
                     auto_compacted: false,
                     aligned_width: None,
                 };
@@ -1333,7 +1333,7 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
         let fixed = rule.fix(&ctx).unwrap();
-        assert!(fixed.contains("|"));
+        assert!(fixed.contains('|'));
     }
 
     #[test]

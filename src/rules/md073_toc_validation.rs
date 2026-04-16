@@ -708,27 +708,27 @@ indent = 2
 
         if let Some(rule_config) = config.rules.get("MD073") {
             // Parse enabled (opt-in rule, defaults to false)
-            if let Some(enabled) = rule_config.values.get("enabled").and_then(|v| v.as_bool()) {
+            if let Some(enabled) = rule_config.values.get("enabled").and_then(toml::Value::as_bool) {
                 rule.enabled = enabled;
             }
 
             // Parse min-level
-            if let Some(min_level) = rule_config.values.get("min-level").and_then(|v| v.as_integer()) {
+            if let Some(min_level) = rule_config.values.get("min-level").and_then(toml::Value::as_integer) {
                 rule.min_level = (min_level.clamp(1, 6)) as u8;
             }
 
             // Parse max-level
-            if let Some(max_level) = rule_config.values.get("max-level").and_then(|v| v.as_integer()) {
+            if let Some(max_level) = rule_config.values.get("max-level").and_then(toml::Value::as_integer) {
                 rule.max_level = (max_level.clamp(1, 6)) as u8;
             }
 
             // Parse enforce-order
-            if let Some(enforce_order) = rule_config.values.get("enforce-order").and_then(|v| v.as_bool()) {
+            if let Some(enforce_order) = rule_config.values.get("enforce-order").and_then(toml::Value::as_bool) {
                 rule.enforce_order = enforce_order;
             }
 
             // Parse indent (MD073-specific override)
-            if let Some(indent) = rule_config.values.get("indent").and_then(|v| v.as_integer()) {
+            if let Some(indent) = rule_config.values.get("indent").and_then(toml::Value::as_integer) {
                 rule.indent = (indent.clamp(1, 8)) as usize;
                 indent_from_md073 = true;
             }
@@ -737,7 +737,7 @@ indent = 2
         // If indent not explicitly set in MD073, read from MD007 config
         if !indent_from_md073
             && let Some(md007_config) = config.rules.get("MD007")
-            && let Some(indent) = md007_config.values.get("indent").and_then(|v| v.as_integer())
+            && let Some(indent) = md007_config.values.get("indent").and_then(toml::Value::as_integer)
         {
             rule.indent = (indent.clamp(1, 8)) as usize;
         }

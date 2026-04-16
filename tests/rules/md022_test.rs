@@ -196,7 +196,7 @@ fn test_empty_content_headings() {
     assert!(fixed != content);
 
     // Test the headings and content are preserved
-    assert!(fixed.contains("#"));
+    assert!(fixed.contains('#'));
     assert!(fixed.contains("##"));
     assert!(fixed.contains("###"));
     assert!(fixed.contains("Some content"));

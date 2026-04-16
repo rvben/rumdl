@@ -34,7 +34,7 @@ fn test_cli_include_exclude() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         (output.status.success(), stdout, stderr)
     };
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // Test include via CLI - should only process docs/doc1.md
     println!("--- Running CLI Include Test ---");
@@ -120,7 +120,7 @@ fn test_config_include_exclude() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         (output.status.success(), stdout, stderr)
     };
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // Test include via config - only include docs/doc1.md specifically
     println!("--- Running Config Include Test ---");
@@ -189,7 +189,7 @@ fn test_cli_override_config() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         (output.status.success(), stdout, stderr)
     };
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // Set up config with one pattern
     let config = r#"
@@ -235,7 +235,7 @@ fn test_readme_pattern_scope() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         (output.status.success(), stdout, stderr)
     };
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // Test include pattern for README.md should only match the root README.md file
     println!("--- Running README Pattern Scope Test ---");
@@ -284,7 +284,7 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Normalize paths in output for consistent matching
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // --- Test Case 1: Exclude directory ---
     println!("--- Running Test Case 1: Exclude directory ---");
@@ -721,7 +721,7 @@ fn test_force_exclude() -> Result<(), Box<dyn std::error::Error>> {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
         (output.status.success(), stdout, stderr)
     };
-    let normalize = |s: &str| s.replace(r"\", "/");
+    let normalize = |s: &str| s.replace('\\', "/");
 
     // Create config with exclude pattern
     let config = r#"[global]
@@ -1454,7 +1454,7 @@ fn test_version_command_prints_version() {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     assert!(output.status.success(), "'rumdl version' did not exit successfully");
     assert!(stdout.contains("rumdl"), "Output missing 'rumdl' in version output");
-    assert!(stdout.contains("."), "Output missing version number");
+    assert!(stdout.contains('.'), "Output missing version number");
 }
 
 #[test]
