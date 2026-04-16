@@ -12,9 +12,6 @@ use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 
 use super::parser_options::rumdl_parser_options;
 
-/// Type alias for code block and span ranges: (code_blocks, code_spans)
-pub type CodeRanges = (Vec<(usize, usize)>, Vec<(usize, usize)>);
-
 /// Detailed information about a code block captured during parsing
 #[derive(Debug, Clone)]
 pub struct CodeBlockDetail {
