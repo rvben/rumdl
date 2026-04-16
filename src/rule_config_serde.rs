@@ -23,7 +23,7 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
             // Build the TOML table with backwards compatibility mappings
             let mut table = toml::map::Map::new();
 
-            for (k, v) in rule_config.values.iter() {
+            for (k, v) in &rule_config.values {
                 // No manual mapping needed - serde aliases handle this
                 table.insert(k.clone(), v.clone());
             }
@@ -169,7 +169,7 @@ pub fn json_to_rule_config_with_warnings(json_value: &serde_json::Value) -> Rule
                             "Invalid severity '{s}', expected 'error', 'warning', or 'info'"
                         ));
                     }
-                };
+                }
             } else {
                 result
                     .warnings

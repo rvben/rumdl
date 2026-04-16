@@ -138,7 +138,7 @@ impl ParallelPerformanceComparison {
             sequential_time.as_secs_f64() / parallel_time.as_secs_f64()
         };
         let parallel_overhead = if parallel_time > sequential_time {
-            parallel_time - sequential_time
+            parallel_time.checked_sub(sequential_time).unwrap()
         } else {
             std::time::Duration::ZERO
         };

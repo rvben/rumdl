@@ -395,7 +395,7 @@ impl RumdlLanguageServer {
             workspace_roots
                 .iter()
                 .find(|root| search_dir.starts_with(root))
-                .map(|p| p.to_path_buf())
+                .cloned()
         };
 
         // Search upward from the file's directory

@@ -174,7 +174,7 @@ impl Rule for MD066FootnoteValidation {
 
         // Deduplicate references (pulldown-cmark and regex might find the same ones)
         for occurrences in references.values_mut() {
-            occurrences.sort();
+            occurrences.sort_unstable();
             occurrences.dedup();
         }
 
@@ -254,7 +254,7 @@ impl Rule for MD066FootnoteValidation {
                         .and_then(|rest| rest.find(']'))
                         .map_or_else(
                             || format!("[^{ref_id}]").chars().count(),
-                            |end| line_content[byte_pos..byte_pos + end + 1].chars().count(),
+                            |end| line_content[byte_pos..=(byte_pos + end)].chars().count(),
                         );
                     (char_col + 1, char_col + marker_chars + 1)
                 } else {

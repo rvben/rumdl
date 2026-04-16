@@ -1301,7 +1301,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                 "code" => {
                     // Find end of code
                     if let Some(code_end) = remaining[1..].find('`') {
-                        let code = &remaining[1..1 + code_end];
+                        let code = &remaining[1..=code_end];
                         elements.push(Element::Code(code.to_string()));
                         remaining = &remaining[1 + code_end + 1..];
                     } else {
@@ -1380,10 +1380,10 @@ fn reflow_elements_sentence_per_line(
 
                         if text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Don't emit yet - this sentence ends with abbreviation, continue accumulating
-                            current_line = sentence.to_string();
+                            current_line = sentence.clone();
                         } else {
                             // Normal case - emit the first sentence
-                            lines.push(sentence.to_string());
+                            lines.push(sentence.clone());
                             current_line.clear();
                         }
                     } else if i == sentences.len() - 1 {
@@ -1393,15 +1393,15 @@ fn reflow_elements_sentence_per_line(
 
                         if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Complete sentence - emit it immediately
-                            lines.push(sentence.to_string());
+                            lines.push(sentence.clone());
                             current_line.clear();
                         } else {
                             // Incomplete sentence - save for next iteration
-                            current_line = sentence.to_string();
+                            current_line = sentence.clone();
                         }
                     } else {
                         // Complete sentences in the middle
-                        lines.push(sentence.to_string());
+                        lines.push(sentence.clone());
                     }
                 }
             } else {
@@ -2408,11 +2408,11 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
             // find() returns byte position which is correct for str slicing
             // The unwrap is safe because we already verified trimmed starts with '>'
             let gt_pos = line.find('>').expect("'>' must exist since trimmed.starts_with('>')");
-            let quote_prefix = line[0..gt_pos + 1].to_string();
+            let quote_prefix = line[0..=gt_pos].to_string();
             let quote_content = &line[quote_prefix.len()..].trim_start();
 
             let reflowed = reflow_line(quote_content, options);
-            for reflowed_line in reflowed.iter() {
+            for reflowed_line in &reflowed {
                 result.push(format!("{quote_prefix} {reflowed_line}"));
             }
             i += 1;
@@ -3242,7 +3242,7 @@ pub fn reflow_paragraph_at_line_with_options(
     }
 
     let mut end_byte = start_byte;
-    for line in paragraph_lines.iter() {
+    for line in paragraph_lines {
         end_byte += line.len() + 1; // +1 for newline
     }
 

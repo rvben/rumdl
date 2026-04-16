@@ -37,7 +37,7 @@ struct ReversedLinkInfo {
 impl ReversedLinkInfo {
     /// Determine the correct order: returns (text, url)
     fn correct_order(&self) -> (&str, &str) {
-        use LinkComponent::*;
+        use LinkComponent::{Ambiguous, ClearUrl, MultiWord};
 
         match (self.paren_type, self.bracket_type) {
             // One side is clearly a URL - that's the URL

@@ -282,7 +282,7 @@ impl MD034NoBareUrls {
         }
 
         // Process found URLs
-        for &(start, _end, ref url_str) in buffers.urls_found.iter() {
+        for &(start, _end, ref url_str) in &buffers.urls_found {
             // Skip custom protocols
             if CUSTOM_PROTOCOL_REGEX.is_match(url_str) {
                 continue;
@@ -372,7 +372,7 @@ impl MD034NoBareUrls {
 
                 // Check if email is inside angle brackets or markdown link
                 let mut is_inside_construct = false;
-                for &(link_start, link_end) in buffers.markdown_link_ranges.iter() {
+                for &(link_start, link_end) in &buffers.markdown_link_ranges {
                     if start >= link_start && end <= link_end {
                         is_inside_construct = true;
                         break;

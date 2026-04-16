@@ -254,7 +254,7 @@ fn scan_jsx_tags(line: &str) -> Vec<JsxTag<'_>> {
         let name = &tag_start_str[..name_len];
 
         // Scan forward to find '>', skipping quoted strings
-        let scan_start = pos + 1 + (if is_closing { 1 } else { 0 }) + name_len;
+        let scan_start = pos + 1 + usize::from(is_closing) + name_len;
         let mut j = scan_start;
         let mut in_string = false;
         let mut string_char = b'"';

@@ -216,7 +216,7 @@ impl Config {
         // Match the file path against all patterns
         for match_idx in cache.globset.matches(path_for_matching.as_ref()) {
             if let Some(rules) = cache.rules.get(match_idx) {
-                for rule in rules.iter() {
+                for rule in rules {
                     // Normalize rule names to uppercase (MD033, md033 -> MD033)
                     ignored_rules.insert(rule.clone());
                 }

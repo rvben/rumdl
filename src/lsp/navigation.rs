@@ -281,7 +281,7 @@ fn detect_ref_link_usage(line: &str, byte_cursor: usize) -> Option<String> {
     if after_close.starts_with('[')
         && let Some(ref_close) = after_close[1..].find(']')
     {
-        let ref_id = &after_close[1..1 + ref_close];
+        let ref_id = &after_close[1..=ref_close];
         if !ref_id.is_empty() {
             return Some(ref_id.to_lowercase());
         }

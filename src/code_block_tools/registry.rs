@@ -39,7 +39,7 @@ impl ToolRegistry {
                 tools.push(key);
             }
         }
-        tools.sort();
+        tools.sort_unstable();
         tools
     }
 }

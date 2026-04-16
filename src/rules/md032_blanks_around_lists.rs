@@ -415,7 +415,7 @@ impl MD032BlanksAroundLists {
             };
 
             // Convert segments to blocks
-            for (start, end) in segments.iter() {
+            for (start, end) in &segments {
                 // Extend the end to include any continuation lines immediately after the last item
                 let mut actual_end = *end;
 

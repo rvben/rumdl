@@ -135,8 +135,7 @@ impl StrExt for str {
         }
 
         // Build the final string
-        let mut result =
-            String::with_capacity(non_space_len + replacement.len() + if ends_with_newline { 1 } else { 0 });
+        let mut result = String::with_capacity(non_space_len + replacement.len() + usize::from(ends_with_newline));
         result.push_str(&content[..non_space_len]);
         result.push_str(replacement);
         if ends_with_newline {

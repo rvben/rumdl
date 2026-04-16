@@ -276,7 +276,7 @@ impl PerformanceBenchmark {
 
         // Calculate memory stats if we have samples
         let memory_stats = if !memory_samples.is_empty() {
-            let peak = memory_samples.iter().cloned().fold(f64::MIN, f64::max);
+            let peak = memory_samples.iter().copied().fold(f64::MIN, f64::max);
             let average = memory_samples.iter().sum::<f64>() / memory_samples.len() as f64;
             Some(MemoryStats {
                 peak_memory_mb: peak,

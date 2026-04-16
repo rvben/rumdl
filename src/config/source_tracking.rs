@@ -127,7 +127,7 @@ impl<T: Clone + Eq + std::hash::Hash> SourcedValue<Vec<T>> {
         if source_precedence(new_source) >= source_precedence(self.source) {
             // Union: combine values from both sources with deduplication
             let mut combined = self.value.clone();
-            for item in new_value.iter() {
+            for item in &new_value {
                 if !combined.contains(item) {
                     combined.push(item.clone());
                 }

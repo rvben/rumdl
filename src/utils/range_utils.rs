@@ -275,7 +275,7 @@ impl<'a> LineIndex<'a> {
             return None; // Lines are 1-based
         }
         // line_num is 1-based, line_starts index is 0-based
-        self.line_starts.get(line_num - 1).cloned()
+        self.line_starts.get(line_num - 1).copied()
     }
 
     /// Check if the line at the given index is within a code block

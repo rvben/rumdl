@@ -228,7 +228,7 @@ pub trait RuleExt {
 impl<R: Rule + 'static> RuleExt for Box<R> {
     fn downcast_ref<T: 'static>(&self) -> Option<&T> {
         if std::any::TypeId::of::<R>() == std::any::TypeId::of::<T>() {
-            unsafe { Some(&*(self.as_ref() as *const _ as *const T)) }
+            unsafe { Some(&*std::ptr::from_ref(self.as_ref()).cast::<T>()) }
         } else {
             None
         }

@@ -133,7 +133,7 @@ impl Rule for MD027MultipleSpacesBlockquote {
                                     let end_byte = ctx.line_index.line_col_to_byte_range(line_num, end_col).start;
                                     start_byte..end_byte
                                 },
-                                replacement: "".to_string(),
+                                replacement: String::new(),
                             }),
                         });
                     }

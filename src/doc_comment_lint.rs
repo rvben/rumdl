@@ -137,7 +137,7 @@ pub fn extract_doc_comment_blocks(content: &str) -> Vec<DocCommentBlock> {
         let line_byte_start = byte_offset;
         // Only add 1 for the newline if this is not the last segment
         let has_newline = line_idx < num_lines - 1 || content.ends_with('\n');
-        let line_byte_end = byte_offset + line.len() + if has_newline { 1 } else { 0 };
+        let line_byte_end = byte_offset + line.len() + usize::from(has_newline);
 
         if let Some((kind, leading_ws, prefix)) = classify_doc_comment_line(line) {
             let trimmed = line.trim_start();

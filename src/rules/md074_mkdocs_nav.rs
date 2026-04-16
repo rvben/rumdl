@@ -300,7 +300,7 @@ impl MD074MkDocsNav {
                             file_path.trim_end_matches('/')
                         )
                     } else {
-                        file_path.to_string()
+                        file_path.clone()
                     };
                     let yaml_line = Self::find_nav_line_in_yaml(yaml_content, file_path);
                     let line_info = yaml_line.map_or(String::new(), |l| format!(", line {l}"));

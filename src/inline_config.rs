@@ -684,7 +684,7 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
                                     .map(|s| if s.starts_with("MD") { s } else { s.to_lowercase() });
                                 warnings.push(InlineConfigWarning {
                                     line_number: line_num,
-                                    rule_name: rule_name.to_string(),
+                                    rule_name: rule_name.clone(),
                                     comment_type: "configure-file".to_string(),
                                     suggestion,
                                 });

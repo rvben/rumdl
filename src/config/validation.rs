@@ -426,7 +426,7 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
     for i in 1..=len1 {
         curr_row[0] = i;
         for j in 1..=len2 {
-            let cost = if s1_chars[i - 1] == s2_chars[j - 1] { 0 } else { 1 };
+            let cost = usize::from(s1_chars[i - 1] != s2_chars[j - 1]);
             curr_row[j] = (prev_row[j] + 1)          // deletion
                 .min(curr_row[j - 1] + 1)            // insertion
                 .min(prev_row[j - 1] + cost); // substitution
@@ -463,7 +463,7 @@ pub fn suggest_similar_key(unknown: &str, valid_keys: &[String]) -> Option<Strin
 }
 
 fn toml_value_type_matches(expected: &toml::Value, actual: &toml::Value) -> bool {
-    use toml::Value::*;
+    use toml::Value::{Array, Boolean, Datetime, Float, Integer, String, Table};
     match (expected, actual) {
         (String(_), String(_)) => true,
         (Integer(_), Integer(_)) => true,

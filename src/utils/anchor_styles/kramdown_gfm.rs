@@ -353,7 +353,7 @@ pub fn heading_to_fragment(heading: &str) -> String {
                 "-".to_string()
             } else {
                 // All other consecutive hyphen counts are removed
-                "".to_string()
+                String::new()
             }
         })
         .to_string();

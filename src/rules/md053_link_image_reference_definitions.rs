@@ -337,7 +337,7 @@ impl MD053LinkImageReferenceDefinitions {
             .collect();
         span_ranges.sort_unstable_by_key(|&(start, _)| start);
 
-        for line_info in ctx.lines.iter() {
+        for line_info in &ctx.lines {
             if line_info.in_code_block || line_info.in_front_matter {
                 continue;
             }

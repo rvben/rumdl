@@ -215,7 +215,7 @@ impl RumdlLanguageServer {
             language_entries.push(((*canonical).to_string(), preferred.clone(), true));
 
             // Add other aliases as secondary completions
-            for &alias in aliases.iter() {
+            for &alias in aliases {
                 if alias != preferred {
                     language_entries.push(((*canonical).to_string(), alias.to_string(), false));
                 }
@@ -374,7 +374,7 @@ impl RumdlLanguageServer {
                         },
                         end: position,
                     },
-                    new_text: rel_str.to_string(),
+                    new_text: rel_str.clone(),
                 })),
                 ..Default::default()
             };
