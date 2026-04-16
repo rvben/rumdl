@@ -127,14 +127,11 @@ impl IndexWorker {
     /// Update a single file in the index
     async fn update_single_file(&self, path: &Path, content: &str) {
         // Build FileIndex using LintContext
-        let file_index =
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::build_file_index(content))) {
-                Ok(index) => index,
-                Err(_) => {
-                    log::error!("Panic while indexing {}: skipping", path.display());
-                    return;
-                }
-            };
+        let Ok(file_index) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::build_file_index(content)))
+        else {
+            log::error!("Panic while indexing {}: skipping", path.display());
+            return;
+        };
 
         // Get old dependents before updating
         let old_dependents = {

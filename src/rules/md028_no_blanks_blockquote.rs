@@ -296,9 +296,8 @@ impl MD028NoBlanksBlockquote {
             }
         }
 
-        let (prev_idx, next_idx) = match (prev_quote_idx, next_quote_idx) {
-            (Some(p), Some(n)) => (p, n),
-            _ => return false,
+        let (Some(prev_idx), Some(next_idx)) = (prev_quote_idx, next_quote_idx) else {
+            return false;
         };
 
         // Callout/Alert check: If either blockquote is a callout/alert, treat them as

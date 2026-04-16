@@ -199,9 +199,8 @@ impl Rule for MD026NoTrailingPunctuation {
         }
 
         let mut warnings = Vec::new();
-        let re = match self.get_punctuation_regex() {
-            Ok(regex) => regex,
-            Err(_) => return Ok(warnings),
+        let Ok(re) = self.get_punctuation_regex() else {
+            return Ok(warnings);
         };
 
         // Create LineIndex for correct byte position calculations across all line ending types

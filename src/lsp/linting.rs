@@ -21,9 +21,8 @@ impl RumdlLanguageServer {
     /// Check if a file URI should be excluded based on exclude patterns
     pub(super) async fn should_exclude_uri(&self, uri: &Url) -> bool {
         // Try to convert URI to file path
-        let file_path = match uri.to_file_path() {
-            Ok(path) => path,
-            Err(_) => return false, // If we can't get a path, don't exclude
+        let Ok(file_path) = uri.to_file_path() else {
+            return false; // If we can't get a path, don't exclude
         };
 
         // Resolve configuration for this specific file to get its exclude patterns

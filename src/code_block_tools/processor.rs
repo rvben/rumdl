@@ -686,12 +686,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let tool_def = match self.resolve_tool(tool_id, ToolContext::Lint) {
-                    Some(t) => t,
-                    None => {
-                        log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
-                        continue;
-                    }
+                let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Lint) else {
+                    log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+                    continue;
                 };
 
                 // Check if tool binary exists before running
@@ -852,12 +849,9 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     continue;
                 }
 
-                let tool_def = match self.resolve_tool(tool_id, ToolContext::Format) {
-                    Some(t) => t,
-                    None => {
-                        log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
-                        continue;
-                    }
+                let Some(tool_def) = self.resolve_tool(tool_id, ToolContext::Format) else {
+                    log::warn!("Unknown tool '{tool_id}' configured for language '{canonical_lang}'");
+                    continue;
                 };
 
                 // Check if tool binary exists before running

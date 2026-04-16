@@ -79,9 +79,8 @@ impl Rule for MD061ForbiddenTerms {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         // Early return if no terms configured
-        let pattern = match &self.pattern {
-            Some(p) => p,
-            None => return Ok(Vec::new()),
+        let Some(pattern) = &self.pattern else {
+            return Ok(Vec::new());
         };
 
         let mut warnings = Vec::new();

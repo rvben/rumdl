@@ -112,9 +112,8 @@ impl MD074MkDocsNav {
     fn collect_docs_files_recursive(current_dir: &Path, root_docs_dir: &Path) -> HashSet<PathBuf> {
         let mut files = HashSet::new();
 
-        let entries = match std::fs::read_dir(current_dir) {
-            Ok(entries) => entries,
-            Err(_) => return files,
+        let Ok(entries) = std::fs::read_dir(current_dir) else {
+            return files;
         };
 
         for entry in entries.flatten() {

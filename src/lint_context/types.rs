@@ -507,9 +507,8 @@ pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
     }
 
     let mut chars = trimmed.chars();
-    let first_char = match chars.next() {
-        Some(c @ ('-' | '*' | '_')) => c,
-        _ => return false,
+    let Some(first_char @ ('-' | '*' | '_')) = chars.next() else {
+        return false;
     };
 
     // Count occurrences of the rule character, rejecting non-whitespace interlopers

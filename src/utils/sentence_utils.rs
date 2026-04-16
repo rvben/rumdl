@@ -174,9 +174,8 @@ fn is_after_sentence_ending_with_abbreviations(
 
     // Safely get the portion of the text before the spaces
     // match_start is a byte position, so we need to ensure it's a valid char boundary
-    let before = match text.get(..match_start) {
-        Some(s) => s,
-        None => return false, // Invalid byte position
+    let Some(before) = text.get(..match_start) else {
+        return false; // Invalid byte position
     };
 
     // Collect chars for iteration (we need random access for some checks)

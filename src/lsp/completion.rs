@@ -332,13 +332,11 @@ impl RumdlLanguageServer {
         start_col: u32,
         position: Position,
     ) -> Vec<CompletionItem> {
-        let current_file = match uri.to_file_path() {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
+        let Ok(current_file) = uri.to_file_path() else {
+            return Vec::new();
         };
-        let current_dir = match current_file.parent() {
-            Some(d) => d.to_path_buf(),
-            None => return Vec::new(),
+        let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
+            return Vec::new();
         };
 
         let index = self.workspace_index.read().await;
@@ -399,26 +397,23 @@ impl RumdlLanguageServer {
         start_col: u32,
         position: Position,
     ) -> Vec<CompletionItem> {
-        let current_file = match uri.to_file_path() {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
+        let Ok(current_file) = uri.to_file_path() else {
+            return Vec::new();
         };
 
         // Resolve the target file: empty path means the current file itself
         let target = if file_path.is_empty() {
             current_file.clone()
         } else {
-            let current_dir = match current_file.parent() {
-                Some(d) => d.to_path_buf(),
-                None => return Vec::new(),
+            let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
+                return Vec::new();
             };
             normalize_path(current_dir.join(file_path))
         };
 
         let index = self.workspace_index.read().await;
-        let file_index = match index.get_file(&target) {
-            Some(fi) => fi,
-            None => return Vec::new(),
+        let Some(file_index) = index.get_file(&target) else {
+            return Vec::new();
         };
 
         let partial_lower = partial_anchor.to_lowercase();

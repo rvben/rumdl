@@ -639,9 +639,8 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let source_uri = match Url::from_file_path(source_path) {
-                Ok(uri) => uri,
-                Err(_) => continue,
+            let Ok(source_uri) = Url::from_file_path(source_path) else {
+                continue;
             };
 
             let source_content = tokio::fs::read_to_string(source_path).await.ok();
@@ -742,9 +741,8 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let source_uri = match Url::from_file_path(source_path) {
-                Ok(uri) => uri,
-                Err(_) => continue,
+            let Ok(source_uri) = Url::from_file_path(source_path) else {
+                continue;
             };
 
             // Load source content for byte→UTF-16 column conversion.
@@ -950,9 +948,8 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let source_uri = match Url::from_file_path(source_path) {
-                Ok(uri) => uri,
-                Err(_) => continue,
+            let Ok(source_uri) = Url::from_file_path(source_path) else {
+                continue;
             };
 
             // Try editor buffer first, fall back to disk

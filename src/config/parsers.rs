@@ -895,9 +895,7 @@ pub(super) fn parse_rumdl_toml(
         }
 
         // Resolve rule name (handles both canonical names like "MD004" and aliases like "ul-style")
-        let norm_rule_name = if let Some(resolved) = registry.resolve_rule_name(key) {
-            resolved
-        } else {
+        let Some(norm_rule_name) = registry.resolve_rule_name(key) else {
             // Unknown rule - always track it for validation and suggestions
             fragment
                 .unknown_keys

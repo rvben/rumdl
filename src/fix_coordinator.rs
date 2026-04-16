@@ -252,9 +252,8 @@ impl FixCoordinator {
                 }
 
                 // Check if this rule has any current warnings
-                let warnings = match rule.check(&ctx) {
-                    Ok(w) => w,
-                    Err(_) => continue,
+                let Ok(warnings) = rule.check(&ctx) else {
+                    continue;
                 };
 
                 if warnings.is_empty() {
