@@ -98,8 +98,6 @@ impl<'a> LintContext<'a> {
     pub fn new(content: &'a str, flavor: MarkdownFlavor, source_file: Option<PathBuf>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         let profile = std::env::var("RUMDL_PROFILE_QUADRATIC").is_ok();
-        #[cfg(target_arch = "wasm32")]
-        let profile = false;
 
         let line_offsets = profile_section!("Line offsets", profile, {
             let mut offsets = vec![0];

@@ -285,8 +285,6 @@ pub fn lint_and_index(
 
     #[cfg(not(target_arch = "wasm32"))]
     let profile_rules = std::env::var("RUMDL_PROFILE_RULES").is_ok();
-    #[cfg(target_arch = "wasm32")]
-    let profile_rules = false;
 
     // Automatic inline config support: merge inline overrides into config once,
     // then recreate only the affected rules. Works for ALL rules without per-rule changes.

@@ -49,7 +49,7 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::config::{Config, MarkdownFlavor, RuleConfig};
+use crate::config::{Config, MarkdownFlavor};
 use crate::fix_coordinator::FixCoordinator;
 use crate::rule::{LintWarning, Severity};
 use crate::rule_config_serde::{is_rule_name, json_to_rule_config_with_warnings, toml_value_to_json};
@@ -179,6 +179,7 @@ pub struct LinterConfig {
 
 impl LinterConfig {
     /// Convert to internal Config (discards any config parse warnings)
+    #[cfg(test)]
     fn to_config(&self) -> Config {
         self.to_config_with_warnings().0
     }
