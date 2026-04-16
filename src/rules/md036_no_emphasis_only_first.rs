@@ -61,10 +61,6 @@ impl MD036NoEmphasisAsHeading {
         }
     }
 
-    pub fn from_config_struct(config: MD036Config) -> Self {
-        Self { config }
-    }
-
     /// Generate the ATX heading prefix for the configured heading level
     fn atx_prefix(&self) -> String {
         // HeadingLevel is already validated to 1-6, no clamping needed

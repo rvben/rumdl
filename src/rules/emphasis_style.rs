@@ -1,6 +1,4 @@
-use regex::Regex;
 use std::fmt;
-use std::sync::LazyLock;
 
 /// The style for emphasis (MD049)
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default, Hash)]
@@ -34,29 +32,6 @@ impl From<&str> for EmphasisStyle {
     }
 }
 
-/// Get regex pattern for finding emphasis markers based on style
-pub fn get_emphasis_pattern(style: EmphasisStyle) -> &'static Regex {
-    static ASTERISK_EMPHASIS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"\*([^\s*][^*]*?[^\s*]|[^\s*])\*").unwrap());
-    static UNDERSCORE_EMPHASIS: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"_([^\s_][^_]*?[^\s_]|[^\s_])_").unwrap());
-
-    match style {
-        EmphasisStyle::Asterisk => &ASTERISK_EMPHASIS,
-        EmphasisStyle::Underscore => &UNDERSCORE_EMPHASIS,
-        EmphasisStyle::Consistent => &ASTERISK_EMPHASIS, // Default to asterisk for consistent style
-    }
-}
-
-/// Determine the emphasis style from a marker
-pub fn get_emphasis_style(marker: &str) -> Option<EmphasisStyle> {
-    match marker {
-        "*" => Some(EmphasisStyle::Asterisk),
-        "_" => Some(EmphasisStyle::Underscore),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,36 +42,5 @@ mod tests {
         assert_eq!(EmphasisStyle::from("underscore"), EmphasisStyle::Underscore);
         assert_eq!(EmphasisStyle::from(""), EmphasisStyle::Consistent);
         assert_eq!(EmphasisStyle::from("unknown"), EmphasisStyle::Consistent);
-    }
-
-    #[test]
-    fn test_get_emphasis_pattern() {
-        // Test asterisk pattern
-        let asterisk_pattern = get_emphasis_pattern(EmphasisStyle::Asterisk);
-        assert!(asterisk_pattern.is_match("*text*"));
-        assert!(asterisk_pattern.is_match("*t*"));
-        assert!(!asterisk_pattern.is_match("* text*"));
-        assert!(!asterisk_pattern.is_match("*text *"));
-
-        // Test underscore pattern
-        let underscore_pattern = get_emphasis_pattern(EmphasisStyle::Underscore);
-        assert!(underscore_pattern.is_match("_text_"));
-        assert!(underscore_pattern.is_match("_t_"));
-        assert!(!underscore_pattern.is_match("_ text_"));
-        assert!(!underscore_pattern.is_match("_text _"));
-
-        // Test consistent pattern (default to asterisk)
-        let consistent_pattern = get_emphasis_pattern(EmphasisStyle::Consistent);
-        assert!(consistent_pattern.is_match("*text*"));
-        assert!(!consistent_pattern.is_match("_text_"));
-    }
-
-    #[test]
-    fn test_get_emphasis_style() {
-        assert_eq!(get_emphasis_style("*"), Some(EmphasisStyle::Asterisk));
-        assert_eq!(get_emphasis_style("_"), Some(EmphasisStyle::Underscore));
-        assert_eq!(get_emphasis_style(""), None);
-        assert_eq!(get_emphasis_style("**"), None);
-        assert_eq!(get_emphasis_style("__"), None);
     }
 }

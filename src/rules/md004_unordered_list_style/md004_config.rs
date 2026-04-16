@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 /// Configuration for MD004 (Unordered list style)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
-pub struct MD004Config {
+pub(super) struct MD004Config {
     /// The style for unordered list markers
     #[serde(default)]
     pub style: UnorderedListStyle,

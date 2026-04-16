@@ -14,7 +14,7 @@ mod md030_config;
 use md030_config::MD030Config;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ListType {
+enum ListType {
     Unordered,
     Ordered,
 }
@@ -40,11 +40,11 @@ impl MD030ListMarkerSpace {
         }
     }
 
-    pub fn from_config_struct(config: MD030Config) -> Self {
+    fn from_config_struct(config: MD030Config) -> Self {
         Self { config }
     }
 
-    pub fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
+    fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
         match (list_type, is_multi) {
             (ListType::Unordered, false) => self.config.ul_single.get(),
             (ListType::Unordered, true) => self.config.ul_multi.get(),

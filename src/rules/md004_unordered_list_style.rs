@@ -80,10 +80,6 @@ impl MD004UnorderedListStyle {
         }
     }
 
-    pub fn from_config_struct(config: MD004Config) -> Self {
-        Self { config }
-    }
-
     /// Count marker prevalence across all unordered list items in the document
     /// Returns the most prevalent marker character, preferring dash in case of ties
     fn count_marker_prevalence(&self, ctx: &crate::lint_context::LintContext) -> Option<char> {

@@ -48,10 +48,6 @@ pub struct MD040FencedCodeLanguage {
 }
 
 impl MD040FencedCodeLanguage {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_config(config: MD040Config) -> Self {
         Self { config }
     }

@@ -361,62 +361,6 @@ impl FrontMatterUtils {
 
         0
     }
-
-    /// Fix malformed front matter
-    pub fn fix_malformed_front_matter(content: &str) -> String {
-        let lines: Vec<&str> = content.lines().collect();
-        if lines.len() < 3 {
-            return content.to_string();
-        }
-
-        let mut result = Vec::new();
-        let mut in_front_matter = false;
-        let mut is_malformed = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            // Handle front matter start
-            if i == 0 {
-                if STANDARD_FRONT_MATTER_START.is_match(line) {
-                    // Standard front matter - keep as is
-                    in_front_matter = true;
-                    result.push(line.to_string());
-                } else if MALFORMED_FRONT_MATTER_START1.is_match(line) || MALFORMED_FRONT_MATTER_START2.is_match(line) {
-                    // Malformed front matter - fix it
-                    in_front_matter = true;
-                    is_malformed = true;
-                    result.push("---".to_string());
-                } else {
-                    // Regular line
-                    result.push(line.to_string());
-                }
-                continue;
-            }
-
-            // Handle front matter end
-            if in_front_matter {
-                if STANDARD_FRONT_MATTER_END.is_match(line) {
-                    // Standard front matter end - keep as is
-                    in_front_matter = false;
-                    result.push(line.to_string());
-                } else if (MALFORMED_FRONT_MATTER_END1.is_match(line) || MALFORMED_FRONT_MATTER_END2.is_match(line))
-                    && is_malformed
-                {
-                    // Malformed front matter end - fix it
-                    in_front_matter = false;
-                    result.push("---".to_string());
-                } else {
-                    // Content inside front matter
-                    result.push(line.to_string());
-                }
-                continue;
-            }
-
-            // Regular line
-            result.push(line.to_string());
-        }
-
-        result.join("\n")
-    }
 }
 
 #[cfg(test)]
@@ -603,32 +547,6 @@ mod tests {
 
         // Too short
         assert_eq!(FrontMatterUtils::get_front_matter_end_line("--"), 0);
-    }
-
-    #[test]
-    fn test_fix_malformed_front_matter() {
-        // Fix malformed type 1
-        let malformed1 = "- --\ntitle: Test\n- --\nContent";
-        let fixed1 = FrontMatterUtils::fix_malformed_front_matter(malformed1);
-        assert!(fixed1.starts_with("---\ntitle: Test\n---"));
-
-        // Fix malformed type 2
-        let malformed2 = "-- -\ntitle: Test\n-- -\nContent";
-        let fixed2 = FrontMatterUtils::fix_malformed_front_matter(malformed2);
-        assert!(fixed2.starts_with("---\ntitle: Test\n---"));
-
-        // Don't change valid front matter
-        let valid = "---\ntitle: Test\n---\nContent";
-        let unchanged = FrontMatterUtils::fix_malformed_front_matter(valid);
-        assert_eq!(unchanged, valid);
-
-        // No front matter
-        let no_fm = "# Regular content";
-        assert_eq!(FrontMatterUtils::fix_malformed_front_matter(no_fm), no_fm);
-
-        // Too short
-        let short = "--";
-        assert_eq!(FrontMatterUtils::fix_malformed_front_matter(short), short);
     }
 
     #[test]
