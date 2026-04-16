@@ -22,14 +22,6 @@ static AUTODOC_MARKER: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Pattern to match cross-reference links in various forms
-/// [module.Class][], [text][module.Class], [module.Class]
-static CROSSREF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"\[(?:[^\]]*)\]\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]|\[[a-zA-Z_][a-zA-Z0-9_]*(?:[:\.][a-zA-Z_][a-zA-Z0-9_]*)*\]\[\]"
-    ).unwrap()
-});
-
 /// Check if a line is an auto-doc insertion marker
 ///
 /// Matches mkdocstrings syntax `::: module.Class` but NOT Pandoc fenced divs
@@ -78,11 +70,6 @@ pub fn is_autodoc_marker(line: &str) -> bool {
     }
 
     true
-}
-
-/// Check if a line contains cross-reference links
-pub fn contains_crossref(line: &str) -> bool {
-    CROSSREF_PATTERN.is_match(line)
 }
 
 /// Get the indentation level of an autodoc marker
@@ -179,13 +166,6 @@ pub fn is_within_autodoc_block_ranges(ranges: &[crate::utils::skip_context::Byte
     crate::utils::skip_context::is_in_html_comment_ranges(ranges, position)
 }
 
-/// Check if a reference should be treated as a cross-reference (not a broken link)
-pub fn is_valid_crossref(ref_text: &str) -> bool {
-    // Cross-references typically follow module.Class or module:function patterns
-    // They often contain dots or colons
-    ref_text.contains('.') || ref_text.contains(':')
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,16 +206,6 @@ mod tests {
     }
 
     #[test]
-    fn test_crossref_detection() {
-        assert!(contains_crossref("See [module.Class][]"));
-        assert!(contains_crossref("The [text][module.Class] here"));
-        assert!(contains_crossref("[package.module.Class][]"));
-        assert!(contains_crossref("[custom text][module:function]"));
-        assert!(!contains_crossref("Regular [link](url)"));
-        assert!(!contains_crossref("No references here"));
-    }
-
-    #[test]
     fn test_autodoc_options() {
         assert!(is_autodoc_options("    handler: python", 0));
         assert!(is_autodoc_options("    options:", 0));
@@ -246,15 +216,5 @@ mod tests {
         // Test YAML list items
         assert!(is_autodoc_options("            - window", 0));
         assert!(is_autodoc_options("            - app", 0));
-    }
-
-    #[test]
-    fn test_valid_crossref() {
-        assert!(is_valid_crossref("module.Class"));
-        assert!(is_valid_crossref("package.module.Class"));
-        assert!(is_valid_crossref("module:function"));
-        assert!(is_valid_crossref("numpy.ndarray"));
-        assert!(!is_valid_crossref("simple_word"));
-        assert!(!is_valid_crossref("no-dots-here"));
     }
 }

@@ -120,38 +120,6 @@ pub fn is_within_tab_content(content: &str, position: usize) -> bool {
     false
 }
 
-/// Check if multiple consecutive lines form a tab group
-pub fn get_tab_group_range(lines: &[&str], start_line_idx: usize) -> Option<(usize, usize)> {
-    if start_line_idx >= lines.len() {
-        return None;
-    }
-
-    let start_line = lines[start_line_idx];
-    if !is_tab_marker(start_line) {
-        return None;
-    }
-
-    let base_indent = get_tab_indent(start_line).unwrap_or(0);
-    let mut end_line_idx = start_line_idx;
-
-    // Find where the tab group ends
-    for (idx, line) in lines.iter().enumerate().skip(start_line_idx + 1) {
-        if is_tab_marker(line) && get_tab_indent(line).unwrap_or(0) == base_indent {
-            // Another tab at the same level continues the group
-            end_line_idx = idx;
-        } else if is_tab_content(line, base_indent) {
-            // Indented content within the tab
-            end_line_idx = idx;
-        } else {
-            // Non-tab, non-content line ends the group
-            // Don't include trailing empty lines
-            break;
-        }
-    }
-
-    Some((start_line_idx, end_line_idx))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,44 +151,5 @@ mod tests {
         assert!(!is_tab_content("", 0)); // Empty lines not considered content on their own
         assert!(!is_tab_content("Not indented", 0));
         assert!(!is_tab_content("  Only 2 spaces", 0));
-    }
-
-    #[test]
-    fn test_within_tab_content() {
-        let content = r#"# Document
-
-=== "Python"
-
-    ```python
-    def hello():
-        print("Hello")
-    ```
-
-=== "JavaScript"
-
-    ```javascript
-    function hello() {
-        console.log("Hello");
-    }
-    ```
-
-Regular text outside tabs."#;
-
-        let python_code_pos = content.find("def hello").unwrap();
-        let js_code_pos = content.find("function hello").unwrap();
-        let outside_pos = content.find("Regular text").unwrap();
-
-        assert!(is_within_tab_content(content, python_code_pos));
-        assert!(is_within_tab_content(content, js_code_pos));
-        assert!(!is_within_tab_content(content, outside_pos));
-    }
-
-    #[test]
-    fn test_tab_group_range() {
-        let content = "=== \"Tab 1\"\n    Content 1\n=== \"Tab 2\"\n    Content 2\n\nOutside";
-        let lines: Vec<&str> = content.lines().collect();
-
-        let range = get_tab_group_range(&lines, 0);
-        assert_eq!(range, Some((0, 3))); // Includes both tabs and their content
     }
 }
