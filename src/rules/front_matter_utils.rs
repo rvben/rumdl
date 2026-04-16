@@ -47,76 +47,6 @@ pub enum FrontMatterType {
 pub struct FrontMatterUtils;
 
 impl FrontMatterUtils {
-    /// Check if a line is inside front matter content
-    pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
-        let lines: Vec<&str> = content.lines().collect();
-        if line_num >= lines.len() {
-            return false;
-        }
-
-        let mut in_standard_front_matter = false;
-        let mut in_toml_front_matter = false;
-        let mut in_json_front_matter = false;
-        let mut in_malformed_front_matter1 = false;
-        let mut in_malformed_front_matter2 = false;
-
-        for (i, line) in lines.iter().enumerate() {
-            if i > line_num {
-                break;
-            }
-
-            // Check if current line is a closing delimiter before updating state
-            if i == line_num
-                && i > 0
-                && ((in_standard_front_matter && STANDARD_FRONT_MATTER_END.is_match(line))
-                    || (in_toml_front_matter && TOML_FRONT_MATTER_END.is_match(line))
-                    || (in_json_front_matter && JSON_FRONT_MATTER_END.is_match(line))
-                    || (in_malformed_front_matter1 && MALFORMED_FRONT_MATTER_END1.is_match(line))
-                    || (in_malformed_front_matter2 && MALFORMED_FRONT_MATTER_END2.is_match(line)))
-            {
-                return false; // Closing delimiter is not part of front matter content
-            }
-
-            // Standard YAML front matter handling
-            if i == 0 && STANDARD_FRONT_MATTER_START.is_match(line) {
-                in_standard_front_matter = true;
-            } else if STANDARD_FRONT_MATTER_END.is_match(line) && in_standard_front_matter && i > 0 {
-                in_standard_front_matter = false;
-            }
-            // TOML front matter handling
-            else if i == 0 && TOML_FRONT_MATTER_START.is_match(line) {
-                in_toml_front_matter = true;
-            } else if TOML_FRONT_MATTER_END.is_match(line) && in_toml_front_matter && i > 0 {
-                in_toml_front_matter = false;
-            }
-            // JSON front matter handling
-            else if i == 0 && JSON_FRONT_MATTER_START.is_match(line) {
-                in_json_front_matter = true;
-            } else if JSON_FRONT_MATTER_END.is_match(line) && in_json_front_matter && i > 0 {
-                in_json_front_matter = false;
-            }
-            // Malformed front matter type 1 (- --)
-            else if i == 0 && MALFORMED_FRONT_MATTER_START1.is_match(line) {
-                in_malformed_front_matter1 = true;
-            } else if MALFORMED_FRONT_MATTER_END1.is_match(line) && in_malformed_front_matter1 && i > 0 {
-                in_malformed_front_matter1 = false;
-            }
-            // Malformed front matter type 2 (-- -)
-            else if i == 0 && MALFORMED_FRONT_MATTER_START2.is_match(line) {
-                in_malformed_front_matter2 = true;
-            } else if MALFORMED_FRONT_MATTER_END2.is_match(line) && in_malformed_front_matter2 && i > 0 {
-                in_malformed_front_matter2 = false;
-            }
-        }
-
-        // Return true if we're in any type of front matter
-        in_standard_front_matter
-            || in_toml_front_matter
-            || in_json_front_matter
-            || in_malformed_front_matter1
-            || in_malformed_front_matter2
-    }
-
     /// Check if a content contains front matter with a specific field
     pub fn has_front_matter_field(content: &str, field_prefix: &str) -> bool {
         let field_name = field_prefix.trim_end_matches(':');
@@ -551,22 +481,6 @@ mod tests {
             FrontMatterUtils::detect_front_matter_type("---\ntitle: Test"),
             FrontMatterType::None
         );
-    }
-
-    #[test]
-    fn test_is_in_front_matter() {
-        let content = "---\ntitle: Test\nauthor: Me\n---\nContent here";
-
-        // The implementation considers opening delimiter and content lines as inside front matter
-        // but the closing delimiter triggers the exit from front matter state
-        assert!(FrontMatterUtils::is_in_front_matter(content, 0)); // Opening ---
-        assert!(FrontMatterUtils::is_in_front_matter(content, 1)); // title line
-        assert!(FrontMatterUtils::is_in_front_matter(content, 2)); // author line
-        assert!(!FrontMatterUtils::is_in_front_matter(content, 3)); // Closing --- (not part of front matter)
-        assert!(!FrontMatterUtils::is_in_front_matter(content, 4)); // Content
-
-        // Out of bounds
-        assert!(!FrontMatterUtils::is_in_front_matter(content, 100));
     }
 
     #[test]

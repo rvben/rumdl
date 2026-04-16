@@ -59,46 +59,6 @@ fn test_detect_front_matter_type() {
 }
 
 #[test]
-fn test_is_in_front_matter() {
-    // YAML front matter
-    let yaml_content = "---\ntitle: Test Document\ndate: 2023-04-01\n---\n# Heading";
-    assert!(FrontMatterUtils::is_in_front_matter(yaml_content, 1)); // Line with "title"
-    assert!(FrontMatterUtils::is_in_front_matter(yaml_content, 2)); // Line with "date"
-    assert!(!FrontMatterUtils::is_in_front_matter(yaml_content, 3)); // Closing delimiter
-    assert!(!FrontMatterUtils::is_in_front_matter(yaml_content, 4)); // Line with heading
-
-    // TOML front matter
-    let toml_content = "+++\ntitle = \"Test Document\"\ndate = 2023-04-01\n+++\n# Heading";
-    assert!(FrontMatterUtils::is_in_front_matter(toml_content, 1)); // Line with "title"
-    assert!(FrontMatterUtils::is_in_front_matter(toml_content, 2)); // Line with "date"
-    assert!(!FrontMatterUtils::is_in_front_matter(toml_content, 3)); // Closing delimiter
-    assert!(!FrontMatterUtils::is_in_front_matter(toml_content, 4)); // Line with heading
-
-    // JSON front matter
-    let json_content = "{\n\"title\": \"Test Document\",\n\"date\": \"2023-04-01\"\n}\n# Heading";
-    assert!(FrontMatterUtils::is_in_front_matter(json_content, 1)); // Line with "title"
-    assert!(FrontMatterUtils::is_in_front_matter(json_content, 2)); // Line with "date"
-    assert!(!FrontMatterUtils::is_in_front_matter(json_content, 3)); // Closing delimiter
-    assert!(!FrontMatterUtils::is_in_front_matter(json_content, 4)); // Line with heading
-
-    // Malformed front matter
-    let malformed_content = "- --\ntitle: Test Document\ndate: 2023-04-01\n- --\n# Heading";
-    assert!(FrontMatterUtils::is_in_front_matter(malformed_content, 1)); // Line with "title"
-    assert!(FrontMatterUtils::is_in_front_matter(malformed_content, 2)); // Line with "date"
-    assert!(!FrontMatterUtils::is_in_front_matter(malformed_content, 3)); // Closing delimiter
-    assert!(!FrontMatterUtils::is_in_front_matter(malformed_content, 4)); // Line with heading
-
-    // No front matter
-    let no_front_matter = "# Heading\nThis is content.";
-    assert!(!FrontMatterUtils::is_in_front_matter(no_front_matter, 0)); // Line with heading
-    assert!(!FrontMatterUtils::is_in_front_matter(no_front_matter, 1)); // Line with content
-
-    // Edge cases
-    assert!(!FrontMatterUtils::is_in_front_matter("", 0)); // Empty document
-    assert!(!FrontMatterUtils::is_in_front_matter("---\ntitle: Test", 5)); // Out of bounds
-}
-
-#[test]
 fn test_extract_front_matter() {
     // YAML front matter
     let yaml_content = "---\ntitle: Test Document\ndate: 2023-04-01\n---\n# Heading";

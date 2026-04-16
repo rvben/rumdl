@@ -75,31 +75,6 @@ pub fn is_line_entirely_in_html_comment(ranges: &[ByteRange], line_start: usize,
     false
 }
 
-/// Check if a line is within front matter (both YAML and TOML)
-pub fn is_in_front_matter(content: &str, line_num: usize) -> bool {
-    let lines: Vec<&str> = content.lines().collect();
-
-    // Check YAML front matter (---) at the beginning
-    if !lines.is_empty() && lines[0] == "---" {
-        for (i, line) in lines.iter().enumerate().skip(1) {
-            if *line == "---" {
-                return line_num <= i;
-            }
-        }
-    }
-
-    // Check TOML front matter (+++) at the beginning
-    if !lines.is_empty() && lines[0] == "+++" {
-        for (i, line) in lines.iter().enumerate().skip(1) {
-            if *line == "+++" {
-                return line_num <= i;
-            }
-        }
-    }
-
-    false
-}
-
 /// Check if a byte position is within a JSX expression (MDX: {expression})
 #[inline]
 pub fn is_in_jsx_expression(ctx: &LintContext, byte_pos: usize) -> bool {
@@ -424,81 +399,6 @@ mod tests {
         assert!(is_table_line("| Cell 1 | Cell 2 |"));
         assert!(!is_table_line("Regular text"));
         assert!(!is_table_line("Just a pipe | here"));
-    }
-
-    #[test]
-    fn test_is_in_front_matter() {
-        // Test YAML frontmatter
-        let yaml_content = r#"---
-title: "My Post"
-tags: ["test", "example"]
----
-
-# Content"#;
-
-        assert!(
-            is_in_front_matter(yaml_content, 0),
-            "Line 1 should be in YAML front matter"
-        );
-        assert!(
-            is_in_front_matter(yaml_content, 2),
-            "Line 3 should be in YAML front matter"
-        );
-        assert!(
-            is_in_front_matter(yaml_content, 3),
-            "Line 4 should be in YAML front matter"
-        );
-        assert!(
-            !is_in_front_matter(yaml_content, 4),
-            "Line 5 should NOT be in front matter"
-        );
-
-        // Test TOML frontmatter
-        let toml_content = r#"+++
-title = "My Post"
-tags = ["test", "example"]
-+++
-
-# Content"#;
-
-        assert!(
-            is_in_front_matter(toml_content, 0),
-            "Line 1 should be in TOML front matter"
-        );
-        assert!(
-            is_in_front_matter(toml_content, 2),
-            "Line 3 should be in TOML front matter"
-        );
-        assert!(
-            is_in_front_matter(toml_content, 3),
-            "Line 4 should be in TOML front matter"
-        );
-        assert!(
-            !is_in_front_matter(toml_content, 4),
-            "Line 5 should NOT be in front matter"
-        );
-
-        // Test TOML blocks NOT at beginning (should not be considered front matter)
-        let mixed_content = r#"# Content
-
-+++
-title = "Not frontmatter"
-+++
-
-More content"#;
-
-        assert!(
-            !is_in_front_matter(mixed_content, 2),
-            "TOML block not at beginning should NOT be front matter"
-        );
-        assert!(
-            !is_in_front_matter(mixed_content, 3),
-            "TOML block not at beginning should NOT be front matter"
-        );
-        assert!(
-            !is_in_front_matter(mixed_content, 4),
-            "TOML block not at beginning should NOT be front matter"
-        );
     }
 
     #[test]
