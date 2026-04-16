@@ -169,18 +169,7 @@ pub fn effective_indent_in_blockquote(line_content: &str, expected_bq_level: usi
 /// Count the number of blockquote markers (`>`) at the start of a line.
 ///
 /// Handles both compact (`>>text`) and spaced (`> > text`) blockquote syntax.
-///
-/// # Examples
-///
-/// ```
-/// use rumdl_lib::utils::blockquote::count_blockquote_level;
-///
-/// assert_eq!(count_blockquote_level("regular text"), 0);
-/// assert_eq!(count_blockquote_level("> quoted"), 1);
-/// assert_eq!(count_blockquote_level(">> nested"), 2);
-/// assert_eq!(count_blockquote_level("> > spaced nested"), 2);
-/// ```
-pub fn count_blockquote_level(line_content: &str) -> usize {
+fn count_blockquote_level(line_content: &str) -> usize {
     line_content
         .chars()
         .take_while(|c| *c == '>' || c.is_whitespace())

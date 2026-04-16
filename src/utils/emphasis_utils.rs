@@ -8,9 +8,6 @@ static INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(`+)([^`]|[^
 // The pattern allows zero or more characters between delimiters to handle empty math spans
 static INLINE_MATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\$[^$]*\$\$|\$[^$\n]*\$").unwrap());
 
-// List markers pattern - used to avoid confusion with emphasis
-static LIST_MARKER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[*+-]\s+").unwrap());
-
 // Documentation style patterns
 static DOC_METADATA_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\s*\*?\s*\*\*(?:[^*\s][^*]*[^*\s]|[^*\s])\*\*\s*:").unwrap());
@@ -289,7 +286,7 @@ pub fn find_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<Emph
 
 /// Fast validation of emphasis span context
 #[inline]
-pub fn is_valid_emphasis_span_fast(line: &str, opening: &EmphasisMarker, closing: &EmphasisMarker) -> bool {
+fn is_valid_emphasis_span_fast(line: &str, opening: &EmphasisMarker, closing: &EmphasisMarker) -> bool {
     let content_start = opening.end_pos();
     let content_end = closing.start_pos;
 
@@ -345,13 +342,8 @@ pub fn is_valid_emphasis_span_fast(line: &str, opening: &EmphasisMarker, closing
 
 /// Fast validation of emphasis content
 #[inline]
-pub fn is_valid_emphasis_content_fast(content: &str) -> bool {
+fn is_valid_emphasis_content_fast(content: &str) -> bool {
     !content.trim().is_empty()
-}
-
-/// Check if a line should be treated as a list item vs emphasis
-pub fn is_likely_list_line(line: &str) -> bool {
-    LIST_MARKER.is_match(line)
 }
 
 /// Check if line has documentation patterns that should be preserved

@@ -5,7 +5,6 @@
 pub mod anchor_styles;
 pub mod blockquote;
 pub mod code_block_utils;
-pub mod early_returns;
 pub mod emphasis_utils;
 pub mod fix_utils;
 pub mod header_id_utils;

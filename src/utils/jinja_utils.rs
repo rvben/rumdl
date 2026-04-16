@@ -27,63 +27,41 @@ pub fn find_jinja_ranges(content: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
-/// Check if a position is within a Jinja2 template expression or statement
-pub fn is_in_jinja_template(content: &str, pos: usize) -> bool {
-    // Check Jinja expressions {{ ... }}
-    for mat in JINJA_EXPRESSION_REGEX.find_iter(content) {
-        if pos >= mat.start() && pos < mat.end() {
-            return true;
-        }
-    }
-
-    // Check Jinja statements {% ... %}
-    for mat in JINJA_STATEMENT_REGEX.find_iter(content) {
-        if pos >= mat.start() && pos < mat.end() {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_jinja_expression_detection() {
+    fn test_find_jinja_ranges_expressions() {
         let content = "Some text {{ variable }} more text";
-
-        // Position before Jinja
-        assert!(!is_in_jinja_template(content, 5));
-
-        // Position inside Jinja expression
-        assert!(is_in_jinja_template(content, 15));
-
-        // Position after Jinja
-        assert!(!is_in_jinja_template(content, 30));
+        let ranges = find_jinja_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(&content[ranges[0].0..ranges[0].1], "{{ variable }}");
     }
 
     #[test]
-    fn test_jinja_statement_detection() {
+    fn test_find_jinja_ranges_statements() {
         let content = "{% if condition %} text {% endif %}";
-
-        // Inside first statement
-        assert!(is_in_jinja_template(content, 5));
-
-        // Between statements
-        assert!(!is_in_jinja_template(content, 20));
-
-        // Inside second statement
-        assert!(is_in_jinja_template(content, 28));
+        let ranges = find_jinja_ranges(content);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(&content[ranges[0].0..ranges[0].1], "{% if condition %}");
+        assert_eq!(&content[ranges[1].0..ranges[1].1], "{% endif %}");
     }
 
     #[test]
-    fn test_complex_jinja_expression() {
+    fn test_find_jinja_ranges_complex_expression() {
         let content = "{{ pd_read_csv()[index] | filter }}";
+        let ranges = find_jinja_ranges(content);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0], (0, content.len()));
+    }
 
-        // The entire expression should be detected
-        assert!(is_in_jinja_template(content, 10));
-        assert!(is_in_jinja_template(content, 20));
+    #[test]
+    fn test_find_jinja_ranges_sorted() {
+        let content = "{% if x %} foo {{ bar }} baz {% endif %}";
+        let ranges = find_jinja_ranges(content);
+        assert_eq!(ranges.len(), 3);
+        assert!(ranges[0].0 < ranges[1].0);
+        assert!(ranges[1].0 < ranges[2].0);
     }
 }
