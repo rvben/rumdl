@@ -36,7 +36,7 @@ pub mod performance;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub mod wasm;
 
-pub use rules::heading_utils::{Heading, HeadingStyle};
+pub use rules::heading_utils::HeadingStyle;
 pub use rules::*;
 
 pub use crate::lint_context::{LineInfo, LintContext, ListItemInfo};
