@@ -7,6 +7,9 @@ edition = "2024"
 [package.metadata]
 cargo-fuzz = true
 
+[package.metadata.cargo-machete]
+ignored = ["rumdl"] # Imported as rumdl_lib (lib rename in parent Cargo.toml)
+
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 arbitrary = { version = "1", features = ["derive"] }

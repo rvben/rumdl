@@ -72,9 +72,6 @@ phf = { version = "0.13", features = ["macros"] }
 # LSP dependencies (native only)
 tower-lsp = { version = "0.20", optional = true }
 tokio = { version = "1.48", features = ["full"], optional = true }
-tokio-util = { version = "0.7", optional = true }
-tower = { version = "0.5.2", optional = true }
-tower-service = { version = "0.3", optional = true }
 env_logger = { version = "0.11", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 notify = { version = "8.2", optional = true }
@@ -85,7 +82,6 @@ postcard = { version = "1.1", features = ["alloc"], optional = true }
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
-js-sys = { version = "0.3", optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 futures = { version = "0.3.31", features = ["alloc"] }
 clap_complete = "4.5.65"
@@ -97,9 +93,6 @@ profiling = []
 native = [
     "tower-lsp",
     "tokio",
-    "tokio-util",
-    "tower",
-    "tower-service",
     "env_logger",
     "chrono",
     "notify",
@@ -109,7 +102,7 @@ native = [
     "colored",
     "memory-stats",
 ]
-wasm = ["wasm-bindgen", "console_error_panic_hook", "js-sys", "serde-wasm-bindgen"]
+wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 
 [dev-dependencies]
 assert_cmd = "2.1.1"
