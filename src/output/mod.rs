@@ -119,17 +119,12 @@ impl OutputFormat {
 /// Output writer that handles stdout/stderr routing
 pub struct OutputWriter {
     use_stderr: bool,
-    _quiet: bool,
     silent: bool,
 }
 
 impl OutputWriter {
-    pub fn new(use_stderr: bool, quiet: bool, silent: bool) -> Self {
-        Self {
-            use_stderr,
-            _quiet: quiet,
-            silent,
-        }
+    pub fn new(use_stderr: bool, silent: bool) -> Self {
+        Self { use_stderr, silent }
     }
 
     /// Write output to appropriate stream
@@ -264,25 +259,22 @@ mod tests {
 
     #[test]
     fn test_output_writer_new() {
-        let writer1 = OutputWriter::new(false, false, false);
+        let writer1 = OutputWriter::new(false, false);
         assert!(!writer1.use_stderr);
-        assert!(!writer1._quiet);
         assert!(!writer1.silent);
 
-        let writer2 = OutputWriter::new(true, true, false);
+        let writer2 = OutputWriter::new(true, false);
         assert!(writer2.use_stderr);
-        assert!(writer2._quiet);
         assert!(!writer2.silent);
 
-        let writer3 = OutputWriter::new(false, false, true);
+        let writer3 = OutputWriter::new(false, true);
         assert!(!writer3.use_stderr);
-        assert!(!writer3._quiet);
         assert!(writer3.silent);
     }
 
     #[test]
     fn test_output_writer_silent_mode() {
-        let writer = OutputWriter::new(false, false, true);
+        let writer = OutputWriter::new(false, true);
 
         // All write methods should succeed but not produce output when silent
         assert!(writer.write("test").is_ok());
@@ -293,7 +285,7 @@ mod tests {
     #[test]
     fn test_output_writer_write_methods() {
         // Test non-silent mode
-        let writer = OutputWriter::new(false, false, false);
+        let writer = OutputWriter::new(false, false);
 
         // These should succeed (we can't easily test the actual output)
         assert!(writer.write("test").is_ok());
@@ -303,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_output_writer_stderr_mode() {
-        let writer = OutputWriter::new(true, false, false);
+        let writer = OutputWriter::new(true, false);
 
         // Should write to stderr instead of stdout
         assert!(writer.write("stderr test").is_ok());

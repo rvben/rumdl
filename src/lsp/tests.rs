@@ -5532,7 +5532,11 @@ async fn test_hover_file_preview_truncates() {
     );
 
     // Create a target file with more than 15 lines
-    let long_content: String = (1..=30).map(|i| format!("Line {i}\n")).collect();
+    let long_content: String = (1..=30).fold(String::new(), |mut acc, i| {
+        use std::fmt::Write;
+        let _ = writeln!(acc, "Line {i}");
+        acc
+    });
     server.documents.write().await.insert(
         target_uri.clone(),
         DocumentEntry {

@@ -48,7 +48,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     use rumdl_lib::rule::Severity;
 
     // Create output writer for linting results
-    let output_writer = OutputWriter::new(args.stderr, quiet, args.silent);
+    let output_writer = OutputWriter::new(args.stderr, args.silent);
 
     // Read RUMDL_OUTPUT_FORMAT env var (if set)
     let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
@@ -140,7 +140,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     // (warnings are collected and formatted as a batch at the end)
     let batch_output_writer;
     let effective_output_writer = if needs_collection {
-        batch_output_writer = OutputWriter::new(false, true, true);
+        batch_output_writer = OutputWriter::new(false, true);
         &batch_output_writer
     } else {
         &output_writer

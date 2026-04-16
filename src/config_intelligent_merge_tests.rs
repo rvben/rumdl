@@ -12,7 +12,7 @@ mod tests {
     use std::collections::HashSet;
 
     /// Helper to create a SourcedValue with a vec
-    fn make_sourced_vec(values: Vec<&str>, source: ConfigSource) -> SourcedValue<Vec<String>> {
+    fn make_sourced_vec(values: &[&str], source: ConfigSource) -> SourcedValue<Vec<String>> {
         SourcedValue::new(values.iter().map(std::string::ToString::to_string).collect(), source)
     }
 
@@ -36,7 +36,7 @@ mod tests {
     #[test]
     fn test_merge_union_combines_arrays() {
         // User config disables MD013
-        let mut user_disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
+        let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Project config disables MD041
         user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::PyprojectToml, None, None);
@@ -49,7 +49,7 @@ mod tests {
     #[test]
     fn test_merge_union_deduplicates() {
         // User config disables MD013, MD041
-        let mut user_disable = make_sourced_vec(vec!["MD013", "MD041"], ConfigSource::UserConfig);
+        let mut user_disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);
 
         // Project config also disables MD013 (duplicate) and MD047 (new)
         user_disable.merge_union(
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_merge_union_with_empty_new_value() {
         // User config disables MD013
-        let mut user_disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
+        let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Project config has empty disable array
         user_disable.merge_union(vec![], ConfigSource::PyprojectToml, None, None);
@@ -79,7 +79,7 @@ mod tests {
     #[test]
     fn test_merge_union_respects_precedence() {
         // User config (lower precedence)
-        let mut user_disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
+        let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Default config (even lower precedence) shouldn't add
         user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::Default, None, None);
@@ -92,7 +92,7 @@ mod tests {
     #[test]
     fn test_merge_union_equal_precedence_merges() {
         // First config
-        let mut disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
+        let mut disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Another config at same precedence level
         disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None, None);
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_merge_replace_replaces_arrays() {
         // User config enables MD001, MD002
-        let mut user_enable = make_sourced_vec(vec!["MD001", "MD002"], ConfigSource::UserConfig);
+        let mut user_enable = make_sourced_vec(&["MD001", "MD002"], ConfigSource::UserConfig);
 
         // Project config enables only MD003 (different set)
         user_enable.merge_override(vec!["MD003".to_string()], ConfigSource::PyprojectToml, None, None);
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn test_merge_replace_respects_precedence() {
         // Project config
-        let mut enable = make_sourced_vec(vec!["MD001"], ConfigSource::PyprojectToml);
+        let mut enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
         // User config (lower precedence) shouldn't replace
         enable.merge_override(vec!["MD002".to_string()], ConfigSource::UserConfig, None, None);
@@ -171,8 +171,8 @@ mod tests {
 
         // Start with user config
         let mut config = SourcedConfig::default();
-        config.global.disable = make_sourced_vec(vec!["MD013", "MD041"], ConfigSource::UserConfig);
-        config.global.enable = make_sourced_vec(vec![], ConfigSource::UserConfig);
+        config.global.disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);
+        config.global.enable = make_sourced_vec(&[], ConfigSource::UserConfig);
 
         // Create project config fragment
         let mut project_fragment = SourcedConfigFragment {
@@ -185,8 +185,8 @@ mod tests {
             rule_display_names: Default::default(),
             unknown_keys: vec![],
         };
-        project_fragment.global.disable = make_sourced_vec(vec!["MD047"], ConfigSource::PyprojectToml);
-        project_fragment.global.enable = make_sourced_vec(vec!["MD001"], ConfigSource::PyprojectToml);
+        project_fragment.global.disable = make_sourced_vec(&["MD047"], ConfigSource::PyprojectToml);
+        project_fragment.global.enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
         // Merge project config
         config.merge(project_fragment);
@@ -205,8 +205,8 @@ mod tests {
 
         // User config disables MD013
         let mut config = SourcedConfig::default();
-        config.global.disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
-        config.global.enable = make_sourced_vec(vec![], ConfigSource::UserConfig);
+        config.global.disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
+        config.global.enable = make_sourced_vec(&[], ConfigSource::UserConfig);
 
         // Project config enables MD013 (conflict!)
         let mut project_fragment = SourcedConfigFragment {
@@ -219,7 +219,7 @@ mod tests {
             rule_display_names: Default::default(),
             unknown_keys: vec![],
         };
-        project_fragment.global.enable = make_sourced_vec(vec!["MD013"], ConfigSource::PyprojectToml);
+        project_fragment.global.enable = make_sourced_vec(&["MD013"], ConfigSource::PyprojectToml);
 
         // Merge and resolve conflicts
         config.merge(project_fragment);
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_cli_has_highest_precedence() {
         // Project config
-        let mut enable = make_sourced_vec(vec!["MD001"], ConfigSource::PyprojectToml);
+        let mut enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
         // CLI flag
         enable.merge_override(vec!["MD002".to_string()], ConfigSource::Cli, None, None);
@@ -274,7 +274,7 @@ mod tests {
 
         // User config disables rules
         let mut config = SourcedConfig::default();
-        config.global.disable = make_sourced_vec(vec!["MD013", "MD041"], ConfigSource::UserConfig);
+        config.global.disable = make_sourced_vec(&["MD013", "MD041"], ConfigSource::UserConfig);
 
         // Project config has empty enable (no rules explicitly enabled)
         let project_fragment = SourcedConfigFragment {
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_multiple_merges_accumulate_disable() {
-        let mut disable = make_sourced_vec(vec!["MD013"], ConfigSource::Default);
+        let mut disable = make_sourced_vec(&["MD013"], ConfigSource::Default);
 
         // User config adds MD041
         disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None, None);
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_history_tracking() {
-        let mut disable = make_sourced_vec(vec!["MD013"], ConfigSource::UserConfig);
+        let mut disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Initial state should have one override
         assert_eq!(disable.overrides.len(), 1);

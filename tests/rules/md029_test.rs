@@ -429,7 +429,7 @@ fn test_single_item_edge_cases() {
     ];
 
     for (style, content, should_have_error) in test_cases {
-        let rule = MD029OrderedListPrefix::new(style.clone());
+        let rule = MD029OrderedListPrefix::new(style);
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -997,7 +997,7 @@ fn test_md029_all_styles_with_nesting() {
    1. Another nested"#;
 
     for style in styles {
-        let rule = MD029OrderedListPrefix::new(style.clone());
+        let rule = MD029OrderedListPrefix::new(style);
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx);
 

@@ -38,6 +38,14 @@
 #![allow(clippy::items_after_statements)]
 #![allow(clippy::match_same_arms)]
 #![allow(clippy::format_push_string)]
+// Test smoke-constructors like `let _formatter = Foo;` fire this lint,
+// but are acceptable: they verify the type exists without asserting behavior.
+#![allow(clippy::no_effect_underscore_binding)]
+// Style-only: `Default::default()` vs `T::default()`. Both are readable.
+#![allow(clippy::default_trait_access)]
+// Style-only: `"".to_string()` vs `String::new()`. Tests favor the former
+// for symmetry with non-empty string literals.
+#![allow(clippy::manual_string_new)]
 
 pub mod code_block_tools;
 pub mod config;

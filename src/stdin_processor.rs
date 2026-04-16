@@ -24,7 +24,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         true
     };
     // Create output writer for linting results
-    let output_writer = OutputWriter::new(use_stderr, quiet, silent);
+    let output_writer = OutputWriter::new(use_stderr, silent);
 
     // Read RUMDL_OUTPUT_FORMAT env var (if set)
     let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
@@ -228,7 +228,7 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 file_processor::count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings);
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
-            let fix_writer = OutputWriter::new(true, quiet, silent);
+            let fix_writer = OutputWriter::new(true, silent);
             if !remaining_warnings.is_empty() {
                 match output_format {
                     // Batch formats: remaining-only warnings
