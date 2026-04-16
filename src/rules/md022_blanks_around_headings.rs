@@ -113,7 +113,7 @@ impl MD022BlanksAroundHeadings {
     }
 
     /// Fix a document by adding appropriate blank lines around headings
-    fn _fix_content(&self, ctx: &crate::lint_context::LintContext) -> String {
+    fn fix_content(&self, ctx: &crate::lint_context::LintContext) -> String {
         // Content is normalized to LF at I/O boundary
         let line_ending = "\n";
         let had_trailing_newline = ctx.content.ends_with('\n');
@@ -644,7 +644,7 @@ impl Rule for MD022BlanksAroundHeadings {
         }
 
         // Use a consolidated fix that avoids adding multiple blank lines
-        let fixed = self._fix_content(ctx);
+        let fixed = self.fix_content(ctx);
 
         Ok(fixed)
     }
@@ -923,7 +923,7 @@ Even more content.
 Final content.";
 
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule._fix_content(&ctx);
+        let result = rule.fix_content(&ctx);
         assert_eq!(
             result, expected,
             "Fix should only add missing blank lines, never remove existing ones"
@@ -958,7 +958,7 @@ Final content.";
         let expected = "## Configuration\n\nThis rule has the following configuration options:\n\n- `option1`: Description of option 1.\n- `option2`: Description of option 2.\n\n## Another Section\n\nSome content here.";
 
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule._fix_content(&ctx);
+        let result = rule.fix_content(&ctx);
         assert_eq!(result, expected, "Fix should not add blank lines before lists");
     }
 

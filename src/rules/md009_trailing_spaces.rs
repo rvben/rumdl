@@ -84,7 +84,7 @@ impl Rule for MD009TrailingSpaces {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -141,7 +141,7 @@ impl Rule for MD009TrailingSpaces {
                     let fix_range = if line_is_ascii {
                         line_start..line_start + line.len()
                     } else {
-                        _line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.chars().count())
+                        line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.chars().count())
                     };
 
                     warnings.push(LintWarning {
@@ -209,7 +209,7 @@ impl Rule for MD009TrailingSpaces {
                 let end = start + trailing_all_whitespace;
                 start..end
             } else {
-                _line_index.line_col_to_byte_range_with_length(
+                line_index.line_col_to_byte_range_with_length(
                     line_num + 1,
                     trimmed.chars().count() + 1,
                     trailing_all_whitespace,

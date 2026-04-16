@@ -693,21 +693,21 @@ impl Rule for MD075OrphanedTableRows {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
+    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
     where
         Self: Sized,
     {
-        let mut md060_config = crate::rule_config_serde::load_rule_config::<MD060Config>(_config);
+        let mut md060_config = crate::rule_config_serde::load_rule_config::<MD060Config>(config);
         if md060_config.style == "any" {
             // MD075 should normalize merged tables by default; "any" preserves broken alignment.
             md060_config.style = "aligned".to_string();
         }
-        let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(_config);
-        let md013_disabled = _config
+        let md013_config = crate::rule_config_serde::load_rule_config::<MD013Config>(config);
+        let md013_disabled = config
             .global
             .disable
             .iter()
-            .chain(_config.global.extend_disable.iter())
+            .chain(config.global.extend_disable.iter())
             .any(|rule| rule.trim().eq_ignore_ascii_case("MD013"));
         let formatter = MD060TableFormat::from_config_struct(md060_config, md013_config, md013_disabled);
         Box::new(Self::with_formatter(formatter))

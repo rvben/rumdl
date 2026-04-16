@@ -132,8 +132,8 @@ pub fn is_snippet_section_start(line: &str) -> bool {
     }
 
     // Must have proper bracket structure
-    if let Some(_start_idx) = line.find("[start:")
-        && let Some(_end_idx) = line[_start_idx..].find(']')
+    if let Some(start_idx) = line.find("[start:")
+        && line[start_idx..].contains(']')
     {
         // Empty section names are allowed (lenient for detection)
         let trimmed = line.trim();
@@ -170,8 +170,8 @@ pub fn is_snippet_section_end(line: &str) -> bool {
     }
 
     // Must have proper bracket structure
-    if let Some(_start_idx) = line.find("[end:")
-        && let Some(_end_idx) = line[_start_idx..].find(']')
+    if let Some(start_idx) = line.find("[end:")
+        && line[start_idx..].contains(']')
     {
         // Empty section names are allowed (lenient for detection)
         let trimmed = line.trim();

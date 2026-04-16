@@ -351,8 +351,8 @@ impl MarkdownlintConfig {
             sourced_config.global.enable = SourcedValue::new(enabled_rules, ConfigSource::ProjectConfig);
         }
 
-        if let Some(_f) = file {
-            sourced_config.loaded_files.push(_f);
+        if let Some(f) = file {
+            sourced_config.loaded_files.push(f);
         }
         sourced_config
     }

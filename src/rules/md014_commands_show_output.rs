@@ -180,7 +180,7 @@ impl Rule for MD014CommandsShowOutput {
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
         let content = ctx.content;
-        let _line_index = &ctx.line_index;
+        let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
 
@@ -206,8 +206,8 @@ impl Rule for MD014CommandsShowOutput {
                                 let content_end_line = line_num - 1; // Line before closing fence (0-indexed)
 
                                 // Calculate byte range for the content lines including their newlines
-                                let start_byte = _line_index.get_line_start_byte(content_start_line + 1).unwrap_or(0); // +1 for 1-indexed
-                                let end_byte = _line_index
+                                let start_byte = line_index.get_line_start_byte(content_start_line + 1).unwrap_or(0); // +1 for 1-indexed
+                                let end_byte = line_index
                                     .get_line_start_byte(content_end_line + 2)
                                     .unwrap_or(start_byte); // +2 to include newline after last content line
                                 start_byte..end_byte
