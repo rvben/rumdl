@@ -193,7 +193,7 @@ impl MD051LinkFragments {
             });
             if let Some(alias_anchor) = alias {
                 let heading_idx = file_index.headings.len() - 1;
-                file_index.add_anchor_alias(alias_anchor, heading_idx);
+                file_index.add_anchor_alias(&alias_anchor, heading_idx);
             }
         } else {
             fragment_counts.insert(fragment.to_string(), 1);
@@ -696,7 +696,7 @@ impl Rule for MD051LinkFragments {
                             if let Some(caps) = HTML_ANCHOR_PATTERN.captures(tag)
                                 && let Some(id_match) = caps.get(1)
                             {
-                                file_index.add_html_anchor(id_match.as_str().to_string());
+                                file_index.add_html_anchor(id_match.as_str());
                             }
                             pos = tag_end;
                         } else {
@@ -713,7 +713,7 @@ impl Rule for MD051LinkFragments {
             if line_info.heading.is_none() && content.contains('{') && content.contains('#') {
                 for caps in ATTR_ANCHOR_PATTERN.captures_iter(content) {
                     if let Some(id_match) = caps.get(1) {
-                        file_index.add_attribute_anchor(id_match.as_str().to_string());
+                        file_index.add_attribute_anchor(id_match.as_str());
                     }
                 }
             }
@@ -757,7 +757,7 @@ impl Rule for MD051LinkFragments {
                     && let Some(caps) = MD_SETTING_PATTERN.captures(content)
                     && let Some(name) = caps.get(1)
                 {
-                    file_index.add_html_anchor(name.as_str().to_string());
+                    file_index.add_html_anchor(name.as_str());
                 }
             }
         }

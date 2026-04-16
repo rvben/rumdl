@@ -1380,7 +1380,7 @@ fn reflow_elements_sentence_per_line(
 
                         if text_ends_with_abbreviation(trimmed, &abbreviations) {
                             // Don't emit yet - this sentence ends with abbreviation, continue accumulating
-                            current_line = sentence.clone();
+                            current_line.clone_from(sentence);
                         } else {
                             // Normal case - emit the first sentence
                             lines.push(sentence.clone());
@@ -1397,7 +1397,7 @@ fn reflow_elements_sentence_per_line(
                             current_line.clear();
                         } else {
                             // Incomplete sentence - save for next iteration
-                            current_line = sentence.clone();
+                            current_line.clone_from(sentence);
                         }
                     } else {
                         // Complete sentences in the middle
@@ -2310,7 +2310,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
                 // Not adjacent, would exceed — start new line
                 lines.push(current_line.trim().to_string());
-                current_line = element_str.clone();
+                current_line.clone_from(&element_str);
                 current_length = element_len;
                 current_line_element_spans.clear();
                 current_line_element_spans.push((0, element_str.len()));

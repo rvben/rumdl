@@ -1018,7 +1018,7 @@ impl Rule for MD060TableFormat {
             }
 
             for (i, &line_idx) in table_line_indices.iter().enumerate() {
-                result_lines[line_idx] = format_result.lines[i].clone();
+                result_lines[line_idx].clone_from(&format_result.lines[i]);
             }
         }
 

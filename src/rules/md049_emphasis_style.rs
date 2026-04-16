@@ -57,7 +57,7 @@ impl MD049EmphasisStyle {
         }
 
         // Find single emphasis spans (not strong emphasis)
-        let spans = find_single_emphasis_spans(&line_no_code, markers);
+        let spans = find_single_emphasis_spans(&line_no_code, &markers);
 
         for span in spans {
             let marker_char = span.opening.as_char();

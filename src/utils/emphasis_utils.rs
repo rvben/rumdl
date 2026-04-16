@@ -151,7 +151,7 @@ pub fn find_emphasis_markers(line: &str) -> Vec<EmphasisMarker> {
 }
 
 /// Find all emphasis spans in a line, excluding only single emphasis (not strong)
-pub fn find_single_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<EmphasisSpan> {
+pub fn find_single_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisSpan> {
     // Early return for insufficient markers
     if markers.len() < 2 {
         return Vec::new();
@@ -218,7 +218,7 @@ pub fn find_single_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> V
 }
 
 /// Optimized emphasis span finding with reduced complexity (includes both single and strong)
-pub fn find_emphasis_spans(line: &str, markers: Vec<EmphasisMarker>) -> Vec<EmphasisSpan> {
+pub fn find_emphasis_spans(line: &str, markers: &[EmphasisMarker]) -> Vec<EmphasisSpan> {
     // Early return for insufficient markers
     if markers.len() < 2 {
         return Vec::new();
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn test_single_emphasis_span_detection() {
         let markers = find_emphasis_markers("This has *valid* emphasis and **strong** too");
-        let spans = find_single_emphasis_spans("This has *valid* emphasis and **strong** too", markers);
+        let spans = find_single_emphasis_spans("This has *valid* emphasis and **strong** too", &markers);
         assert_eq!(spans.len(), 1); // Only the single emphasis
         assert_eq!(spans[0].content, "valid");
         assert!(!spans[0].has_leading_space);
@@ -384,7 +384,7 @@ mod tests {
     #[test]
     fn test_emphasis_with_spaces() {
         let markers = find_emphasis_markers("This has * invalid * emphasis");
-        let spans = find_emphasis_spans("This has * invalid * emphasis", markers);
+        let spans = find_emphasis_spans("This has * invalid * emphasis", &markers);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].content, " invalid ");
         assert!(spans[0].has_leading_space);
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn test_mixed_markers() {
         let markers = find_emphasis_markers("This has *asterisk* and _underscore_ emphasis");
-        let spans = find_single_emphasis_spans("This has *asterisk* and _underscore_ emphasis", markers);
+        let spans = find_single_emphasis_spans("This has *asterisk* and _underscore_ emphasis", &markers);
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].opening.as_char(), '*');
         assert_eq!(spans[1].opening.as_char(), '_');

@@ -449,7 +449,7 @@ impl RumdlLanguageServer {
         let target_path = if link.file_path.is_empty() {
             current_file.clone()
         } else {
-            normalize_path(current_dir.join(&link.file_path))
+            normalize_path(&current_dir.join(&link.file_path))
         };
 
         // Read target file content
@@ -601,7 +601,7 @@ impl RumdlLanguageServer {
             let target_path = if link.file_path.is_empty() {
                 current_file.clone()
             } else {
-                normalize_path(current_dir.join(&link.file_path))
+                normalize_path(&current_dir.join(&link.file_path))
             };
 
             return self.find_references_to_target(&target_path, &link.anchor).await;
@@ -630,7 +630,7 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    let resolved_target = normalize_path(source_dir.join(&link.target_path));
+                    let resolved_target = normalize_path(&source_dir.join(&link.target_path));
                     resolved_target == *target_file
                 })
                 .collect();
@@ -684,7 +684,7 @@ impl RumdlLanguageServer {
         let target_path = if link.file_path.is_empty() {
             current_file.clone()
         } else {
-            normalize_path(current_dir.join(&link.file_path))
+            normalize_path(&current_dir.join(&link.file_path))
         };
 
         let target_uri = Url::from_file_path(&target_path).ok()?;
@@ -732,7 +732,7 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    let resolved_target = normalize_path(source_dir.join(&link.target_path));
+                    let resolved_target = normalize_path(&source_dir.join(&link.target_path));
                     resolved_target == *target_path && link.fragment.eq_ignore_ascii_case(fragment)
                 })
                 .collect();
@@ -1012,7 +1012,7 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    let resolved = normalize_path(source_dir.join(&link.target_path));
+                    let resolved = normalize_path(&source_dir.join(&link.target_path));
                     resolved == *target_path && link.fragment.eq_ignore_ascii_case(old_anchor)
                 })
                 .cloned()

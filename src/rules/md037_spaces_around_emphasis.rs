@@ -284,7 +284,7 @@ impl MD037NoSpaceInEmphasis {
         }
 
         // Find valid emphasis spans
-        let spans = find_emphasis_spans(&processed_content, markers);
+        let spans = find_emphasis_spans(&processed_content, &markers);
 
         // Check each span for spacing issues
         for span in spans {
@@ -356,14 +356,14 @@ mod tests {
     #[test]
     fn test_emphasis_span_detection() {
         let markers = find_emphasis_markers("This has *valid* emphasis");
-        let spans = find_emphasis_spans("This has *valid* emphasis", markers);
+        let spans = find_emphasis_spans("This has *valid* emphasis", &markers);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].content, "valid");
         assert!(!spans[0].has_leading_space);
         assert!(!spans[0].has_trailing_space);
 
         let markers = find_emphasis_markers("This has * invalid * emphasis");
-        let spans = find_emphasis_spans("This has * invalid * emphasis", markers);
+        let spans = find_emphasis_spans("This has * invalid * emphasis", &markers);
         assert_eq!(spans.len(), 1);
         assert_eq!(spans[0].content, " invalid ");
         assert!(spans[0].has_leading_space);

@@ -697,7 +697,7 @@ impl FileIndex {
 
     /// Add an alternative anchor that resolves to an existing heading.
     /// Used for platform-specific anchor conventions (e.g., Python-Markdown `_N` dedup).
-    pub fn add_anchor_alias(&mut self, anchor: String, heading_index: usize) {
+    pub fn add_anchor_alias(&mut self, anchor: &str, heading_index: usize) {
         if heading_index < self.headings.len() {
             self.anchor_to_heading.insert(anchor.to_lowercase(), heading_index);
         }
@@ -738,14 +738,14 @@ impl FileIndex {
     }
 
     /// Add an HTML anchor (from `<a id="...">` or `<element id="...">` tags)
-    pub fn add_html_anchor(&mut self, anchor: String) {
+    pub fn add_html_anchor(&mut self, anchor: &str) {
         if !anchor.is_empty() {
             self.html_anchors.insert(anchor.to_lowercase());
         }
     }
 
     /// Add an attribute anchor (from { #id } syntax on non-heading elements)
-    pub fn add_attribute_anchor(&mut self, anchor: String) {
+    pub fn add_attribute_anchor(&mut self, anchor: &str) {
         if !anchor.is_empty() {
             self.attribute_anchors.insert(anchor.to_lowercase());
         }

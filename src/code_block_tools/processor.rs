@@ -195,6 +195,7 @@ pub struct FormatOutput {
 
 /// Main processor for code block tools.
 /// Context in which a tool is being used.
+#[derive(Copy, Clone)]
 enum ToolContext {
     Lint,
     Format,

@@ -408,7 +408,7 @@ impl RumdlLanguageServer {
             let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
                 return Vec::new();
             };
-            normalize_path(current_dir.join(file_path))
+            normalize_path(&current_dir.join(file_path))
         };
 
         let index = self.workspace_index.read().await;
@@ -483,7 +483,7 @@ fn make_relative_path(from_dir: &Path, to_file: &Path) -> PathBuf {
 }
 
 /// Resolve `..` and `.` components in a path without touching the filesystem.
-pub(super) fn normalize_path(path: PathBuf) -> PathBuf {
+pub(super) fn normalize_path(path: &std::path::Path) -> PathBuf {
     let mut result = PathBuf::new();
     for component in path.components() {
         match component {

@@ -43,7 +43,7 @@ impl MD033NoInlineHtml {
 
     pub fn with_allowed(allowed_vec: Vec<String>) -> Self {
         let config = MD033Config {
-            allowed: allowed_vec.clone(),
+            allowed: allowed_vec,
             disallowed: Vec::new(),
             fix: false,
             ..MD033Config::default()
@@ -64,7 +64,7 @@ impl MD033NoInlineHtml {
     pub fn with_disallowed(disallowed_vec: Vec<String>) -> Self {
         let config = MD033Config {
             allowed: Vec::new(),
-            disallowed: disallowed_vec.clone(),
+            disallowed: disallowed_vec,
             fix: false,
             ..MD033Config::default()
         };
