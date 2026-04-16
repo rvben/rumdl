@@ -843,7 +843,7 @@ fn has_meaningful_content_between(content: &str, current: &ListBlock, next: &Lis
             }
 
             // Horizontal rules separate lists (---, ***, ___)
-            if is_horizontal_rule(trimmed) {
+            if is_horizontal_rule_content(trimmed) {
                 return true;
             }
 

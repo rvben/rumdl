@@ -61,10 +61,10 @@ fn test_line_info() {
     assert!(line3.is_blank);
 
     // Test helper methods
-    assert_eq!(ctx.line_to_byte_offset(1), Some(0));
-    assert_eq!(ctx.line_to_byte_offset(2), Some(8));
     assert_eq!(ctx.line_info(1).map(|l| l.indent), Some(0));
     assert_eq!(ctx.line_info(2).map(|l| l.indent), Some(4));
+    assert_eq!(ctx.line_info(1).map(|l| l.byte_offset), Some(0));
+    assert_eq!(ctx.line_info(2).map(|l| l.byte_offset), Some(8));
 }
 
 #[test]
@@ -975,48 +975,12 @@ Use [link][ref1] and [link][REF2]."#;
 }
 
 #[test]
-fn test_reference_lookup_o1_get_reference_def() {
-    let content = r#"[myref]: https://example.com "My Title"
-"#;
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-
-    // Test get_reference_def
-    let def = ctx.get_reference_def("myref").expect("Should find myref");
-    assert_eq!(def.url, "https://example.com");
-    assert_eq!(def.title.as_deref(), Some("My Title"));
-
-    // Case insensitive
-    let def2 = ctx.get_reference_def("MYREF").expect("Should find MYREF");
-    assert_eq!(def2.url, "https://example.com");
-
-    // Non-existent
-    assert!(ctx.get_reference_def("nonexistent").is_none());
-}
-
-#[test]
-fn test_reference_lookup_o1_has_reference_def() {
-    let content = r#"[foo]: /foo
-[BAR]: /bar
-"#;
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-
-    // Test has_reference_def
-    assert!(ctx.has_reference_def("foo"));
-    assert!(ctx.has_reference_def("FOO")); // case insensitive
-    assert!(ctx.has_reference_def("bar"));
-    assert!(ctx.has_reference_def("Bar")); // case insensitive
-    assert!(!ctx.has_reference_def("baz")); // doesn't exist
-}
-
-#[test]
 fn test_reference_lookup_o1_empty_content() {
     let content = "No references here.";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
     assert!(ctx.reference_defs.is_empty());
     assert_eq!(ctx.get_reference_url("anything"), None);
-    assert!(ctx.get_reference_def("anything").is_none());
-    assert!(!ctx.has_reference_def("anything"));
 }
 
 #[test]

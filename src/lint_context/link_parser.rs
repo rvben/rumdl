@@ -338,7 +338,6 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     id: footnote_id.to_string(),
                     line: line_num,
                     byte_offset: range.start,
-                    byte_end: range.end,
                 });
             }
             _ => {}

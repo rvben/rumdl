@@ -481,7 +481,6 @@ pub(super) fn parse_html_tags(
                 tag_name,
                 is_closing,
                 is_self_closing,
-                raw_content: full_match.as_str().to_string(),
             });
 
             // Advance past the match to avoid overlapping
@@ -580,15 +579,6 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
         }
 
         let url = full_match.as_str();
-        let url_type = if url.starts_with("https://") {
-            "https"
-        } else if url.starts_with("http://") {
-            "http"
-        } else if url.starts_with("ftp://") {
-            "ftp"
-        } else {
-            "other"
-        };
 
         // Find which line this URL is on using binary search
         let line_idx = lines
@@ -605,7 +595,6 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
             byte_offset: match_start,
             byte_end: match_end,
             url: url.to_string(),
-            url_type: url_type.to_string(),
         });
     }
 
@@ -653,7 +642,6 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
             byte_offset: match_start,
             byte_end: match_end,
             url: email.to_string(),
-            url_type: "email".to_string(),
         });
     }
 

@@ -159,8 +159,6 @@ pub struct FootnoteRef {
     pub line: usize,
     /// Start byte offset in document
     pub byte_offset: usize,
-    /// End byte offset in document
-    pub byte_end: usize,
 }
 
 /// Parsed image information
@@ -339,20 +337,14 @@ impl<'a> Iterator for ValidHeadingsIter<'a> {
 pub struct BlockquoteInfo {
     /// Nesting level (1 for >, 2 for >>, etc.)
     pub nesting_level: usize,
-    /// The indentation before the blockquote marker
-    pub indent: String,
     /// Column where the first > starts (0-based)
     pub marker_column: usize,
     /// The blockquote prefix (e.g., "> ", ">> ", etc.)
     pub prefix: String,
     /// Content after the blockquote marker(s)
     pub content: String,
-    /// Whether the line has no space after the marker
-    pub has_no_space_after_marker: bool,
     /// Whether the line has multiple spaces after the marker
     pub has_multiple_spaces_after_marker: bool,
-    /// Whether this is an empty blockquote line needing MD028 fix
-    pub needs_md028_fix: bool,
 }
 
 /// Information about a list block
@@ -424,8 +416,6 @@ pub struct HtmlTag {
     pub is_closing: bool,
     /// Whether it's self-closing (`<tag />`)
     pub is_self_closing: bool,
-    /// Raw tag content
-    pub raw_content: String,
 }
 
 /// Pre-parsed emphasis span information
@@ -443,8 +433,6 @@ pub struct EmphasisSpan {
     pub byte_end: usize,
     /// Type of emphasis ('*' or '_')
     pub marker: char,
-    /// Number of markers (1 for italic, 2 for bold, 3+ for bold+italic)
-    pub marker_count: usize,
     /// Content inside the emphasis
     pub content: String,
 }
@@ -477,8 +465,6 @@ pub struct BareUrl {
     pub byte_end: usize,
     /// The URL string
     pub url: String,
-    /// Type of URL ("http", "https", "ftp", "email")
-    pub url_type: String,
 }
 
 /// A lazy continuation line detected by pulldown-cmark.
@@ -536,9 +522,4 @@ pub fn is_horizontal_rule_content(trimmed: &str) -> bool {
         }
     }
     count >= 3
-}
-
-/// Backwards-compatible alias for `is_horizontal_rule_content`
-pub fn is_horizontal_rule(trimmed: &str) -> bool {
-    is_horizontal_rule_content(trimmed)
 }
