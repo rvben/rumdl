@@ -84,67 +84,6 @@ Content with trailing space{}
         .stdout(predicate::str::contains("code=MD022]"));
 }
 
-// Config tests are currently disabled because config loading happens after output format determination
-// TODO: Fix the order of config loading to support output format in config files
-
-// #[test]
-// fn test_output_format_from_config() {
-//     let temp_dir = tempdir().unwrap();
-//     let test_file = temp_dir.path().join("test.md");
-//     let config_file = temp_dir.path().join(".rumdl.toml");
-//
-//     let config_content = r#"[global]
-// output-format = "pylint"
-// "#;
-//
-//     let md_content = r#"# Heading
-// Content with trailing space
-// "#;
-//
-//     fs::write(&test_file, md_content).unwrap();
-//     fs::write(&config_file, config_content).unwrap();
-//
-//     let mut cmd = cargo_bin_cmd!("rumdl");
-//     cmd.current_dir(&temp_dir)
-//         .arg("check")
-//         .arg("test.md");
-//
-//     cmd.assert()
-//         .failure()
-//         .stdout(predicate::str::contains(":1:1: [CMD022]"))
-//         .stdout(predicate::str::contains(":2:29: [CMD009]"));
-// }
-
-// #[test]
-// fn test_output_format_cli_overrides_config() {
-//     let temp_dir = tempdir().unwrap();
-//     let test_file = temp_dir.path().join("test.md");
-//     let config_file = temp_dir.path().join(".rumdl.toml");
-//
-//     let config_content = r#"[global]
-// output-format = "pylint"
-// "#;
-//
-//     let md_content = r#"# Heading
-// Content with trailing space
-// "#;
-//
-//     fs::write(&test_file, md_content).unwrap();
-//     fs::write(&config_file, config_content).unwrap();
-//
-//     let mut cmd = cargo_bin_cmd!("rumdl");
-//     cmd.current_dir(&temp_dir)
-//         .arg("check")
-//         .arg("--output-format")
-//         .arg("azure")
-//         .arg("test.md");
-//
-//     // Should use azure format from CLI, not pylint from config
-//     cmd.assert()
-//         .failure()
-//         .stdout(predicate::str::contains("##vso[task.logissue type=warning;"));
-// }
-
 #[test]
 fn test_rumdl_output_format_env_var() {
     let temp_dir = tempdir().unwrap();

@@ -609,10 +609,10 @@ fn test_roundtrip_custom_blank_lines() {
     assert_check_fix_roundtrip("# Heading 1\nContent.\n## Heading 2\nMore content.", &rule);
 }
 
-// TODO: kramdown IAL and frontmatter roundtrip tests skipped — MD022's
-// _fix_content has special IAL/frontmatter handling that check()'s Fix
-// structs don't replicate yet. Refactoring fix() requires enhancing
-// check() to emit IAL-aware Fix structs first.
+// kramdown IAL and frontmatter roundtrip tests are intentionally omitted:
+// MD022's `_fix_content` has special IAL/frontmatter handling that
+// `check()`'s `Fix` structs don't replicate. Enhancing `check()` to emit
+// IAL-aware `Fix` structs is a prerequisite for covering those cases here.
 
 #[test]
 fn test_roundtrip_code_block_heading() {

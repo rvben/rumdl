@@ -324,8 +324,9 @@ fn test_md026_fix_preserves_formatting() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let fixed = rule.fix(&ctx).unwrap();
 
-    // Check that punctuation is removed
-    // TODO: Headings without space after # (like "###No space") may not be properly detected
+    // Check that punctuation is removed. "###No space heading;" is not a valid
+    // heading (ATX requires a space after #), so its trailing punctuation is
+    // left untouched.
     assert_eq!(
         fixed,
         "# Heading with period\n## Another heading with comma\n###No space heading;"

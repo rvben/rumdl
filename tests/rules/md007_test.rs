@@ -333,7 +333,6 @@ mod comprehensive_tests {
         assert_eq!(fixed, "* Item 1\n  * Item 2\n    * Item 3");
 
         // Mixed tabs and spaces
-        // TODO: Tab handling may not be consistent
         let content_mixed = "* Item 1\n \t* Item 2\n\t * Item 3";
         let ctx = LintContext::new(content_mixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();

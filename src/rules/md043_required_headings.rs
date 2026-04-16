@@ -295,19 +295,9 @@ impl Rule for MD043RequiredHeadings {
             return Ok(content.to_string());
         }
 
-        // IMPORTANT: MD043 fixes are inherently risky as they require restructuring the document.
-        // Instead of making destructive changes, we should be conservative and only make
-        // minimal changes when we're confident about the user's intent.
-
-        // For now, we'll avoid making destructive fixes and preserve the original content.
-        // This prevents data loss while still allowing the rule to identify issues.
-
-        // TODO: In the future, this could be enhanced to:
-        // 1. Insert missing required headings at appropriate positions
-        // 2. Rename existing headings to match requirements (when structure is similar)
-        // 3. Provide more granular fixes based on the specific mismatch
-
-        // Return original content unchanged to prevent data loss
+        // Auto-fixing MD043 would require restructuring the document (inserting,
+        // renaming, or reordering headings), which risks data loss. Return the
+        // content unchanged and let the user address the violation manually.
         Ok(content.to_string())
     }
 
