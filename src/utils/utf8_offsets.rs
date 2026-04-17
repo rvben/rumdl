@@ -19,7 +19,7 @@
 ///
 /// # Examples
 /// ```
-/// use rumdl::utils::utf8_offsets::byte_offset_to_char_offset;
+/// use rumdl_lib::utils::utf8_offsets::byte_offset_to_char_offset;
 ///
 /// // ASCII: bytes == characters
 /// assert_eq!(byte_offset_to_char_offset("Hello", 5), 5);

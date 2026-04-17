@@ -112,6 +112,7 @@ pub fn get_cache_stats() -> HashMap<String, u64> {
 /// # Example
 ///
 /// ```
+/// use std::sync::LazyLock;
 /// use rumdl_lib::regex_lazy;
 /// let my_re = regex_lazy!(r"^foo.*bar$");
 /// assert!(my_re.is_match("foobar"));

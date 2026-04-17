@@ -1173,8 +1173,8 @@ impl<'a> LintContext<'a> {
     /// # Examples
     ///
     /// ```
-    /// use rumdl::lint_context::LintContext;
-    /// use rumdl::config::MarkdownFlavor;
+    /// use rumdl_lib::lint_context::LintContext;
+    /// use rumdl_lib::config::MarkdownFlavor;
     ///
     /// let content = "# Valid Heading\n#NoSpace\n## Another Valid";
     /// let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);

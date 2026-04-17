@@ -119,11 +119,11 @@ pub fn parse_blockquote_prefix(line: &str) -> Option<ParsedBlockquotePrefix<'_>>
 /// // Regular line (no blockquote context)
 /// assert_eq!(effective_indent_in_blockquote("   text", 0, 3), 3);
 ///
-/// // Blockquote line with 2 spaces after marker
-/// assert_eq!(effective_indent_in_blockquote(">  text", 1, 0), 2);
+/// // Blockquote with 2 spaces after marker (first space consumed as marker syntax)
+/// assert_eq!(effective_indent_in_blockquote(">  text", 1, 0), 1);
 ///
-/// // Nested blockquote with 3 spaces after markers
-/// assert_eq!(effective_indent_in_blockquote("> >   text", 2, 0), 3);
+/// // Nested blockquote with 3 spaces after last marker (first space consumed as marker syntax)
+/// assert_eq!(effective_indent_in_blockquote("> >   text", 2, 0), 2);
 ///
 /// // Mismatched blockquote level - returns fallback
 /// assert_eq!(effective_indent_in_blockquote("> text", 2, 5), 5);
