@@ -67,7 +67,7 @@ pub fn resolve_docs_dir(start_path: &Path) -> Option<PathBuf> {
 
     // Parse mkdocs.yml to get docs_dir
     let content = std::fs::read_to_string(&mkdocs_path).ok()?;
-    let config: MkDocsYmlPartial = serde_yml::from_str(&content).ok()?;
+    let config: MkDocsYmlPartial = serde_yaml::from_str(&content).ok()?;
 
     // Resolve docs_dir relative to mkdocs.yml location
     let mkdocs_dir = mkdocs_path.parent()?;

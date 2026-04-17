@@ -63,7 +63,7 @@ impl MD074MkDocsNav {
 
     /// Parse mkdocs.yml from already-read content
     fn parse_mkdocs_yml_from_str(content: &str, path: &Path) -> Result<MkDocsConfig, String> {
-        serde_yml::from_str(content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+        serde_yaml::from_str(content).map_err(|e| format!("Failed to parse {}: {e}", path.display()))
     }
 
     /// Recursively extract all file paths from nav structure
@@ -394,11 +394,11 @@ enum NavItem {
 }
 
 impl NavItem {
-    /// Parse a NavItem from a serde_yml::Value
-    fn from_yaml_value(value: &serde_yml::Value) -> Option<NavItem> {
+    /// Parse a NavItem from a serde_yaml::Value
+    fn from_yaml_value(value: &serde_yaml::Value) -> Option<NavItem> {
         match value {
-            serde_yml::Value::String(s) => Some(NavItem::Path(s.clone())),
-            serde_yml::Value::Mapping(map) => {
+            serde_yaml::Value::String(s) => Some(NavItem::Path(s.clone())),
+            serde_yaml::Value::Mapping(map) => {
                 if map.len() != 1 {
                     return None;
                 }
@@ -407,15 +407,15 @@ impl NavItem {
                 let name = key.as_str()?.to_string();
 
                 match val {
-                    serde_yml::Value::String(path) => Some(NavItem::NamedPath {
+                    serde_yaml::Value::String(path) => Some(NavItem::NamedPath {
                         name,
                         path: path.clone(),
                     }),
-                    serde_yml::Value::Sequence(seq) => {
+                    serde_yaml::Value::Sequence(seq) => {
                         let children: Vec<NavItem> = seq.iter().filter_map(NavItem::from_yaml_value).collect();
                         Some(NavItem::Section { name, children })
                     }
-                    serde_yml::Value::Null => {
+                    serde_yaml::Value::Null => {
                         // Handle case like "- Section:" with no value (treated as empty section)
                         Some(NavItem::Section {
                             name,
@@ -440,13 +440,13 @@ impl<'de> Deserialize<'de> for MkDocsConfig {
             #[serde(default = "default_docs_dir")]
             docs_dir: String,
             #[serde(default)]
-            nav: Option<serde_yml::Value>,
+            nav: Option<serde_yaml::Value>,
         }
 
         let raw = RawMkDocsConfig::deserialize(deserializer)?;
 
         let nav = match raw.nav {
-            Some(serde_yml::Value::Sequence(seq)) => seq.iter().filter_map(NavItem::from_yaml_value).collect(),
+            Some(serde_yaml::Value::Sequence(seq)) => seq.iter().filter_map(NavItem::from_yaml_value).collect(),
             _ => Vec::new(),
         };
 
