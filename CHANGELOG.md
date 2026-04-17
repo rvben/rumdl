@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.73](https://github.com/rvben/rumdl/compare/v0.1.72...v0.1.73) - 2026-04-17
+
+### Fixed
+
+- **test**: make test_performance_md051 actually exercise MD051 ([c550ef6](https://github.com/rvben/rumdl/commit/c550ef68738a623e040e512db722fe7235a36242))
+- **md013,bench**: enforce CommonMark 3-space indent on thematic breaks; hoist LintContext out of bench loop ([1aafb9a](https://github.com/rvben/rumdl/commit/1aafb9a7997a0e04a4d98963ec446847ee7cd3f8))
+
 ## [0.1.72](https://github.com/rvben/rumdl/compare/v0.1.71...v0.1.72) - 2026-04-14
 
 ### Added
