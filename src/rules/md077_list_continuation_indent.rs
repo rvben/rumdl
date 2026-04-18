@@ -63,6 +63,77 @@ impl MD077ListContinuationIndent {
         }
     }
 
+    /// Given the line number of a fenced code block opener, walk forward and
+    /// return the line number of the matching closer. Returns the opener itself
+    /// if no following line is in the code block (degenerate single-line block).
+    fn find_fence_closer(ctx: &LintContext, opener_line: usize) -> usize {
+        let mut closer_line = opener_line;
+        for peek in (opener_line + 1)..=ctx.lines.len() {
+            let Some(peek_info) = ctx.line_info(peek) else { break };
+            if peek_info.in_code_block {
+                closer_line = peek;
+            } else {
+                break;
+            }
+        }
+        closer_line
+    }
+
+    /// Build an atomic fix that reindents a fenced code block from its opener
+    /// through its matching closer, shifting every non-blank line's leading
+    /// whitespace by the same visual delta. Preserves relative indentation of
+    /// code content inside the block so the parser keeps pairing the fences.
+    ///
+    /// Leading tabs are normalized to spaces: CommonMark expands a tab to the
+    /// next column that's a multiple of 4, so simply prepending spaces before
+    /// a tab would let the tab snap back and cancel the shift. We replace the
+    /// whole leading-whitespace byte range with `(visual_indent + delta)`
+    /// spaces instead.
+    ///
+    /// This prevents other rules (notably MD031) from seeing a transiently
+    /// broken fence pair between iterations of the fix loop (see issue #574).
+    fn build_compound_fence_fix(
+        ctx: &LintContext,
+        opener_line: usize,
+        closer_line: usize,
+        opener_actual: usize,
+        required: usize,
+    ) -> Option<Fix> {
+        let opener_info = ctx.line_info(opener_line)?;
+        let closer_info = ctx.line_info(closer_line)?;
+        let delta = required.saturating_sub(opener_actual);
+        if delta == 0 {
+            return None;
+        }
+
+        let fix_start = opener_info.byte_offset;
+        let fix_end = closer_info.byte_offset + closer_info.byte_len;
+
+        let mut replacement = String::new();
+        for i in opener_line..=closer_line {
+            let info = ctx.line_info(i)?;
+            if i > opener_line {
+                replacement.push('\n');
+            }
+            let line = info.content(ctx.content);
+            if info.is_blank {
+                // Blank lines have no content to shift; preserve verbatim.
+                replacement.push_str(line);
+            } else {
+                let new_visual = info.visual_indent + delta;
+                for _ in 0..new_visual {
+                    replacement.push(' ');
+                }
+                replacement.push_str(&line[info.indent..]);
+            }
+        }
+
+        Some(Fix {
+            range: fix_start..fix_end,
+            replacement,
+        })
+    }
+
     /// Check if a line should be skipped (inside code, HTML, frontmatter, etc.)
     ///
     /// Code block *content* is skipped, but fence opener/closer lines are not —
@@ -238,22 +309,47 @@ impl Rule for MD077ListContinuationIndent {
                         )
                     };
 
-                    // Build fix: replace leading whitespace with correct indent
-                    let fix_start = line_info.byte_offset;
-                    let fix_end = fix_start + line_info.indent;
+                    // If this is the opener of a fenced code block, emit a
+                    // compound fix that reindents the whole block (opener +
+                    // interior + closer). Fixing only the fence lines while
+                    // leaving interior content at the old indent creates a
+                    // transiently-broken fence pair that MD031 (which runs in
+                    // the same iterative-fix loop) misreads as orphan fences
+                    // and "repairs" by inserting stray blank lines.
+                    let is_fence_opener = line_info.in_code_block
+                        && Self::is_code_fence(trimmed)
+                        && ctx.line_info(line_num - 1).is_none_or(|p| !p.in_code_block);
+
+                    let (fix, warn_end_line, warn_end_column) = if is_fence_opener {
+                        let closer_line = Self::find_fence_closer(ctx, line_num);
+                        if closer_line != line_num {
+                            flagged_lines.insert(closer_line);
+                        }
+                        let fix = Self::build_compound_fence_fix(ctx, line_num, closer_line, actual, required);
+                        let end_line = closer_line;
+                        let end_column = ctx
+                            .line_info(closer_line)
+                            .map_or(line_content.len() + 1, |ci| ci.content(ctx.content).len() + 1);
+                        (fix, end_line, end_column)
+                    } else {
+                        let fix_start = line_info.byte_offset;
+                        let fix_end = fix_start + line_info.indent;
+                        let fix = Some(Fix {
+                            range: fix_start..fix_end,
+                            replacement: " ".repeat(required),
+                        });
+                        (fix, line_num, line_content.len() + 1)
+                    };
 
                     warnings.push(LintWarning {
                         rule_name: Some("MD077".to_string()),
                         line: line_num,
                         column: 1,
-                        end_line: line_num,
-                        end_column: line_content.len() + 1,
+                        end_line: warn_end_line,
+                        end_column: warn_end_column,
                         message,
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: fix_start..fix_end,
-                            replacement: " ".repeat(required),
-                        }),
+                        fix,
                     });
                 }
 
@@ -652,11 +748,13 @@ mod tests {
 
     #[test]
     fn code_fence_under_indented_warns() {
-        // Fence opener has 1-space indent, but "- " needs 2
+        // Fence opener has 1-space indent, but "- " needs 2.
+        // Only the opener is flagged — its compound fix also covers the
+        // interior content and the matching closer (see issue #574).
         let content = "- Item\n\n ```\n code\n ```\n";
         let warnings = check(content);
-        // Fence opener and closer are flagged; content lines are skipped
-        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 3);
     }
 
     #[test]
@@ -666,7 +764,8 @@ mod tests {
         let content = "1. Item\n\n   ```toml\n   key = \"value\"\n   ```\n";
         assert!(check(content).is_empty()); // Standard mode: 3 is fine
         let warnings = check_mkdocs(content);
-        assert_eq!(warnings.len(), 2); // MkDocs: fence opener + closer both need 4
+        assert_eq!(warnings.len(), 1); // MkDocs: opener's compound fix covers the whole block
+        assert_eq!(warnings[0].line, 3);
         assert!(warnings[0].message.contains("4 spaces"));
         assert!(warnings[0].message.contains("MkDocs"));
     }
@@ -675,7 +774,8 @@ mod tests {
     fn code_fence_tilde_under_indented() {
         let content = "- Item\n\n ~~~\n code\n ~~~\n";
         let warnings = check(content);
-        assert_eq!(warnings.len(), 2); // Tilde fences also checked
+        assert_eq!(warnings.len(), 1); // Tilde fences: single compound-fix warning on opener
+        assert_eq!(warnings[0].line, 3);
     }
 
     // ── Multiple blank lines ──────────────────────────────────────────
@@ -909,18 +1009,19 @@ mod tests {
 
     #[test]
     fn fix_code_fence_indent() {
-        // Fence opener and closer get re-indented; content inside is untouched
+        // Fence opener, interior, and closer all shift by the same delta so
+        // the parser keeps pairing the fences and MD031 doesn't misfire.
         let content = "- Item\n\n ```\n code\n ```\n";
         let fixed = fix(content);
-        assert_eq!(fixed, "- Item\n\n  ```\n code\n  ```\n");
+        assert_eq!(fixed, "- Item\n\n  ```\n  code\n  ```\n");
     }
 
     #[test]
     fn fix_mkdocs_code_fence_indent() {
-        // MkDocs ordered list: fence at 3 spaces needs 4
+        // MkDocs ordered list: fence at 3 spaces needs 4; interior shifts too
         let content = "1. Item\n\n   ```toml\n   key = \"val\"\n   ```\n";
         let fixed = fix_mkdocs(content);
-        assert_eq!(fixed, "1. Item\n\n    ```toml\n   key = \"val\"\n    ```\n");
+        assert_eq!(fixed, "1. Item\n\n    ```toml\n    key = \"val\"\n    ```\n");
     }
 
     // ── Empty document / whitespace-only ──────────────────────────────
@@ -1002,6 +1103,45 @@ mod tests {
     }
 
     #[test]
+    fn fence_fix_does_not_break_pairing_for_md031() {
+        // Regression for issue #574: previously MD077 only reindented the
+        // fence delimiter lines while leaving the code block's interior at
+        // the old indent. Between iterations of the fix loop the parser
+        // saw an opener-closer mismatch, and MD031 then injected stray
+        // blank lines at the fence boundaries. MD077's compound fix must
+        // now rewrite the whole block atomically so the fences stay paired.
+        let content = "#### title\n\nabc\n\n\
+                       1. ab\n\n\
+                       \x20\x20`aabbccdd`\n\n\
+                       2. cd\n\n\
+                       \x20\x20`bbcc dd ee`\n\n\
+                       \x20\x20```\n\
+                       \x20\x20abcd\n\
+                       \x20\x20ef gh\n\
+                       \x20\x20```\n\n\
+                       \x20\x20uu\n\n\
+                       \x20\x20```\n\
+                       \x20\x20cdef\n\
+                       \x20\x20gh ij\n\
+                       \x20\x20```\n";
+        let expected = "#### title\n\nabc\n\n\
+                        1. ab\n\n\
+                        \x20\x20\x20`aabbccdd`\n\n\
+                        2. cd\n\n\
+                        \x20\x20\x20`bbcc dd ee`\n\n\
+                        \x20\x20\x20```\n\
+                        \x20\x20\x20abcd\n\
+                        \x20\x20\x20ef gh\n\
+                        \x20\x20\x20```\n\n\
+                        \x20\x20\x20uu\n\n\
+                        \x20\x20\x20```\n\
+                        \x20\x20\x20cdef\n\
+                        \x20\x20\x20gh ij\n\
+                        \x20\x20\x20```\n";
+        assert_eq!(fix(content), expected);
+    }
+
+    #[test]
     fn multiline_continuation_separated_by_blank() {
         let content = "1. Item\n\n  para1 line1\n  para1 line2\n\n  para2 line1\n  para2 line2\n";
         let warnings = check(content);
@@ -1011,5 +1151,19 @@ mod tests {
             fixed,
             "1. Item\n\n   para1 line1\n   para1 line2\n\n   para2 line1\n   para2 line2\n"
         );
+    }
+
+    #[test]
+    fn tab_indented_fence_is_normalized_to_spaces() {
+        // Leading tabs expand to the next multiple-of-4 column under
+        // CommonMark, so simply prepending spaces before a tab would
+        // silently no-op (the tab snaps back to column 4). The compound
+        // fence fix must replace the leading whitespace with a fresh
+        // (visual_indent + delta) run of spaces. A `100. ` item has
+        // content_column = 5, so a tab-indented fence (visual col 4) is
+        // under-indented by 1 and must end up at 5 spaces after the fix.
+        let content = "100. ab\n\n\t```\n\tabcd\n\t```\n";
+        let expected = "100. ab\n\n     ```\n     abcd\n     ```\n";
+        assert_eq!(fix(content), expected);
     }
 }
