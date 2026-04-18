@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.74](https://github.com/rvben/rumdl/compare/v0.1.73...v0.1.74) - 2026-04-18
+
+### Fixed
+
+- **md077**: emit atomic compound fix for under-indented fences in lists ([455822c](https://github.com/rvben/rumdl/commit/455822c55ca947ea9065edf09e4303a596a471f7))
+- **doctests**: correct rotted imports and blockquote indent assertions ([0238728](https://github.com/rvben/rumdl/commit/0238728025b2a4676b01d060b8380538972c4376))
+
 ## [0.1.73](https://github.com/rvben/rumdl/compare/v0.1.72...v0.1.73) - 2026-04-17
 
 ### Fixed
