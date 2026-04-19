@@ -152,7 +152,16 @@ jobs:
 
       # Install rust target for cross-compilation
       - name: Install Rust target
-        run: rustup target add ${{ matrix.target }}
+        # Runner images may ship a partially-installed toolchain whose
+        # binaries conflict with rustup when it installs the toolchain
+        # pinned by rust-toolchain.toml. Remove any stale install first so
+        # rustup can lay down the pinned toolchain cleanly alongside the
+        # requested target.
+        shell: bash
+        run: |
+          pinned=$(awk -F '"' '/^channel/ { print $2 }' rust-toolchain.toml)
+          rustup toolchain uninstall "$pinned" >/dev/null 2>&1 || true
+          rustup target add ${{ matrix.target }}
 
       # Build wheel
       - name: Build wheel
