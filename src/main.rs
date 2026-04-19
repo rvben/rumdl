@@ -43,6 +43,7 @@ struct Cli {
     /// Path to configuration file
     #[arg(
         long,
+        short = 'c',
         global = true,
         help = "Path to configuration file",
         conflicts_with_all = ["no_config", "isolated"]
@@ -107,7 +108,7 @@ enum Commands {
         #[arg(long, short = 'f')]
         fixable: bool,
         /// Filter by category (use --list-categories to see options)
-        #[arg(long, short = 'c', value_name = "CATEGORY")]
+        #[arg(long, value_name = "CATEGORY")]
         category: Option<String>,
         /// Include full documentation in output (for json/json-lines)
         #[arg(long)]

@@ -1408,17 +1408,17 @@ fn test_rule_command_invalid_category_error() {
 fn test_rule_command_short_flags() {
     let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
 
-    // Test -f (fixable) and -c (category) short flags
+    // -f is the short form of --fixable. --category has no short form because
+    // -c is reserved for the global --config flag.
     let output = Command::new(rumdl_exe)
-        .args(["rule", "-f", "-c", "heading", "-o", "json"])
+        .args(["rule", "-f", "--category", "heading", "-o", "json"])
         .output()
-        .expect("Failed to execute 'rumdl rule -f -c heading -o json'");
+        .expect("Failed to execute 'rumdl rule -f --category heading -o json'");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let rules: Vec<serde_json::Value> = serde_json::from_str(&stdout).expect("Failed to parse JSON");
 
     assert!(!rules.is_empty(), "Should return at least one rule");
 
-    // All rules should be fixable and in heading category
     for rule in &rules {
         let fix_avail = rule.get("fix_availability").and_then(|f| f.as_str()).unwrap();
         let category = rule.get("category").and_then(|c| c.as_str()).unwrap();
@@ -1426,6 +1426,37 @@ fn test_rule_command_short_flags() {
         assert!(matches!(fix_avail, "Always" | "Sometimes"), "Rule should be fixable");
         assert_eq!(category, "heading", "Rule should be in heading category");
     }
+}
+
+#[test]
+fn test_config_short_flag_loads_file() {
+    // -c is the short alias for --config. This is the conventional short flag
+    // in the wider ecosystem (markdownlint-cli, ruff, etc.) and tools like
+    // MegaLinter pass it by default.
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let config_path = temp_dir.path().join("custom.toml");
+    std::fs::write(&config_path, "[global]\ndisable = [\"MD013\"]\n").expect("Failed to write config");
+
+    let md_path = temp_dir.path().join("long.md");
+    std::fs::write(
+        &md_path,
+        "# Heading\n\nThis line is deliberately much longer than eighty characters to trigger MD013 when it is enabled by default.\n",
+    )
+    .expect("Failed to write markdown file");
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "-c"])
+        .arg(&config_path)
+        .arg(&md_path)
+        .output()
+        .expect("Failed to execute 'rumdl check -c <path> <file>'");
+
+    assert!(
+        output.status.success(),
+        "rumdl check -c <path> should succeed when MD013 is disabled in config; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
