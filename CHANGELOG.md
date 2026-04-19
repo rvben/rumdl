@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.76](https://github.com/rvben/rumdl/compare/v0.1.75...v0.1.76) - 2026-04-19
+
+### Fixed
+
+- **cli**: error when --config path does not exist ([c328c11](https://github.com/rvben/rumdl/commit/c328c110b8ae538d040875d142d4bd130e2cb83e))
+
 ## [0.1.75](https://github.com/rvben/rumdl/compare/v0.1.74...v0.1.75) - 2026-04-19
 
 ### Added
