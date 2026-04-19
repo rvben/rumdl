@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.75](https://github.com/rvben/rumdl/compare/v0.1.74...v0.1.75) - 2026-04-19
+
+### Added
+
+- **cli**: add -c short alias for --config ([3aaaca4](https://github.com/rvben/rumdl/commit/3aaaca431bb649567b99c887b4d29d241b34b891))
+
 ## [0.1.74](https://github.com/rvben/rumdl/compare/v0.1.73...v0.1.74) - 2026-04-18
 
 ### Fixed
