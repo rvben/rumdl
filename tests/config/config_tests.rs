@@ -816,7 +816,9 @@ line-length:
         let stdout = String::from_utf8_lossy(&output.stdout);
         let combined_output = format!("{stderr}{stdout}");
         assert!(
-            combined_output.contains("Failed to read config file") || combined_output.contains("Config error"),
+            combined_output.contains("config file not found")
+                || combined_output.contains("Failed to read config file")
+                || combined_output.contains("Config error"),
             "CLI should show file reading error: stderr='{stderr}' stdout='{stdout}'"
         );
     }
