@@ -494,6 +494,19 @@ impl Default for GlobalConfig {
     }
 }
 
+/// Names of rumdl-native config files, searched in precedence order when
+/// walking up a directory tree.
+///
+/// This is the single source of truth for config discovery. Both the CLI
+/// (`SourcedConfig::discover_config_upward`, `discover_config_for_dir`) and
+/// the LSP (`RumdlLanguageServer::resolve_config_for_file`) must use this
+/// list; any deviation causes silent config-not-found bugs where the CLI
+/// recognises a config but the LSP does not (or vice versa).
+///
+/// See `src/lsp/tests.rs::lsp_cli_config_filename_parity` for the parity
+/// test that pins this invariant.
+pub const RUMDL_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
+
 pub const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
     ".markdownlint-cli2.jsonc",
     ".markdownlint-cli2.yaml",

@@ -6668,3 +6668,96 @@ async fn test_initialize_advertises_nav_capabilities_when_enabled() {
         "rename_provider must be advertised by default"
     );
 }
+
+/// Pins the invariant that the LSP and CLI walk the same set of filenames
+/// when searching for a project config. Any deviation makes configs silently
+/// invisible in one path but not the other (see rumdl-vscode#115, where
+/// `.config/rumdl.toml` was discovered by the CLI but not by the LSP's
+/// per-file resolver).
+#[test]
+fn lsp_cli_config_filename_parity() {
+    use crate::config::{MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES};
+
+    assert!(
+        RUMDL_CONFIG_FILES.contains(&".config/rumdl.toml"),
+        "RUMDL_CONFIG_FILES must include `.config/rumdl.toml` — CLI discovery expects it"
+    );
+    assert!(
+        RUMDL_CONFIG_FILES.contains(&".rumdl.toml"),
+        "RUMDL_CONFIG_FILES must include `.rumdl.toml`"
+    );
+    assert!(
+        RUMDL_CONFIG_FILES.contains(&"rumdl.toml"),
+        "RUMDL_CONFIG_FILES must include `rumdl.toml`"
+    );
+    assert!(
+        RUMDL_CONFIG_FILES.contains(&"pyproject.toml"),
+        "RUMDL_CONFIG_FILES must include `pyproject.toml`"
+    );
+    assert!(
+        MARKDOWNLINT_CONFIG_FILES.contains(&".markdownlint.json"),
+        "MARKDOWNLINT_CONFIG_FILES must include `.markdownlint.json`"
+    );
+}
+
+/// Regression test for rumdl-vscode#115: an opt-in rule enabled via
+/// `extend-enable` in a `.config/rumdl.toml` at a parent directory must fire
+/// from the LSP, matching CLI behaviour.
+///
+/// Before the fix, the LSP's walk-up search only looked for `.rumdl.toml`,
+/// `rumdl.toml`, `pyproject.toml`, `.markdownlint.json` — missing
+/// `.config/rumdl.toml` — so it fell through to `Config::default()` and
+/// silently disabled opt-in rules.
+#[tokio::test]
+async fn test_resolve_config_finds_dotconfig_rumdl_toml() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+
+    let project = temp_path.join("project");
+    let dotconfig = project.join(".config");
+    fs::create_dir_all(&dotconfig).unwrap();
+
+    let config_file = dotconfig.join("rumdl.toml");
+    fs::write(
+        &config_file,
+        r#"
+[global]
+extend-enable = ["MD060"]
+
+[MD060]
+style = "aligned"
+"#,
+    )
+    .unwrap();
+
+    // File nested below the config's parent directory
+    let deep_dir = project.join("sub").join("deeper");
+    fs::create_dir_all(&deep_dir).unwrap();
+    let test_file = deep_dir.join("test.md");
+    fs::write(&test_file, "# Test\n").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let config = server.resolve_config_for_file(&test_file).await;
+
+    // MD060 must appear in extend_enable so opt-in filtering picks it up
+    assert!(
+        config.global.extend_enable.iter().any(|r| r == "MD060"),
+        "LSP should discover `.config/rumdl.toml` when walking up from a nested file. \
+         extend_enable was {:?}",
+        config.global.extend_enable
+    );
+
+    // And the rule-specific [MD060] table should be loaded
+    assert!(
+        config.rules.contains_key("MD060"),
+        "LSP should load [MD060] table from `.config/rumdl.toml`"
+    );
+}

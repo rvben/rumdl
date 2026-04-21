@@ -11,7 +11,7 @@ use super::registry::RuleRegistry;
 use super::source_tracking::{
     ConfigSource, ConfigValidationWarning, SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig, SourcedValue,
 };
-use super::types::{Config, ConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RuleConfig};
+use super::types::{Config, ConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES, RuleConfig};
 use super::validation::validate_config_sourced_internal;
 
 /// Maximum depth for extends chains to prevent runaway recursion
@@ -415,7 +415,6 @@ impl SourcedConfig<ConfigLoaded> {
     fn discover_config_upward() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
         use std::env;
 
-        const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
         const MAX_DEPTH: usize = 100; // Prevent infinite traversal
 
         let start_dir = match env::current_dir() {
@@ -440,7 +439,7 @@ impl SourcedConfig<ConfigLoaded> {
 
             // Check for config files in order of precedence (only if not already found)
             if found_config.is_none() {
-                for config_name in CONFIG_FILES {
+                for config_name in RUMDL_CONFIG_FILES {
                     let config_path = current_dir.join(config_name);
 
                     if config_path.exists() {
@@ -915,8 +914,6 @@ impl SourcedConfig<ConfigLoaded> {
     ///
     /// Returns the config file path if found. Does NOT use CWD.
     pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        const RUMDL_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
-
         let mut current_dir = dir.to_path_buf();
 
         loop {

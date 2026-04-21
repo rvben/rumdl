@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use anyhow::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::config::Config;
+use crate::config::{Config, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES};
 use crate::rule::Rule;
 
 use super::server::{ConfigCacheEntry, RumdlLanguageServer};
@@ -342,16 +342,10 @@ impl RumdlLanguageServer {
                 // has since been created in the directory. If so, treat as a cache miss
                 // so we pick up the new config file.
                 if entry.from_global_fallback {
-                    const CONFIG_FILES: &[&str] = &[
-                        ".rumdl.toml",
-                        "rumdl.toml",
-                        "pyproject.toml",
-                        ".markdownlint.json",
-                        ".markdownlint-cli2.jsonc",
-                        ".markdownlint-cli2.yaml",
-                        ".markdownlint-cli2.yml",
-                    ];
-                    let config_now_exists = CONFIG_FILES.iter().any(|name| search_dir.join(name).exists());
+                    let config_now_exists = RUMDL_CONFIG_FILES
+                        .iter()
+                        .chain(MARKDOWNLINT_CONFIG_FILES.iter())
+                        .any(|name| search_dir.join(name).exists());
                     if config_now_exists {
                         log::debug!(
                             "Config cache fallback entry for {} is stale: config file now exists, re-resolving",
@@ -403,10 +397,13 @@ impl RumdlLanguageServer {
         let mut found_config: Option<(Config, Option<PathBuf>)> = None;
 
         loop {
-            // Try to find a config file in the current directory
-            const CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", "pyproject.toml", ".markdownlint.json"];
-
-            for config_file_name in CONFIG_FILES {
+            // Try to find a config file in the current directory.
+            //
+            // Must mirror CLI discovery (`SourcedConfig::discover_config_for_dir`):
+            // rumdl-native files take precedence, then markdownlint files. Any drift
+            // here produces silent config-not-found bugs where the CLI recognises a
+            // config but the LSP does not. See `lsp_cli_config_filename_parity` test.
+            for config_file_name in RUMDL_CONFIG_FILES.iter().chain(MARKDOWNLINT_CONFIG_FILES.iter()) {
                 let config_path = current_dir.join(config_file_name);
                 if config_path.exists() {
                     // For pyproject.toml, verify it contains [tool.rumdl] section (same as CLI)
