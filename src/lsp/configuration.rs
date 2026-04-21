@@ -402,7 +402,7 @@ impl RumdlLanguageServer {
             // Must mirror CLI discovery (`SourcedConfig::discover_config_for_dir`):
             // rumdl-native files take precedence, then markdownlint files. Any drift
             // here produces silent config-not-found bugs where the CLI recognises a
-            // config but the LSP does not. See `lsp_cli_config_filename_parity` test.
+            // config but the LSP does not. See `test_lsp_cli_resolver_parity_on_fixtures`.
             for config_file_name in RUMDL_CONFIG_FILES.iter().chain(MARKDOWNLINT_CONFIG_FILES.iter()) {
                 let config_path = current_dir.join(config_file_name);
                 if config_path.exists() {

@@ -503,8 +503,9 @@ impl Default for GlobalConfig {
 /// list; any deviation causes silent config-not-found bugs where the CLI
 /// recognises a config but the LSP does not (or vice versa).
 ///
-/// See `src/lsp/tests.rs::lsp_cli_config_filename_parity` for the parity
-/// test that pins this invariant.
+/// See `src/lsp/tests.rs::test_lsp_cli_resolver_parity_on_fixtures` for
+/// the side-by-side resolver parity test that pins this invariant across
+/// several directory layouts.
 pub const RUMDL_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml", ".config/rumdl.toml", "pyproject.toml"];
 
 pub const MARKDOWNLINT_CONFIG_FILES: &[&str] = &[
