@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.78](https://github.com/rvben/rumdl/compare/v0.1.77...v0.1.78) - 2026-04-21
+
+### Fixed
+
+- **lsp**: discover .config/rumdl.toml when walking up from a file ([9d32fa7](https://github.com/rvben/rumdl/commit/9d32fa76b8d6baac3387ce588758a3bec6a3390a))
+
 ## [0.1.77](https://github.com/rvben/rumdl/compare/v0.1.76...v0.1.77) - 2026-04-21
 
 ### Fixed
