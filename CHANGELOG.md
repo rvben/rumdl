@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.77](https://github.com/rvben/rumdl/compare/v0.1.76...v0.1.77) - 2026-04-21
+
+### Fixed
+
+- **md046**: ignore container content when detecting code-block style ([2685388](https://github.com/rvben/rumdl/commit/2685388a223764504d6a994118605d1a2890aadd))
+
 ## [0.1.76](https://github.com/rvben/rumdl/compare/v0.1.75...v0.1.76) - 2026-04-19
 
 ### Fixed
