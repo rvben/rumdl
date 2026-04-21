@@ -1077,3 +1077,96 @@ fn test_html_tag_at_byte_zero() {
     assert!(!tags.is_empty(), "Should detect HTML tag at byte 0");
     assert_eq!(tags[0].line, 1, "Tag at byte 0 should be on line 1");
 }
+
+// =========================================================================
+// HTML block detection: CommonMark Type-1 blank-line handling
+// =========================================================================
+//
+// Per CommonMark §4.6, Type-1 HTML blocks open with <pre, <script, <style,
+// or <textarea and run until the matching end tag (or EOF). Blank lines do
+// not terminate these blocks. Type 6/7 blocks (e.g. <div>, <p>) terminate
+// at the first blank line.
+
+#[test]
+fn test_html_block_pre_with_blank_line_marks_all_inner_lines() {
+    // Reproduces issue #578: a <pre> containing a blank line.
+    let content = "# Heading\n\n<pre>\n\nhello  world\n</pre>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(ctx.is_in_html_block(3), "line 3 (`<pre>`) should be in html block");
+    assert!(
+        ctx.is_in_html_block(4),
+        "line 4 (blank inside pre) should be in html block"
+    );
+    assert!(
+        ctx.is_in_html_block(5),
+        "line 5 (`hello  world`) should be in html block"
+    );
+    assert!(ctx.is_in_html_block(6), "line 6 (`</pre>`) should be in html block");
+}
+
+#[test]
+fn test_html_block_textarea_with_blank_line_marks_all_inner_lines() {
+    let content = "<textarea>\n\ninner  content\n</textarea>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(ctx.is_in_html_block(1), "line 1 (`<textarea>`) should be in html block");
+    assert!(ctx.is_in_html_block(2), "line 2 (blank) should be in html block");
+    assert!(
+        ctx.is_in_html_block(3),
+        "line 3 (inner content) should be in html block"
+    );
+    assert!(
+        ctx.is_in_html_block(4),
+        "line 4 (`</textarea>`) should be in html block"
+    );
+}
+
+#[test]
+fn test_html_block_long_pre_exceeds_arbitrary_line_cap() {
+    // A <pre> with 120 inner lines (no blanks) must mark every inner line,
+    // regardless of any internal line cap.
+    let mut content = String::from("<pre>\n");
+    for i in 0..120 {
+        content.push_str(&format!("inner line {i}\n"));
+    }
+    content.push_str("</pre>\n");
+
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+
+    // 1-indexed: line 1 = <pre>, lines 2..=121 = inner, line 122 = </pre>.
+    for line_num in 1..=122 {
+        assert!(
+            ctx.is_in_html_block(line_num),
+            "line {line_num} of a 122-line <pre> block should be marked in_html_block",
+        );
+    }
+}
+
+#[test]
+fn test_html_block_div_still_terminates_on_blank_line() {
+    // Type-6 guardrail: <div> is not Type-1 and must terminate at blank line.
+    let content = "<div>\ninner\n\nafter blank\n</div>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert!(ctx.is_in_html_block(1), "line 1 (`<div>`) should be in html block");
+    assert!(ctx.is_in_html_block(2), "line 2 (inner) should be in html block");
+    assert!(
+        !ctx.is_in_html_block(4),
+        "line 4 (`after blank`) must NOT be in html block"
+    );
+}
+
+#[test]
+fn test_html_block_unclosed_pre_extends_to_eof() {
+    // Per CommonMark, an unclosed Type-1 block extends to end of document.
+    let content = "<pre>\nline a\n\nline b\nline c\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    for line_num in 1..=5 {
+        assert!(
+            ctx.is_in_html_block(line_num),
+            "line {line_num} of an unclosed <pre> should extend to EOF",
+        );
+    }
+}

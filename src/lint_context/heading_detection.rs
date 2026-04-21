@@ -316,7 +316,16 @@ pub(super) fn detect_headings_and_blockquotes(
 }
 
 /// Detect HTML blocks in the content
+///
+/// Follows CommonMark §4.6. Type-1 blocks (`<pre>`, `<script>`, `<style>`,
+/// `<textarea>`) run until their matching end tag or end of document and may
+/// contain blank lines. All other recognised block elements are treated as
+/// Type-6-style blocks that terminate at the first blank line.
 pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
+    /// Type-1 tags per CommonMark: blank lines inside these blocks do not
+    /// terminate them — only a matching end tag (or EOF) does.
+    const TYPE_1_BLOCK_ELEMENTS: &[&str] = &["pre", "script", "style", "textarea"];
+
     const BLOCK_ELEMENTS: &[&str] = &[
         "address",
         "article",
@@ -405,10 +414,10 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
                     let same_line_close = lines[i].content(content).contains(&closing_tag);
 
                     if !same_line_close {
-                        let allow_blank_lines = tag_name == "style" || tag_name == "script";
+                        let allow_blank_lines = TYPE_1_BLOCK_ELEMENTS.contains(&tag_name.as_str());
                         let mut j = i + 1;
                         let mut found_closing_tag = false;
-                        while j < lines.len() && j < i + 100 {
+                        while j < lines.len() {
                             if !allow_blank_lines && lines[j].is_blank {
                                 break;
                             }
@@ -421,7 +430,7 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
 
                             if found_closing_tag {
                                 j += 1;
-                                while j < lines.len() && j < i + 100 {
+                                while j < lines.len() {
                                     if lines[j].is_blank {
                                         break;
                                     }
