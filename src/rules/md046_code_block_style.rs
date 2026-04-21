@@ -9,12 +9,21 @@ mod md046_config;
 pub use md046_config::CodeBlockStyle;
 use md046_config::MD046Config;
 
-/// Pre-computed context arrays for indented code block detection
+/// Pre-computed context arrays for indented code block detection.
 struct IndentContext<'a> {
     in_list_context: &'a [bool],
     in_tab_context: &'a [bool],
     in_admonition_context: &'a [bool],
-    in_jsx_context: &'a [bool],
+    /// Lines belonging to a non-code container whose body can legitimately be
+    /// indented by 4+ spaces or contain verbatim fence markers: HTML/MDX
+    /// comments, raw HTML blocks, JSX blocks, mkdocstrings blocks, footnote
+    /// definitions, and blockquotes.
+    ///
+    /// These lines are excluded from `detect_style`'s style tally, from
+    /// `is_indented_code_block_with_context`, and from
+    /// `categorize_indented_blocks`'s fence rewriting — keeping detection in
+    /// lockstep with the warning-side skip list used in `check`.
+    in_comment_or_html: &'a [bool],
 }
 
 /// Rule MD046: Code block style
@@ -271,8 +280,12 @@ impl MD046CodeBlockStyle {
             return false;
         }
 
-        // Skip if inside a JSX component block
-        if ctx.in_jsx_context.get(i).copied().unwrap_or(false) {
+        // Skip if inside an HTML/MDX comment, raw HTML block, JSX block,
+        // mkdocstrings block, footnote definition, or blockquote. These
+        // containers can legitimately hold 4+ space indented text that is
+        // not a code block. Counting them would desync style detection from
+        // the warning-side skip list in `check`.
+        if ctx.in_comment_or_html.get(i).copied().unwrap_or(false) {
             return false;
         }
 
@@ -283,7 +296,8 @@ impl MD046CodeBlockStyle {
             && calculate_indentation_width_default(lines[i - 1]) >= 4
             && !ctx.in_list_context[i - 1]
             && !(is_mkdocs && ctx.in_tab_context[i - 1])
-            && !(is_mkdocs && ctx.in_admonition_context[i - 1]);
+            && !(is_mkdocs && ctx.in_admonition_context[i - 1])
+            && !ctx.in_comment_or_html.get(i - 1).copied().unwrap_or(false);
 
         // If no blank line before and previous line is not indented code,
         // it's likely list continuation, not a code block
@@ -292,6 +306,30 @@ impl MD046CodeBlockStyle {
         }
 
         true
+    }
+
+    /// Pre-compute which lines sit inside a non-code container whose body may
+    /// legitimately be indented by 4+ spaces without being an indented code
+    /// block: HTML comments, raw HTML blocks, JSX blocks, MDX comments,
+    /// mkdocstrings blocks, footnote definitions, and blockquotes.
+    ///
+    /// This mirrors the skip list used in `check` when emitting indented
+    /// code-block warnings, keeping style detection and warning emission in
+    /// lockstep.
+    fn precompute_comment_or_html_context(ctx: &crate::lint_context::LintContext, line_count: usize) -> Vec<bool> {
+        (0..line_count)
+            .map(|i| {
+                ctx.line_info(i + 1).is_some_and(|info| {
+                    info.in_html_comment
+                        || info.in_mdx_comment
+                        || info.in_html_block
+                        || info.in_jsx_block
+                        || info.in_mkdocstrings
+                        || info.in_footnote_definition
+                        || info.blockquote.is_some()
+                })
+            })
+            .collect()
     }
 
     /// Pre-compute which lines are in MkDocs tab context with a single forward pass
@@ -406,26 +444,16 @@ impl MD046CodeBlockStyle {
         &self,
         lines: &[&str],
         is_mkdocs: bool,
-        in_list_context: &[bool],
-        in_tab_context: &[bool],
-        in_admonition_context: &[bool],
-        in_jsx_context: &[bool],
+        ictx: &IndentContext<'_>,
     ) -> (Vec<bool>, Vec<bool>) {
         let mut is_misplaced = vec![false; lines.len()];
         let mut contains_fences = vec![false; lines.len()];
-
-        let ictx = IndentContext {
-            in_list_context,
-            in_tab_context,
-            in_admonition_context,
-            in_jsx_context,
-        };
 
         // Find contiguous indented blocks and categorize them
         let mut i = 0;
         while i < lines.len() {
             // Find the start of an indented block
-            if !self.is_indented_code_block_with_context(lines, i, is_mkdocs, &ictx) {
+            if !self.is_indented_code_block_with_context(lines, i, is_mkdocs, ictx) {
                 i += 1;
                 continue;
             }
@@ -434,8 +462,7 @@ impl MD046CodeBlockStyle {
             let block_start = i;
             let mut block_end = i;
 
-            while block_end < lines.len()
-                && self.is_indented_code_block_with_context(lines, block_end, is_mkdocs, &ictx)
+            while block_end < lines.len() && self.is_indented_code_block_with_context(lines, block_end, is_mkdocs, ictx)
             {
                 block_end += 1;
             }
@@ -588,12 +615,28 @@ impl MD046CodeBlockStyle {
         let mut fenced_count = 0;
         let mut indented_count = 0;
 
-        // Count all code block occurrences (prevalence-based approach)
+        // Count all code block occurrences (prevalence-based approach).
+        //
+        // Both counts must ignore fence markers and indented text that live
+        // inside a non-code container (HTML/MDX comments, raw HTML/JSX
+        // blocks, mkdocstrings, footnote definitions, blockquotes) so that
+        // the detected style stays in lockstep with the warning-side skip
+        // list in `check`. Without this, a document that contains a single
+        // real code block plus a fake fence or indented paragraph nested in
+        // a comment is wrongly classified and the real block gets flagged.
         let mut in_fenced = false;
         let mut prev_was_indented = false;
 
         for (i, line) in lines.iter().enumerate() {
+            let in_container = ictx.in_comment_or_html.get(i).copied().unwrap_or(false);
+
             if self.is_fenced_code_block_start(line) {
+                if in_container {
+                    // Fence marker inside a container — not a real fence,
+                    // don't flip state or count it.
+                    prev_was_indented = false;
+                    continue;
+                }
                 if !in_fenced {
                     // Opening fence
                     fenced_count += 1;
@@ -602,6 +645,7 @@ impl MD046CodeBlockStyle {
                     // Closing fence
                     in_fenced = false;
                 }
+                prev_was_indented = false;
             } else if !in_fenced && self.is_indented_code_block_with_context(lines, i, is_mkdocs, ictx) {
                 // Count each continuous indented block once
                 if !prev_was_indented {
@@ -669,9 +713,7 @@ impl Rule for MD046CodeBlockStyle {
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
                 let in_list_context = self.precompute_block_continuation_context(lines);
-                let in_jsx_context: Vec<bool> = (0..lines.len())
-                    .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
-                    .collect();
+                let in_comment_or_html = Self::precompute_comment_or_html_context(ctx, lines.len());
                 let in_tab_context = if is_mkdocs {
                     self.precompute_mkdocs_tab_context(lines)
                 } else {
@@ -686,7 +728,7 @@ impl Rule for MD046CodeBlockStyle {
                     in_list_context: &in_list_context,
                     in_tab_context: &in_tab_context,
                     in_admonition_context: &in_admonition_context,
-                    in_jsx_context: &in_jsx_context,
+                    in_comment_or_html: &in_comment_or_html,
                 };
                 self.detect_style(lines, is_mkdocs, &ictx)
                     .unwrap_or(CodeBlockStyle::Fenced)
@@ -793,10 +835,7 @@ impl Rule for MD046CodeBlockStyle {
         // Determine target style
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        // Pre-compute JSX block context from LineInfo
-        let in_jsx_context: Vec<bool> = (0..lines.len())
-            .map(|i| ctx.line_info(i + 1).is_some_and(|info| info.in_jsx_block))
-            .collect();
+        let in_comment_or_html = Self::precompute_comment_or_html_context(ctx, lines.len());
 
         // Pre-compute list, tab, and admonition contexts once
         let in_list_context = self.precompute_block_continuation_context(lines);
@@ -811,38 +850,24 @@ impl Rule for MD046CodeBlockStyle {
             vec![false; lines.len()]
         };
 
+        let ictx = IndentContext {
+            in_list_context: &in_list_context,
+            in_tab_context: &in_tab_context,
+            in_admonition_context: &in_admonition_context,
+            in_comment_or_html: &in_comment_or_html,
+        };
+
         let target_style = match self.config.style {
-            CodeBlockStyle::Consistent => {
-                let ictx = IndentContext {
-                    in_list_context: &in_list_context,
-                    in_tab_context: &in_tab_context,
-                    in_admonition_context: &in_admonition_context,
-                    in_jsx_context: &in_jsx_context,
-                };
-                self.detect_style(lines, is_mkdocs, &ictx)
-                    .unwrap_or(CodeBlockStyle::Fenced)
-            }
+            CodeBlockStyle::Consistent => self
+                .detect_style(lines, is_mkdocs, &ictx)
+                .unwrap_or(CodeBlockStyle::Fenced),
             _ => self.config.style,
         };
 
         // Categorize indented blocks:
         // - misplaced_fence_lines: complete fenced blocks that were over-indented (safe to dedent)
         // - unsafe_fence_lines: contain fence markers but aren't complete (skip fixing to avoid broken output)
-        let (misplaced_fence_lines, unsafe_fence_lines) = self.categorize_indented_blocks(
-            lines,
-            is_mkdocs,
-            &in_list_context,
-            &in_tab_context,
-            &in_admonition_context,
-            &in_jsx_context,
-        );
-
-        let ictx = IndentContext {
-            in_list_context: &in_list_context,
-            in_tab_context: &in_tab_context,
-            in_admonition_context: &in_admonition_context,
-            in_jsx_context: &in_jsx_context,
-        };
+        let (misplaced_fence_lines, unsafe_fence_lines) = self.categorize_indented_blocks(lines, is_mkdocs, &ictx);
 
         let mut result = String::with_capacity(content.len());
         let mut in_fenced_block = false;
@@ -1059,13 +1084,14 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
 
-    /// Test helper: detect_style with automatic context computation
-    fn detect_style_from_content(
-        rule: &MD046CodeBlockStyle,
-        content: &str,
-        is_mkdocs: bool,
-        in_jsx_context: &[bool],
-    ) -> Option<CodeBlockStyle> {
+    /// Test helper: detect_style with automatic context computation.
+    ///
+    /// The container context (HTML/MDX comments, HTML/JSX blocks,
+    /// mkdocstrings, footnote definitions, blockquotes) is not populated by
+    /// this helper — callers that need to exercise those paths should go
+    /// through the full `rule.check(&ctx)` entry point so the real LineInfo
+    /// is computed from a `LintContext`.
+    fn detect_style_from_content(rule: &MD046CodeBlockStyle, content: &str, is_mkdocs: bool) -> Option<CodeBlockStyle> {
         let lines: Vec<&str> = content.lines().collect();
         let in_list_context = rule.precompute_block_continuation_context(&lines);
         let in_tab_context = if is_mkdocs {
@@ -1078,11 +1104,12 @@ mod tests {
         } else {
             vec![false; lines.len()]
         };
+        let in_comment_or_html = vec![false; lines.len()];
         let ictx = IndentContext {
             in_list_context: &in_list_context,
             in_tab_context: &in_tab_context,
             in_admonition_context: &in_admonition_context,
-            in_jsx_context,
+            in_comment_or_html: &in_comment_or_html,
         };
         rule.detect_style(&lines, is_mkdocs, &ictx)
     }
@@ -1396,7 +1423,7 @@ key:
     fn test_detect_style_fenced() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "```\ncode\n```";
-        let style = detect_style_from_content(&rule, content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false);
 
         assert_eq!(style, Some(CodeBlockStyle::Fenced));
     }
@@ -1405,7 +1432,7 @@ key:
     fn test_detect_style_indented() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "Text\n\n    code\n\nMore";
-        let style = detect_style_from_content(&rule, content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false);
 
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
@@ -1414,7 +1441,7 @@ key:
     fn test_detect_style_none() {
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
         let content = "No code blocks here";
-        let style = detect_style_from_content(&rule, content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false);
 
         assert_eq!(style, None);
     }
@@ -1540,11 +1567,11 @@ Regular text
     Content in second tab"#;
 
         // In MkDocs mode, tab content should not be detected as indented code blocks
-        let style = detect_style_from_content(&rule, content, true, &[]);
+        let style = detect_style_from_content(&rule, content, true);
         assert_eq!(style, None); // No code blocks detected
 
         // In standard mode, it would detect indented code blocks
-        let style = detect_style_from_content(&rule, content, false, &[]);
+        let style = detect_style_from_content(&rule, content, false);
         assert_eq!(style, Some(CodeBlockStyle::Indented));
     }
 
@@ -2202,6 +2229,156 @@ More text."#;
             "Code blocks after HTML comments should still be detected"
         );
         assert!(result[0].message.contains("Use fenced code blocks"));
+    }
+
+    #[test]
+    fn test_consistent_style_indented_html_comment() {
+        // Under the default `Consistent` style, indented content inside an
+        // HTML comment must not contribute to the document's code-block style
+        // tally. Otherwise a single fenced block alongside an indented HTML
+        // comment flips the detected style to `Indented`, emitting a spurious
+        // "Use indented code blocks" warning against the only real code block.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# MD046 false-positive reproduction\n\
+                       \n\
+                       <!--\n    \
+                       This is just an indented comment, not a code block.\n\
+                       \n    \
+                       A second line is required to trigger the false-positive.\n\
+                       \n    \
+                       Actually, three lines are required.\n\
+                       -->\n\
+                       \n\
+                       ```md\n\
+                       This should be fine, since it's the only code block and therefore consistent.\n\
+                       ```\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "A single fenced block and an indented HTML comment must produce no MD046 warnings",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_indented_html_block() {
+        // Indented content inside a raw HTML block (e.g. a `<div>` tag pair)
+        // must not count as an indented code block when `detect_style` picks
+        // the document's predominant style.
+        //
+        // Per CommonMark, a type-6 HTML block is terminated by a blank line,
+        // so the content here is kept contiguous to remain inside the block.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       <div class=\"note\">\n    \
+                       line one of indented html content\n    \
+                       line two of indented html content\n    \
+                       line three of indented html content\n\
+                       </div>\n\
+                       \n\
+                       ```md\n\
+                       real fenced block\n\
+                       ```\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Indented content inside a raw HTML block must not influence MD046 style detection",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_fake_fence_inside_html_comment() {
+        // Fence markers inside an HTML comment must not contribute to the
+        // fenced count during style detection. Otherwise a document whose
+        // only real code block is indented gets flagged "Use fenced code
+        // blocks" under `Consistent` because the verbatim ``` inside the
+        // comment ties the count.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Title\n\
+                       \n\
+                       <!--\n\
+                       ```\n\
+                       fake fence inside comment\n\
+                       ```\n\
+                       -->\n\
+                       \n    \
+                       real indented code block line 1\n    \
+                       real indented code block line 2\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Fence markers inside an HTML comment must not influence MD046 style detection",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_indented_footnote_definition() {
+        // Footnote-definition continuation lines are commonly indented by 4+
+        // spaces. They must not be counted as indented code blocks during
+        // style detection under `Consistent`.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       Reference to a footnote[^note].\n\
+                       \n\
+                       [^note]: First line of the footnote.\n    \
+                       Second indented continuation line.\n    \
+                       Third indented continuation line.\n    \
+                       Fourth indented continuation line.\n\
+                       \n\
+                       ```md\n\
+                       real fenced block\n\
+                       ```\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Footnote-definition continuation content must not influence MD046 style detection",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_indented_blockquote() {
+        // Indented content inside a blockquote (`>     foo`) must not be
+        // counted as an indented code block by `detect_style`. The check-side
+        // skip list already excludes `blockquote.is_some()` for indented
+        // warnings, so detection must match to keep `Consistent` stable.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       >     line one of quoted indented content\n\
+                       >\n\
+                       >     line two of quoted indented content\n\
+                       >\n\
+                       >     line three of quoted indented content\n\
+                       \n\
+                       ```md\n\
+                       real fenced block\n\
+                       ```\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Indented content inside a blockquote must not influence MD046 style detection",
+        );
     }
 
     #[test]
