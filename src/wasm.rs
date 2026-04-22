@@ -136,6 +136,19 @@ fn expand_directory_pattern(pattern: &str) -> Vec<String> {
     vec![base.to_string(), format!("{base}/**")]
 }
 
+/// Human-readable name for a TOML value's variant. Used in config warnings.
+fn toml_type_name(value: &toml::Value) -> &'static str {
+    match value {
+        toml::Value::String(_) => "string",
+        toml::Value::Integer(_) => "integer",
+        toml::Value::Float(_) => "float",
+        toml::Value::Boolean(_) => "boolean",
+        toml::Value::Array(_) => "array",
+        toml::Value::Table(_) => "table",
+        toml::Value::Datetime(_) => "datetime",
+    }
+}
+
 /// Return true if `path` matches any of the exclude patterns.
 fn path_matches_exclude(exclude_patterns: &[String], path: &str) -> bool {
     if exclude_patterns.is_empty() {
@@ -268,19 +281,35 @@ impl LinterConfig {
 
         // Apply rule-specific configurations
         if let Some(ref rules) = self.rules {
+            let registry = crate::config::registry::default_registry();
             for (rule_name, json_value) in rules {
                 // Only process keys that look like rule names (MD###)
                 if !is_rule_name(rule_name) {
                     continue;
                 }
+                let canonical = rule_name.to_ascii_uppercase();
 
                 // Convert JSON value to RuleConfig, collecting warnings
                 let result = json_to_rule_config_with_warnings(json_value);
                 for warning in result.warnings {
-                    warnings.push(format!("[{}] {}", rule_name.to_ascii_uppercase(), warning));
+                    warnings.push(format!("[{canonical}] {warning}"));
                 }
                 if let Some(rule_config) = result.config {
-                    config.rules.insert(rule_name.to_ascii_uppercase(), rule_config);
+                    // Validate value types against the rule's known schema.
+                    // Emits a warning when a provided value type doesn't match
+                    // what the rule expects (e.g. `line-length = "not-a-number"`).
+                    for (field, actual) in &rule_config.values {
+                        if let Some(expected) = registry.expected_value_for(&canonical, field)
+                            && std::mem::discriminant(actual) != std::mem::discriminant(expected)
+                        {
+                            warnings.push(format!(
+                                "[{canonical}] Invalid type for '{field}': expected {}, got {}",
+                                toml_type_name(expected),
+                                toml_type_name(actual),
+                            ));
+                        }
+                    }
+                    config.rules.insert(canonical, rule_config);
                 }
             }
         }
