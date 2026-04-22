@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.79](https://github.com/rvben/rumdl/compare/v0.1.78...v0.1.79) - 2026-04-22
+
+### Fixed
+
+- **md051**: strip HTML comments from heading anchors ([e4e3c4b](https://github.com/rvben/rumdl/commit/e4e3c4b79126b7d8a90357edcba044ed7d473404))
+- **md077**: accept task-item post-checkbox column to break MD013 reflow cycle ([1c3cbef](https://github.com/rvben/rumdl/commit/1c3cbef4cb2a5e0c9ff9c810c5012018f9ee3e18))
+- **lint-context**: honor CommonMark Type-1 HTML blocks ([6f37e49](https://github.com/rvben/rumdl/commit/6f37e49cf9f54bf56c20bb88309cf7e9a052946a))
+
 ## [0.1.78](https://github.com/rvben/rumdl/compare/v0.1.77...v0.1.78) - 2026-04-21
 
 ### Fixed
