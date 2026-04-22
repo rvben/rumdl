@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.80](https://github.com/rvben/rumdl/compare/v0.1.79...v0.1.80) - 2026-04-22
+
+### Added
+
+- **wasm**: validate rule-config value types at parse time ([ab3d3d5](https://github.com/rvben/rumdl/commit/ab3d3d547eb58ac093f52a5678b65d59e6602541))
+- **wasm**: honor exclude patterns via path-aware check() and fix() ([e578308](https://github.com/rvben/rumdl/commit/e578308978f04e582acedf014ff75b4890ceca44))
+
 ## [0.1.79](https://github.com/rvben/rumdl/compare/v0.1.78...v0.1.79) - 2026-04-22
 
 ### Fixed
