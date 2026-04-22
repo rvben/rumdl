@@ -969,3 +969,70 @@ Content inside the block.
         "PyMdown block content should not be modified by reflow fix"
     );
 }
+
+/// Issue #579: `rumdl fmt` must converge on GFM task lists when MD013
+/// `reflow-mode = "normalize"` is enabled. Before the fix, MD013 reflowed
+/// wrapped task-item content to the post-checkbox column (6 for `- [ ] `)
+/// and MD077 immediately fixed it back to the content column (2), creating
+/// an `MD077 -> MD013 -> MD077` oscillation that the fixer aborted after
+/// three iterations.
+#[test]
+fn md013_md077_task_list_no_fix_loop() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("task.md");
+    let config_path = dir.path().join(".rumdl.toml");
+
+    let content = "# T\n\n- [ ] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "normalize"
+"#;
+    fs::write(&config_path, config).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("conflict loop") && !stderr.contains("conflict loop"),
+        "rumdl fmt detected a fix loop on a task list — MD013 and MD077 \
+         are disagreeing about the task-continuation column.\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(
+        fixed,
+        "# T\n\n- [ ] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod\n      tempor incididunt ut labore et dolore magna aliqua.\n",
+        "MD013 reflow should produce the post-checkbox-aligned layout and \
+         MD077 should accept it"
+    );
+
+    // Second pass: running check on the reflowed output should emit no
+    // MD077 warnings.
+    let recheck = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--no-cache")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl check");
+    let recheck_stdout = String::from_utf8_lossy(&recheck.stdout);
+    assert!(
+        !recheck_stdout.contains("MD077"),
+        "MD077 should accept MD013's post-checkbox continuation column. \
+         Re-check output: {recheck_stdout}"
+    );
+}

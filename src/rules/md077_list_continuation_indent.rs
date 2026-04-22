@@ -3,7 +3,9 @@
 //!
 //! See [docs/md077.md](../../docs/md077.md) for full documentation, configuration, and examples.
 
-use crate::lint_context::LintContext;
+use std::ops::ControlFlow;
+
+use crate::lint_context::{LineInfo, LintContext};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 
 /// Rule MD077: List continuation content indentation
@@ -20,6 +22,31 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 pub struct MD077ListContinuationIndent;
 
 impl MD077ListContinuationIndent {
+    /// Width of a GFM task checkbox prefix including its trailing space:
+    /// `[ ] `, `[x] `, or `[X] ` — always exactly 4 bytes.
+    const TASK_CHECKBOX_PREFIX_LEN: usize = 4;
+
+    /// Returns true if the item line starts a GFM task list item, i.e. its
+    /// content column begins with `[ ] `, `[x] `, or `[X] `. The trailing
+    /// space is part of the match — `- [ ]` with no body is an empty list
+    /// item, not a task.
+    ///
+    /// Task items have a second, conventionally-accepted continuation column
+    /// at `content_col + 4` (aligned after the checkbox). MD013 reflow
+    /// produces this column for wrapped task lines, so MD077 has to accept
+    /// it to avoid a fix loop with MD013.
+    ///
+    /// `content_col` is a byte offset into `line`, not a visual column. The
+    /// CommonMark list parser produces byte-offset content columns, and the
+    /// checkbox prefix `[ ] ` is pure ASCII, so this byte-level comparison
+    /// is correct. Leading indent mixing tabs and spaces is irrelevant here
+    /// because `content_col` already points past any leading whitespace.
+    fn is_task_list_item(line: &str, content_col: usize) -> bool {
+        line.as_bytes()
+            .get(content_col..content_col + Self::TASK_CHECKBOX_PREFIX_LEN)
+            .is_some_and(|window| matches!(window, b"[ ] " | b"[x] " | b"[X] "))
+    }
+
     /// Check if a trimmed line is a block-level construct (not list continuation).
     fn is_block_level_construct(trimmed: &str) -> bool {
         // Footnote definition: [^label]:
@@ -80,18 +107,35 @@ impl MD077ListContinuationIndent {
     }
 
     /// Build an atomic fix that reindents a fenced code block from its opener
-    /// through its matching closer, shifting every non-blank line's leading
-    /// whitespace by the same visual delta. Preserves relative indentation of
-    /// code content inside the block so the parser keeps pairing the fences.
+    /// through its matching closer.
     ///
-    /// Leading tabs are normalized to spaces: CommonMark expands a tab to the
-    /// next column that's a multiple of 4, so simply prepending spaces before
-    /// a tab would let the tab snap back and cancel the shift. We replace the
-    /// whole leading-whitespace byte range with `(visual_indent + delta)`
-    /// spaces instead.
+    /// - **Opener and closer** are moved to `required` (the list item's
+    ///   content column, which is what MD077 actually flagged).
+    /// - **Interior lines** are *promoted* to `required` only if they sit
+    ///   below it; interior content at or above `required` is left at its
+    ///   original column. This preserves authored interior indentation when
+    ///   possible while guaranteeing fence pairing: every non-blank line in
+    ///   the block ends at column ≥ `required`, so the block stays inside
+    ///   the list item's scope after the fix.
     ///
-    /// This prevents other rules (notably MD031) from seeing a transiently
-    /// broken fence pair between iterations of the fix loop (see issue #574).
+    /// Why a compound fix rather than three independent fixes? MD077 and
+    /// MD031 run in the same iterative fix loop. If we only moved the
+    /// delimiters, an intermediate state would have mismatched
+    /// opener/closer indentation and MD031 would misread the block as
+    /// unpaired, injecting stray blank lines (issue #574).
+    ///
+    /// Why `max(interior, required)` instead of `interior + delta`? The
+    /// delta-shift version was not idempotent: if interior started below
+    /// the list scope (e.g., col 0 under an opener at col 2 that needs to
+    /// move to col 3), delta-shift landed interior at col 1 — still below
+    /// the list scope — and the next MD077 pass would re-flag it
+    /// individually and snap it to `required`. The promote-up rule reaches
+    /// that end state in a single pass.
+    ///
+    /// Leading tabs are normalized to spaces: CommonMark expands a tab to
+    /// the next column that's a multiple of 4, so simply prepending spaces
+    /// before a tab would let the tab snap back and cancel the shift. We
+    /// replace the whole leading-whitespace byte range with spaces.
     fn build_compound_fence_fix(
         ctx: &LintContext,
         opener_line: usize,
@@ -99,12 +143,11 @@ impl MD077ListContinuationIndent {
         opener_actual: usize,
         required: usize,
     ) -> Option<Fix> {
-        let opener_info = ctx.line_info(opener_line)?;
-        let closer_info = ctx.line_info(closer_line)?;
-        let delta = required.saturating_sub(opener_actual);
-        if delta == 0 {
+        if required <= opener_actual {
             return None;
         }
+        let opener_info = ctx.line_info(opener_line)?;
+        let closer_info = ctx.line_info(closer_line)?;
 
         let fix_start = opener_info.byte_offset;
         let fix_end = closer_info.byte_offset + closer_info.byte_len;
@@ -120,7 +163,11 @@ impl MD077ListContinuationIndent {
                 // Blank lines have no content to shift; preserve verbatim.
                 replacement.push_str(line);
             } else {
-                let new_visual = info.visual_indent + delta;
+                let new_visual = if i == opener_line || i == closer_line {
+                    required
+                } else {
+                    info.visual_indent.max(required)
+                };
                 for _ in 0..new_visual {
                     replacement.push(' ');
                 }
@@ -132,6 +179,156 @@ impl MD077ListContinuationIndent {
             range: fix_start..fix_end,
             replacement,
         })
+    }
+
+    /// Walk the continuation lines owned by a single list item, invoking
+    /// `per_line` for each *in-scope, non-blank, non-nested, non-skipped*
+    /// line with its pre-computed visual column and loose/tight state.
+    ///
+    /// This is the **single source of truth** for MD077's item-scope
+    /// traversal: both the sibling-column pre-pass and the main check loop
+    /// route through this method so their termination semantics cannot
+    /// drift. The callback sees only lines the rule actually needs to
+    /// reason about; it can return `ControlFlow::Break` for early exit.
+    ///
+    /// Termination conditions (applied before the callback fires):
+    /// - Headings and horizontal rules end the item unconditionally.
+    /// - After a blank line, content at or below the marker column has
+    ///   escaped the item; further lines are not delivered.
+    ///
+    /// Skipped silently (do not fire the callback):
+    /// - Blank lines (toggle `saw_blank`).
+    /// - Nested list items (reset `saw_blank`, track their content column).
+    /// - Lines inside a nested item's scope (`col >= nested_content_col`).
+    /// - Reference/footnote/abbreviation definitions and similar block
+    ///   constructs that aren't list continuation.
+    /// - Lines that `should_skip_line` rejects (code-block interior etc.).
+    fn walk_item_continuation<F>(
+        ctx: &LintContext,
+        item_line: usize,
+        range_end: usize,
+        marker_col: usize,
+        mut per_line: F,
+    ) where
+        F: FnMut(&ContinuationLine<'_>) -> ControlFlow<()>,
+    {
+        let mut saw_blank = false;
+        let mut nested_content_col: Option<usize> = None;
+
+        for line_num in (item_line + 1)..=range_end {
+            let Some(info) = ctx.line_info(line_num) else {
+                continue;
+            };
+
+            let trimmed = info.content(ctx.content).trim_start();
+
+            if Self::should_skip_line(info, trimmed) {
+                continue;
+            }
+
+            if info.is_blank {
+                saw_blank = true;
+                continue;
+            }
+
+            if let Some(ref li) = info.list_item {
+                nested_content_col = (li.marker_column > marker_col).then_some(li.content_column);
+                saw_blank = false;
+                continue;
+            }
+
+            if info.heading.is_some() || info.is_horizontal_rule {
+                break;
+            }
+
+            if Self::is_block_level_construct(trimmed) {
+                continue;
+            }
+
+            let col = info.visual_indent;
+
+            if let Some(ncc) = nested_content_col {
+                if col >= ncc {
+                    continue;
+                }
+                nested_content_col = None;
+            }
+
+            if saw_blank && col <= marker_col {
+                break;
+            }
+
+            let line = ContinuationLine {
+                line_num,
+                info,
+                trimmed,
+                actual: col,
+                saw_blank,
+            };
+            if per_line(&line).is_break() {
+                break;
+            }
+        }
+    }
+
+    /// Scan an item's owned range and report whether any *other* continuation
+    /// line in the item uses the content column or the post-checkbox column.
+    ///
+    /// Used exclusively for tie-breaking the auto-fix target when an
+    /// over-indented line is exactly equidistant from `content_col` and
+    /// `task_col`. In that case the author's intent is ambiguous, so we
+    /// snap to whichever valid column *they're already using* elsewhere in
+    /// the same item. When neither or both columns are in use, the caller
+    /// falls back to a canonical default.
+    fn sibling_column_usage(
+        ctx: &LintContext,
+        item_line: usize,
+        range_end: usize,
+        marker_col: usize,
+        content_col: usize,
+        task_col: usize,
+    ) -> (bool, bool) {
+        let mut uses_content = false;
+        let mut uses_task = false;
+
+        Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+            if line.actual == content_col {
+                uses_content = true;
+            }
+            if line.actual == task_col {
+                uses_task = true;
+            }
+            if uses_content && uses_task {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+
+        (uses_content, uses_task)
+    }
+
+    /// Compute the auto-fix target for an over-indented continuation line.
+    /// Snaps to the nearer of the two valid columns (content_col / task_col)
+    /// for task items, and on an exact tie uses sibling-column context to
+    /// pick whichever column the author is already using elsewhere in this
+    /// item. Non-task items always snap to `required`.
+    fn compute_fix_target(
+        actual: usize,
+        required: usize,
+        task_col: Option<usize>,
+        uses_content_col: bool,
+        uses_task_col: bool,
+    ) -> usize {
+        let Some(t) = task_col else { return required };
+        match actual.abs_diff(t).cmp(&actual.abs_diff(required)) {
+            std::cmp::Ordering::Less => t,
+            std::cmp::Ordering::Greater => required,
+            std::cmp::Ordering::Equal => match (uses_task_col, uses_content_col) {
+                (true, false) => t,
+                _ => required,
+            },
+        }
     }
 
     /// Check if a line should be skipped (inside code, HTML, frontmatter, etc.)
@@ -156,6 +353,106 @@ impl MD077ListContinuationIndent {
             || info.in_mkdocs_html_markdown
             || info.in_kramdown_extension_block
     }
+
+    /// Build the warning for a tight-mode over-indented continuation line.
+    fn build_over_indent_warning(
+        ctx: &LintContext,
+        line: &ContinuationLine<'_>,
+        fix_target: usize,
+        message: String,
+    ) -> LintWarning {
+        let line_content = line.info.content(ctx.content);
+        let fix_start = line.info.byte_offset;
+        let fix_end = fix_start + line.info.indent;
+        LintWarning {
+            rule_name: Some("MD077".to_string()),
+            line: line.line_num,
+            column: 1,
+            end_line: line.line_num,
+            end_column: line_content.len() + 1,
+            message,
+            severity: Severity::Warning,
+            fix: Some(Fix {
+                range: fix_start..fix_end,
+                replacement: " ".repeat(fix_target),
+            }),
+        }
+    }
+
+    /// Build the warning for a loose-mode under-indented continuation line.
+    /// When the line is the opener of a fenced code block, emit a compound
+    /// fix that reindents opener + interior + closer atomically so MD031
+    /// doesn't see a transiently-broken fence pair (see #574).
+    ///
+    /// Returns the warning plus, when the fix is compound, the closer
+    /// line number so the caller can mark it flagged (preventing the
+    /// main loop from double-flagging the closer as its own under-indent
+    /// case). Keeping the "also flag this line" signal out of band keeps
+    /// this function pure — it reads from `ctx` only and returns a
+    /// plain value.
+    fn build_under_indent_warning(
+        ctx: &LintContext,
+        line: &ContinuationLine<'_>,
+        required: usize,
+        message: String,
+    ) -> UnderIndentOutcome {
+        let line_content = line.info.content(ctx.content);
+        let is_fence_opener = line.info.in_code_block
+            && Self::is_code_fence(line.trimmed)
+            && ctx.line_info(line.line_num - 1).is_none_or(|p| !p.in_code_block);
+
+        let (fix, warn_end_line, warn_end_column, compound_closer) = if is_fence_opener {
+            let closer_line = Self::find_fence_closer(ctx, line.line_num);
+            let fix = Self::build_compound_fence_fix(ctx, line.line_num, closer_line, line.actual, required);
+            let end_column = ctx
+                .line_info(closer_line)
+                .map_or(line_content.len() + 1, |ci| ci.content(ctx.content).len() + 1);
+            let extra_flag = (closer_line != line.line_num).then_some(closer_line);
+            (fix, closer_line, end_column, extra_flag)
+        } else {
+            let fix_start = line.info.byte_offset;
+            let fix_end = fix_start + line.info.indent;
+            let fix = Some(Fix {
+                range: fix_start..fix_end,
+                replacement: " ".repeat(required),
+            });
+            (fix, line.line_num, line_content.len() + 1, None)
+        };
+
+        UnderIndentOutcome {
+            warning: LintWarning {
+                rule_name: Some("MD077".to_string()),
+                line: line.line_num,
+                column: 1,
+                end_line: warn_end_line,
+                end_column: warn_end_column,
+                message,
+                severity: Severity::Warning,
+                fix,
+            },
+            also_flag_line: compound_closer,
+        }
+    }
+}
+
+/// A continuation line yielded by `walk_item_continuation`. Bundles the
+/// per-line facts both checker branches need so helper functions don't
+/// balloon their argument lists.
+struct ContinuationLine<'a> {
+    line_num: usize,
+    info: &'a LineInfo,
+    trimmed: &'a str,
+    actual: usize,
+    saw_blank: bool,
+}
+
+/// Result of `build_under_indent_warning`. Carries both the warning and,
+/// when the fix is compound (fence opener → promote-to-required over the
+/// whole block), the closer line so the caller can record it as already
+/// handled. This keeps the warning builder free of external mutation.
+struct UnderIndentOutcome {
+    warning: LintWarning,
+    also_flag_line: Option<usize>,
 }
 
 impl Rule for MD077ListContinuationIndent {
@@ -177,23 +474,31 @@ impl Rule for MD077ListContinuationIndent {
         let mut warnings = Vec::new();
         let mut flagged_lines = std::collections::HashSet::new();
 
-        // Collect all list item lines sorted, with their content_column and marker_column.
-        // We need this to compute owned ranges that extend past block.end_line
-        // (the parser excludes under-indented continuation from the block).
-        let mut items: Vec<(usize, usize, usize)> = Vec::new(); // (line_num, marker_col, content_col)
+        // Collect all list item lines sorted, with their content_column,
+        // marker_column, and — if the item is a GFM task — its post-checkbox
+        // column. Precomputing task_col here (instead of re-reading line_info
+        // inside the hot inner loop) keeps the per-item cost O(1).
+        //
+        // We need the owned range to extend past block.end_line because the
+        // parser excludes under-indented continuation from the block, and
+        // MD077 specifically has to evaluate those escaped lines.
+        let mut items: Vec<(usize, usize, usize, Option<usize>)> = Vec::new();
         for block in &ctx.list_blocks {
             for &item_line in &block.item_lines {
                 if let Some(info) = ctx.line_info(item_line)
                     && let Some(ref li) = info.list_item
                 {
-                    items.push((item_line, li.marker_column, li.content_column));
+                    let line = info.content(ctx.content);
+                    let task_col = Self::is_task_list_item(line, li.content_column)
+                        .then_some(li.content_column + Self::TASK_CHECKBOX_PREFIX_LEN);
+                    items.push((item_line, li.marker_column, li.content_column, task_col));
                 }
             }
         }
         items.sort_unstable();
-        items.dedup_by_key(|&mut (ln, _, _)| ln);
+        items.dedup_by_key(|&mut (ln, _, _, _)| ln);
 
-        for (item_idx, &(item_line, marker_col, content_col)) in items.iter().enumerate() {
+        for (item_idx, &(item_line, marker_col, content_col, task_col)) in items.iter().enumerate() {
             let required = if strict_indent { content_col.max(4) } else { content_col };
 
             // Owned range ends at the line before the next sibling-or-higher
@@ -201,102 +506,41 @@ impl Rule for MD077ListContinuationIndent {
             let range_end = items
                 .iter()
                 .skip(item_idx + 1)
-                .find(|&&(_, mc, _)| mc <= marker_col)
-                .map_or(total_lines, |&(ln, _, _)| ln - 1);
+                .find(|&&(_, mc, _, _)| mc <= marker_col)
+                .map_or(total_lines, |&(ln, _, _, _)| ln - 1);
 
-            let mut saw_blank = false;
-            // Track nested child items so we don't check their continuation
-            // lines against the parent's content column.
-            let mut nested_content_col: Option<usize> = None;
+            // For task items, gather sibling-column usage once per item so
+            // the auto-fix can tie-break equidistant over-indents toward
+            // whichever valid column the author is already using.
+            let (uses_content_col, uses_task_col) = match task_col {
+                Some(t) => Self::sibling_column_usage(ctx, item_line, range_end, marker_col, content_col, t),
+                None => (false, false),
+            };
 
-            for line_num in (item_line + 1)..=range_end {
-                let Some(line_info) = ctx.line_info(line_num) else {
-                    continue;
-                };
-
-                let trimmed = line_info.content(ctx.content).trim_start();
-
-                if Self::should_skip_line(line_info, trimmed) {
-                    continue;
-                }
-
-                if line_info.is_blank {
-                    saw_blank = true;
-                    continue;
-                }
-
-                // Nested list items are not continuation content
-                if let Some(ref li) = line_info.list_item {
-                    if li.marker_column > marker_col {
-                        nested_content_col = Some(li.content_column);
-                    } else {
-                        nested_content_col = None;
+            Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+                let actual = line.actual;
+                if !line.saw_blank {
+                    // Tight continuation: flag over-indented lines.
+                    if actual > required
+                        && Some(actual) != task_col
+                        && !Self::starts_with_list_marker(line.trimmed)
+                        && flagged_lines.insert(line.line_num)
+                    {
+                        let fix_target =
+                            Self::compute_fix_target(actual, required, task_col, uses_content_col, uses_task_col);
+                        let message = match task_col {
+                            Some(t) => format!(
+                                "Continuation line over-indented \
+                                 (expected {required} or {t}, found {actual})"
+                            ),
+                            None => {
+                                format!("Continuation line over-indented (expected {required}, found {actual})")
+                            }
+                        };
+                        warnings.push(Self::build_over_indent_warning(ctx, line, fix_target, message));
                     }
-                    saw_blank = false;
-                    continue;
-                }
-
-                // Skip headings - they clearly aren't list continuation
-                if line_info.heading.is_some() {
-                    break;
-                }
-
-                // Skip horizontal rules
-                if line_info.is_horizontal_rule {
-                    break;
-                }
-
-                // Skip block-level constructs that aren't list continuation:
-                // reference definitions, footnote definitions, abbreviation definitions
-                if Self::is_block_level_construct(trimmed) {
-                    continue;
-                }
-
-                let actual = line_info.visual_indent;
-
-                // Lines belonging to a nested item's scope are handled by
-                // that item's own iteration — skip them here.
-                if let Some(ncc) = nested_content_col {
-                    if actual >= ncc {
-                        continue;
-                    }
-                    nested_content_col = None;
-                }
-
-                // Tight continuation (no blank line): flag over-indented lines
-                if !saw_blank {
-                    if actual > required && !Self::starts_with_list_marker(trimmed) && flagged_lines.insert(line_num) {
-                        let line_content = line_info.content(ctx.content);
-                        let fix_start = line_info.byte_offset;
-                        let fix_end = fix_start + line_info.indent;
-
-                        warnings.push(LintWarning {
-                            rule_name: Some("MD077".to_string()),
-                            line: line_num,
-                            column: 1,
-                            end_line: line_num,
-                            end_column: line_content.len() + 1,
-                            message: format!("Continuation line over-indented (expected {required}, found {actual})",),
-                            severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: fix_start..fix_end,
-                                replacement: " ".repeat(required),
-                            }),
-                        });
-                    }
-                    continue;
-                }
-
-                // Content at or below the marker column is not continuation —
-                // it starts a new paragraph (top-level) or belongs to a
-                // parent item (nested).
-                if actual <= marker_col {
-                    break;
-                }
-
-                if actual < required && flagged_lines.insert(line_num) {
-                    let line_content = line_info.content(ctx.content);
-
+                } else if actual < required && flagged_lines.insert(line.line_num) {
+                    // Loose continuation: flag under-indented lines.
                     let message = if strict_indent {
                         format!(
                             "Content inside list item needs {required} spaces of indentation \
@@ -308,56 +552,14 @@ impl Rule for MD077ListContinuationIndent {
                              indentation to remain part of the list (found {actual})",
                         )
                     };
-
-                    // If this is the opener of a fenced code block, emit a
-                    // compound fix that reindents the whole block (opener +
-                    // interior + closer). Fixing only the fence lines while
-                    // leaving interior content at the old indent creates a
-                    // transiently-broken fence pair that MD031 (which runs in
-                    // the same iterative-fix loop) misreads as orphan fences
-                    // and "repairs" by inserting stray blank lines.
-                    let is_fence_opener = line_info.in_code_block
-                        && Self::is_code_fence(trimmed)
-                        && ctx.line_info(line_num - 1).is_none_or(|p| !p.in_code_block);
-
-                    let (fix, warn_end_line, warn_end_column) = if is_fence_opener {
-                        let closer_line = Self::find_fence_closer(ctx, line_num);
-                        if closer_line != line_num {
-                            flagged_lines.insert(closer_line);
-                        }
-                        let fix = Self::build_compound_fence_fix(ctx, line_num, closer_line, actual, required);
-                        let end_line = closer_line;
-                        let end_column = ctx
-                            .line_info(closer_line)
-                            .map_or(line_content.len() + 1, |ci| ci.content(ctx.content).len() + 1);
-                        (fix, end_line, end_column)
-                    } else {
-                        let fix_start = line_info.byte_offset;
-                        let fix_end = fix_start + line_info.indent;
-                        let fix = Some(Fix {
-                            range: fix_start..fix_end,
-                            replacement: " ".repeat(required),
-                        });
-                        (fix, line_num, line_content.len() + 1)
-                    };
-
-                    warnings.push(LintWarning {
-                        rule_name: Some("MD077".to_string()),
-                        line: line_num,
-                        column: 1,
-                        end_line: warn_end_line,
-                        end_column: warn_end_column,
-                        message,
-                        severity: Severity::Warning,
-                        fix,
-                    });
+                    let outcome = Self::build_under_indent_warning(ctx, line, required, message);
+                    if let Some(closer_line) = outcome.also_flag_line {
+                        flagged_lines.insert(closer_line);
+                    }
+                    warnings.push(outcome.warning);
                 }
-
-                // Intentionally keep `saw_blank = true` while scanning this
-                // owned item range so that *all* lines in a loose continuation
-                // paragraph are validated/fixed, not just the first line after
-                // the blank.
-            }
+                ControlFlow::Continue(())
+            });
         }
 
         Ok(warnings)
@@ -1165,5 +1367,632 @@ mod tests {
         let content = "100. ab\n\n\t```\n\tabcd\n\t```\n";
         let expected = "100. ab\n\n     ```\n     abcd\n     ```\n";
         assert_eq!(fix(content), expected);
+    }
+
+    // ── GFM task list items: post-checkbox continuation column ───────
+    //
+    // MD013's reflow indents wrapped task-list lines at `content_col + 4`
+    // (the column after the checkbox). MD077 must accept that column for
+    // both tight and loose continuation, for every marker flavour, so the
+    // two rules don't fight over well-formed task items (issue #579).
+
+    #[test]
+    fn task_list_tight_continuation_post_checkbox_reproducer_579() {
+        // Exact reproducer from the bug report: content wraps to the
+        // post-checkbox column (6) with no blank line.
+        let content = "- [ ] Lorem ipsum dolor sit amet, consectetur adipiscing\n      tempor incididunt ut labore.\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_dash_unchecked() {
+        let content = "- [ ] Task\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_dash_checked_lower() {
+        let content = "- [x] Task\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_dash_checked_upper() {
+        let content = "- [X] Task\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_star_marker() {
+        let content = "* [ ] Task\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_plus_marker() {
+        let content = "+ [ ] Task\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_content_column_still_valid() {
+        // Column 2 is the CommonMark-canonical indent for "- " and remains
+        // valid for task items too.
+        let content = "- [ ] Task\n  continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_between_columns_still_flagged() {
+        // Column 4 matches neither content_col (2) nor post-checkbox (6).
+        // A genuine indentation mistake — must remain flagged.
+        let content = "- [ ] Task\n    continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        // Task items advertise both valid columns to the user.
+        assert!(warnings[0].message.contains("expected 2 or 6"));
+        assert!(warnings[0].message.contains("found 4"));
+    }
+
+    #[test]
+    fn task_list_tight_continuation_overshoot_still_flagged() {
+        // Column 7 overshoots the post-checkbox column. Genuine mistake.
+        let content = "- [ ] Task\n       continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("expected 2 or 6"));
+        assert!(warnings[0].message.contains("found 7"));
+    }
+
+    // ── Task-list fix output: snap to nearer valid column ────────────
+
+    #[test]
+    fn fix_task_list_overshoot_snaps_to_task_col() {
+        // Col 7 is 1 away from post-checkbox (6), 5 away from content (2).
+        // Snap to 6 — the author's intent was almost certainly the
+        // post-checkbox alignment, not the content column.
+        let content = "- [ ] Task\n       continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n      continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_col_5_snaps_to_task_col() {
+        // Col 5 is 1 away from post-checkbox (6), 3 away from content (2).
+        let content = "- [ ] Task\n     continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n      continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_col_3_snaps_to_content_col() {
+        // Col 3 is 1 away from content (2), 3 away from post-checkbox (6).
+        let content = "- [ ] Task\n   continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n  continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_col_4_ties_to_content_col() {
+        // Col 4 is equidistant (±2) from both columns. Tie breaks to the
+        // CommonMark-canonical content column — that's the default indent
+        // MD077 would produce for a non-task item, so prefer it when the
+        // author's intent is ambiguous.
+        let content = "- [ ] Task\n    continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n  continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_ordered_overshoot_snaps_to_task_col() {
+        // "1. [ ] " → content_col = 3, post-checkbox = 7.
+        // Col 8 is nearer to 7.
+        let content = "1. [ ] Task\n        continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. [ ] Task\n       continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_ordered_under_overshoot_snaps_to_content_col() {
+        // "1. [ ] " → content_col = 3, post-checkbox = 7.
+        // Col 4 is nearer to 3.
+        let content = "1. [ ] Task\n    continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. [ ] Task\n   continuation\n");
+    }
+
+    #[test]
+    fn task_list_tight_continuation_ordered_single_digit() {
+        // "1. [ ] " → content_col = 3, post-checkbox = 7
+        let content = "1. [ ] Task\n       continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_ordered_multi_digit() {
+        // "10. [ ] " → content_col = 4, post-checkbox = 8
+        let content = "10. [ ] Task\n        continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_tight_continuation_nested_dash() {
+        // Nested "  - [ ] " at marker_col=2 → content_col=4, post-checkbox=8
+        let content = "- Parent\n  - [ ] Nested task\n        continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_loose_continuation_post_checkbox_column_not_flagged() {
+        // Loose continuation (blank line) at col 6 is also valid. This
+        // already passed before the fix, but pin the intent: the 6-space
+        // indent is accepted because it's the task-alignment column, not
+        // because the under-indent check happens to let it through.
+        let content = "- [ ] Task\n\n      continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_empty_body_is_not_a_task() {
+        // "- [ ]" with nothing after is an empty regular list item, not a
+        // task. Column 4 continuation has no task alignment to justify it
+        // and must still be flagged as over-indented. (Col 6 would turn
+        // the continuation into an indented code block inside the item,
+        // which is a different code path.)
+        let content = "- [ ]\n    continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("found 4"));
+    }
+
+    #[test]
+    fn task_list_malformed_checkbox_is_not_a_task() {
+        // `[~] ` is not a GFM checkbox; only `[ ] `, `[x] `, `[X] ` count.
+        let content = "- [~] Not a task\n      continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    // ── MkDocs flavor × task checkbox ─────────────────────────────────
+    //
+    // MkDocs strict-indent and task alignment interact: required_min is
+    // max(content_col, 4), and post-checkbox is content_col + 4. Both are
+    // independently valid; values between them are flagged.
+
+    #[test]
+    fn task_list_mkdocs_unordered_required_min_valid() {
+        // "- [ ]" MkDocs: required_min = max(2, 4) = 4, post-checkbox = 6.
+        let content = "- [ ] Task\n    continuation\n";
+        assert!(check_mkdocs(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_mkdocs_unordered_post_checkbox_valid() {
+        let content = "- [ ] Task\n      continuation\n";
+        assert!(check_mkdocs(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_mkdocs_unordered_between_flagged() {
+        // Column 5 is between required_min=4 and post-checkbox=6.
+        let content = "- [ ] Task\n     continuation\n";
+        let warnings = check_mkdocs(content);
+        assert_eq!(warnings.len(), 1);
+    }
+
+    #[test]
+    fn task_list_mkdocs_ordered_both_columns_valid() {
+        // "1. [ ]" MkDocs: required_min = max(3, 4) = 4, post-checkbox = 7.
+        let at_4 = "1. [ ] Task\n    continuation\n";
+        assert!(check_mkdocs(at_4).is_empty());
+        let at_7 = "1. [ ] Task\n       continuation\n";
+        assert!(check_mkdocs(at_7).is_empty());
+    }
+
+    #[test]
+    fn task_list_mkdocs_ordered_between_flagged() {
+        // Column 5 and 6 are between required_min=4 and post-checkbox=7.
+        let at_5 = "1. [ ] Task\n     continuation\n";
+        assert_eq!(check_mkdocs(at_5).len(), 1);
+        let at_6 = "1. [ ] Task\n      continuation\n";
+        assert_eq!(check_mkdocs(at_6).len(), 1);
+    }
+
+    // ── Context-aware tie-break ──────────────────────────────────────
+    //
+    // When a flagged line is exactly equidistant from `content_col` and
+    // `task_col`, the author's intent is ambiguous. Before picking a
+    // canonical default, look at whether other continuation lines in the
+    // same item already use one of the valid columns — if so, snap to the
+    // column they're using so the fix preserves the author's visible
+    // convention.
+
+    #[test]
+    fn fix_task_list_tie_sibling_at_task_col_snaps_to_task_col() {
+        // Col 4 is equidistant from content_col (2) and task_col (6).
+        // A valid sibling at col 6 proves the author is aligning under the
+        // checkbox, so the tie resolves to col 6.
+        let content = "- [ ] Task\n      aligned continuation\n    tied continuation\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "- [ ] Task\n      aligned continuation\n      tied continuation\n"
+        );
+    }
+
+    #[test]
+    fn fix_task_list_tie_sibling_at_content_col_snaps_to_content_col() {
+        // Valid sibling at col 2 proves the author is aligning to the
+        // content column, so the col-4 tie resolves to col 2.
+        let content = "- [ ] Task\n  aligned continuation\n    tied continuation\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n  aligned continuation\n  tied continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_tie_both_siblings_snaps_to_content_col() {
+        // When siblings exist at both valid columns, the author's pattern
+        // is self-contradictory. Fall back to the CommonMark-canonical
+        // content column.
+        let content = "- [ ] Task\n  at content col\n      at task col\n    tied continuation\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed,
+            "- [ ] Task\n  at content col\n      at task col\n  tied continuation\n"
+        );
+    }
+
+    #[test]
+    fn fix_task_list_tie_sees_task_col_through_tight_lazy_continuation() {
+        // CommonMark allows tight lazy continuation at col ≤ marker_col
+        // (zero-indent continuation) inside a list item. The pre-pass
+        // must MIRROR the main check loop's termination semantics: in
+        // tight mode (no preceding blank) col ≤ marker_col is NOT a
+        // termination signal — the lazy line still belongs to the item.
+        //
+        // This test pins that mirroring: a `lazy` line at col 0 is
+        // followed by a legitimate task-col sibling at col 6, then a
+        // tied col-4 line. If the pre-pass terminated eagerly at the
+        // lazy line, the task-col sibling would be missed and the tied
+        // line would fall back to content column. With correct
+        // mirroring, the task-col sibling is seen and the tie resolves
+        // to col 6.
+        let content = concat!("- [ ] Task\n", "lazy\n", "      aligned at task col\n", "    tied\n",);
+        let fixed = fix(content);
+        assert!(
+            fixed.contains("\n      tied\n"),
+            "tied line should snap to col 6 (task col) because a task-col \
+             sibling is visible past the tight lazy-continuation line; got:\n{fixed}"
+        );
+    }
+
+    // ── Tab-indented task continuation ───────────────────────────────
+    //
+    // Leading tabs expand to the next column that's a multiple of 4 under
+    // CommonMark. The fix replaces the leading whitespace bytes wholesale,
+    // turning tabs into space-indented output.
+
+    #[test]
+    fn task_list_tab_indented_continuation_flagged() {
+        // Two tabs → visual col 8, which overshoots both valid columns
+        // for `- [ ] ` (content_col=2, task_col=6).
+        let content = "- [ ] Task\n\t\twrap\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("expected 2 or 6"));
+        assert!(warnings[0].message.contains("found 8"));
+    }
+
+    #[test]
+    fn fix_task_list_tab_indented_snaps_to_task_col() {
+        // abs_diff(8, 6) = 2 < abs_diff(8, 2) = 6 → snap to task_col (6).
+        let content = "- [ ] Task\n\t\twrap\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n      wrap\n");
+    }
+
+    #[test]
+    fn fix_task_list_single_tab_equidistant_snaps_to_content_col() {
+        // One tab → visual col 4, equidistant from content_col (2) and
+        // task_col (6). No siblings → tie-break to content_col.
+        let content = "- [ ] Task\n\twrap\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "- [ ] Task\n  wrap\n");
+    }
+
+    // ── Blockquote × task-list ───────────────────────────────────────
+    //
+    // Blockquote-nested lists are a known limitation on MD077: the list
+    // parser doesn't always expose them with the same column semantics as
+    // top-level lists, and the rule prefers a false-negative default to
+    // avoid spurious warnings inside blockquotes (see
+    // `blockquote_list_under_indent_no_false_positive`). These tests pin
+    // the current behavior so any future change is intentional.
+
+    #[test]
+    fn task_list_blockquote_post_checkbox_not_flagged() {
+        // Post-checkbox alignment inside a blockquote — accepted as valid.
+        let content = "> - [ ] Task\n>       continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_blockquote_between_cols_documented_limitation() {
+        // Col-4-equivalent inside a blockquote is silently accepted — a
+        // known MD077 limitation on blockquote-nested lists, not a task-
+        // list-specific choice. Pinning the current behavior.
+        let content = "> - [ ] Task\n>     continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn task_list_blockquote_overshoot_documented_limitation() {
+        // Overshoot inside a blockquote — same known limitation.
+        let content = "> - [ ] Task\n>        continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    // ── MkDocs × task × fix output ───────────────────────────────────
+    //
+    // MkDocs strict-indent raises `required` to max(content_col, 4) while
+    // task_col stays at content_col + 4. The snap logic operates on the
+    // raised required, not on the underlying content_col.
+
+    #[test]
+    fn fix_task_list_mkdocs_unordered_overshoot_snaps_to_task_col() {
+        // `- [ ]` MkDocs: required=4, task_col=6. Col 7 → abs_diff(7,6)=1
+        // < abs_diff(7,4)=3. Snap to task_col.
+        let content = "- [ ] Task\n       continuation\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "- [ ] Task\n      continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_mkdocs_unordered_tie_snaps_to_required() {
+        // `- [ ]` MkDocs: required=4, task_col=6. Col 5 → abs_diff(5,6)=1
+        // == abs_diff(5,4)=1. Tie with no siblings → required (4).
+        let content = "- [ ] Task\n     continuation\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "- [ ] Task\n    continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_mkdocs_ordered_overshoot_snaps_to_task_col() {
+        // `1. [ ]` MkDocs: required=4, task_col=7. Col 8 → abs_diff(8,7)=1
+        // < abs_diff(8,4)=4. Snap to task_col.
+        let content = "1. [ ] Task\n        continuation\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "1. [ ] Task\n       continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_mkdocs_ordered_near_required_snaps_to_required() {
+        // `1. [ ]` MkDocs: required=4, task_col=7. Col 5 → abs_diff(5,7)=2
+        // > abs_diff(5,4)=1. Snap to required (4). `1. [ ] Task\n     wrap`
+        // has actual=5 which is over `required=4` so it's flagged in
+        // strict mode, while in standard mode it falls under the lazy-
+        // continuation window and isn't flagged at all.
+        let content = "1. [ ] Task\n     continuation\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "1. [ ] Task\n    continuation\n");
+    }
+
+    #[test]
+    fn fix_task_list_mkdocs_ordered_between_cols_snaps_to_task_col() {
+        // `1. [ ]` MkDocs: required=4, task_col=7. Col 6 → abs_diff(6,7)=1
+        // < abs_diff(6,4)=2. Snap to task_col (7).
+        let content = "1. [ ] Task\n      continuation\n";
+        let fixed = fix_mkdocs(content);
+        assert_eq!(fixed, "1. [ ] Task\n       continuation\n");
+    }
+
+    // ── Fix idempotency (property test) ──────────────────────────────
+    //
+    // A fix pass on already-fixed content must produce the same content
+    // — otherwise MD077 would oscillate on repeated invocations. This is
+    // the core property that issue #579 was about (MD077 vs. MD013 fix
+    // loop), and the integration test covers the MD013 interaction. The
+    // property tests below pin the *internal* idempotency of MD077's own
+    // fix, so any future change that introduces oscillation fails fast.
+
+    fn assert_idempotent(content: &str) {
+        let once = fix(content);
+        let twice = fix(&once);
+        assert_eq!(once, twice, "MD077 fix was not idempotent on input: {content:?}");
+    }
+
+    fn assert_idempotent_mkdocs(content: &str) {
+        let once = fix_mkdocs(content);
+        let twice = fix_mkdocs(&once);
+        assert_eq!(
+            once, twice,
+            "MD077 (MkDocs) fix was not idempotent on input: {content:?}"
+        );
+    }
+
+    #[test]
+    fn idempotent_task_list_between_cols() {
+        assert_idempotent("- [ ] Task\n    continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_overshoot() {
+        assert_idempotent("- [ ] Task\n       continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_under_post_checkbox() {
+        assert_idempotent("- [ ] Task\n   continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_near_post_checkbox() {
+        assert_idempotent("- [ ] Task\n     continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_tab_overshoot() {
+        assert_idempotent("- [ ] Task\n\t\twrap\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_single_tab() {
+        assert_idempotent("- [ ] Task\n\twrap\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_ordered_overshoot() {
+        assert_idempotent("1. [ ] Task\n        continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_ordered_under() {
+        assert_idempotent("1. [ ] Task\n    continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_tie_with_sibling_at_task_col() {
+        assert_idempotent("- [ ] Task\n      aligned\n    tied\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_tie_with_sibling_at_content_col() {
+        assert_idempotent("- [ ] Task\n  aligned\n    tied\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_mkdocs_unordered_overshoot() {
+        assert_idempotent_mkdocs("- [ ] Task\n       continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_mkdocs_unordered_tie() {
+        assert_idempotent_mkdocs("- [ ] Task\n     continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_mkdocs_ordered_overshoot() {
+        assert_idempotent_mkdocs("1. [ ] Task\n        continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_mkdocs_ordered_between() {
+        assert_idempotent_mkdocs("1. [ ] Task\n      continuation\n");
+    }
+
+    #[test]
+    fn idempotent_task_list_reproducer_579() {
+        // The exact reproducer from issue #579 already has correct indent
+        // (col 6 = post-checkbox), so idempotency is trivially true. Pin
+        // it anyway as a smoke test against future regressions.
+        assert_idempotent(
+            "- [ ] Lorem ipsum dolor sit amet, consectetur adipiscing\n      tempor incididunt ut labore.\n",
+        );
+    }
+
+    #[test]
+    fn idempotent_non_task_list_still_holds() {
+        // Non-task items never enter the task_col code path; sanity-check
+        // that idempotency is preserved for them too.
+        assert_idempotent("1. Item\n    over-indented\n");
+        assert_idempotent("- Item\n\n continuation\n");
+    }
+
+    // ── Non-task idempotency: loose-mode under-indent ────────────────
+    //
+    // When a blank line precedes the continuation (loose mode),
+    // under-indented content is flagged and fixed up to the content
+    // column. Idempotency pins that one pass of the fix is sufficient.
+
+    #[test]
+    fn idempotent_non_task_loose_under_indent_ordered() {
+        // 1. Item → content col 3; "  x" is 2 spaces, under content col.
+        assert_idempotent("1. Item\n\n  continuation\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_loose_under_indent_multi_digit() {
+        // 10. Item → content col 4; single-space continuation needs 4.
+        assert_idempotent("10. Item\n\n continuation\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_tight_over_indent_ordered() {
+        // Tight-mode over-indent: 5 spaces where content col is 3.
+        assert_idempotent("1. Item\n     over-indented\n");
+    }
+
+    // ── Non-task idempotency: fenced code block compound fix ─────────
+    //
+    // A fence opener that needs re-indenting is repaired by the
+    // compound-fence fix which shifts opener + interior + closer
+    // together. Idempotency pins that the compound fix settles in one
+    // pass and does not oscillate between runs.
+
+    #[test]
+    fn idempotent_non_task_fence_ordered_loose() {
+        // 1. Item → content col 3; fence at col 2 needs to shift to 3.
+        assert_idempotent("1. Item\n\n  ```rust\n  let x = 1;\n  ```\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_fence_tilde_under_indent() {
+        // Tilde fences use the same compound-fix path as backtick fences.
+        // Interior below the list scope (col 0 here, required col 3) must
+        // be promoted up in the same pass as the fence delimiters —
+        // otherwise a second pass would flag the interior individually
+        // and defeat idempotency.
+        assert_idempotent("1. Item\n\n  ~~~\nplain text\n  ~~~\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_fence_interior_above_required() {
+        // Interior already above the required column must not be pushed
+        // further up by the compound fix — authored interior indentation
+        // is preserved when it doesn't threaten fence pairing.
+        assert_idempotent("1. Item\n\n  ```\n    deeply indented code\n  ```\n");
+    }
+
+    #[test]
+    fn fence_fix_promotes_interior_below_scope_in_single_pass() {
+        // Concrete behavioral check, not just idempotency:
+        // interior at col 0 with opener at col 2, required 3, must land
+        // at col 3 (same as opener) so fence pairing is preserved.
+        let content = "1. Item\n\n  ```\ncode\n  ```\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. Item\n\n   ```\n   code\n   ```\n");
+    }
+
+    #[test]
+    fn fence_fix_preserves_interior_above_required() {
+        // Opener at col 2 → col 3 (required). Interior at col 4 stays at
+        // col 4 (above required, no need to push it).
+        let content = "1. Item\n\n  ```\n    code\n  ```\n";
+        let fixed = fix(content);
+        assert_eq!(fixed, "1. Item\n\n   ```\n    code\n   ```\n");
+    }
+
+    // ── Non-task idempotency: MkDocs strict-indent ───────────────────
+    //
+    // Under MkDocs flavor, continuation requires max(content_col, 4),
+    // which can force a fix even when CommonMark would accept the
+    // content. Pin idempotency for the non-task path there too.
+
+    #[test]
+    fn idempotent_non_task_mkdocs_ordered_at_3_spaces() {
+        // CommonMark-valid (3 spaces) but MkDocs demands 4 → fix runs.
+        assert_idempotent_mkdocs("1. Item\n\n   continuation\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_mkdocs_unordered_at_2_spaces() {
+        // "- Item" → content col 2, but MkDocs raises the floor to 4.
+        assert_idempotent_mkdocs("- Item\n\n  continuation\n");
+    }
+
+    #[test]
+    fn idempotent_non_task_mkdocs_fence_compound() {
+        // MkDocs non-task fence: opener/interior/closer shift together.
+        assert_idempotent_mkdocs("1. Item\n\n   ```toml\n   k = 1\n   ```\n");
     }
 }
