@@ -82,7 +82,7 @@ pub mod parallel;
 pub mod performance;
 
 // WASM module
-#[cfg(all(target_arch = "wasm32", feature = "wasm"))]
+#[cfg(feature = "wasm")]
 pub mod wasm;
 
 pub use rules::heading_utils::HeadingStyle;

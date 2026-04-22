@@ -18,11 +18,11 @@
 //!   flavor: "mkdocs"          // Use MkDocs markdown flavor
 //! });
 //!
-//! // Check for issues
-//! const warnings = JSON.parse(linter.check(content));
+//! // Check for issues (path is optional; when provided, excludes are applied)
+//! const warnings = JSON.parse(linter.check(content, "docs/page.md"));
 //!
 //! // Apply all fixes
-//! const fixed = linter.fix(content);
+//! const fixed = linter.fix(content, "docs/page.md");
 //! ```
 //!
 //! # Rule-specific Configuration
@@ -123,6 +123,38 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
+/// Expand bare-directory exclude patterns so they also match nested contents.
+/// `foo` -> `["foo", "foo/**"]`; glob-containing patterns pass through.
+///
+/// Mirrors the CLI behavior in `file_processor/discovery.rs` so `.rumdl.toml`
+/// entries like `exclude = [".git"]` work the same way everywhere.
+fn expand_directory_pattern(pattern: &str) -> Vec<String> {
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        return vec![pattern.to_string()];
+    }
+    let base = pattern.trim_end_matches('/');
+    vec![base.to_string(), format!("{base}/**")]
+}
+
+/// Return true if `path` matches any of the exclude patterns.
+fn path_matches_exclude(exclude_patterns: &[String], path: &str) -> bool {
+    if exclude_patterns.is_empty() {
+        return false;
+    }
+    // Normalize: drop leading `./` so `./q2/foo.md` matches `q2/**/*.md`
+    let normalized = path.strip_prefix("./").unwrap_or(path);
+    for pattern in exclude_patterns {
+        for expanded in expand_directory_pattern(pattern) {
+            if let Ok(glob) = globset::Glob::new(&expanded) {
+                if glob.compile_matcher().is_match(normalized) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Configuration options for the Linter
 ///
 /// All fields are optional. If not specified, defaults are used.
@@ -170,6 +202,11 @@ pub struct LinterConfig {
 
     /// Rules that should never apply fixes (takes precedence over fixable)
     pub unfixable: Option<Vec<String>>,
+
+    /// File path patterns to exclude from linting. Matched against the optional
+    /// `path` argument of `check`/`fix`. Bare directory names (e.g. `.git`) are
+    /// expanded to also match their contents.
+    pub exclude: Option<Vec<String>>,
 
     /// Rule-specific configurations
     /// Keys are rule names (e.g., "MD060", "MD013") and values are rule options
@@ -222,6 +259,11 @@ impl LinterConfig {
         }
         if let Some(ref unfixable) = self.unfixable {
             config.global.unfixable = unfixable.clone();
+        }
+
+        // Apply exclude patterns
+        if let Some(ref exclude) = self.exclude {
+            config.global.exclude = exclude.clone();
         }
 
         // Apply rule-specific configurations
@@ -316,6 +358,12 @@ impl Linter {
 
     /// Lint markdown content and return warnings as JSON
     ///
+    /// # Arguments
+    /// * `content` - Markdown content to lint
+    /// * `path` - Optional file path (e.g. vault-relative). When provided, the
+    ///   path is matched against configured `exclude` patterns; excluded files
+    ///   return `"[]"` without linting.
+    ///
     /// Returns a JSON array of warnings, each with:
     /// - `rule_name`: Rule name (e.g., "MD001")
     /// - `message`: Warning message
@@ -325,7 +373,13 @@ impl Linter {
     ///
     /// Note: Fix ranges use character offsets (not byte offsets) for JavaScript compatibility.
     /// This is important for multi-byte UTF-8 characters like `æ` or emoji.
-    pub fn check(&self, content: &str) -> String {
+    pub fn check(&self, content: &str, path: Option<String>) -> String {
+        if let Some(ref p) = path
+            && path_matches_exclude(&self.config.global.exclude, p)
+        {
+            return "[]".to_string();
+        }
+
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
@@ -341,8 +395,19 @@ impl Linter {
 
     /// Apply all auto-fixes to the content and return the fixed content
     ///
+    /// # Arguments
+    /// * `content` - Markdown content to fix
+    /// * `path` - Optional file path. When provided and matching an `exclude`
+    ///   pattern, the content is returned unchanged.
+    ///
     /// Uses the same fix coordinator as the CLI for consistent behavior.
-    pub fn fix(&self, content: &str) -> String {
+    pub fn fix(&self, content: &str, path: Option<String>) -> String {
+        if let Some(ref p) = path
+            && path_matches_exclude(&self.config.global.exclude, p)
+        {
+            return content.to_string();
+        }
+
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
@@ -585,7 +650,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check("");
+        let result = linter.check("", None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
         assert!(warnings.is_empty());
     }
@@ -601,7 +666,7 @@ mod tests {
 
         // Heading increment violation: ## followed by ####
         let content = "## Level 2\n\n#### Level 4";
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
         assert!(!warnings.is_empty());
     }
@@ -620,7 +685,7 @@ mod tests {
 
         // This would normally trigger MD001 (heading increment)
         let content = "## Level 2\n\n#### Level 4";
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // MD001 should be disabled
@@ -639,7 +704,7 @@ mod tests {
 
         // Content with trailing spaces that MD009 will fix
         let content = "Hello   \nWorld";
-        let result = linter.fix(content);
+        let result = linter.fix(content, None);
         assert!(!result.contains("   \n"));
     }
 
@@ -653,7 +718,7 @@ mod tests {
         };
 
         let content = "# Heading\n```code\nblock\n```\n| Header |\n|--------|\n| Cell   |";
-        let result = linter.fix(content);
+        let result = linter.fix(content, None);
 
         // Should NOT have double blank lines
         assert!(!result.contains("\n\n\n"), "Should not have double blank lines");
@@ -699,7 +764,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // Should have MD047 warning (missing trailing newline)
@@ -735,7 +800,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let fixed = linter.fix(content);
+        let fixed = linter.fix(content, None);
 
         // Should add trailing newline
         assert!(fixed.ends_with('\n'), "Should end with newline");
@@ -760,7 +825,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         let md047 = warnings.iter().find(|w| w["rule_name"] == "MD047");
@@ -801,7 +866,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // Any warning on line 1 should have correct character-based column
@@ -830,7 +895,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // Verify any warnings have character-based columns
@@ -860,7 +925,7 @@ mod tests {
             config_warnings: Vec::new(),
         };
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // Line 1 "# 日本語" is 11 bytes but 5 characters
@@ -1102,7 +1167,7 @@ mod tests {
         // Table with inconsistent formatting (should trigger MD060 with aligned style)
         let content = "# Heading\n\n| a | b |\n|---|---|\n|1|2|";
 
-        let result = linter.check(content);
+        let result = linter.check(content, None);
         let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
 
         // Should have MD060 warning because table cells aren't aligned
@@ -1136,7 +1201,7 @@ mod tests {
         // Table with extra spacing
         let content = "# Heading\n\n| a  |  b |\n|---|---|\n| 1 | 2 |";
 
-        let fixed = linter.fix(content);
+        let fixed = linter.fix(content, None);
 
         // With compact style, the table should have minimal spacing
         assert!(
@@ -1381,7 +1446,7 @@ mod tests {
         };
 
         let content = "|Column 1 |Column 2|\n|:--|--:|\n|Test|Val |\n|New|Val|\n";
-        let fixed = linter.fix(content);
+        let fixed = linter.fix(content, None);
 
         // The fix should produce aligned table output
         assert_ne!(fixed, content, "MD060 fix should modify the unaligned table");
@@ -1389,5 +1454,197 @@ mod tests {
             fixed.contains("| Column 1 |"),
             "Fixed table should have padded cells, got: {fixed}"
         );
+    }
+
+    // ========== Exclude pattern tests ==========
+
+    fn exclude_linter(patterns: Vec<&str>) -> Linter {
+        let config = LinterConfig {
+            exclude: Some(patterns.into_iter().map(String::from).collect()),
+            ..Default::default()
+        };
+        Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+            config_warnings: Vec::new(),
+        }
+    }
+
+    /// Content that triggers MD001 (heading increment) so we can detect whether linting ran.
+    const LINT_TRIGGERING: &str = "## Level 2\n\n#### Level 4";
+
+    #[test]
+    fn test_linter_check_no_path_lints_even_with_exclude() {
+        // Without a path, the linter has no way to check excludes — lints normally.
+        let linter = exclude_linter(vec!["q2/**/*.md"]);
+        let result = linter.check(LINT_TRIGGERING, None);
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(!warnings.is_empty(), "No path → should still lint");
+    }
+
+    #[test]
+    fn test_linter_check_glob_excludes_nested_file() {
+        let linter = exclude_linter(vec!["q2/**/*.md"]);
+        let result = linter.check(LINT_TRIGGERING, Some("q2/sub/page.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(warnings.is_empty(), "Glob match should exclude file");
+    }
+
+    #[test]
+    fn test_linter_check_bare_directory_excludes_contents() {
+        // `.git` (bare name) should exclude everything inside `.git/`
+        let linter = exclude_linter(vec![".git", "node_modules"]);
+        for path in [".git/config.md", "node_modules/pkg/README.md"] {
+            let result = linter.check(LINT_TRIGGERING, Some(path.to_string()));
+            let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+            assert!(warnings.is_empty(), "{path} under excluded dir should be skipped");
+        }
+    }
+
+    #[test]
+    fn test_linter_check_bare_filename_matches_root() {
+        let linter = exclude_linter(vec!["CHANGELOG.md"]);
+        let result = linter.check(LINT_TRIGGERING, Some("CHANGELOG.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(warnings.is_empty(), "Bare filename match should exclude");
+    }
+
+    #[test]
+    fn test_linter_check_non_matching_path_still_lints() {
+        let linter = exclude_linter(vec!["q2/**/*.md", ".git"]);
+        let result = linter.check(LINT_TRIGGERING, Some("notes/foo.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(!warnings.is_empty(), "Non-matching path should still lint");
+    }
+
+    #[test]
+    fn test_linter_check_path_with_leading_dot_slash() {
+        // Obsidian's vault paths don't have `./`, but CLI callers sometimes do.
+        let linter = exclude_linter(vec!["q2/**/*.md"]);
+        let result = linter.check(LINT_TRIGGERING, Some("./q2/sub/page.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(warnings.is_empty(), "`./` prefix should be normalized");
+    }
+
+    #[test]
+    fn test_linter_fix_excluded_returns_unchanged() {
+        // Content with trailing whitespace that MD009 would normally fix
+        let content = "Hello   \nWorld";
+        let linter = exclude_linter(vec!["q2/**/*.md"]);
+
+        let fixed = linter.fix(content, Some("q2/sub/page.md".to_string()));
+        assert_eq!(fixed, content, "Excluded file → fix returns content unchanged");
+    }
+
+    #[test]
+    fn test_linter_fix_non_excluded_still_fixes() {
+        let content = "Hello   \nWorld";
+        let linter = exclude_linter(vec!["q2/**/*.md"]);
+
+        let fixed = linter.fix(content, Some("notes/foo.md".to_string()));
+        assert!(!fixed.contains("   \n"), "Non-excluded path should still get fixed");
+    }
+
+    #[test]
+    fn test_linter_config_deserializes_exclude() {
+        let json = serde_json::json!({
+            "exclude": ["q2/**/*.md", ".git", "CHANGELOG.md"],
+        });
+        let config: LinterConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            config.exclude.as_deref(),
+            Some(&["q2/**/*.md".to_string(), ".git".to_string(), "CHANGELOG.md".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn test_linter_exclude_wired_to_global_config() {
+        // Verify `exclude` on LinterConfig lands in config.global.exclude
+        let config = LinterConfig {
+            exclude: Some(vec!["docs/**".to_string()]),
+            ..Default::default()
+        };
+        let internal = config.to_config();
+        assert_eq!(internal.global.exclude, vec!["docs/**".to_string()]);
+    }
+
+    #[test]
+    fn test_linter_check_empty_exclude_array_lints_normally() {
+        let linter = exclude_linter(vec![]);
+        let result = linter.check(LINT_TRIGGERING, Some("q2/page.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(!warnings.is_empty(), "Empty exclude array should not skip linting");
+    }
+
+    #[test]
+    fn test_linter_check_none_exclude_lints_normally() {
+        // `exclude: None` is the default — same behavior as empty array.
+        let config = LinterConfig {
+            exclude: None,
+            ..Default::default()
+        };
+        let linter = Linter {
+            config: config.to_config(),
+            flavor: config.markdown_flavor(),
+            config_warnings: Vec::new(),
+        };
+        let result = linter.check(LINT_TRIGGERING, Some("q2/page.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(!warnings.is_empty(), "None exclude should not skip linting");
+    }
+
+    #[test]
+    fn test_linter_check_exclude_is_case_sensitive() {
+        // globset is case-sensitive by default; LSP parity requires same behavior.
+        let linter = exclude_linter(vec!["README.md"]);
+        let result = linter.check(LINT_TRIGGERING, Some("readme.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(!warnings.is_empty(), "Case mismatch should not exclude");
+    }
+
+    #[test]
+    fn test_linter_check_single_char_wildcard() {
+        let linter = exclude_linter(vec!["draft?.md"]);
+        let cases = [("draft1.md", true), ("draft.md", false), ("draft10.md", false)];
+        for (path, should_exclude) in cases {
+            let result = linter.check(LINT_TRIGGERING, Some(path.to_string()));
+            let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+            assert_eq!(warnings.is_empty(), should_exclude, "`?` wildcard mismatch for {path}");
+        }
+    }
+
+    #[test]
+    fn test_linter_check_character_class_glob() {
+        let linter = exclude_linter(vec!["draft[12].md"]);
+        let cases = [("draft1.md", true), ("draft2.md", true), ("draft3.md", false)];
+        for (path, should_exclude) in cases {
+            let result = linter.check(LINT_TRIGGERING, Some(path.to_string()));
+            let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+            assert_eq!(
+                warnings.is_empty(),
+                should_exclude,
+                "Character class mismatch for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_linter_check_invalid_glob_pattern_falls_back_to_lint() {
+        // An invalid glob (unbalanced bracket) shouldn't crash — file lints normally.
+        let linter = exclude_linter(vec!["[invalid"]);
+        let result = linter.check(LINT_TRIGGERING, Some("any.md".to_string()));
+        let warnings: Vec<serde_json::Value> = serde_json::from_str(&result).unwrap();
+        assert!(
+            !warnings.is_empty(),
+            "Invalid pattern should be ignored, file still lints"
+        );
+    }
+
+    #[test]
+    fn test_linter_fix_empty_exclude_fixes_everything() {
+        let content = "Hello   \nWorld";
+        let linter = exclude_linter(vec![]);
+        let fixed = linter.fix(content, Some("q2/page.md".to_string()));
+        assert!(!fixed.contains("   \n"), "Empty exclude → fix should run");
     }
 }
