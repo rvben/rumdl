@@ -59,6 +59,12 @@ static COPYRIGHT_WITH_SPACES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s
 // Uses case-insensitive flag since this is applied after lowercasing
 static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
 
+// HTML comment stripping - GitHub renders `<!-- ... -->` invisibly and never includes
+// its content in anchor IDs. Stripped before arrow-pattern processing so a comment's
+// trailing `-->` is never misinterpreted as an arrow.
+// Non-greedy and newline-free: headings are single-line, and `.` excludes `\n` by default.
+static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--.*?-->").unwrap());
+
 /// Generate GitHub.com style anchor fragment from heading text with security hardening
 ///
 /// This implementation matches GitHub.com's exact behavior, verified through
@@ -135,6 +141,14 @@ fn heading_to_fragment_internal(heading: &str) -> String {
 
     // Step 5: Convert to lowercase
     let mut text = sanitized.to_lowercase();
+
+    // Step 5a: Strip HTML comments before any other processing.
+    // Comments are invisible on GitHub and must not contribute to the anchor.
+    // Stripping before arrow handling prevents `-->` inside a comment from
+    // being misread as an arrow pattern.
+    if text.contains("<!--") {
+        text = HTML_COMMENT_PATTERN.replace_all(&text, "").to_string();
+    }
 
     // Step 5: Remove markdown formatting while preserving inner text
     if text.contains('*') || text.contains('_') || text.contains('`') || text.contains('[') {
@@ -732,6 +746,46 @@ mod tests {
             heading_to_fragment("Arrow Test <-> bidirectional"),
             "arrow-test---bidirectional"
         );
+    }
+
+    #[test]
+    fn test_github_html_comment_stripping() {
+        // Verified against GitHub.com gist rendering: HTML comments `<!-- ... -->`
+        // are invisible in rendered output and stripped from anchors. The surrounding
+        // whitespace is preserved and becomes hyphens via the normal pipeline.
+
+        // Trailing comment — space before comment survives as a trailing hyphen
+        assert_eq!(heading_to_fragment("Hello <!-- world -->"), "hello-");
+
+        // Comment in the middle — two flanking spaces become two hyphens
+        assert_eq!(heading_to_fragment("A <!-- c --> B"), "a--b");
+
+        // Leading comment — space after comment becomes a leading hyphen
+        assert_eq!(heading_to_fragment("<!-- hidden --> Title"), "-title");
+
+        // Comment abutting text with no spaces — nothing survives the comment
+        assert_eq!(heading_to_fragment("Title<!-- no space -->"), "title");
+
+        // Multiple adjacent comments — both fully stripped
+        assert_eq!(heading_to_fragment("Hello<!-- x --><!-- y -->"), "hello");
+
+        // Empty comment (`<!-- -->`) is still a full comment, gets stripped
+        assert_eq!(heading_to_fragment("Hello <!-- --> World"), "hello--world");
+        assert_eq!(heading_to_fragment("Arrow <!-- --> Test"), "arrow--test");
+
+        // Comment content never leaks into the anchor, even when it contains
+        // text that would otherwise form arrow sequences
+        assert_eq!(heading_to_fragment("Has <!-- arrow --> inside"), "has--inside");
+
+        // Only the comment is stripped — a real `-->` outside the comment still
+        // goes through the arrow-replacement pipeline
+        assert_eq!(
+            heading_to_fragment("Has <!-- --> and --> outside"),
+            "has--and----outside"
+        );
+
+        // Unclosed comments are left as literal text (GitHub treats them as text too)
+        assert_eq!(heading_to_fragment("Unclosed <!-- comment"), "unclosed----comment");
     }
 
     #[test]

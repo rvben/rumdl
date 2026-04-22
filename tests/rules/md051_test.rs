@@ -2837,3 +2837,70 @@ Section Four { #2nd_item }\n\
         );
     }
 }
+
+/// Regression tests for rvben/rumdl-vscode#113: HTML comments in headings were
+/// being baked into the anchor (e.g. `hello----world---`) instead of being
+/// stripped, so links that match the actually-rendered anchor (`hello-` on
+/// GitHub, `title` on MkDocs) were flagged as missing.
+mod html_comment_in_heading_regression {
+    use super::*;
+
+    #[test]
+    fn github_style_accepts_post_comment_trailing_hyphen() {
+        // Verified against GitHub.com: `# Hello <!-- world -->` renders with
+        // anchor `hello-` (the trailing space before the comment becomes a
+        // single hyphen; the comment itself contributes nothing).
+        let content = "# Hello <!-- world -->\n\n[link](#hello-)\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "#hello- must match GitHub-rendered anchor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn github_style_rejects_pre_fix_leaky_anchor() {
+        // Before the fix, rumdl generated `hello----world---` for the same
+        // heading. Any link that previously validated against that leaky
+        // anchor must now be flagged.
+        let content = "# Hello <!-- world -->\n\n[link](#hello----world---)\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::GitHub);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "leaky anchor containing comment text must be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn kramdown_gfm_style_accepts_leading_comment_hyphen() {
+        // Verified against kramdown 2.5.1 with GFM input: the space between a
+        // stripped leading comment and the heading text becomes a leading hyphen.
+        let content = "# <!-- hidden --> Title\n\n[link](#-title)\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::KramdownGfm);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "#-title must match kramdown-GFM anchor for leading comment, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn python_markdown_style_accepts_collapsed_anchor() {
+        // Verified against Python-Markdown 3.x TOC extension: comments never
+        // enter the anchor, surrounding whitespace collapses via `[-\s]+`.
+        let content = "# Hello <!-- world -->\n\n[link](#hello)\n";
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let rule = MD051LinkFragments::with_anchor_style(AnchorStyle::PythonMarkdown);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "#hello must match Python-Markdown TOC anchor, got: {result:?}"
+        );
+    }
+}

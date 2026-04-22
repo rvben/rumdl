@@ -26,6 +26,13 @@ use super::common::{
 // Requires first char after < to be a letter or / (to avoid matching arrow patterns like <->)
 static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
 
+// HTML comment stripping. Kramdown's GFM parser treats `<!-- ... -->` as an invisible
+// xml_comment node whose content never reaches anchor generation. Stripped before the
+// tag pattern (which doesn't match `<!--`) and before arrow handling, so a trailing
+// `-->` inside a comment can't be misread as an arrow sequence.
+// Non-greedy and newline-free: headings are single-line and `.` excludes `\n`.
+static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--.*?-->").unwrap());
+
 // Improved markdown removal patterns with better nested handling
 // Match emphasis patterns - asterisks and underscores
 // Process multiple times to handle nested patterns
@@ -73,6 +80,13 @@ pub fn heading_to_fragment(heading: &str) -> String {
     let text = CONTROL_CHARS.replace_all(&normalized, "");
     let text = WHITESPACE_NORMALIZE.replace_all(&text, " ");
 
+    // Detect a leading HTML comment. Kramdown's GFM parser represents the comment as
+    // an invisible XML node that still occupies a position in the heading's child
+    // list, so whitespace between the comment and the following text becomes an
+    // interior (not leading) gap. The fragment therefore starts with a hyphen even
+    // though the comment itself contributes nothing.
+    let had_leading_comment = text.trim_start().starts_with("<!--");
+
     // Step 3: Symbol replacements - Jekyll/kramdown GFM replaces certain symbols
     // &, <, >, = become "--" ONLY when they have spaces around them
     // Without spaces, they're just removed during character filtering
@@ -110,6 +124,13 @@ pub fn heading_to_fragment(heading: &str) -> String {
     // Process images first, then links
     text = IMAGE_PATTERN.replace_all(&text, "$1").to_string();
     text = LINK_PATTERN.replace_all(&text, "$1").to_string();
+
+    // Strip HTML comments before tags. Comments are invisible in rendered output and
+    // must not contribute to the anchor; removing them first also prevents a trailing
+    // `-->` from being misinterpreted as an arrow in later steps.
+    if text.contains("<!--") {
+        text = HTML_COMMENT_PATTERN.replace_all(&text, "").to_string();
+    }
 
     // Strip HTML/JSX tags while code spans are protected by placeholders
     text = HTML_TAG_PATTERN.replace_all(&text, "").to_string();
@@ -376,6 +397,13 @@ pub fn heading_to_fragment(heading: &str) -> String {
         result = format!("-{result}");
     }
 
+    // Step 12b: Restore the leading hyphen from a stripped leading HTML comment.
+    // Matches kramdown-GFM: `<!-- x --> Title` → `-title` because the comment
+    // node occupies a position and the following space becomes interior hyphen.
+    if had_leading_comment && !result.is_empty() && !result.starts_with('-') {
+        result = format!("-{result}");
+    }
+
     if result.is_empty() {
         "section".to_string()
     } else {
@@ -515,6 +543,27 @@ mod tests {
         assert_eq!(heading_to_fragment("Generic<T>"), "generic");
         // Code span content with angle brackets should be preserved
         assert_eq!(heading_to_fragment("`import <FILE>`"), "import-file");
+    }
+
+    #[test]
+    fn test_jekyll_html_comment_stripping() {
+        // Ground truth: kramdown 2.5.1 with `input: "GFM"` renders HTML comments
+        // as invisible nodes, so their content never reaches anchor generation.
+        // Surrounding whitespace then flows through the normal pipeline.
+        assert_eq!(heading_to_fragment("Hello <!-- world -->"), "hello-");
+        assert_eq!(heading_to_fragment("A <!-- c --> B"), "a--b");
+        assert_eq!(heading_to_fragment("<!-- hidden --> Title"), "-title");
+        assert_eq!(heading_to_fragment("Title<!-- no space -->"), "title");
+        assert_eq!(heading_to_fragment("Hello<!-- x --><!-- y -->"), "hello");
+        assert_eq!(heading_to_fragment("Hello <!-- --> World"), "hello--world");
+        assert_eq!(heading_to_fragment("Arrow <!-- --> Test"), "arrow--test");
+        assert_eq!(heading_to_fragment("Has <!-- arrow --> inside"), "has--inside");
+        // Real `-->` outside the comment remains and still participates
+        // in the arrow-replacement pipeline.
+        assert_eq!(heading_to_fragment("Has <!-- --> and --> outside"), "has--and--outside");
+        // Unclosed comments are left as literal text; `<!` and `>` are
+        // filtered and the hyphens survive per normal rules.
+        assert_eq!(heading_to_fragment("Unclosed <!-- comment"), "unclosed--comment");
     }
 
     #[test]

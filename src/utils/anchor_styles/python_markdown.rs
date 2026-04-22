@@ -26,6 +26,13 @@ use super::common::MAX_INPUT_LENGTH;
 // HTML/JSX tag stripping - strip entire HTML tags from heading text before anchor generation
 static HTML_TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?[a-z][^>]*>").unwrap());
 
+// HTML comment stripping. Matches what Python-Markdown's TOC treeprocessor does
+// effectively: HTML comments in headings become Comment nodes in the element
+// tree, so `itertext()` never sees the inner text and the surrounding
+// whitespace collapses via the final `[-\s]+` separator pass.
+// Non-greedy `.*?` keeps this ReDoS-safe on any single-line heading.
+static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--.*?-->").unwrap());
+
 // Code span pattern for extracting content from backtick-delimited spans
 static CODE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+([^`]*?)`+").unwrap());
 
@@ -83,6 +90,14 @@ pub fn heading_to_fragment(heading: &str) -> String {
             format!("\x00CODE{idx}\x00")
         })
         .to_string();
+    // Strip HTML comments before tag stripping. The later separator-collapse
+    // step folds the surrounding whitespace, matching Python-Markdown's TOC
+    // behavior where comments never enter the anchor text.
+    let input = if input.contains("<!--") {
+        HTML_COMMENT_PATTERN.replace_all(&input, "").into_owned()
+    } else {
+        input
+    };
     let input = HTML_TAG_PATTERN.replace_all(&input, "");
     let mut input = input.to_string();
     for (idx, content) in code_extracts.into_iter().enumerate() {
@@ -152,6 +167,29 @@ mod tests {
         assert_eq!(heading_to_fragment("Generic<T>"), "generic");
         // Code span content with angle brackets should be preserved
         assert_eq!(heading_to_fragment("`import <FILE>`"), "import-file");
+    }
+
+    #[test]
+    fn test_html_comment_stripping() {
+        // Verified against Python-Markdown 3.x TOC extension:
+        //   import markdown
+        //   md = markdown.Markdown(extensions=["toc"])
+        //   md.convert("# Hello <!-- world -->")
+        // HTML comments never contribute to the anchor, and the later `[-\s]+`
+        // collapse folds any surrounding whitespace.
+        assert_eq!(heading_to_fragment("Hello <!-- world -->"), "hello");
+        assert_eq!(heading_to_fragment("A <!-- c --> B"), "a-b");
+        assert_eq!(heading_to_fragment("<!-- hidden --> Title"), "title");
+        assert_eq!(heading_to_fragment("Title<!-- no space -->"), "title");
+        assert_eq!(heading_to_fragment("Hello<!-- x --><!-- y -->"), "hello");
+        assert_eq!(heading_to_fragment("Hello <!-- --> World"), "hello-world");
+        assert_eq!(heading_to_fragment("Arrow <!-- --> Test"), "arrow-test");
+        assert_eq!(heading_to_fragment("Has <!-- arrow --> inside"), "has-inside");
+        // Real `-->` outside the comment remains literal text; Python-Markdown
+        // filters the `>` out and the hyphens collapse with surrounding spaces.
+        assert_eq!(heading_to_fragment("Has <!-- --> and --> outside"), "has-and-outside");
+        // Unclosed comments are not stripped - left as literal text
+        assert_eq!(heading_to_fragment("Unclosed <!-- comment"), "unclosed-comment");
     }
 
     #[test]
