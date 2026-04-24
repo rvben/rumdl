@@ -1792,4 +1792,52 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty(), "Reference link definitions should not be flagged");
     }
+
+    #[test]
+    fn test_pre_block_with_blank_line_not_flagged() {
+        // Content inside <pre> must not be flagged even when a blank line
+        // precedes the flagged text within the block (CommonMark §4.6 Type 1).
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "# Heading\n\n<pre>\n\nhello  world\n</pre>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD064 must not fire inside <pre> when a blank line precedes the content, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_textarea_block_with_blank_line_not_flagged() {
+        // <textarea> is a CommonMark Type-1 block — blank lines inside it
+        // must not terminate the HTML block or expose content to lint rules.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "<textarea>\n\ninner  content\n</textarea>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD064 must not fire inside <textarea> when a blank line precedes the content, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_div_with_blank_line_content_is_flagged() {
+        // <div> is a Type-6 block — it terminates at the first blank line,
+        // so content after a blank line inside <div> is treated as normal
+        // Markdown text and must be flagged by MD064.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "<div>\ninner\n\nafter  blank\n</div>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            !result.is_empty(),
+            "MD064 must fire on content after a blank line inside a <div> block"
+        );
+    }
 }
