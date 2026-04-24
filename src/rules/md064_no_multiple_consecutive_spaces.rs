@@ -1804,8 +1804,7 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "MD064 must not fire inside <pre> when a blank line precedes the content, got: {:?}",
-            result
+            "MD064 must not fire inside <pre> when a blank line precedes the content, got: {result:?}"
         );
     }
 
@@ -1820,8 +1819,7 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "MD064 must not fire inside <textarea> when a blank line precedes the content, got: {:?}",
-            result
+            "MD064 must not fire inside <textarea> when a blank line precedes the content, got: {result:?}"
         );
     }
 
