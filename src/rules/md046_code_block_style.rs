@@ -2382,6 +2382,95 @@ More text."#;
     }
 
     #[test]
+    fn test_consistent_style_genuine_indented_block_detected_as_indented() {
+        // A top-level indented code block that is not inside any container
+        // must still count toward the Indented tally under `Consistent` style.
+        // This guards against over-filtering: the `in_comment_or_html` skip
+        // must not suppress real indented code blocks.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       Some prose.\n\
+                       \n    \
+                       real indented code line 1\n    \
+                       real indented code line 2\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        // Only one indented block exists; Consistent must detect it as Indented and
+        // produce no warnings (the detected style matches the only real block).
+        assert_eq!(
+            result,
+            vec![],
+            "A genuine top-level indented block must be detected as Indented style under Consistent",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_skipped_lines_dont_override_real_block() {
+        // Two indented-but-skipped regions (inside HTML comments) plus one
+        // genuine indented code block and no fenced blocks: the skipped lines
+        // must be excluded from the tally, leaving indented_count=1, fenced_count=0,
+        // so Consistent still selects Indented and emits no warnings.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       <!--\n    \
+                       skipped indented comment line 1\n    \
+                       skipped indented comment line 2\n\
+                       -->\n\
+                       \n\
+                       <!--\n    \
+                       second skipped region\n    \
+                       also skipped\n\
+                       -->\n\
+                       \n    \
+                       real indented code line\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Skipped container lines must not outweigh the single real indented block",
+        );
+    }
+
+    #[test]
+    fn test_consistent_style_fenced_wins_over_skipped_indented() {
+        // One real fenced block plus two indented-but-skipped regions: after
+        // filtering the skipped lines the tally is fenced=1, indented=0, so
+        // Consistent selects Fenced and emits no warnings.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        let content = "# Heading\n\
+                       \n\
+                       <!--\n    \
+                       skipped indented region one\n    \
+                       more of region one\n\
+                       -->\n\
+                       \n\
+                       <!--\n    \
+                       skipped indented region two\n    \
+                       more of region two\n\
+                       -->\n\
+                       \n\
+                       ```md\n\
+                       real fenced block\n\
+                       ```\n";
+
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result,
+            vec![],
+            "Fenced block must win when all indented lines are inside skipped containers",
+        );
+    }
+
+    #[test]
     fn test_four_space_indented_fence_is_not_valid_fence() {
         // Per CommonMark 0.31.2: "An opening code fence may be indented 0-3 spaces."
         // 4+ spaces means it's NOT a valid fence opener - it becomes an indented code block
