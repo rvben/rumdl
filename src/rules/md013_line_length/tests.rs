@@ -1949,50 +1949,6 @@ fn test_default_mode_preserves_list_structure() {
 }
 
 #[test]
-fn test_normalize_mode_multi_line_list_items_no_extra_spaces() {
-    // Test that multi-line list items don't get extra spaces when normalized
-    let config = MD013Config {
-        line_length: crate::types::LineLength::from_const(80),
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    let content = r#"- This is a bullet point that has
-  some text on multiple lines
-  that should be combined
-
-1. Numbered list item with
-   multiple lines that need
-   to be properly combined
-2. Second item"#;
-
-    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-
-    // Check that there are no extra spaces in the combined list items
-    assert!(
-        !fixed.contains("lines  that"),
-        "Should not have double spaces in bullet list"
-    );
-    assert!(
-        !fixed.contains("need  to"),
-        "Should not have double spaces in numbered list"
-    );
-
-    // Check that the list items are properly combined
-    assert!(
-        fixed.contains("- This is a bullet point that has some text on multiple lines that should be"),
-        "Bullet list should be properly combined"
-    );
-    assert!(
-        fixed.contains("1. Numbered list item with multiple lines that need to be properly combined"),
-        "Numbered list should be properly combined"
-    );
-}
-
-#[test]
 fn test_normalize_mode_actual_numbered_list() {
     // Ensure actual numbered lists are still detected correctly
     let config = MD013Config {
@@ -2433,89 +2389,6 @@ fn test_sentence_per_line_in_lists() {
 }
 
 #[test]
-fn test_multi_paragraph_list_item_with_3_space_indent() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(999999),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    let content = "1. First paragraph\n   continuation line.\n\n   Second paragraph\n   more content.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    assert!(!result.is_empty(), "Should detect multi-line paragraphs in list item");
-    let fix = result[0].fix.as_ref().unwrap();
-
-    // Should preserve paragraph structure, not collapse everything
-    assert!(
-        fix.replacement.contains("\n\n"),
-        "Should preserve blank line between paragraphs"
-    );
-    assert!(fix.replacement.starts_with("1. "), "Should preserve list marker");
-}
-
-#[test]
-fn test_multi_paragraph_list_item_with_4_space_indent() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(999999),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    // User's example from issue #76 - uses 4 spaces for continuation
-    let content = "1. It **generated an application template**. There's a lot of files and\n    configurations required to build a native installer, above and\n    beyond the code of your actual application.\n\n    If you're not happy with the template provided by Briefcase, you can\n    provide your own.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    assert!(
-        !result.is_empty(),
-        "Should detect multi-line paragraphs in list item with 4-space indent"
-    );
-    let fix = result[0].fix.as_ref().unwrap();
-
-    // Should preserve paragraph structure
-    assert!(
-        fix.replacement.contains("\n\n"),
-        "Should preserve blank line between paragraphs"
-    );
-    assert!(fix.replacement.starts_with("1. "), "Should preserve list marker");
-
-    // Both paragraphs should be reflowed but kept separate
-    let lines: Vec<&str> = fix.replacement.split('\n').collect();
-    let blank_line_idx = lines.iter().position(|l| l.trim().is_empty());
-    assert!(blank_line_idx.is_some(), "Should have blank line separating paragraphs");
-}
-
-#[test]
-fn test_multi_paragraph_bullet_list_item() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(999999),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    let content = "- First paragraph\n  continuation.\n\n  Second paragraph\n  more text.";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    assert!(!result.is_empty(), "Should detect multi-line paragraphs in bullet list");
-    let fix = result[0].fix.as_ref().unwrap();
-
-    assert!(
-        fix.replacement.contains("\n\n"),
-        "Should preserve blank line between paragraphs"
-    );
-    assert!(fix.replacement.starts_with("- "), "Should preserve bullet marker");
-}
-
-#[test]
 fn test_code_block_in_list_item_five_spaces() {
     let config = MD013Config {
         reflow: true,
@@ -2580,36 +2453,6 @@ fn test_fenced_code_block_in_list_item() {
             fix.replacement
         );
     }
-}
-
-#[test]
-fn test_mixed_indentation_3_and_4_spaces() {
-    let config = MD013Config {
-        reflow: true,
-        reflow_mode: ReflowMode::Normalize,
-        line_length: crate::types::LineLength::from_const(999999),
-        ..Default::default()
-    };
-    let rule = MD013LineLength::from_config_struct(config);
-
-    // First continuation has 3 spaces, second has 4 - both should be accepted
-    let content = "1. Text\n   3 space continuation\n    4 space continuation";
-    let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-
-    assert!(!result.is_empty(), "Should detect multi-line list item");
-    let fix = result[0].fix.as_ref().unwrap();
-    // Should reflow all content together
-    assert!(
-        fix.replacement.contains("3 space continuation"),
-        "Should include 3-space line: {}",
-        fix.replacement
-    );
-    assert!(
-        fix.replacement.contains("4 space continuation"),
-        "Should include 4-space line: {}",
-        fix.replacement
-    );
 }
 
 #[test]
@@ -4478,24 +4321,6 @@ mod reflow_link_exemption_tests {
         assert!(
             result.is_empty(),
             "Normalize mode should not trigger for standalone link paragraph; got: {result:?}"
-        );
-    }
-
-    #[test]
-    fn test_normalize_mode_list_item_with_actual_multiple_paragraphs_warns() {
-        // In Normalize mode, a list item with two actual text paragraphs should still
-        // trigger normalization.
-        let content = "\
-- First paragraph text.
-
-    Second paragraph text.
-";
-        let rule = make_rule_reflow_normalize(80);
-        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert!(
-            !result.is_empty(),
-            "Normalize mode should trigger for list item with two actual text paragraphs"
         );
     }
 
@@ -6793,5 +6618,284 @@ fn test_html_only_adjacent_to_paragraph_not_absorbed() {
     assert!(
         fixed.contains(r#"<a href="https://example.com"><img src="https://example.com/badge.svg" alt="badge"/></a>"#),
         "HTML-only line should be preserved during adjacent paragraph reflow, got:\n{fixed}"
+    );
+}
+
+// ─── Issue #582: MD013 must not report joined-paragraph length on under-limit list items ───
+
+fn make_normalize_rule(line_length: usize) -> MD013LineLength {
+    MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::from_const(line_length),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    })
+}
+
+/// (a) The exact reproducer from issue #582. Physical lines are 78 and 15 chars;
+/// the joined paragraph would be 92 chars. MD013 must not warn — no physical
+/// line exceeds the 80-char limit.
+#[test]
+fn test_no_warning_when_list_item_physical_lines_under_limit() {
+    let rule = make_normalize_rule(80);
+    // `- [ ] ` (6) + 72-char body = 78 chars, under 80.
+    let content = "- [ ] @holdex/hr-payroll-operations: post additional costs in own payout issue\n  and link here\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD013 must not warn on an under-limit list item; got: {result:?}"
+    );
+}
+
+/// (b) When at least one physical line does exceed the limit, the message must
+/// report that physical line's length, not the joined-paragraph length.
+#[test]
+fn test_length_warning_uses_physical_line_length_not_joined() {
+    let rule = make_normalize_rule(80);
+    // Build a first line that is exactly 84 characters:
+    //   "- [ ] " (6) + 78-char body = 84.
+    let first = format!("- [ ] {}", "x".repeat(78));
+    assert_eq!(first.chars().count(), 84);
+    let content = format!("{first}\n  and link here\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let over_limit_warnings: Vec<_> = result.iter().filter(|w| w.message.starts_with("Line length")).collect();
+    assert!(
+        !over_limit_warnings.is_empty(),
+        "Expected a length warning; got: {result:?}"
+    );
+    let msg = &over_limit_warnings[0].message;
+    assert!(
+        msg.contains("Line length 84 exceeds 80 characters"),
+        "Expected physical-line length 84, got: {msg:?}"
+    );
+    assert!(
+        !msg.contains("98"),
+        "Message must not report the joined-paragraph length (98); got: {msg:?}"
+    );
+}
+
+/// (c) Same semantics for an ordered-list item.
+#[test]
+fn test_no_warning_when_under_limit_ordered_list_item() {
+    let rule = make_normalize_rule(80);
+    // "1. " (3) + 75-char body = 78 chars.
+    let content = format!("1. {}\n   and tail\n", "x".repeat(75));
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD013 must not warn on an under-limit ordered list item; got: {result:?}"
+    );
+}
+
+/// (d) Same semantics when the item is nested under an outer list.
+#[test]
+fn test_no_warning_when_under_limit_nested_list_item() {
+    let rule = make_normalize_rule(80);
+    // Outer item line is short; nested item's marker+body = "  - " (4) + 74 = 78.
+    let nested_body = "x".repeat(74);
+    let content = format!("- outer\n  - {nested_body}\n    tail\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD013 must not warn on an under-limit nested list item; got: {result:?}"
+    );
+}
+
+/// (e) Task-list variants. All three checkbox states (`- [ ] `, `- [x] `, `- [X] `)
+/// must be handled identically.
+#[test]
+fn test_no_warning_when_under_limit_task_list_item() {
+    let rule = make_normalize_rule(80);
+    for marker in &["- [ ] ", "- [x] ", "- [X] "] {
+        // marker (6) + 72-char body = 78 chars.
+        let content = format!("{marker}{}\n  and tail\n", "y".repeat(72));
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD013 must not warn on under-limit task-list item with marker {marker:?}; got: {result:?}"
+        );
+    }
+}
+
+/// (f) When a list item contains a short paragraph plus an admonition whose body
+/// line is over the limit, the warning still fires and reports the admonition
+/// body's physical length.
+#[test]
+fn test_mixed_content_list_item_admonition_body_over_limit() {
+    let rule = MD013LineLength::from_config_struct(MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    });
+    // Admonition header at 4-space indent (standard for admonition nested under
+    // "- " marker); body at 8-space indent. Body line is 8 + 82 = 90 chars.
+    let body = "z".repeat(82);
+    let content = format!("- short head\n\n    !!! note\n        {body}\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let length_warnings: Vec<_> = result.iter().filter(|w| w.message.starts_with("Line length")).collect();
+    assert!(
+        !length_warnings.is_empty(),
+        "Expected a length warning for over-limit admonition body; got: {result:?}"
+    );
+    let expected_len = 8 + body.chars().count();
+    let expected = format!("Line length {expected_len} exceeds 80 characters");
+    let any_match = length_warnings.iter().any(|w| w.message.contains(&expected));
+    assert!(
+        any_match,
+        "Expected admonition body physical length ({expected_len}); got messages: {:?}",
+        length_warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+    );
+}
+
+/// (g) A list item whose only over-limit line is inside a fenced code block:
+/// the per-line warning on the code line surfaces (since `code_blocks=true` by
+/// default), and NO paragraph-level warning fires — the new gate excludes
+/// `in_code_block` lines from its physical-line scan. The code body uses
+/// whitespace so MD013's non-strict "last token forgiveness" heuristic does
+/// not silence the per-line check.
+#[test]
+fn test_mixed_content_list_item_preserved_block_over_limit() {
+    let rule = make_normalize_rule(80);
+    // Code body line inside fenced code block, indented 2 spaces (list-item
+    // continuation). Use multiple short tokens separated by spaces so the line
+    // registers as over-limit for MD013 even in non-strict mode. Total length
+    // = 2 indent + 85 body = 87 chars.
+    let code_body = ["alpha beta gamma delta epsilon"; 4].join(" ");
+    assert!(
+        code_body.chars().count() >= 78,
+        "code body must exceed 78 chars to trigger with 2-space indent; got {}",
+        code_body.chars().count()
+    );
+    let content = format!("- short head\n\n  ```\n  {code_body}\n  ```\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // The per-line path should flag the code line at its physical length.
+    let code_line_warnings: Vec<_> = result.iter().filter(|w| w.line == 4).collect();
+    assert!(
+        !code_line_warnings.is_empty(),
+        "Expected per-line warning for over-limit code block line at line 4; got: {result:?}"
+    );
+
+    // No paragraph-level warning should fire on the list-item head.
+    let paragraph_warnings: Vec<_> = result.iter().filter(|w| w.line == 1).collect();
+    assert!(
+        paragraph_warnings.is_empty(),
+        "Expected NO paragraph-level warning on the list-item head; got: {paragraph_warnings:?}"
+    );
+}
+
+/// (h) MkDocs-strict flavor: continuation indent differs, but MD013 must still
+/// not warn when physical lines are all under limit.
+#[test]
+fn test_mkdocs_strict_flavor_under_limit_list_item() {
+    let rule = make_normalize_rule(80);
+    // MkDocs prefers 4-space continuation indent. Head = "- " (2) + 76 = 78 chars.
+    let head_body = "m".repeat(76);
+    let content = format!("- {head_body}\n    and tail\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::MkDocs, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD013 must not warn on an under-limit list item under MkDocs flavor; got: {result:?}"
+    );
+}
+
+/// (i) Idempotency: running check() twice on an under-limit list item yields
+/// zero warnings both times. Reproduces the "persistent warning" symptom from
+/// the issue.
+#[test]
+fn test_idempotent_under_limit_list_item_with_unfixable() {
+    let rule = make_normalize_rule(80);
+    let content = "- [ ] @holdex/hr-payroll-operations: post additional costs in own payout issue\n  and link here\n";
+    let ctx1 = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let run1 = rule.check(&ctx1).unwrap();
+    assert!(run1.is_empty(), "First check() must be clean; got: {run1:?}");
+
+    let ctx2 = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let run2 = rule.check(&ctx2).unwrap();
+    assert!(run2.is_empty(), "Second check() must be clean; got: {run2:?}");
+}
+
+/// (j) Regression guard for #579: a list item with a genuinely long single
+/// physical line still triggers reflow and reports the physical length.
+#[test]
+fn test_reflow_still_wraps_when_physical_line_over_limit() {
+    let rule = make_normalize_rule(80);
+    // "- [ ] " (6) + 123 chars = 129 chars. Use a repeated wrappable token so
+    // the reflow has break points to wrap at.
+    let body = "word ".repeat(24).trim_end().to_string(); // 24 * 5 - 1 = 119 chars
+    let first = format!("- [ ] {body} xxxxx"); // 6 + 119 + 1 + 5 = 131 — adjust below
+    let first_len = first.chars().count();
+    assert!(first_len > 80, "test setup: first line must exceed 80 chars");
+    let content = format!("{first}\n");
+
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    let length_warnings: Vec<_> = result.iter().filter(|w| w.message.starts_with("Line length")).collect();
+    assert!(
+        !length_warnings.is_empty(),
+        "Expected a length warning for a 129-char line; got: {result:?}"
+    );
+    let msg = &length_warnings[0].message;
+    let expected = format!("Line length {first_len} exceeds 80 characters");
+    assert!(
+        msg.contains(&expected),
+        "Expected physical-line length {first_len}; got: {msg:?}"
+    );
+
+    // And the reflow fix must actually produce a wrapped output.
+    let fix = length_warnings[0].fix.as_ref().expect("Expected a fix");
+    assert!(
+        fix.replacement.contains('\n'),
+        "Fix must wrap the long line; got: {:?}",
+        fix.replacement
+    );
+    assert!(
+        fix.replacement.starts_with("- [ ] "),
+        "Fix must preserve the task-list marker; got: {:?}",
+        fix.replacement
+    );
+}
+
+/// (k) A list item whose only over-limit line is inside an HTML block. The per-line
+/// path excludes `in_html_block` lines from length checks unconditionally, so no
+/// warning fires at all. The new paragraph gate must not re-introduce a warning
+/// via the joined-length path.
+#[test]
+fn test_mixed_content_list_item_preserved_html_over_limit() {
+    let rule = make_normalize_rule(80);
+    // HTML block body line, indented 2 spaces: 2 + 85 chars = 87 chars.
+    let html_payload = "a".repeat(85);
+    let content = format!("- short head\n\n  <div>\n  {html_payload}\n  </div>\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD013 must not warn on any line of a list item whose only over-limit line is inside an HTML block; got: {result:?}"
+    );
+}
+
+/// (l) With `line-length = 0` (documented "no limit"), the normalize-mode list-item
+/// gate must never emit a length warning, even when reflow would restructure
+/// multi-line content.
+#[test]
+fn test_normalize_mode_list_item_line_length_zero_no_warning() {
+    let rule = make_normalize_rule(0);
+    let content = "- Short first line\n  continued here\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "line-length = 0 must suppress MD013 length warnings on list items even when reflow would restructure; got: {result:?}"
     );
 }

@@ -14,18 +14,19 @@ fn test_trailing_whitespace_removed_before_reflow_integration() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
 
-    // Content with ACCIDENTAL trailing whitespace at end of lines (not hard breaks)
-    // Note: single space after "and" and "beyond" - NOT hard breaks
+    // Content with ACCIDENTAL trailing whitespace at end of lines (not hard breaks).
+    // Note: single space after "and" and "beyond" - NOT hard breaks.
     // The trailing spaces should be removed BEFORE reflow combines the lines
+    // so they don't become mid-line double spaces.
+    // Line 1 exceeds line-length=60 so MD013 reflow triggers.
     let content = "1. It **generated an application template**. There's a lot of files and \n    configurations required to build a native installer, above and \n    beyond the code of your actual application.\n";
 
     fs::write(&file_path, content).unwrap();
 
-    // Create config file enabling reflow with high line length
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
 [MD013]
-line-length = 999999
+line-length = 60
 reflow = true
 reflow-mode = "normalize"
 "#;
@@ -45,18 +46,11 @@ reflow-mode = "normalize"
     let fixed_content = fs::read_to_string(&file_path).unwrap();
 
     // Verify:
-    // 1. Content has been reflowed into a single line (no hard breaks present)
-    // 2. No trailing whitespace exists anywhere
-    // 3. No mid-line double spaces (which would indicate trailing spaces became mid-line)
+    // 1. No trailing whitespace exists anywhere (MD009 stripped the accidental trailing spaces).
+    // 2. No mid-line triple+ spaces (which would indicate trailing spaces became mid-line on join).
+    // 3. The reflow wrapped the content to the configured line length (no line over 60 chars).
 
-    // Should be reflowed to single line (within the list item) since no hard breaks
     let lines: Vec<&str> = fixed_content.lines().collect();
-    assert!(
-        lines.len() <= 2, // The list item line and possibly an empty trailing line
-        "Content without hard breaks should be reflowed to single line, got {} lines: {:?}",
-        lines.len(),
-        lines
-    );
 
     // No trailing whitespace
     for line in &lines {
@@ -93,9 +87,10 @@ fn test_multi_paragraph_list_items_with_hard_breaks() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
 
-    // Content with intentional hard breaks (2 spaces)
-    // MD009 will normalize any excessive trailing spaces to exactly 2 spaces (hard break)
-    // MD013 will preserve the hard breaks and not reflow into a single line
+    // Content with intentional hard breaks (2 spaces).
+    // MD009 will normalize any excessive trailing spaces to exactly 2 spaces (hard break).
+    // MD013 will preserve the hard breaks during reflow — line 1 exceeds line-length=60
+    // so the reflow path is exercised.
     let content = "1. It **generated an application template**. There's a lot of files and   \n    configurations required to build a native installer, above and  \n    beyond the code of your actual application.\n";
 
     fs::write(&file_path, content).unwrap();
@@ -103,7 +98,7 @@ fn test_multi_paragraph_list_items_with_hard_breaks() {
     let config_path = dir.path().join(".rumdl.toml");
     let config_content = r#"
 [MD013]
-line-length = 999999
+line-length = 60
 reflow = true
 reflow-mode = "normalize"
 "#;

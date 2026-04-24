@@ -1036,3 +1036,53 @@ reflow-mode = "normalize"
          Re-check output: {recheck_stdout}"
     );
 }
+
+/// End-to-end guard for issue #582. With `unfixable = ["MD013"]` in config, an
+/// under-limit list item must not produce a persistent MD013 warning, and two
+/// back-to-back runs of `rumdl check` must produce identical zero-warning
+/// output.
+#[test]
+fn md013_under_limit_list_item_with_unfixable_stable() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("repro.md");
+    let config_path = dir.path().join(".rumdl.toml");
+
+    let content =
+        "# T\n\n- [ ] @holdex/hr-payroll-operations: post additional costs in own payout issue\n  and link here\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "normalize"
+
+[global]
+unfixable = ["MD013"]
+"#;
+    fs::write(&config_path, config).unwrap();
+
+    let run_check = || -> String {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--no-cache")
+            .arg(&file_path)
+            .arg("--config")
+            .arg(&config_path)
+            .output()
+            .expect("Failed to execute rumdl check");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+
+    let first = run_check();
+    assert!(
+        !first.contains("MD013"),
+        "MD013 must not warn on an under-limit list item (first run). Got:\n{first}"
+    );
+
+    let second = run_check();
+    assert!(
+        !second.contains("MD013"),
+        "MD013 must not warn on an under-limit list item (second run). Got:\n{second}"
+    );
+}

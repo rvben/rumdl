@@ -56,10 +56,11 @@ fn test_hard_breaks_segment_based_reflow() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
 
-    // Content with hard break - MD013 should use segment-based reflow
-    // First segment (line 1) ends with hard break - gets reflowed and hard break preserved
-    // Second segment (lines 2-3) has no hard breaks - gets joined and reflowed
-    let content = "1. First line  \n    Second line\n    Third line\n";
+    // Content with hard break - MD013 should use segment-based reflow.
+    // Line 2 exceeds line-length=50 so the reflow triggers.
+    // First segment (line 1) ends with hard break - gets reflowed and hard break preserved.
+    // Second segment (lines 2-3) has no hard breaks - gets joined and reflowed.
+    let content = "1. First line  \n    Second line with more than fifty characters of text here\n    Third\n";
 
     fs::write(&file_path, content).unwrap();
 
@@ -93,9 +94,10 @@ br-spaces = 2
         "Hard break should be preserved after 'First line', got: {fixed_content:?}"
     );
 
-    // Lines after hard break (second segment) should be joined together
+    // Lines after hard break (second segment) should be joined and reflowed —
+    // the original "    Third\n" line no longer stands alone.
     assert!(
-        fixed_content.contains("Second line Third line"),
+        !fixed_content.contains("of text here\n    Third"),
         "Lines in segment after hard break should be joined, got: {fixed_content:?}"
     );
 }
@@ -542,8 +544,9 @@ fn test_backslash_segment_based_reflow() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
 
-    // Content with backslash hard break - MD013 should use segment-based reflow
-    let content = "1. First line\\\n    Second line\n    Third line\n";
+    // Content with backslash hard break - MD013 should use segment-based reflow.
+    // Line 2 exceeds line-length=50 so the reflow triggers.
+    let content = "1. First line\\\n    Second line with more than fifty characters of text here\n    Third\n";
 
     fs::write(&file_path, content).unwrap();
 
@@ -573,9 +576,10 @@ reflow-mode = "normalize"
         "Backslash hard break should be preserved after 'First line', got: {fixed_content:?}"
     );
 
-    // Lines after hard break (second segment) should be joined together
+    // Lines after hard break (second segment) should be joined and reflowed —
+    // the original "    Third\n" line no longer stands alone.
     assert!(
-        fixed_content.contains("Second line Third line"),
+        !fixed_content.contains("of text here\n    Third"),
         "Lines in segment after hard break should be joined, got: {fixed_content:?}"
     );
 }

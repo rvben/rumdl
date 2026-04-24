@@ -2789,8 +2789,59 @@ impl MD013LineLength {
                     // Get the original text to compare
                     let original_text = &ctx.content[byte_range.clone()];
 
-                    // Only generate a warning if the replacement is different from the original
-                    if original_text != replacement {
+                    // Physical-line-length scan, shared by the Normalize-mode gate and its
+                    // message. The list-item reflow preserves code blocks, HTML blocks,
+                    // admonition headers, fence markers, semantic markers, and snippet/div
+                    // markers verbatim; only paragraph content and admonition bodies are
+                    // restructured. Only those lines drive the length warning, so that
+                    // preserved-but-overlong content does not keep the paragraph-level
+                    // warning alive when the reflow would not fix that line.
+                    let should_count_for_length = |line_idx: usize| -> bool {
+                        let line = lines[line_idx];
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() || is_exempt_line(line) {
+                            return false;
+                        }
+                        let info = &ctx.lines[line_idx];
+                        if info.in_code_block || info.in_html_block {
+                            return false;
+                        }
+                        if info.in_admonition && mkdocs_admonitions::is_admonition_start(line) {
+                            return false;
+                        }
+                        if is_fence_marker(line) || is_semantic_line(line) {
+                            return false;
+                        }
+                        if is_snippet_block_delimiter(line) {
+                            return false;
+                        }
+                        if line.trim_start().starts_with(":::") {
+                            return false;
+                        }
+                        true
+                    };
+                    let max_physical_length = (list_start..i)
+                        .filter(|&idx| should_count_for_length(idx))
+                        .map(|idx| self.calculate_effective_length(lines[idx]))
+                        .max()
+                        .unwrap_or(0);
+                    // `line-length = 0` means "no limit" — never emit a length warning in
+                    // that configuration, even when the reflow would restructure content.
+                    let any_paragraph_line_over =
+                        !config.line_length.is_unlimited() && max_physical_length > config.line_length.get();
+
+                    // Only generate a warning if the replacement is different from the original.
+                    // For Normalize mode, additionally require that at least one physical
+                    // content line exceeds the limit — otherwise the reflow is a cosmetic
+                    // change (continuation-indent normalization or joining/splitting
+                    // already-fitting multi-line paragraphs) and should not be reported as
+                    // a length violation. SentencePerLine and SemanticLineBreaks modes warn
+                    // on sentence structure, not length, so they ignore this gate.
+                    let gate_ok = match config.reflow_mode {
+                        ReflowMode::Normalize => original_text != replacement && any_paragraph_line_over,
+                        _ => original_text != replacement,
+                    };
+                    if gate_ok {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
                             ReflowMode::SentencePerLine => {
@@ -2811,32 +2862,13 @@ impl MD013LineLength {
                                 format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
                             }
                             ReflowMode::Normalize => {
-                                // Find the longest non-exempt paragraph when joined
-                                let max_para_length = blocks
-                                    .iter()
-                                    .filter_map(|block| {
-                                        if let Block::Paragraph(para_lines) = block {
-                                            if para_lines.iter().all(|line| is_exempt_line(line)) {
-                                                return None;
-                                            }
-                                            let joined = para_lines.join(" ");
-                                            let with_indent = format!("{}{}", " ".repeat(indent_size), joined.trim());
-                                            Some(self.calculate_effective_length(&with_indent))
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                    .max()
-                                    .unwrap_or(0);
-                                if max_para_length > config.line_length.get() {
-                                    format!(
-                                        "Line length {} exceeds {} characters",
-                                        max_para_length,
-                                        config.line_length.get()
-                                    )
-                                } else {
-                                    "Multi-line content can be normalized".to_string()
-                                }
+                                // Report the physical line length of the longest over-limit
+                                // content line. The gate above guarantees at least one.
+                                format!(
+                                    "Line length {} exceeds {} characters",
+                                    max_physical_length,
+                                    config.line_length.get()
+                                )
                             }
                             ReflowMode::Default => {
                                 // Report the actual longest non-exempt line, not the combined content
