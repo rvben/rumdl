@@ -9,7 +9,6 @@ rules:
     ignore:
       - ci.yml
       - docs.yml
-      - docs-prod-probe.yml
       - performance.yml
       - release.yml
       - sync-schemastore.yml
