@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links release-patch release-minor release-major
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke release-patch release-minor release-major
 
 # Development environment setup
 setup-mise:
@@ -287,6 +287,20 @@ check-links:
 # Documentation validation
 test-doc-completeness:
 	cargo test --test config_documentation_completeness -- --nocapture
+
+# Assert the `docs/` tree is fmt-clean with the current rumdl code.
+# Catches cases where someone hand-edits a docs file without running fmt,
+# or where rumdl itself would want to rewrite a committed doc file.
+docs-check:
+	@echo "Checking docs/ is fmt-clean..."
+	cargo run --quiet --release --bin rumdl -- fmt --check docs/
+
+# Smoke-test the built documentation site (site/) for structural invariants
+# that would have caught the #583 grid-cards mangling. Runs after `zensical
+# build` and before deploy.
+docs-smoke:
+	@test -d site || { echo "site/ not found; run 'zensical build' first"; exit 1; }
+	python3 scripts/docs_smoke_test.py site
 
 release-patch:
 	vership bump patch

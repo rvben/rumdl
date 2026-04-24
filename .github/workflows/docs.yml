@@ -35,6 +35,9 @@ jobs:
       - name: Build documentation
         run: zensical build --clean
 
+      - name: Smoke-test built site
+        run: make docs-smoke
+
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
