@@ -8,53 +8,37 @@ icon: lucide/file-check
 
 <div class="grid cards" markdown>
 
-- :zap:{ .lg .middle } **Built for speed**
+-   :zap:{ .lg .middle } **Built for speed**
 
----
+    ---
 
-```text
-Written in Rust for blazing fast performance. Significantly faster than alternatives.
-```
+    Written in Rust for blazing fast performance. Significantly faster than alternatives.
 
-```text
-[:octicons-arrow-right-24: Benchmarks](#performance)
-```
+    [:octicons-arrow-right-24: Benchmarks](#performance)
 
-- :mag:{ .lg .middle } **71 lint rules**
+-   :mag:{ .lg .middle } **71 lint rules**
 
----
+    ---
 
-```text
-Comprehensive coverage of common Markdown issues with detailed error messages.
-```
+    Comprehensive coverage of common Markdown issues with detailed error messages.
 
-```text
-[:octicons-arrow-right-24: View rules](rules.md)
-```
+    [:octicons-arrow-right-24: View rules](rules.md)
 
-- :wrench:{ .lg .middle } **Auto-formatting**
+-   :wrench:{ .lg .middle } **Auto-formatting**
 
----
+    ---
 
-```text
-Automatic fixes for most issues with `rumdl fmt` or `rumdl check --fix`.
-```
+    Automatic fixes for most issues with `rumdl fmt` or `rumdl check --fix`.
 
-```text
-[:octicons-arrow-right-24: Quick start](getting-started/quickstart.md)
-```
+    [:octicons-arrow-right-24: Quick start](getting-started/quickstart.md)
 
-- :package:{ .lg .middle } **Zero dependencies**
+-   :package:{ .lg .middle } **Zero dependencies**
 
----
+    ---
 
-```text
-Single binary with no runtime requirements. Install via Cargo, pip, Homebrew, or download.
-```
+    Single binary with no runtime requirements. Install via Cargo, pip, Homebrew, or download.
 
-```text
-[:octicons-arrow-right-24: Installation](getting-started/installation.md)
-```
+    [:octicons-arrow-right-24: Installation](getting-started/installation.md)
 
 </div>
 
@@ -106,19 +90,19 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
 <div class="grid cards" markdown>
 
-- [:octicons-download-24: **Installation**](getting-started/installation.md)
+-   [:octicons-download-24: **Installation**](getting-started/installation.md)
 
     Install rumdl via Cargo, pip, Homebrew, or download a binary.
 
-- [:octicons-play-24: **Quick Start**](getting-started/quickstart.md)
+-   [:octicons-play-24: **Quick Start**](getting-started/quickstart.md)
 
     Get up and running with rumdl in minutes.
 
-- [:octicons-book-24: **Rules Reference**](rules.md)
+-   [:octicons-book-24: **Rules Reference**](rules.md)
 
     Explore all 71 linting rules with examples.
 
-- [:octicons-gear-24: **Configuration**](global-settings.md)
+-   [:octicons-gear-24: **Configuration**](global-settings.md)
 
     Customize rumdl for your project.
 
