@@ -23,6 +23,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.81](https://github.com/rvben/rumdl/compare/v0.1.80...v0.1.81) - 2026-04-24
+
+### Added
+
+- **md057**: add relative_to_roots option for absolute link validation ([e911919](https://github.com/rvben/rumdl/commit/e91191941703dd2095b6b3d4b1d6633f4031d35c))
+- **md024**: treat headings with different {#custom-id} anchors as distinct ([0b4dadb](https://github.com/rvben/rumdl/commit/0b4dadb54a1d519a3316360bd87d3690c30e09fd))
+
+### Fixed
+
+- **md013**: don't warn on under-limit list items in normalize mode ([3e08094](https://github.com/rvben/rumdl/commit/3e0809434f523db0c72d16712e7800bd257c475c))
+- **fmt**: honor <div markdown> opt-in across all flavors ([4c9c8dc](https://github.com/rvben/rumdl/commit/4c9c8dcffafd982451970ab87a6daf8196575612))
+- **docs**: restore grid-cards formatting on landing page ([5acba85](https://github.com/rvben/rumdl/commit/5acba85bc6c3e4e6dd43d78ee4b654ffafd38ce7))
+- **md005,md032**: preserve nesting under tight continuation followed by sub-list ([993c0f5](https://github.com/rvben/rumdl/commit/993c0f55d85453d5c70256416c24e7a13b5dbf64))
+
 ## [0.1.80](https://github.com/rvben/rumdl/compare/v0.1.79...v0.1.80) - 2026-04-22
 
 ### Added
