@@ -433,6 +433,40 @@ pub(super) fn detect_jsx_and_mdx_comments(
     (jsx_expression_ranges, mdx_comment_ranges)
 }
 
+/// Detect `<div markdown>`-style HTML blocks and populate `in_mkdocs_html_markdown`.
+///
+/// The `markdown` attribute on a block-level HTML element is Python-Markdown's
+/// `md_in_html` opt-in and is also used by MkDocs Material for constructs like
+/// grid cards. Because the attribute is an unambiguous author-supplied signal,
+/// we recognize these blocks regardless of the configured flavor — otherwise
+/// `rumdl fmt` can silently mangle a page (e.g. rewriting 4-space-indented
+/// continuation content as indented code blocks) when the flavor isn't set.
+///
+/// Also clears `in_code_block` for content inside such blocks (outside fenced
+/// code), mirroring the admonition/tab handling: pulldown-cmark otherwise
+/// treats the 4-space-indented continuation content as indented code.
+pub(super) fn detect_markdown_html_blocks(content_lines: &[&str], lines: &mut [LineInfo]) {
+    let mut markdown_html_tracker = MarkdownHtmlTracker::new();
+    let mut html_markdown_fence = FencedCodeTracker::new();
+
+    for (i, line) in content_lines.iter().enumerate() {
+        if i >= lines.len() {
+            break;
+        }
+
+        lines[i].in_mkdocs_html_markdown = markdown_html_tracker.process_line(line);
+
+        if lines[i].in_mkdocs_html_markdown {
+            let in_fenced = html_markdown_fence.process_line(line.trim());
+            if !in_fenced {
+                lines[i].in_code_block = false;
+            }
+        } else {
+            html_markdown_fence.reset();
+        }
+    }
+}
+
 /// Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
 /// and populate the corresponding fields in LineInfo
 pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineInfo], flavor: MarkdownFlavor) {
@@ -456,10 +490,6 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
 
     // Track definition list context
     let mut in_definition = false;
-
-    // Track markdown-enabled HTML block context (grid cards, etc.)
-    let mut markdown_html_tracker = MarkdownHtmlTracker::new();
-    let mut html_markdown_fence = FencedCodeTracker::new();
 
     for (i, line) in content_lines.iter().enumerate() {
         if i >= lines.len() {
@@ -521,22 +551,6 @@ pub(super) fn detect_mkdocs_line_info(content_lines: &[&str], lines: &mut [LineI
                     lines[i].in_content_tab = true;
                 }
             }
-        }
-
-        // Check for markdown-enabled HTML blocks (grid cards, etc.)
-        // Supports div, section, article, aside, details, figure, footer, header, main, nav
-        // with markdown, markdown="1", or markdown="block" attributes
-        lines[i].in_mkdocs_html_markdown = markdown_html_tracker.process_line(line);
-
-        // Override indented code block detection for markdown HTML content,
-        // mirroring the pattern used for admonitions and tabs above.
-        if lines[i].in_mkdocs_html_markdown {
-            let in_fenced = html_markdown_fence.process_line(line.trim());
-            if !in_fenced {
-                lines[i].in_code_block = false;
-            }
-        } else {
-            html_markdown_fence.reset();
         }
 
         // Skip remaining detection for lines in actual code blocks

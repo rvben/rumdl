@@ -5325,8 +5325,13 @@ mod html_markdown_link_detection {
     }
 
     #[test]
-    fn test_standard_flavor_div_markdown_not_affected() {
-        // In standard flavor, <div markdown> indented content IS treated as code
+    fn test_standard_flavor_div_markdown_honored() {
+        // The `markdown` attribute on a block-level HTML element is an explicit,
+        // author-supplied opt-in for Markdown processing of the content. rumdl
+        // honors it regardless of the configured flavor so `rumdl fmt` cannot
+        // silently mangle pages like Material grid cards when no flavor is set
+        // (regression for issue #583). That means links in the indented content
+        // ARE detected as Markdown links even under standard flavor.
         let content = "# Test\n\n## One\n\n<div markdown>\n\n    See [two](#two)\n\n</div>\n\n## Three\n";
         let warnings = lint_standard(content);
         let md051: Vec<_> = warnings
@@ -5334,8 +5339,8 @@ mod html_markdown_link_detection {
             .filter(|w| w.rule_name.as_deref() == Some("MD051"))
             .collect();
         assert!(
-            md051.is_empty(),
-            "Standard flavor should not detect links in indented content of <div markdown>: {md051:?}"
+            !md051.is_empty(),
+            "Standard flavor should honor `<div markdown>` and detect broken link '#two': {warnings:?}"
         );
     }
 

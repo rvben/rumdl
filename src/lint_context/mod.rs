@@ -212,6 +212,16 @@ impl<'a> LintContext<'a> {
             flavor_detection::detect_jsx_and_mdx_comments(content, &mut lines, flavor, &code_blocks)
         );
 
+        // Detect `<div markdown>`-style HTML blocks (grid cards, etc.) regardless of flavor.
+        // The `markdown` attribute is an explicit, author-supplied signal; recognizing it
+        // in all flavors keeps `rumdl fmt` from mangling Material grid cards when the
+        // MkDocs flavor isn't active.
+        profile_section!(
+            "Markdown-in-HTML blocks",
+            profile,
+            flavor_detection::detect_markdown_html_blocks(&content_lines, &mut lines)
+        );
+
         // Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
         profile_section!(
             "MkDocs constructs",
@@ -261,13 +271,15 @@ impl<'a> LintContext<'a> {
             code_blocks = new_code_blocks;
         }
 
-        // Filter code_blocks to remove false positives from MkDocs admonition/tab content.
+        // Filter code_blocks to remove false positives from MkDocs admonition/tab content
+        // and `<div markdown>` HTML blocks (grid cards).
         // pulldown-cmark treats 4-space-indented content as indented code blocks, but inside
-        // MkDocs admonitions and content tabs this is regular markdown content.
-        // detect_mkdocs_line_info already corrected LineInfo.in_code_block for these lines,
+        // these containers this is regular markdown content. detect_mkdocs_line_info and
+        // detect_markdown_html_blocks already corrected LineInfo.in_code_block for these lines,
         // but the code_blocks byte ranges are still stale. We split ranges rather than using
-        // all-or-nothing removal, so fenced code blocks within admonitions are preserved.
-        if flavor == MarkdownFlavor::MkDocs {
+        // all-or-nothing removal, so fenced code blocks within the containers are preserved.
+        let has_markdown_html = lines.iter().any(|l| l.in_mkdocs_html_markdown);
+        if flavor == MarkdownFlavor::MkDocs || has_markdown_html {
             let mut new_code_blocks = Vec::with_capacity(code_blocks.len());
             for &(start, end) in &code_blocks {
                 let start_line = line_offsets
