@@ -19,6 +19,7 @@ impl MD024NoDuplicateHeading {
             config: MD024Config {
                 allow_different_nesting,
                 siblings_only,
+                allow_different_link_anchors: true,
             },
         }
     }
@@ -47,13 +48,17 @@ impl Rule for MD024NoDuplicateHeading {
             return Ok(Vec::new());
         }
 
+        // Dedup key pairs the heading's visible text with its `{#custom-id}` (if any).
+        // Using a tuple avoids ambiguity when the text itself contains `#`.
+        type HeadingKey = (String, Option<String>);
+
         let mut warnings = Vec::new();
-        let mut seen_headings: HashSet<String> = HashSet::new();
-        let mut seen_headings_per_level: HashMap<u8, HashSet<String>> = HashMap::new();
+        let mut seen_headings: HashSet<HeadingKey> = HashSet::new();
+        let mut seen_headings_per_level: HashMap<u8, HashSet<HeadingKey>> = HashMap::new();
 
         // For siblings_only mode, track heading hierarchy
-        let mut current_section_path: Vec<(u8, String)> = Vec::new(); // Stack of (level, heading_text)
-        let mut seen_siblings: HashMap<String, HashSet<String>> = HashMap::new(); // parent_path -> set of child headings
+        let mut current_section_path: Vec<(u8, HeadingKey)> = Vec::new();
+        let mut seen_siblings: HashMap<Vec<HeadingKey>, HashSet<HeadingKey>> = HashMap::new();
 
         // Track if we're in a snippet section (MkDocs flavor)
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
@@ -88,7 +93,11 @@ impl Rule for MD024NoDuplicateHeading {
                     continue;
                 }
 
-                let heading_key = heading.text.clone();
+                let heading_key: HeadingKey = if self.config.allow_different_link_anchors {
+                    (heading.text.clone(), heading.custom_id.clone())
+                } else {
+                    (heading.text.clone(), None)
+                };
                 let level = heading.level;
 
                 // Calculate precise character range for the heading text content
@@ -116,15 +125,10 @@ impl Rule for MD024NoDuplicateHeading {
                         current_section_path.pop();
                     }
 
-                    // Build parent path for sibling detection
-                    let parent_path = current_section_path
-                        .iter()
-                        .map(|(_, text)| text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("/");
+                    let parent_path: Vec<HeadingKey> = current_section_path.iter().map(|(_, k)| k.clone()).collect();
 
                     // Check if this heading is a duplicate among its siblings
-                    let siblings = seen_siblings.entry(parent_path.clone()).or_default();
+                    let siblings = seen_siblings.entry(parent_path).or_default();
                     if siblings.contains(&heading_key) {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
@@ -309,6 +313,7 @@ This has the same text but different level."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -331,6 +336,7 @@ This has the same text but different level."#;
         let config = MD024Config {
             allow_different_nesting: true,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -377,6 +383,7 @@ Without punctuation."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -410,6 +417,7 @@ Duplicate code formatted."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -436,6 +444,7 @@ Same subsection name in different section."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -462,6 +471,7 @@ Same subsection name in different section."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -532,6 +542,7 @@ Duplicate special chars."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -563,6 +574,7 @@ Different section, but still a duplicate when allow_different_nesting is true."#
         let config = MD024Config {
             allow_different_nesting: true,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -591,6 +603,7 @@ Duplicate with different style."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -657,6 +670,7 @@ Exact match."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -680,6 +694,7 @@ Exact match."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -714,6 +729,7 @@ Another Overview in yet another section."#;
         let config = MD024Config {
             allow_different_nesting: true,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -789,6 +805,7 @@ Not a duplicate."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -814,6 +831,7 @@ Three in a row."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -842,6 +860,7 @@ Different parent sections, so not siblings - no warning expected."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: true,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -871,6 +890,7 @@ This 'First Subsection' IS a sibling duplicate."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: true,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -894,6 +914,7 @@ Duplicate with code span."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -911,6 +932,7 @@ Duplicate with code span."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(&content, config);
         assert!(result.is_ok());
@@ -933,6 +955,7 @@ Duplicate with HTML entity."#;
         let config = MD024Config {
             allow_different_nesting: false,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
@@ -957,11 +980,173 @@ All same text, different levels."#;
         let config = MD024Config {
             allow_different_nesting: true,
             siblings_only: false,
+            ..MD024Config::default()
         };
         let result = run_test(content, config);
         assert!(result.is_ok());
         let warnings = result.unwrap();
         // With allow_different_nesting, there should be no warnings
         assert_eq!(warnings.len(), 0);
+    }
+
+    // --- allow_different_link_anchors tests ---
+
+    #[test]
+    fn test_custom_anchor_different_ids_no_warning_default() {
+        // Reporter's exact repro: same visible text, different {#id} → no warning with default config.
+        let content = "#### Unit testing\n\n#### Unit testing {#custom-anchor}\n";
+        let config = MD024Config::default();
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(
+            warnings.len(),
+            0,
+            "headings with different custom anchors must not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_custom_anchor_same_id_flagged() {
+        // Same text and same explicit {#id} → the rendered anchor is identical, must flag.
+        let content = "## Overview {#overview}\n\n## Overview {#overview}\n";
+        let config = MD024Config::default();
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "headings with identical custom anchors must be flagged"
+        );
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Overview'.");
+    }
+
+    #[test]
+    fn test_custom_anchor_one_with_id_one_without_no_warning() {
+        // Same visible text but one has a {#id} suffix and the other has none → distinct keys.
+        let content = "## Setup\n\n## Setup {#alt-setup}\n";
+        let config = MD024Config::default();
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(
+            warnings.len(),
+            0,
+            "a plain heading and one with a custom anchor must not collide"
+        );
+    }
+
+    #[test]
+    fn test_allow_different_link_anchors_false_restores_original_behavior() {
+        // When the option is disabled the {#id} is stripped before dedup, so both headings
+        // share the key "Unit testing" and the second is flagged.
+        let content = "#### Unit testing\n\n#### Unit testing {#custom-anchor}\n";
+        let config = MD024Config {
+            allow_different_link_anchors: false,
+            siblings_only: false,
+            ..MD024Config::default()
+        };
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "with allow_different_link_anchors=false the duplicate must be flagged"
+        );
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Unit testing'.");
+    }
+
+    #[test]
+    fn test_custom_anchor_with_siblings_only() {
+        // With siblings_only=true, headings under the same parent but with different anchors
+        // must not be flagged; headings with the same text AND same anchor under the same parent must be.
+        let content = concat!(
+            "# Parent\n\n",
+            "## Section {#section-a}\n\n",
+            "## Section {#section-b}\n\n",
+            "## Section {#section-a}\n",
+        );
+        let config = MD024Config {
+            siblings_only: true,
+            allow_different_link_anchors: true,
+            ..MD024Config::default()
+        };
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        // Only the third "## Section {#section-a}" duplicates the first one.
+        assert_eq!(
+            warnings.len(),
+            1,
+            "only exact key collision under same parent must be flagged"
+        );
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Section'.");
+    }
+
+    #[test]
+    fn test_custom_anchor_with_allow_different_nesting() {
+        // With allow_different_nesting=true, two headings at different levels that would otherwise
+        // be exempt are still compared separately per-level. Anchors still differentiate same-level dups.
+        let content = concat!(
+            "## Topic {#topic-1}\n\n",
+            "### Topic {#topic-2}\n\n",
+            "## Topic {#topic-1}\n",
+        );
+        let config = MD024Config {
+            allow_different_nesting: true,
+            siblings_only: false,
+            allow_different_link_anchors: true,
+        };
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        // The two h2 headings share the same key "Topic#topic-1" → flagged.
+        // The h3 has a distinct key → not flagged.
+        assert_eq!(
+            warnings.len(),
+            1,
+            "same-level, same-anchor headings must still be flagged"
+        );
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Topic'.");
+    }
+
+    #[test]
+    fn test_heading_text_containing_hash_no_false_collision() {
+        // A `#` in visible heading text must not collide with a different heading that
+        // carries a `{#id}` suffix. Regression: previously the dedup key was built with
+        // string concatenation `"{text}#{id}"`, which made `## Foo#bar` and `## Foo {#bar}`
+        // share the same key and triggered a false-positive duplicate warning.
+        let content = "## Foo#bar\n\n## Foo {#bar}\n";
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+            allow_different_link_anchors: true,
+        };
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert!(
+            warnings.is_empty(),
+            "heading text containing # must not collide with a different heading carrying {{#id}}; got: {warnings:#?}",
+        );
+    }
+
+    #[test]
+    fn test_heading_text_containing_hash_real_duplicate_still_flagged() {
+        // Sanity guardrail: after the tuple-key fix, genuine duplicate text
+        // containing `#` is still flagged.
+        let content = "## Foo#bar\n\n## Foo#bar\n";
+        let config = MD024Config {
+            allow_different_nesting: false,
+            siblings_only: false,
+            allow_different_link_anchors: true,
+        };
+        let result = run_test(content, config);
+        assert!(result.is_ok());
+        let warnings = result.unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].message, "Duplicate heading: 'Foo#bar'.");
     }
 }
