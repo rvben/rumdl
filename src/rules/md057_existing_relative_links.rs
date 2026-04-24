@@ -429,6 +429,74 @@ impl MD057ExistingRelativeLinks {
             resolved_path.display()
         ))
     }
+
+    /// Validate an absolute link by resolving it against each configured root directory.
+    ///
+    /// Applies the same checks as `validate_absolute_link_via_docs_dir` (directory
+    /// `index.md`, markdown-extension fallback, `.html`/`.htm` to markdown source) but
+    /// against every configured root. The first root under which the link resolves
+    /// successfully wins. When `roots` is empty the link cannot be validated and a
+    /// generic warning is returned, consistent with the `relative_to_docs` fallback
+    /// when no `mkdocs.yml` is present.
+    fn validate_absolute_link_via_roots(url: &str, roots: &[String]) -> Option<String> {
+        if roots.is_empty() {
+            return Some(format!(
+                "Absolute link '{url}' cannot be validated locally (no roots configured)"
+            ));
+        }
+
+        let relative_url = url.trim_start_matches('/');
+        let file_path = Self::strip_query_and_fragment(relative_url);
+        let decoded = Self::url_decode(file_path);
+        let is_directory_link = url.ends_with('/') || decoded.is_empty();
+
+        for root in roots {
+            let root_path = if Path::new(root).is_absolute() {
+                PathBuf::from(root)
+            } else {
+                CURRENT_DIR.join(root)
+            };
+            let resolved = root_path.join(&decoded);
+
+            // Directory-style links resolve via `index.md` inside the directory.
+            // Must be checked before `file_exists_or_markdown_extension` because
+            // `path.exists()` returns true for directories.
+            let is_dir = resolved.is_dir();
+            if is_directory_link || is_dir {
+                let index_path = resolved.join("index.md");
+                if file_exists_with_cache(&index_path) {
+                    return None;
+                }
+                // Directory exists but has no index.md — skip the plain existence
+                // check for this root (it would incorrectly succeed on the directory
+                // itself) and try the next root.
+                if is_dir {
+                    continue;
+                }
+            }
+
+            if file_exists_or_markdown_extension(&resolved) {
+                return None;
+            }
+
+            // For .html/.htm links, accept a matching markdown source in the same
+            // directory — supports doc sites that compile .md to .html.
+            if let Some(ext) = resolved.extension().and_then(|e| e.to_str())
+                && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
+                && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|s| s.to_str()), resolved.parent())
+            {
+                let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
+                    let source_path = parent.join(format!("{stem}{md_ext}"));
+                    file_exists_with_cache(&source_path)
+                });
+                if has_md_source {
+                    return None;
+                }
+            }
+        }
+
+        Some(format!("Absolute link '{url}' was not found under any configured root"))
+    }
 }
 
 impl Rule for MD057ExistingRelativeLinks {
@@ -617,6 +685,22 @@ impl Rule for MD057ExistingRelativeLinks {
                                         });
                                     }
                                 }
+                                AbsoluteLinksOption::RelativeToRoots => {
+                                    if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
+                                        let url_start = url_group.start();
+                                        let url_end = url_group.end();
+                                        warnings.push(LintWarning {
+                                            rule_name: Some(self.name().to_string()),
+                                            line: link.line,
+                                            column: url_start + 1,
+                                            end_line: link.line,
+                                            end_column: url_end + 1,
+                                            message: msg,
+                                            severity: Severity::Warning,
+                                            fix: None,
+                                        });
+                                    }
+                                }
                                 AbsoluteLinksOption::Ignore => {}
                             }
                             continue;
@@ -759,6 +843,20 @@ impl Rule for MD057ExistingRelativeLinks {
                             });
                         }
                     }
+                    AbsoluteLinksOption::RelativeToRoots => {
+                        if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: image.line,
+                                column: image.start_col + 1,
+                                end_line: image.line,
+                                end_column: image.start_col + 1 + url.len(),
+                                message: msg,
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
                     AbsoluteLinksOption::Ignore => {}
                 }
                 continue;
@@ -880,6 +978,24 @@ impl Rule for MD057ExistingRelativeLinks {
                     }
                     AbsoluteLinksOption::RelativeToDocs => {
                         if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
+                            let line_idx = ref_def.line - 1;
+                            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                            });
+                            warnings.push(LintWarning {
+                                rule_name: Some(self.name().to_string()),
+                                line: ref_def.line,
+                                column,
+                                end_line: ref_def.line,
+                                end_column: column + url.len(),
+                                message: msg,
+                                severity: Severity::Warning,
+                                fix: None,
+                            });
+                        }
+                    }
+                    AbsoluteLinksOption::RelativeToRoots => {
+                        if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
                             let line_idx = ref_def.line - 1;
                             let column = content.lines().nth(line_idx).map_or(1, |line_content| {
                                 line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)

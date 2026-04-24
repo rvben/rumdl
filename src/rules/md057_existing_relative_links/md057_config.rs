@@ -12,6 +12,9 @@ pub enum AbsoluteLinksOption {
     Warn,
     /// Resolve absolute links relative to MkDocs docs_dir and validate
     RelativeToDocs,
+    /// Resolve absolute links relative to one or more explicit root directories.
+    /// First match wins; reports broken only when all roots miss.
+    RelativeToRoots,
 }
 
 /// Configuration for MD057 (relative link validation)
@@ -24,6 +27,7 @@ pub struct MD057Config {
     /// - "ignore" (default): Skip validation for absolute links
     /// - "warn": Report a warning for absolute links
     /// - "relative_to_docs": Resolve relative to MkDocs docs_dir and validate
+    /// - "relative_to_roots": Resolve relative to one or more configured root directories
     #[serde(alias = "absolute_links")]
     pub absolute_links: AbsoluteLinksOption,
 
@@ -50,6 +54,28 @@ pub struct MD057Config {
     /// ```
     #[serde(alias = "search_paths")]
     pub search_paths: Vec<String>,
+
+    /// Root directories used when `absolute-links = "relative_to_roots"`.
+    ///
+    /// Absolute links are resolved against each root in order; the first root
+    /// where the target file exists passes the check. A warning is emitted only
+    /// when none of the roots contain the target.
+    ///
+    /// Paths are resolved relative to the current working directory when not
+    /// absolute. Trailing slashes are normalized automatically.
+    ///
+    /// When `roots` is empty and `absolute-links = "relative_to_roots"`, the
+    /// rule emits a "not validated" warning for every absolute link, consistent
+    /// with the fallback behavior of `relative_to_docs` when no `mkdocs.yml` is
+    /// found.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD057]
+    /// absolute-links = "relative_to_roots"
+    /// roots = ["content/en", "content/zh-cn"]
+    /// ```
+    pub roots: Vec<String>,
 }
 
 impl RuleConfig for MD057Config {
