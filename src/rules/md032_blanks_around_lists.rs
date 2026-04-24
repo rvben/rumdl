@@ -702,9 +702,25 @@ impl MD032BlanksAroundLists {
 
                     let prefixes_match = next_prefix.trim() == prefix.trim();
 
+                    // Do not warn when the immediately following line is a tight continuation
+                    // of the last list item. A tight continuation is any non-blank,
+                    // non-list-item line indented strictly past the last item's marker column.
+                    // Inserting a blank there would structurally separate the continuation
+                    // from its parent item.
+                    let is_tight_continuation_of_last_item = ctx
+                        .lines
+                        .get(end_line - 1)
+                        .and_then(|last_li| last_li.list_item.as_ref())
+                        .is_some_and(|last_item| {
+                            let marker_col = last_item.marker_column;
+                            ctx.lines.get(content_line - 1).is_some_and(|next_li| {
+                                !next_li.is_blank && next_li.list_item.is_none() && next_li.indent > marker_col
+                            })
+                        });
+
                     // Only require blank lines for content in the same context (same blockquote level)
                     // Skip if the following line exits a blockquote - boundary provides separation
-                    if !is_next_excluded && prefixes_match && !exits_blockquote {
+                    if !is_next_excluded && prefixes_match && !exits_blockquote && !is_tight_continuation_of_last_item {
                         // Calculate precise character range for the last line of the list (not the line after)
                         let (start_line_last, start_col_last, end_line_last, end_col_last) =
                             calculate_line_range(end_line, lines[end_line - 1]);

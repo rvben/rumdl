@@ -90,6 +90,13 @@ impl FixCoordinator {
         // - MD031 (blanks around fences) - same reason
         dependencies.insert("MD070", vec!["MD040", "MD031"]);
 
+        // MD005/MD077 (list indent and continuation indent) MUST run before:
+        // - MD032 (blanks around lists) - MD005/MD077 fix nesting structure that MD032 relies on
+        //   to correctly identify list block boundaries; running MD032 first on under-indented
+        //   content causes spurious blank-line insertions inside list items
+        dependencies.insert("MD005", vec!["MD032"]);
+        dependencies.insert("MD077", vec!["MD032"]);
+
         Self { dependencies }
     }
 
