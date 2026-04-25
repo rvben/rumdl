@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.82](https://github.com/rvben/rumdl/compare/v0.1.81...v0.1.82) - 2026-04-25
+
+### Added
+
+- **md057**: fall back to project root when resolving absolute links ([3df4ed0](https://github.com/rvben/rumdl/commit/3df4ed00d77fe0d3d94f56ba17a1a60cef170c47))
+
 ## [0.1.81](https://github.com/rvben/rumdl/compare/v0.1.80...v0.1.81) - 2026-04-24
 
 ### Added
