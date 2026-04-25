@@ -57,17 +57,21 @@ pub struct MD057Config {
 
     /// Root directories used when `absolute-links = "relative_to_roots"`.
     ///
-    /// Absolute links are resolved against each root in order; the first root
-    /// where the target file exists passes the check. A warning is emitted only
-    /// when none of the roots contain the target.
+    /// Absolute links are resolved against each configured root in order, then
+    /// against the project root as an implicit fallback. The first root under
+    /// which the target file exists passes the check. A warning is emitted only
+    /// when no resolution finds the file.
     ///
-    /// Paths are resolved relative to the current working directory when not
-    /// absolute. Trailing slashes are normalized automatically.
+    /// The implicit project-root fallback supports both link styles in the same
+    /// project without extra configuration: `/foo.md` (relative to a configured
+    /// root) and `/content/en/foo.md` (literal path from the project root).
     ///
-    /// When `roots` is empty and `absolute-links = "relative_to_roots"`, the
-    /// rule emits a "not validated" warning for every absolute link, consistent
-    /// with the fallback behavior of `relative_to_docs` when no `mkdocs.yml` is
-    /// found.
+    /// Paths are resolved relative to the project root when not absolute.
+    /// Trailing slashes are normalized automatically.
+    ///
+    /// When `roots` is empty, absolute links are validated against the project
+    /// root only — useful for single-root projects where every absolute link
+    /// resolves directly from the project root.
     ///
     /// Example:
     /// ```toml

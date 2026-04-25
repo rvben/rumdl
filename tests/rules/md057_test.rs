@@ -2974,8 +2974,9 @@ fn test_relative_to_roots_all_miss_warns() {
 }
 
 #[test]
-fn test_relative_to_roots_empty_roots_warns() {
-    // An empty roots list cannot validate links; emits a "not validated" warning
+fn test_relative_to_roots_empty_roots_missing_file_warns() {
+    // With no configured roots and no file at the project root, the link
+    // cannot be resolved and a warning is emitted.
     let temp_dir = tempdir().unwrap();
     let config = MD057Config {
         absolute_links: AbsoluteLinksOption::RelativeToRoots,
@@ -2987,11 +2988,293 @@ fn test_relative_to_roots_empty_roots_warns() {
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 1, "Empty roots should produce a warning, got: {result:?}");
+    assert_eq!(
+        result.len(),
+        1,
+        "Missing file should produce a warning, got: {result:?}"
+    );
     assert!(
-        result[0].message.contains("no roots configured"),
-        "Message should mention missing roots config, got: {}",
+        result[0].message.contains("not found under the project root"),
+        "Unexpected message: {}",
         result[0].message
+    );
+    assert!(
+        !result[0].message.contains("any configured root"),
+        "Empty-roots message should not mention configured roots: {}",
+        result[0].message
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_literal_path() {
+    // With `roots = ["root"]`, an absolute link that includes the literal `root/`
+    // prefix (e.g. `/root/foo.md`) must validate against the project root.
+    // Resolution: configured root tries `<project>/root/root/foo.md` (miss),
+    // then the project-root fallback tries `<project>/root/foo.md` (hit).
+    let temp_dir = tempdir().unwrap();
+    let nested = temp_dir.path().join("root");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("foo.md"), "# Foo").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec!["root".to_string()],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Real](/root/foo.md)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Literal project-root path should resolve via project-root fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_root_relative_form_still_works() {
+    // Regression guard: with `roots = ["root"]`, a link relative to the configured
+    // root (e.g. `/foo.md`) must still validate via the configured root, not the
+    // project-root fallback.
+    let temp_dir = tempdir().unwrap();
+    let nested = temp_dir.path().join("root");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("foo.md"), "# Foo").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec!["root".to_string()],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[RelativeToRoot](/foo.md)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Root-relative absolute link should resolve under configured root, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_empty_roots_resolves_via_project_root() {
+    // With no configured roots, an absolute link is resolved against the project
+    // root only. A file present at `<project>/foo.md` validates `/foo.md`.
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join("foo.md"), "# Foo").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Foo](/foo.md)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Empty roots with file at project root should pass via fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_still_warns_when_truly_missing() {
+    // Regression guard: a link missing under configured roots AND missing at the
+    // project root must still warn — the fallback widens the valid set, it does
+    // not silently accept everything.
+    let temp_dir = tempdir().unwrap();
+    let nested = temp_dir.path().join("root");
+    fs::create_dir_all(&nested).unwrap();
+    // Note: no foo.md anywhere
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec!["root".to_string()],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Missing](/foo.md)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Truly missing link should still warn after project-root fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_for_image() {
+    // Image syntax must use the same project-root fallback as inline links.
+    let temp_dir = tempdir().unwrap();
+    let nested = temp_dir.path().join("root");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("photo.png"), b"fake").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec!["root".to_string()],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "![Photo](/root/photo.png)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Image with literal project-root path should resolve via fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_for_reference_definition() {
+    // Reference-style link definitions must use the same project-root fallback.
+    let temp_dir = tempdir().unwrap();
+    let nested = temp_dir.path().join("root");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("guide.md"), "# Guide").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec!["root".to_string()],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[guide][gd]\n\n[gd]: /root/guide.md\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Reference-style definition with literal project-root path should resolve via fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_directory_with_index() {
+    // A directory-style absolute link (`/dir/`) must resolve via `index.md`
+    // under the project-root fallback.
+    let temp_dir = tempdir().unwrap();
+    let dir = temp_dir.path().join("guides");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("index.md"), "# Guides").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Guides](/guides/)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Directory-style link should resolve via index.md under project-root fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_html_to_markdown_source() {
+    // A `.html` link must resolve via a co-located markdown source under the
+    // project-root fallback (supports doc sites that compile .md to .html).
+    let temp_dir = tempdir().unwrap();
+    let dir = temp_dir.path().join("posts");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("hello.md"), "# Hello").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Hello](/posts/hello.html)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        ".html link with co-located .md source should pass via project-root fallback, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_url_encoded_path() {
+    // URL-encoded characters in the link must be decoded before the project-root
+    // fallback's filesystem check.
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join("foo bar.md"), "# Foo Bar").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Foo Bar](/foo%20bar.md)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "URL-encoded path should decode before fallback resolution, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_fallback_fragment_stripped() {
+    // Fragment suffixes must be stripped before the project-root fallback's
+    // filesystem check; the link should validate against the file alone.
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join("guide.md"), "# Guide").unwrap();
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Guide](/guide.md#installation)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Fragment should be stripped before fallback resolution, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_relative_to_roots_project_root_directory_without_index_warns() {
+    // When a directory exists at the project root but lacks `index.md`, the
+    // fallback must NOT silently accept it — the link must still warn.
+    let temp_dir = tempdir().unwrap();
+    let dir = temp_dir.path().join("empty_dir");
+    fs::create_dir_all(&dir).unwrap();
+    // Note: no index.md inside
+
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::RelativeToRoots,
+        roots: vec![],
+        ..Default::default()
+    };
+    let rule = rumdl_lib::rules::MD057ExistingRelativeLinks::from_config_struct(config).with_path(temp_dir.path());
+    let content = "[Empty](/empty_dir/)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Directory without index.md should still warn under project-root fallback, got: {result:?}"
     );
 }
 

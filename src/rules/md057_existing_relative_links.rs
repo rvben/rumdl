@@ -18,6 +18,7 @@ mod md057_config;
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::mkdocs_config::resolve_docs_dir;
 use crate::utils::obsidian_config::resolve_attachment_folder;
+use crate::utils::project_root::discover_project_root_from;
 pub use md057_config::{AbsoluteLinksOption, MD057Config};
 
 // Thread-safe cache for file existence checks to avoid redundant filesystem operations
@@ -83,6 +84,13 @@ static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
 
 // Current working directory
 static CURRENT_DIR: LazyLock<PathBuf> = LazyLock::new(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+/// Project root discovered once at process start by walking up from CWD looking
+/// for `.git`, `.rumdl.toml`, `pyproject.toml`, or `.markdownlint.json`. Used as
+/// the anchor for resolving non-absolute paths in `roots` and `search-paths`,
+/// and as the implicit fallback root for absolute-link validation. Tests that
+/// pass a path via `with_path()` bypass this discovery.
+static PROJECT_ROOT: LazyLock<PathBuf> = LazyLock::new(|| discover_project_root_from(&CURRENT_DIR));
 
 /// Convert a hex digit (0-9, a-f, A-F) to its numeric value.
 /// Returns None for non-hex characters.
@@ -156,6 +164,30 @@ impl MD057ExistingRelativeLinks {
             base_path: Arc::new(Mutex::new(None)),
             config,
             flavor: crate::config::MarkdownFlavor::default(),
+        }
+    }
+
+    /// Project root used for absolute-link resolution and `search-paths` anchoring.
+    ///
+    /// Returns the explicit base path when set via `with_path()` (used by tests
+    /// to isolate filesystem state to a temp dir); otherwise returns the
+    /// process-wide discovered project root.
+    fn project_root(&self) -> PathBuf {
+        self.base_path
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
+            .unwrap_or_else(|| PROJECT_ROOT.clone())
+    }
+
+    /// Resolve a config-supplied path string (from `roots` or `search-paths`)
+    /// against the project root: absolute strings are taken verbatim, relative
+    /// strings are joined onto `project_root`.
+    fn resolve_against_project_root(path_str: &str, project_root: &Path) -> PathBuf {
+        if Path::new(path_str).is_absolute() {
+            PathBuf::from(path_str)
+        } else {
+            project_root.join(path_str)
         }
     }
 
@@ -304,6 +336,7 @@ impl MD057ExistingRelativeLinks {
         flavor: crate::config::MarkdownFlavor,
         source_file: Option<&Path>,
         base_path: &Path,
+        project_root: &Path,
     ) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
@@ -315,14 +348,11 @@ impl MD057ExistingRelativeLinks {
             paths.push(attachment_dir);
         }
 
-        // Add explicitly configured search paths
+        // Add explicitly configured search paths. Resolved relative to the
+        // discovered project root so paths are stable regardless of which
+        // subdirectory rumdl is invoked from.
         for search_path in &self.config.search_paths {
-            let resolved = if Path::new(search_path).is_absolute() {
-                PathBuf::from(search_path)
-            } else {
-                // Resolve relative to CWD (project root)
-                CURRENT_DIR.join(search_path)
-            };
+            let resolved = Self::resolve_against_project_root(search_path, project_root);
             if resolved != *base_path && !paths.contains(&resolved) {
                 paths.push(resolved);
             }
@@ -367,136 +397,129 @@ impl MD057ExistingRelativeLinks {
     ///
     /// Returns `Some(warning_message)` if the link is broken, `None` if valid.
     /// Falls back to a generic warning if no mkdocs.yml is found.
+    /// Validate an absolute link against the MkDocs `docs_dir`.
     fn validate_absolute_link_via_docs_dir(url: &str, source_path: &Path) -> Option<String> {
         let Some(docs_dir) = resolve_docs_dir(source_path) else {
-            // No mkdocs.yml found — fall back to warn behavior
             return Some(format!(
                 "Absolute link '{url}' cannot be validated locally (no mkdocs.yml found)"
             ));
         };
 
-        // Strip leading / and resolve relative to docs_dir
-        let relative_url = url.trim_start_matches('/');
+        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
 
-        // Strip query/fragment before checking existence
+        match Self::resolve_under_root(&docs_dir, &decoded, is_directory_link) {
+            Resolution::Found => None,
+            Resolution::DirectoryWithoutIndex { resolved } => Some(format!(
+                "Absolute link '{url}' resolves to directory '{}' which has no index.md",
+                resolved.display()
+            )),
+            Resolution::NotFound { resolved } => Some(format!(
+                "Absolute link '{url}' resolves to '{}' which does not exist",
+                resolved.display()
+            )),
+        }
+    }
+
+    /// Validate an absolute link by resolving it against each configured root and the project root.
+    ///
+    /// Configured `roots` are tried first (first match wins), then the project
+    /// root is tried as an implicit fallback. The fallback supports links
+    /// written as literal absolute paths from the project root (e.g.
+    /// `/content/en/foo.md`) alongside links written relative to a configured
+    /// root (e.g. `/foo.md` with `roots = ["content/en"]`). A warning is
+    /// emitted only when no root — configured or implicit — contains the target.
+    fn validate_absolute_link_via_roots(url: &str, roots: &[String], project_root: &Path) -> Option<String> {
+        let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
+
+        for root in roots {
+            let root_path = Self::resolve_against_project_root(root, project_root);
+            if matches!(
+                Self::resolve_under_root(&root_path, &decoded, is_directory_link),
+                Resolution::Found
+            ) {
+                return None;
+            }
+        }
+
+        if matches!(
+            Self::resolve_under_root(project_root, &decoded, is_directory_link),
+            Resolution::Found
+        ) {
+            return None;
+        }
+
+        let msg = if roots.is_empty() {
+            format!("Absolute link '{url}' was not found under the project root")
+        } else {
+            format!("Absolute link '{url}' was not found under any configured root or the project root")
+        };
+        Some(msg)
+    }
+
+    /// Decode an absolute-link URL into a filesystem-relative path and a
+    /// directory-link flag. Strips the leading `/`, query/fragment suffix, and
+    /// percent-encoding.
+    fn prepare_absolute_url(url: &str) -> (String, bool) {
+        let relative_url = url.trim_start_matches('/');
         let file_path = Self::strip_query_and_fragment(relative_url);
         let decoded = Self::url_decode(file_path);
-        let resolved_path = docs_dir.join(&decoded);
-
-        // For directory-style links (ending with /, bare path to a directory, or empty
-        // decoded path like "/"), check for index.md inside the directory.
-        // This must be checked BEFORE file_exists_or_markdown_extension because
-        // path.exists() returns true for directories — we need to verify index.md exists.
         let is_directory_link = url.ends_with('/') || decoded.is_empty();
-        if is_directory_link || resolved_path.is_dir() {
-            let index_path = resolved_path.join("index.md");
+        (decoded, is_directory_link)
+    }
+
+    /// Try to resolve a decoded absolute-link path under a single root directory.
+    ///
+    /// Applies four resolution strategies in order:
+    /// 1. Directory-style links: look for `<resolved>/index.md`.
+    /// 2. Direct existence (with markdown-extension fallback for extensionless links).
+    /// 3. `.html`/`.htm` links: look for a markdown source with the same stem in the same directory.
+    fn resolve_under_root(root_path: &Path, decoded: &str, is_directory_link: bool) -> Resolution {
+        let resolved = root_path.join(decoded);
+
+        // Directory-style links resolve via `index.md` inside the directory.
+        // Must be checked before `file_exists_or_markdown_extension` because
+        // `path.exists()` returns true for directories.
+        let is_dir = resolved.is_dir();
+        if is_directory_link || is_dir {
+            let index_path = resolved.join("index.md");
             if file_exists_with_cache(&index_path) {
-                return None; // Valid directory link with index.md
+                return Resolution::Found;
             }
-            // Directory exists but no index.md — fall through to error
-            if resolved_path.is_dir() {
-                return Some(format!(
-                    "Absolute link '{url}' resolves to directory '{}' which has no index.md",
-                    resolved_path.display()
-                ));
+            if is_dir {
+                return Resolution::DirectoryWithoutIndex { resolved };
             }
         }
 
-        // Check existence (with markdown extension fallback for extensionless links)
-        if file_exists_or_markdown_extension(&resolved_path) {
-            return None; // Valid link
+        if file_exists_or_markdown_extension(&resolved) {
+            return Resolution::Found;
         }
 
-        // For .html/.htm links, check for corresponding markdown source
-        if let Some(ext) = resolved_path.extension().and_then(|e| e.to_str())
+        // For .html/.htm links, accept a matching markdown source in the same
+        // directory — supports doc sites that compile .md to .html.
+        if let Some(ext) = resolved.extension().and_then(|e| e.to_str())
             && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-            && let (Some(stem), Some(parent)) = (
-                resolved_path.file_stem().and_then(|s| s.to_str()),
-                resolved_path.parent(),
-            )
+            && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|s| s.to_str()), resolved.parent())
         {
             let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
                 let source_path = parent.join(format!("{stem}{md_ext}"));
                 file_exists_with_cache(&source_path)
             });
             if has_md_source {
-                return None; // Markdown source exists
+                return Resolution::Found;
             }
         }
 
-        Some(format!(
-            "Absolute link '{url}' resolves to '{}' which does not exist",
-            resolved_path.display()
-        ))
+        Resolution::NotFound { resolved }
     }
+}
 
-    /// Validate an absolute link by resolving it against each configured root directory.
-    ///
-    /// Applies the same checks as `validate_absolute_link_via_docs_dir` (directory
-    /// `index.md`, markdown-extension fallback, `.html`/`.htm` to markdown source) but
-    /// against every configured root. The first root under which the link resolves
-    /// successfully wins. When `roots` is empty the link cannot be validated and a
-    /// generic warning is returned, consistent with the `relative_to_docs` fallback
-    /// when no `mkdocs.yml` is present.
-    fn validate_absolute_link_via_roots(url: &str, roots: &[String]) -> Option<String> {
-        if roots.is_empty() {
-            return Some(format!(
-                "Absolute link '{url}' cannot be validated locally (no roots configured)"
-            ));
-        }
-
-        let relative_url = url.trim_start_matches('/');
-        let file_path = Self::strip_query_and_fragment(relative_url);
-        let decoded = Self::url_decode(file_path);
-        let is_directory_link = url.ends_with('/') || decoded.is_empty();
-
-        for root in roots {
-            let root_path = if Path::new(root).is_absolute() {
-                PathBuf::from(root)
-            } else {
-                CURRENT_DIR.join(root)
-            };
-            let resolved = root_path.join(&decoded);
-
-            // Directory-style links resolve via `index.md` inside the directory.
-            // Must be checked before `file_exists_or_markdown_extension` because
-            // `path.exists()` returns true for directories.
-            let is_dir = resolved.is_dir();
-            if is_directory_link || is_dir {
-                let index_path = resolved.join("index.md");
-                if file_exists_with_cache(&index_path) {
-                    return None;
-                }
-                // Directory exists but has no index.md — skip the plain existence
-                // check for this root (it would incorrectly succeed on the directory
-                // itself) and try the next root.
-                if is_dir {
-                    continue;
-                }
-            }
-
-            if file_exists_or_markdown_extension(&resolved) {
-                return None;
-            }
-
-            // For .html/.htm links, accept a matching markdown source in the same
-            // directory — supports doc sites that compile .md to .html.
-            if let Some(ext) = resolved.extension().and_then(|e| e.to_str())
-                && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-                && let (Some(stem), Some(parent)) = (resolved.file_stem().and_then(|s| s.to_str()), resolved.parent())
-            {
-                let has_md_source = MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
-                    let source_path = parent.join(format!("{stem}{md_ext}"));
-                    file_exists_with_cache(&source_path)
-                });
-                if has_md_source {
-                    return None;
-                }
-            }
-        }
-
-        Some(format!("Absolute link '{url}' was not found under any configured root"))
-    }
+/// Outcome of trying to resolve an absolute link under a single root directory.
+/// Carries the resolved path on the failure variants so callers can build
+/// specific error messages without recomputing it.
+enum Resolution {
+    Found,
+    DirectoryWithoutIndex { resolved: PathBuf },
+    NotFound { resolved: PathBuf },
 }
 
 impl Rule for MD057ExistingRelativeLinks {
@@ -535,12 +558,20 @@ impl Rule for MD057ExistingRelativeLinks {
 
         let mut warnings = Vec::new();
 
-        // Determine base path for resolving relative links
+        // Read the explicit base path (set via `with_path()` in tests) once; it
+        // doubles as both the per-file base path and the project root override
+        // for absolute-link resolution.
+        let explicit_base = self.base_path.lock().ok().and_then(|g| g.clone());
+
+        // Project root used for absolute-link resolution against configured
+        // `roots` and as the implicit fallback root. The explicit base wins
+        // when set; otherwise the discovered project root is used.
+        let project_root: PathBuf = explicit_base.clone().unwrap_or_else(|| PROJECT_ROOT.clone());
+
+        // Determine base path for resolving relative links.
         // ALWAYS compute from ctx.source_file for each file - do not reuse cached base_path
-        // This ensures each file resolves links relative to its own directory
+        // This ensures each file resolves links relative to its own directory.
         let base_path: Option<PathBuf> = {
-            // First check if base_path was explicitly set via with_path() (for tests)
-            let explicit_base = self.base_path.lock().ok().and_then(|g| g.clone());
             if explicit_base.is_some() {
                 explicit_base
             } else if let Some(ref source_file) = ctx.source_file {
@@ -564,7 +595,8 @@ impl Rule for MD057ExistingRelativeLinks {
         };
 
         // Compute additional search paths for fallback link resolution
-        let extra_search_paths = self.compute_search_paths(ctx.flavor, ctx.source_file.as_deref(), &base_path);
+        let extra_search_paths =
+            self.compute_search_paths(ctx.flavor, ctx.source_file.as_deref(), &base_path, &project_root);
 
         // Use LintContext links instead of expensive regex parsing
         if !ctx.links.is_empty() {
@@ -686,7 +718,9 @@ impl Rule for MD057ExistingRelativeLinks {
                                     }
                                 }
                                 AbsoluteLinksOption::RelativeToRoots => {
-                                    if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
+                                    if let Some(msg) =
+                                        Self::validate_absolute_link_via_roots(url, &self.config.roots, &project_root)
+                                    {
                                         let url_start = url_group.start();
                                         let url_end = url_group.end();
                                         warnings.push(LintWarning {
@@ -844,7 +878,9 @@ impl Rule for MD057ExistingRelativeLinks {
                         }
                     }
                     AbsoluteLinksOption::RelativeToRoots => {
-                        if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
+                        if let Some(msg) =
+                            Self::validate_absolute_link_via_roots(url, &self.config.roots, &project_root)
+                        {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
                                 line: image.line,
@@ -995,7 +1031,9 @@ impl Rule for MD057ExistingRelativeLinks {
                         }
                     }
                     AbsoluteLinksOption::RelativeToRoots => {
-                        if let Some(msg) = Self::validate_absolute_link_via_roots(url, &self.config.roots) {
+                        if let Some(msg) =
+                            Self::validate_absolute_link_via_roots(url, &self.config.roots, &project_root)
+                        {
                             let line_idx = ref_def.line - 1;
                             let column = content.lines().nth(line_idx).map_or(1, |line_content| {
                                 line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
@@ -1191,7 +1229,8 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Compute additional search paths for fallback link resolution
         let base_path = file_dir.map_or_else(|| CURRENT_DIR.clone(), std::path::Path::to_path_buf);
-        let extra_search_paths = self.compute_search_paths(self.flavor, Some(file_path), &base_path);
+        let project_root = self.project_root();
+        let extra_search_paths = self.compute_search_paths(self.flavor, Some(file_path), &base_path, &project_root);
 
         for cross_link in &file_index.cross_file_links {
             // URL-decode the path for filesystem operations
