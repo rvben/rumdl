@@ -276,11 +276,20 @@ impl RumdlLanguageServer {
         }
     }
 
-    /// Load or reload rumdl configuration from files
+    /// Load or reload rumdl configuration from files.
+    ///
+    /// Resolves the explicit config path with this precedence:
+    /// 1. `cli_config_path` -- supplied via `rumdl server --config`. Highest priority
+    ///    so users distributing a canonical ruleset (e.g. a Claude Code plugin)
+    ///    cannot have it overridden by editor settings.
+    /// 2. `self.config.config_path` -- supplied by the client via initialization
+    ///    options or `workspace/didChangeConfiguration`.
+    /// 3. None -- fall through to auto-discovery in `load_config_for_lsp`.
     pub(super) async fn load_configuration(&self, notify_client: bool) {
-        let config_guard = self.config.read().await;
-        let explicit_config_path = config_guard.config_path.clone();
-        drop(config_guard);
+        let explicit_config_path = match self.cli_config_path.as_deref() {
+            Some(path) => Some(path.to_string()),
+            None => self.config.read().await.config_path.clone(),
+        };
 
         // Use the same discovery logic as CLI but with LSP-specific error handling
         match Self::load_config_for_lsp(explicit_config_path.as_deref()) {
@@ -330,7 +339,22 @@ impl RumdlLanguageServer {
     /// and walking up the directory tree until a workspace root is hit or a config is found.
     ///
     /// Results are cached to avoid repeated filesystem access.
+    ///
+    /// When an explicit config path is set -- either via `rumdl server --config`
+    /// (`cli_config_path`) or by the client (`self.config.config_path`) -- per-file
+    /// discovery is skipped entirely and the already-loaded `rumdl_config` is returned.
+    /// This mirrors the CLI's "explicit config is standalone" rule (see
+    /// `src/config/loading.rs::load_with_discovery_impl`) and ensures that a distributed
+    /// ruleset is not silently overridden by `.rumdl.toml` files in the user's project.
     pub(crate) async fn resolve_config_for_file(&self, file_path: &std::path::Path) -> Config {
+        if self.cli_config_path.is_some() || self.config.read().await.config_path.is_some() {
+            log::debug!(
+                "Explicit config path set; bypassing per-file discovery for {}",
+                file_path.display()
+            );
+            return self.rumdl_config.read().await.clone();
+        }
+
         // Get the directory to start searching from
         let search_dir = file_path.parent().unwrap_or(file_path).to_path_buf();
 

@@ -89,15 +89,20 @@ pub struct RumdlLanguageServer {
     /// Whether the client supports pull diagnostics (textDocument/diagnostic)
     /// When true, we skip pushing diagnostics to avoid duplicates
     pub(crate) client_supports_pull_diagnostics: Arc<RwLock<bool>>,
+    /// Config path supplied via `rumdl server --config <path>`.
+    ///
+    /// Held in an immutable field (not in `self.config`) so that client-driven
+    /// updates -- `initialize` initialization options or `workspace/didChangeConfiguration`
+    /// notifications -- cannot drop it. Treated as the highest-priority config source:
+    /// it outranks both client-supplied `configPath` and per-file discovery, mirroring
+    /// the CLI semantics where an explicit `--config` is standalone.
+    pub(crate) cli_config_path: Option<String>,
 }
 
 impl RumdlLanguageServer {
     pub fn new(client: Client, cli_config_path: Option<&str>) -> Self {
-        // Initialize with CLI config path if provided (for `rumdl server --config` convenience)
-        let mut initial_config = RumdlLspConfig::default();
-        if let Some(path) = cli_config_path {
-            initial_config.config_path = Some(path.to_string());
-        }
+        let initial_config = RumdlLspConfig::default();
+        let cli_config_path = cli_config_path.map(str::to_string);
 
         // Create shared state for workspace indexing
         let workspace_index = Arc::new(RwLock::new(WorkspaceIndex::new()));
@@ -130,6 +135,7 @@ impl RumdlLanguageServer {
             index_state,
             update_tx,
             client_supports_pull_diagnostics: Arc::new(RwLock::new(false)),
+            cli_config_path,
         }
     }
 
@@ -690,6 +696,17 @@ impl LanguageServer for RumdlLanguageServer {
 
         // Clear config cache to pick up new settings
         self.config_cache.write().await.clear();
+
+        // Reload the global rumdl config so a runtime change to `configPath`
+        // (handled by the parser branches above) takes effect on the next
+        // resolve. Without this, `resolve_config_for_file` would keep returning
+        // the previously-loaded `rumdl_config`, silently ignoring the new path.
+        // Skip the client notification: the diagnostics refresh below already
+        // surfaces the result, and notifying here can stall when a test or
+        // misbehaving client isn't draining the LSP message channel.
+        if config_applied {
+            self.load_configuration(false).await;
+        }
 
         // Collect all open documents first (to avoid holding lock during async operations)
         let doc_list: Vec<_> = {

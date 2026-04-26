@@ -6908,3 +6908,274 @@ style = "aligned"
         "With no workspace root, `[MD060]` table must still load"
     );
 }
+
+/// Helper: create a test server with a CLI-supplied config path.
+fn create_test_server_with_cli_config(cli_config_path: &str) -> RumdlLanguageServer {
+    let path = cli_config_path.to_string();
+    let (service, _socket) = LspService::new(move |client| RumdlLanguageServer::new(client, Some(&path)));
+    service.inner().clone()
+}
+
+/// Issue #586: `rumdl server --config` must be authoritative for every file,
+/// overriding any locally-discoverable config that lives alongside the file.
+///
+/// The CLI's `check` command treats an explicit config path as standalone (see
+/// `src/config/loading.rs` -- "If explicit config path provided -> use ONLY that").
+/// The LSP must mirror that contract; otherwise distributing a canonical ruleset
+/// via `rumdl server --config <plugin-config>` silently fails whenever the user's
+/// project happens to contain its own config file.
+#[tokio::test]
+async fn test_cli_config_overrides_local_project_config() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+
+    // The user's project has its own .rumdl.toml -- this MUST be ignored
+    // when the server was started with --config pointing elsewhere.
+    let project = temp_path.join("user_project");
+    fs::create_dir(&project).unwrap();
+    fs::write(
+        project.join(".rumdl.toml"),
+        r#"
+[global]
+
+[MD013]
+line_length = 50
+"#,
+    )
+    .unwrap();
+
+    // The CLI-supplied config (e.g. shipped with a Claude Code plugin).
+    let cli_config = temp_path.join("plugin").join(".rumdl.toml");
+    fs::create_dir_all(cli_config.parent().unwrap()).unwrap();
+    fs::write(
+        &cli_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 200
+"#,
+    )
+    .unwrap();
+
+    let server = create_test_server_with_cli_config(cli_config.to_str().unwrap());
+    server.load_configuration(false).await;
+
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let test_file = project.join("doc.md");
+    fs::write(&test_file, "# Test\n").unwrap();
+
+    let resolved = server.resolve_config_for_file(&test_file).await;
+    let line_length = crate::config::get_rule_config_value::<usize>(&resolved, "MD013", "line_length");
+
+    assert_eq!(
+        line_length,
+        Some(200),
+        "Issue #586: explicit --config must win over a locally-discoverable .rumdl.toml. \
+         Got line_length={line_length:?} (expected 200 from CLI config, not 50 from project)."
+    );
+}
+
+/// Issue #586 (related): the CLI-supplied config path must survive a client
+/// `initialize` that wholesale-replaces `self.config`. Many editors send
+/// initialization options without a `configPath`, and the existing implementation
+/// dropped the CLI value when that happened.
+#[tokio::test]
+async fn test_cli_config_survives_init_options_without_config_path() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let cli_config = temp_dir.path().join("cli.toml");
+    fs::write(
+        &cli_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 175
+"#,
+    )
+    .unwrap();
+
+    let server = create_test_server_with_cli_config(cli_config.to_str().unwrap());
+
+    // Simulate `initialize` receiving init options that do NOT specify a
+    // configPath -- the existing implementation overwrites self.config
+    // wholesale (see src/lsp/server.rs::initialize).
+    {
+        let mut config = server.config.write().await;
+        *config = RumdlLspConfig {
+            config_path: None,
+            enable_auto_fix: true,
+            ..RumdlLspConfig::default()
+        };
+    }
+
+    server.load_configuration(false).await;
+
+    let project = temp_dir.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let file = project.join("doc.md");
+    fs::write(&file, "# Test\n").unwrap();
+
+    let resolved = server.resolve_config_for_file(&file).await;
+    let line_length = crate::config::get_rule_config_value::<usize>(&resolved, "MD013", "line_length");
+
+    assert_eq!(
+        line_length,
+        Some(175),
+        "Issue #586: client init options without configPath must not erase the CLI --config. \
+         Got line_length={line_length:?} (expected 175 from CLI config)."
+    );
+}
+
+/// Issue #586 (regression guard surfaced by code review): when the client changes
+/// `configPath` at runtime via `workspace/didChangeConfiguration`, the in-memory
+/// `rumdl_config` must be reloaded from the new file. Without this, the explicit-config
+/// fast path in `resolve_config_for_file` keeps returning the previously-loaded config
+/// and the client's setting change is silently ignored.
+#[tokio::test]
+async fn test_runtime_config_path_change_reloads_config() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+
+    let initial_config = temp_dir.path().join("initial.toml");
+    fs::write(
+        &initial_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 60
+"#,
+    )
+    .unwrap();
+
+    let updated_config = temp_dir.path().join("updated.toml");
+    fs::write(
+        &updated_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 240
+"#,
+    )
+    .unwrap();
+
+    let server = create_test_server();
+
+    // Simulate client `initialize` setting an initial configPath.
+    {
+        let mut config = server.config.write().await;
+        *config = RumdlLspConfig {
+            config_path: Some(initial_config.to_string_lossy().to_string()),
+            ..RumdlLspConfig::default()
+        };
+    }
+    server.load_configuration(false).await;
+
+    // Sanity: the initial config is in effect.
+    let project = temp_dir.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let file = project.join("doc.md");
+    fs::write(&file, "# Test\n").unwrap();
+
+    let resolved = server.resolve_config_for_file(&file).await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&resolved, "MD013", "line_length"),
+        Some(60),
+        "Initial configPath should be in effect."
+    );
+
+    // Simulate the client switching configPath via did_change_configuration.
+    let new_settings = serde_json::json!({
+        "rumdl": {
+            "configPath": updated_config.to_string_lossy().to_string()
+        }
+    });
+    server
+        .did_change_configuration(tower_lsp::lsp_types::DidChangeConfigurationParams { settings: new_settings })
+        .await;
+
+    let resolved = server.resolve_config_for_file(&file).await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&resolved, "MD013", "line_length"),
+        Some(240),
+        "Issue #586 (P1): runtime configPath change must reload the config; fast-path must not \
+         return the stale rumdl_config from the previous configPath."
+    );
+}
+
+/// Issue #586 (precedence): when both `rumdl server --config` and a client-supplied
+/// `configPath` are present, the CLI flag wins. The user's stated rationale -- shipping
+/// a canonical ruleset alongside a plugin -- requires this; otherwise the editor
+/// can silently override the distributed config.
+#[tokio::test]
+async fn test_cli_config_overrides_client_init_config_path() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let cli_config = temp_dir.path().join("cli.toml");
+    fs::write(
+        &cli_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 220
+"#,
+    )
+    .unwrap();
+
+    let client_config = temp_dir.path().join("client.toml");
+    fs::write(
+        &client_config,
+        r#"
+[global]
+
+[MD013]
+line_length = 40
+"#,
+    )
+    .unwrap();
+
+    let server = create_test_server_with_cli_config(cli_config.to_str().unwrap());
+
+    // Simulate the client passing its own configPath via init options.
+    {
+        let mut config = server.config.write().await;
+        *config = RumdlLspConfig {
+            config_path: Some(client_config.to_string_lossy().to_string()),
+            ..RumdlLspConfig::default()
+        };
+    }
+
+    server.load_configuration(false).await;
+
+    let project = temp_dir.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let file = project.join("doc.md");
+    fs::write(&file, "# Test\n").unwrap();
+
+    let resolved = server.resolve_config_for_file(&file).await;
+    let line_length = crate::config::get_rule_config_value::<usize>(&resolved, "MD013", "line_length");
+
+    assert_eq!(
+        line_length,
+        Some(220),
+        "Issue #586: --config must outrank client init configPath. \
+         Got line_length={line_length:?} (expected 220 from CLI config, not 40 from client)."
+    );
+}
