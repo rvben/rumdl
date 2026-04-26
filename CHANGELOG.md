@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.83](https://github.com/rvben/rumdl/compare/v0.1.82...v0.1.83) - 2026-04-26
+
+### Fixed
+
+- **lsp**: respect --config flag in server mode ([40f2a9d](https://github.com/rvben/rumdl/commit/40f2a9d1cd046a44282fb100e8f42052fa1e0ac0))
+
 ## [0.1.82](https://github.com/rvben/rumdl/compare/v0.1.81...v0.1.82) - 2026-04-25
 
 ### Added
