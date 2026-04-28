@@ -615,6 +615,17 @@ mod tests {
     }
 
     #[test]
+    fn test_builtin_yamlfmt_lint_command_validates_stdin() {
+        let registry = ToolRegistry::default();
+
+        let tool = registry.get("yamlfmt").expect("Should find yamlfmt");
+        let mut argv = tool.command.clone();
+        argv.extend(tool.lint_args.clone());
+
+        assert_eq!(argv, vec!["yamlfmt", "-lint", "-"]);
+    }
+
+    #[test]
     fn test_get_user_tool_overrides_builtin() {
         let mut user_tools = HashMap::new();
         user_tools.insert(
