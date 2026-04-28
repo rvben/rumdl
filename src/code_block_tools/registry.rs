@@ -296,11 +296,11 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     m.insert(
         "yamlfmt",
         ToolDefinition {
-            command: vec!["yamlfmt".to_string(), "-".to_string()],
+            command: vec!["yamlfmt".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["-dry".to_string()],
-            format_args: vec![],
+            lint_args: vec!["-lint".to_string(), "-".to_string()],
+            format_args: vec!["-".to_string()],
         },
     );
 
