@@ -6,6 +6,8 @@
 use crate::inline_config::InlineConfig;
 use crate::rule::{Fix, LintWarning};
 use crate::utils::ensure_consistent_line_endings;
+use std::borrow::Cow;
+use std::ops::Range;
 
 /// Filter warnings by inline config, removing those on disabled lines.
 ///
@@ -58,53 +60,81 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         return Ok(content.to_string());
     }
 
-    // Deduplicate fixes that operate on the same range with the same replacement
-    // This prevents double-application when multiple warnings target the same issue
-    fixes.sort_by(|(_, fix_a), (_, fix_b)| {
+    // Sort ascending so the dedup/coalesce pass sees fixes that share a range
+    // as adjacent neighbors. Tie-break on warning index so declaration order
+    // is preserved when we later concatenate same-offset zero-width inserts.
+    fixes.sort_by(|(idx_a, fix_a), (idx_b, fix_b)| {
         let range_cmp = fix_a.range.start.cmp(&fix_b.range.start);
         if range_cmp != std::cmp::Ordering::Equal {
             return range_cmp;
         }
-        fix_a.range.end.cmp(&fix_b.range.end)
-    });
-
-    let mut deduplicated = Vec::new();
-    let mut i = 0;
-    while i < fixes.len() {
-        let (idx, current_fix) = fixes[i];
-        deduplicated.push((idx, current_fix));
-
-        // Skip any subsequent fixes that have the same range and replacement
-        while i + 1 < fixes.len() {
-            let (_, next_fix) = fixes[i + 1];
-            if current_fix.range == next_fix.range && current_fix.replacement == next_fix.replacement {
-                i += 1; // Skip the duplicate
-            } else {
-                break;
-            }
-        }
-        i += 1;
-    }
-
-    let mut fixes = deduplicated;
-
-    // Sort fixes by range in reverse order (end to start) to avoid offset issues
-    // Use original index as secondary sort key to ensure stable sorting
-    fixes.sort_by(|(idx_a, fix_a), (idx_b, fix_b)| {
-        // Primary: sort by range start in reverse order (largest first)
-        let range_cmp = fix_b.range.start.cmp(&fix_a.range.start);
-        if range_cmp != std::cmp::Ordering::Equal {
-            return range_cmp;
-        }
-
-        // Secondary: sort by range end in reverse order
-        let end_cmp = fix_b.range.end.cmp(&fix_a.range.end);
+        let end_cmp = fix_a.range.end.cmp(&fix_b.range.end);
         if end_cmp != std::cmp::Ordering::Equal {
             return end_cmp;
         }
-
-        // Tertiary: maintain original order for identical ranges (stable sort)
         idx_a.cmp(idx_b)
+    });
+
+    // Dedup identical (range, replacement) pairs AND coalesce same-offset
+    // zero-width inserts into a single logical edit by concatenating their
+    // replacements in declaration order.
+    //
+    // The coalesce step is required because `replace_range(N..N, X)` followed
+    // by `replace_range(N..N, Y)` on the *same* document position produces
+    // `Y X` — `X` is already at offset N when `Y` inserts, so `Y` lands
+    // before it. With per-warning insertion (e.g., several MD054 ref-emit
+    // fixes appending different `[label]: url` definitions at EOF), that
+    // would reverse declaration order. Concatenating up front gives one
+    // `replace_range(N..N, X + Y)` that lands `X` then `Y` in source order.
+    let mut applicable: Vec<ApplicableEdit<'_>> = Vec::with_capacity(fixes.len());
+    let mut i = 0;
+    while i < fixes.len() {
+        let (_, current) = fixes[i];
+        let mut combined: Option<String> = None;
+        let is_zero_width = current.range.start == current.range.end;
+        let mut j = i + 1;
+        while j < fixes.len() {
+            let (_, next) = fixes[j];
+            if next.range != current.range {
+                break;
+            }
+            if next.replacement == current.replacement {
+                // Pure duplicate — drop and continue scanning siblings.
+                j += 1;
+                continue;
+            }
+            if !is_zero_width {
+                // Two different replacements competing for the same non-zero
+                // range is a rule-authoring bug at the call site, not something
+                // we can sensibly merge. Stop here so the apply loop sees only
+                // the first replacement (matching prior behavior).
+                break;
+            }
+            // Zero-width inserts at the same offset: concatenate.
+            let buf = combined.get_or_insert_with(|| current.replacement.clone());
+            buf.push_str(&next.replacement);
+            j += 1;
+        }
+
+        applicable.push(ApplicableEdit {
+            range: current.range.clone(),
+            replacement: match combined {
+                Some(owned) => Cow::Owned(owned),
+                None => Cow::Borrowed(current.replacement.as_str()),
+            },
+        });
+        i = j;
+    }
+
+    // Reverse-sort by range start so earlier-offset edits stay valid as later
+    // ones mutate the buffer. Coalescing collapsed the previous tertiary
+    // tiebreak case, so a simple two-key sort is enough.
+    applicable.sort_by(|a, b| {
+        let cmp = b.range.start.cmp(&a.range.start);
+        if cmp != std::cmp::Ordering::Equal {
+            return cmp;
+        }
+        b.range.end.cmp(&a.range.end)
     });
 
     let mut result = content.to_string();
@@ -115,36 +145,42 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
     // overlap with an already-applied fix and corrupt the result.
     let mut min_applied_start = usize::MAX;
 
-    for (_, fix) in fixes {
-        // Validate range bounds
-        if fix.range.end > result.len() {
+    for edit in applicable {
+        if edit.range.end > result.len() {
             return Err(format!(
                 "Fix range end {} exceeds content length {}",
-                fix.range.end,
+                edit.range.end,
                 result.len()
             ));
         }
 
-        if fix.range.start > fix.range.end {
+        if edit.range.start > edit.range.end {
             return Err(format!(
                 "Invalid fix range: start {} > end {}",
-                fix.range.start, fix.range.end
+                edit.range.start, edit.range.end
             ));
         }
 
         // Skip fixes that overlap with an already-applied fix to prevent
         // offset corruption (e.g., nested link/image constructs in MD039).
-        if fix.range.end > min_applied_start {
+        if edit.range.end > min_applied_start {
             continue;
         }
 
-        // Apply the fix by replacing the range with the replacement text
-        result.replace_range(fix.range.clone(), &fix.replacement);
-        min_applied_start = fix.range.start;
+        result.replace_range(edit.range.clone(), &edit.replacement);
+        min_applied_start = edit.range.start;
     }
 
     // Ensure line endings are consistent with the original document
     Ok(ensure_consistent_line_endings(content, &result))
+}
+
+/// One physical edit ready to apply. Either passes through a single `Fix`'s
+/// replacement borrow or holds the concatenation of several same-offset
+/// zero-width inserts.
+struct ApplicableEdit<'a> {
+    range: Range<usize>,
+    replacement: Cow<'a, str>,
 }
 
 /// Convert a single warning fix to a text edit-style representation
@@ -474,6 +510,81 @@ mod tests {
         assert!(
             !result.contains("[docs](https://example.com)"),
             "the inline form must be gone after the atomic fix: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_apply_two_ref_emit_fixes_preserve_source_order() {
+        // Regression for the multi-warning EOF-insert case in MD054.
+        //
+        // Two distinct inline links each rewrite to a reference-style link
+        // and append a fresh `[label]: url` definition at EOF. Each Fix carries
+        // its primary in-place rewrite plus a zero-width additional_edit at
+        // `content.len()..content.len()` with a *different* replacement.
+        //
+        // The naive reverse-sort apply pipeline would `replace_range(N..N, B)`
+        // after `replace_range(N..N, A)`, which lands B *before* A — reversing
+        // declaration order and producing `<orig> + B + A` rather than
+        // `<orig> + A + B`. Coalescing same-offset zero-width inserts into a
+        // single concatenated replacement preserves source order.
+        let content = "See [a](https://a.com) and [b](https://b.com).\n";
+        let span_a = content.find("[a](https://a.com)").unwrap()
+            ..content.find("](https://a.com)").unwrap() + "](https://a.com)".len();
+        let span_b = content.find("[b](https://b.com)").unwrap()
+            ..content.find("](https://b.com)").unwrap() + "](https://b.com)".len();
+        let warnings = vec![
+            LintWarning {
+                message: "Inconsistent link style".to_string(),
+                line: 1,
+                column: 5,
+                end_line: 1,
+                end_column: 0,
+                severity: Severity::Warning,
+                fix: Some(Fix::with_additional_edits(
+                    span_a,
+                    "[a]".to_string(),
+                    vec![Fix::new(
+                        content.len()..content.len(),
+                        "[a]: https://a.com\n".to_string(),
+                    )],
+                )),
+                rule_name: Some("MD054".to_string()),
+            },
+            LintWarning {
+                message: "Inconsistent link style".to_string(),
+                line: 1,
+                column: 28,
+                end_line: 1,
+                end_column: 0,
+                severity: Severity::Warning,
+                fix: Some(Fix::with_additional_edits(
+                    span_b,
+                    "[b]".to_string(),
+                    vec![Fix::new(
+                        content.len()..content.len(),
+                        "[b]: https://b.com\n".to_string(),
+                    )],
+                )),
+                rule_name: Some("MD054".to_string()),
+            },
+        ];
+
+        let result = apply_warning_fixes(content, &warnings).unwrap();
+
+        // Both primary rewrites must land.
+        assert!(
+            result.contains("See [a] and [b]."),
+            "primary rewrites missing: {result:?}"
+        );
+        assert!(!result.contains("[a](https://a.com)"));
+        assert!(!result.contains("[b](https://b.com)"));
+
+        // Both ref-defs must land in source order — `[a]` before `[b]`.
+        let pos_a = result.find("[a]: https://a.com").expect("ref-def for [a] missing");
+        let pos_b = result.find("[b]: https://b.com").expect("ref-def for [b] missing");
+        assert!(
+            pos_a < pos_b,
+            "ref-defs must appear in source order ([a] before [b]); got result:\n{result}"
         );
     }
 

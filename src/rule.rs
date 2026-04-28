@@ -99,12 +99,6 @@ impl Fix {
             additional_edits,
         }
     }
-
-    /// True iff this fix carries one or more secondary edits beyond the
-    /// primary `range`/`replacement` pair.
-    pub fn has_additional_edits(&self) -> bool {
-        !self.additional_edits.is_empty()
-    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, schemars::JsonSchema)]
