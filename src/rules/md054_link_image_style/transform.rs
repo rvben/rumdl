@@ -924,9 +924,9 @@ pub(super) fn render_ref_def_line(content: &str, def: &RefDefInsert) -> Option<S
 /// the line-ending separator(s) needed to detach the new ref-def from any
 /// trailing text on the previous line. The whole-document `apply()` path
 /// trims and re-adds trailing newlines deterministically; the per-warning
-/// path can't rearrange the document's tail, so we produce a valid (possibly
-/// slightly over-padded) form by leading with two line endings whenever the
-/// document doesn't already terminate cleanly with a blank line.
+/// path can't rearrange the document's tail, so we count existing trailing
+/// EOL sequences and pad up to exactly two so the ref-def is preceded by a
+/// blank line, matching CommonMark §4.7's block-context requirement.
 pub(super) fn render_ref_def_append(content: &str, def: &RefDefInsert) -> Option<String> {
     let line = render_ref_def_line(content, def)?;
     let eol = crate::utils::line_ending::detect_line_ending(content);
@@ -934,27 +934,49 @@ pub(super) fn render_ref_def_append(content: &str, def: &RefDefInsert) -> Option
     if content.is_empty() {
         return Some(line);
     }
-    // Strip a single trailing EOL from the prefix detection so we know how
-    // many we still need to add. CommonMark requires a blank line before a
-    // ref-def block when other content precedes it, so target two trailing
-    // line-end sequences total.
-    let trimmed = content.trim_end_matches(['\n', '\r']);
-    let trailing_eols = content.len() - trimmed.len();
-    // Each `\n` or `\r\n` (or `\r`) counts as one EOL; on CRLF docs a single
-    // `\r\n` is still one EOL. Approximate by asking the detector — if the
-    // remainder after `trimmed` is non-empty, treat as one EOL present.
-    let already_one = trailing_eols > 0;
-    let already_two = trailing_eols >= 2 * eol.len();
+    let trailing = count_trailing_eol_sequences(content);
     let mut prefix = String::new();
-    if already_two {
-        // Document already ends with a blank line; nothing extra needed.
-    } else if already_one {
-        prefix.push_str(eol);
-    } else {
-        prefix.push_str(eol);
-        prefix.push_str(eol);
+    match trailing {
+        0 => {
+            prefix.push_str(eol);
+            prefix.push_str(eol);
+        }
+        1 => prefix.push_str(eol),
+        _ => {} // already 2+ EOL sequences → blank line present, no padding needed
     }
     Some(format!("{prefix}{line}"))
+}
+
+/// Count the number of trailing line-ending sequences in `s`, where each of
+/// `\r\n`, `\n`, and `\r` counts as exactly one sequence. Mixed-style tails
+/// (e.g. `\r\n\n`) are counted exactly — `\r\n\n` is two sequences, not 1.5.
+///
+/// Used by `render_ref_def_append` to decide how many EOLs to prepend so the
+/// inserted ref-def lands after exactly one blank line, regardless of the
+/// document's line-ending style or any inconsistencies in its tail.
+fn count_trailing_eol_sequences(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut i = bytes.len();
+    while i > 0 {
+        match bytes[i - 1] {
+            b'\n' => {
+                count += 1;
+                i -= 1;
+                // A preceding `\r` belongs to this `\n` as a single CRLF
+                // sequence — consume it as part of the same EOL.
+                if i > 0 && bytes[i - 1] == b'\r' {
+                    i -= 1;
+                }
+            }
+            b'\r' => {
+                count += 1;
+                i -= 1;
+            }
+            _ => break,
+        }
+    }
+    count
 }
 
 /// Apply a fix plan to the document and return the new content.
@@ -1043,6 +1065,62 @@ mod tests {
     #[test]
     fn extract_full_ref_with_brackets_in_text() {
         assert_eq!(extract_full_ref("[`a[0]`][ref]"), Some("ref".into()));
+    }
+
+    #[test]
+    fn count_trailing_eol_sequences_handles_all_styles() {
+        assert_eq!(count_trailing_eol_sequences(""), 0);
+        assert_eq!(count_trailing_eol_sequences("abc"), 0);
+
+        // LF
+        assert_eq!(count_trailing_eol_sequences("abc\n"), 1);
+        assert_eq!(count_trailing_eol_sequences("abc\n\n"), 2);
+        assert_eq!(count_trailing_eol_sequences("abc\n\n\n"), 3);
+
+        // CRLF — each `\r\n` is one sequence.
+        assert_eq!(count_trailing_eol_sequences("abc\r\n"), 1);
+        assert_eq!(count_trailing_eol_sequences("abc\r\n\r\n"), 2);
+
+        // CR alone
+        assert_eq!(count_trailing_eol_sequences("abc\r"), 1);
+        assert_eq!(count_trailing_eol_sequences("abc\r\r"), 2);
+
+        // Mixed tails — `\r\n\n` is exactly two sequences (CRLF + LF), not
+        // 1.5 like the previous byte-based heuristic produced.
+        assert_eq!(count_trailing_eol_sequences("abc\r\n\n"), 2);
+        assert_eq!(count_trailing_eol_sequences("abc\n\r\n"), 2);
+    }
+
+    #[test]
+    fn render_ref_def_append_pads_exactly_one_blank_line() {
+        let def = RefDefInsert {
+            label: "x".to_string(),
+            url: "https://example.com".to_string(),
+            title: None,
+        };
+
+        // No trailing EOL → prepend two so we end up with `\n\n[x]: …\n`.
+        let appended = render_ref_def_append("body", &def).unwrap();
+        assert_eq!(appended, "\n\n[x]: https://example.com\n");
+
+        // Exactly one trailing EOL → prepend one to make a blank line.
+        let appended = render_ref_def_append("body\n", &def).unwrap();
+        assert_eq!(appended, "\n[x]: https://example.com\n");
+
+        // Already a blank line (two EOLs) → no padding needed.
+        let appended = render_ref_def_append("body\n\n", &def).unwrap();
+        assert_eq!(appended, "[x]: https://example.com\n");
+
+        // CRLF, exactly one trailing CRLF → prepend one CRLF.
+        let appended = render_ref_def_append("body\r\n", &def).unwrap();
+        assert_eq!(appended, "\r\n[x]: https://example.com\r\n");
+
+        // CRLF + bare LF mixed tail (3 bytes, 2 sequences) — must be
+        // recognized as already having a blank line, no padding added.
+        // The previous byte-count heuristic over-padded this case.
+        // `detect_line_ending` resolves a tied LF/CRLF count to LF.
+        let appended = render_ref_def_append("body\r\n\n", &def).unwrap();
+        assert_eq!(appended, "[x]: https://example.com\n");
     }
 
     #[test]

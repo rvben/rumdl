@@ -178,7 +178,13 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
     }
 }
 
-/// Convert byte range to LSP range
+/// Convert a byte range into an LSP `Range`.
+///
+/// LSP positions are measured in *UTF-16 code units* by default (LSP 3.17
+/// `PositionEncodingKind::UTF16`), and rumdl does not negotiate an
+/// alternative encoding at initialize time. Each non-BMP codepoint
+/// (emoji, supplementary CJK, etc.) is therefore two units, not one.
+/// Use `char::len_utf16()` rather than incrementing by 1 per `char`.
 fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Option<Range> {
     let mut line = 0u32;
     let mut character = 0u32;
@@ -200,7 +206,7 @@ fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Op
             line += 1;
             character = 0;
         } else {
-            character += 1;
+            character += ch.len_utf16() as u32;
         }
 
         byte_pos += ch.len_utf8();
@@ -676,6 +682,26 @@ mod tests {
         assert_eq!(range.start.character, 6);
         assert_eq!(range.end.line, 0);
         assert_eq!(range.end.character, 8); // 2 unicode characters
+    }
+
+    #[test]
+    fn test_byte_range_to_lsp_range_non_bmp_counts_as_surrogate_pair() {
+        // Non-BMP codepoints (emoji, supplementary planes) are two UTF-16
+        // code units. LSP positions are measured in UTF-16 by default, so the
+        // range covering text *after* such a codepoint must reflect both
+        // surrogates — counting it as one "character" would shift every
+        // subsequent edit position by one.
+        //
+        // "🎉" is U+1F389, a non-BMP codepoint encoded as 4 UTF-8 bytes and
+        // 2 UTF-16 code units (a surrogate pair).
+        let text = "a🎉b"; // bytes: 'a'(1) + 🎉(4) + 'b'(1) = 6 bytes total
+        // Range covering only 'b' starts at byte 5.
+        let range = byte_range_to_lsp_range(text, 5..6).unwrap();
+        assert_eq!(range.start.line, 0);
+        // 'a' = 1 UTF-16 unit, '🎉' = 2 UTF-16 units → 'b' is at character 3
+        assert_eq!(range.start.character, 3);
+        assert_eq!(range.end.line, 0);
+        assert_eq!(range.end.character, 4);
     }
 
     #[test]
