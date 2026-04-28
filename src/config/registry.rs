@@ -39,8 +39,18 @@ impl RuleRegistry {
         let mut rule_aliases = std::collections::BTreeMap::new();
 
         for rule in rules {
-            let norm_name = if let Some((name, toml::Value::Table(table))) = rule.default_config_section() {
+            let norm_name = if let Some((name, toml::Value::Table(mut table))) = rule.default_config_section() {
                 let norm_name = normalize_key(&name); // Normalize the name from default_config_section
+                // Overwrite polymorphic keys with the sentinel so the validator skips
+                // type checking for fields whose deserializer accepts multiple TOML
+                // types. The clean default is preserved for `rumdl config --defaults`
+                // because that path calls `default_config_section()` directly.
+                for key in rule.polymorphic_config_keys() {
+                    table.insert(
+                        (*key).to_string(),
+                        crate::rule_config_serde::polymorphic_sentinel_value(),
+                    );
+                }
                 rule_schemas.insert(norm_name.clone(), table);
                 norm_name
             } else {
@@ -106,8 +116,9 @@ impl RuleRegistry {
     }
 
     /// Get the expected value type for a rule's configuration key, trying variants.
-    /// Returns `None` for nullable sentinel values (Option fields with default None),
-    /// which signals the caller to skip type checking for that key.
+    /// Returns `None` for sentinel values (nullable Option fields, polymorphic fields
+    /// that accept multiple TOML types), which signals the caller to skip type checking
+    /// for that key while still recognizing the key as valid.
     pub fn expected_value_for(&self, rule: &str, key: &str) -> Option<&toml::Value> {
         let schema = self.rule_schemas.get(rule)?;
 
@@ -116,12 +127,12 @@ impl RuleRegistry {
             && let Some(canonical_key) = aliases.get(key)
             && let Some(value) = schema.get(canonical_key)
         {
-            return filter_nullable_sentinel(value);
+            return filter_type_check_sentinels(value);
         }
 
         // Try the original key
         if let Some(value) = schema.get(key) {
-            return filter_nullable_sentinel(value);
+            return filter_type_check_sentinels(value);
         }
 
         // Try key variants
@@ -133,7 +144,7 @@ impl RuleRegistry {
 
         for variant in &key_variants {
             if let Some(value) = schema.get(variant) {
-                return filter_nullable_sentinel(value);
+                return filter_type_check_sentinels(value);
             }
         }
 
@@ -158,10 +169,12 @@ impl RuleRegistry {
     }
 }
 
-/// Returns `None` if the value is a nullable sentinel, otherwise returns `Some(value)`.
-/// Used by `expected_value_for` to skip type checking for Option fields with default None.
-fn filter_nullable_sentinel(value: &toml::Value) -> Option<&toml::Value> {
-    if crate::rule_config_serde::is_nullable_sentinel(value) {
+/// Returns `None` if the value is a sentinel that signals "skip type check"
+/// (nullable Option fields, polymorphic fields that accept multiple types).
+/// Otherwise returns `Some(value)` so the validator can compare types.
+fn filter_type_check_sentinels(value: &toml::Value) -> Option<&toml::Value> {
+    if crate::rule_config_serde::is_nullable_sentinel(value) || crate::rule_config_serde::is_polymorphic_sentinel(value)
+    {
         None
     } else {
         Some(value)
@@ -364,4 +377,81 @@ pub fn is_valid_rule_name(name: &str) -> bool {
         return true;
     }
     resolve_rule_name_alias(name).is_some()
+}
+
+/// Canonicalizes a rule-name list in place: every entry is rewritten to its canonical
+/// rule ID via [`resolve_rule_name`], duplicates are removed (keeping first occurrence),
+/// and the special `"all"` keyword is preserved as-is (case-insensitive).
+///
+/// This enforces the runtime invariant that rule lists in `Config` (`enable`, `disable`,
+/// `extend_enable`, `extend_disable`, `fixable`, `unfixable`, and per-file ignore values)
+/// always contain canonical rule IDs. Consumers can therefore compare against
+/// `rule.name()` with simple string equality without needing alias resolution at every
+/// call site.
+///
+/// The operation is idempotent: running it twice produces the same result as once.
+pub fn canonicalize_rule_list_in_place(list: &mut Vec<String>) {
+    if list.is_empty() {
+        return;
+    }
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::with_capacity(list.len());
+    let mut out: Vec<String> = Vec::with_capacity(list.len());
+    for entry in list.drain(..) {
+        let canonical = if entry.eq_ignore_ascii_case("all") {
+            "all".to_string()
+        } else {
+            resolve_rule_name(&entry)
+        };
+        if seen.insert(canonical.clone()) {
+            out.push(canonical);
+        }
+    }
+    *list = out;
+}
+
+#[cfg(test)]
+mod canonicalize_tests {
+    use super::canonicalize_rule_list_in_place;
+
+    #[test]
+    fn rewrites_aliases_to_canonical_ids() {
+        let mut list = vec!["no-inline-html".to_string(), "line-length".to_string()];
+        canonicalize_rule_list_in_place(&mut list);
+        assert_eq!(list, vec!["MD033".to_string(), "MD013".to_string()]);
+    }
+
+    #[test]
+    fn dedupes_alias_and_canonical_preserving_order() {
+        let mut list = vec!["MD033".to_string(), "no-inline-html".to_string(), "MD013".to_string()];
+        canonicalize_rule_list_in_place(&mut list);
+        assert_eq!(list, vec!["MD033".to_string(), "MD013".to_string()]);
+    }
+
+    #[test]
+    fn preserves_all_keyword_normalized() {
+        let mut list = vec!["ALL".to_string(), "MD013".to_string()];
+        canonicalize_rule_list_in_place(&mut list);
+        assert_eq!(list, vec!["all".to_string(), "MD013".to_string()]);
+    }
+
+    #[test]
+    fn is_idempotent() {
+        let mut list = vec!["no-inline-html".to_string(), "MD013".to_string()];
+        canonicalize_rule_list_in_place(&mut list);
+        let once = list.clone();
+        canonicalize_rule_list_in_place(&mut list);
+        assert_eq!(list, once);
+    }
+
+    #[test]
+    fn handles_empty_and_unknown_inputs() {
+        let mut empty: Vec<String> = Vec::new();
+        canonicalize_rule_list_in_place(&mut empty);
+        assert!(empty.is_empty());
+
+        let mut unknown = vec!["custom-rule".to_string(), "Custom-Rule".to_string()];
+        canonicalize_rule_list_in_place(&mut unknown);
+        // Both normalize to the same kebab-case form, so they dedupe.
+        assert_eq!(unknown, vec!["custom-rule".to_string()]);
+    }
 }

@@ -317,6 +317,12 @@ impl LinterConfig {
         // Apply per-rule `enabled = true/false` to global enable/disable lists
         config.apply_per_rule_enabled();
 
+        // Re-establish the canonical-rule-IDs invariant: WASM callers can pass
+        // aliases (`"no-inline-html"`) in disable/enable/extend_*/fixable/unfixable
+        // and we must normalise them so `rules::filter_rules` matches against
+        // `Rule::name()` correctly.
+        config.canonicalize_rule_lists();
+
         (config, warnings)
     }
 

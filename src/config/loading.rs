@@ -1049,6 +1049,14 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         // Apply per-rule `enabled = true/false` to global enable/disable lists
         config.apply_per_rule_enabled();
 
+        // Enforce the runtime invariant: every rule-name list is canonicalised.
+        // After this point, downstream consumers (`rules::filter_rules`, the LSP,
+        // WASM, fix coordinator, per-file-ignores) can match against
+        // `Rule::name()` with simple string equality regardless of whether the
+        // user's config used canonical IDs (`"MD033"`) or aliases
+        // (`"no-inline-html"`).
+        config.canonicalize_rule_lists();
+
         config
     }
 }

@@ -279,6 +279,29 @@ impl Config {
         MarkdownFlavor::from_path(file_path)
     }
 
+    /// Canonicalize every rule-name list inside this `Config`.
+    ///
+    /// This is the single enforcement point for the runtime invariant:
+    /// **after a `Config` is fully built, every rule-name list contains
+    /// canonical rule IDs (`"MD033"`) — never aliases (`"no-inline-html"`).**
+    ///
+    /// The invariant lets every consumer (`rules::filter_rules`, the LSP,
+    /// WASM, fix coordinator, per-file-ignore lookups) match against
+    /// `Rule::name()` with simple string equality. Mutation boundaries
+    /// (`From<SourcedConfig> for Config`, LSP `apply_lsp_settings_*`, WASM
+    /// `to_config_with_warnings`) call this before handing the `Config` to
+    /// the linting pipeline.
+    ///
+    /// Covers `global.{enable,disable,extend_enable,extend_disable,fixable,unfixable}`
+    /// and the values of `per_file_ignores`. Idempotent.
+    pub fn canonicalize_rule_lists(&mut self) {
+        use super::registry::canonicalize_rule_list_in_place;
+        self.global.canonicalize_rule_lists();
+        for rules in self.per_file_ignores.values_mut() {
+            canonicalize_rule_list_in_place(rules);
+        }
+    }
+
     /// Merge inline configuration overrides into a copy of this config
     ///
     /// This enables automatic inline config support - the engine can merge
@@ -350,7 +373,17 @@ impl PerFileIgnoreCache {
         for (pattern, rules_list) in per_file_ignores {
             if let Ok(glob) = Glob::new(pattern) {
                 builder.add(glob);
-                rules.push(rules_list.iter().map(|rule| normalize_key(rule)).collect());
+                // Canonicalize defensively: callers should have run
+                // Config::canonicalize_rule_lists already, but per-file-ignores
+                // has reached this cache directly from a few code paths
+                // historically, so we re-canonicalize here to keep the cache
+                // sound regardless of caller discipline.
+                rules.push(
+                    rules_list
+                        .iter()
+                        .map(|rule| super::registry::resolve_rule_name(rule))
+                        .collect(),
+                );
             } else {
                 log::warn!("Invalid glob pattern in per-file-ignores: {pattern}");
             }
@@ -491,6 +524,31 @@ impl Default for GlobalConfig {
             extend_disable: Vec::new(),
             enable_is_explicit: false,
         }
+    }
+}
+
+impl GlobalConfig {
+    /// Canonicalize every rule-name list in this `GlobalConfig`.
+    ///
+    /// Rewrites `enable`, `disable`, `extend_enable`, `extend_disable`, `fixable`,
+    /// and `unfixable` so that all entries are canonical rule IDs (`"MD033"`)
+    /// rather than aliases (`"no-inline-html"`). Duplicates are removed,
+    /// preserving first-occurrence order; the special `"all"` keyword is
+    /// preserved.
+    ///
+    /// This must be called by every code path that mutates a runtime
+    /// `Config`'s rule lists from external input (markdownlint configs,
+    /// `.rumdl.toml`, LSP `initializationOptions`, WASM bindings, etc.) so
+    /// that downstream consumers (`rules::filter_rules`, the LSP, WASM) can
+    /// match against `Rule::name()` with simple string equality.
+    pub fn canonicalize_rule_lists(&mut self) {
+        use super::registry::canonicalize_rule_list_in_place;
+        canonicalize_rule_list_in_place(&mut self.enable);
+        canonicalize_rule_list_in_place(&mut self.disable);
+        canonicalize_rule_list_in_place(&mut self.extend_enable);
+        canonicalize_rule_list_in_place(&mut self.extend_disable);
+        canonicalize_rule_list_in_place(&mut self.fixable);
+        canonicalize_rule_list_in_place(&mut self.unfixable);
     }
 }
 

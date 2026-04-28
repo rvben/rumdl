@@ -6755,6 +6755,29 @@ async fn test_lsp_cli_resolver_parity_on_fixtures() {
             files: &[("pyproject.toml", "[tool.rumdl]\n"), ("sub/test.md", "")],
             from: "sub/test.md",
         },
+        // Issue #588: the markdownlint-cli2 config family must be discovered
+        // identically by both resolvers. Before this fixture was added, the
+        // parity test only covered `.markdownlint.json`, so YAML variants
+        // could drift silently.
+        Fixture {
+            name: "markdownlint_cli2_yaml_at_root",
+            files: &[
+                (".markdownlint-cli2.yaml", "---\nconfig:\n  no-inline-html: false\n"),
+                ("sub/test.md", ""),
+            ],
+            from: "sub/test.md",
+        },
+        Fixture {
+            name: "markdownlint_cli2_jsonc_at_root",
+            files: &[
+                (
+                    ".markdownlint-cli2.jsonc",
+                    "{\n  \"config\": { \"no-inline-html\": false }\n}\n",
+                ),
+                ("sub/test.md", ""),
+            ],
+            from: "sub/test.md",
+        },
     ];
 
     for fx in fixtures {
@@ -7177,5 +7200,159 @@ line_length = 40
         Some(220),
         "Issue #586: --config must outrank client init configPath. \
          Got line_length={line_length:?} (expected 220 from CLI config, not 40 from client)."
+    );
+}
+
+/// Regression test for issue #588: `rumdl server` (LSP) must honour
+/// alias-based disable lists in `.markdownlint-cli2.yaml`.
+///
+/// The reporter saw `MD033` violations from the LSP for a file containing
+/// `<b>...</b>`, even though the project's `.markdownlint-cli2.yaml` set
+/// `no-inline-html: false`. The CLI honoured the same config.
+///
+/// Root cause: the markdownlint parser pushed the alias (`"no-inline-html"`)
+/// into `global.disable`, and `rules::filter_rules` matched against
+/// `Rule::name()` (`"MD033"`) with plain string equality. The CLI compensated
+/// by canonicalising at filter time; the LSP did not, causing silent
+/// divergence.
+///
+/// The fix establishes an invariant — every `Config` returned from a
+/// mutation boundary has canonical rule IDs in its rule lists — enforced
+/// by `Config::canonicalize_rule_lists` in `From<SourcedConfig> for Config`,
+/// LSP `apply_lsp_settings_*`, and WASM `to_config_with_warnings`.
+///
+/// This test asserts both halves of the parity contract:
+/// 1. `MD033` is filtered out of the LSP's enabled rule set.
+/// 2. The LSP produces no `MD033` diagnostics for the reporter's exact
+///    reproduction file.
+#[tokio::test]
+async fn test_issue_588_lsp_honours_markdownlint_cli2_alias_disable() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().expect("create temp dir");
+    let project = temp_dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+
+    fs::write(
+        project.join(".markdownlint-cli2.yaml"),
+        "---\nconfig:\n  no-inline-html: false\n",
+    )
+    .expect("write .markdownlint-cli2.yaml");
+
+    // Reporter's exact reproduction file (frontmatter + inline HTML).
+    let test_md = project.join("test.md");
+    let content = "---\ntitle: Heading\n---\n\nTest Markdown<b>1</b>.\n";
+    fs::write(&test_md, content).expect("write test.md");
+
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(project.clone());
+
+    let resolved_config = server.resolve_config_for_file(&test_md).await;
+
+    // Invariant: alias was canonicalised to "MD033" in the disable list.
+    assert!(
+        resolved_config.global.disable.iter().any(|r| r == "MD033"),
+        "Issue #588: alias-based disable in .markdownlint-cli2.yaml must be canonicalised \
+         to MD033 in the resolved Config. Got disable list: {:?}",
+        resolved_config.global.disable,
+    );
+    assert!(
+        !resolved_config.global.disable.iter().any(|r| r == "no-inline-html"),
+        "Issue #588: the alias \"no-inline-html\" must NOT remain in the disable list \
+         after canonicalisation. Got disable list: {:?}",
+        resolved_config.global.disable,
+    );
+
+    // Filter rules through the same path the LSP uses; MD033 must be excluded.
+    let all_rules = crate::rules::all_rules(&resolved_config);
+    let filtered_rules = crate::rules::filter_rules(&all_rules, &resolved_config.global);
+    assert!(
+        !filtered_rules.iter().any(|r| r.name() == "MD033"),
+        "Issue #588: MD033 must be filtered out when .markdownlint-cli2.yaml sets \
+         no-inline-html: false. Filtered rule names: {:?}",
+        filtered_rules.iter().map(|r| r.name()).collect::<Vec<_>>(),
+    );
+
+    // End-to-end: lint_document must produce no MD033 diagnostics.
+    let uri = Url::from_file_path(&test_md).unwrap();
+    let diagnostics = server.lint_document(&uri, content, true).await.unwrap();
+    let md033_diagnostics: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| {
+            d.code
+                .as_ref()
+                .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "MD033"))
+        })
+        .collect();
+    assert!(
+        md033_diagnostics.is_empty(),
+        "Issue #588: LSP must emit no MD033 diagnostics for the reporter's reproduction. \
+         Got {} diagnostic(s): {:?}",
+        md033_diagnostics.len(),
+        md033_diagnostics
+            .iter()
+            .map(|d| format!("line {}: {}", d.range.start.line, d.message))
+            .collect::<Vec<_>>(),
+    );
+}
+
+/// Companion to `test_issue_588_lsp_honours_markdownlint_cli2_alias_disable`:
+/// the same invariant must hold when a user writes aliases directly in
+/// `.rumdl.toml` (`disable = ["line-length"]`). Before the canonical-IDs
+/// invariant, this also silently failed for non-CLI consumers.
+#[tokio::test]
+async fn test_alias_in_rumdl_toml_disable_is_canonicalized() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().expect("create temp dir");
+    let project = temp_dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+
+    fs::write(
+        project.join(".rumdl.toml"),
+        "[global]\ndisable = [\"line-length\", \"no-inline-html\"]\n",
+    )
+    .expect("write .rumdl.toml");
+
+    let test_md = project.join("test.md");
+    fs::write(&test_md, "# Title\n").expect("write test.md");
+
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(project.clone());
+
+    let resolved = server.resolve_config_for_file(&test_md).await;
+    assert!(
+        resolved.global.disable.iter().any(|r| r == "MD013"),
+        "Alias `line-length` in .rumdl.toml must be canonicalised to MD013. Got: {:?}",
+        resolved.global.disable,
+    );
+    assert!(
+        resolved.global.disable.iter().any(|r| r == "MD033"),
+        "Alias `no-inline-html` in .rumdl.toml must be canonicalised to MD033. Got: {:?}",
+        resolved.global.disable,
+    );
+    assert!(
+        !resolved
+            .global
+            .disable
+            .iter()
+            .any(|r| r == "line-length" || r == "no-inline-html"),
+        "Aliases must not remain in the disable list after canonicalisation. Got: {:?}",
+        resolved.global.disable,
+    );
+
+    let all_rules = crate::rules::all_rules(&resolved);
+    let filtered = crate::rules::filter_rules(&all_rules, &resolved.global);
+    assert!(
+        !filtered.iter().any(|r| r.name() == "MD013" || r.name() == "MD033"),
+        "filter_rules must exclude MD013 and MD033 when their aliases are in disable. \
+         Got: {:?}",
+        filtered.iter().map(|r| r.name()).collect::<Vec<_>>(),
     );
 }

@@ -575,12 +575,40 @@ fn contains_all_keyword(list: &[String]) -> bool {
     list.iter().any(|s| s.eq_ignore_ascii_case("all"))
 }
 
+/// Build a canonical-form `HashSet` from a rule-name list.
+///
+/// Rewrites every entry through `resolve_rule_name` so aliases
+/// (`"no-inline-html"`) match the same set as canonical IDs (`"MD033"`).
+/// The `"all"` keyword is preserved (case-folded to lowercase) so the
+/// special-case branches in `filter_rules` continue to work.
+fn canonical_rule_set(list: &[String]) -> HashSet<String> {
+    list.iter()
+        .map(|s| {
+            if s.eq_ignore_ascii_case("all") {
+                "all".to_string()
+            } else {
+                crate::config::resolve_rule_name(s)
+            }
+        })
+        .collect()
+}
+
+/// Filter `rules` according to `global_config.{enable,disable,extend_enable,extend_disable}`.
+///
+/// Rule-name entries may be either canonical IDs (`"MD033"`) or aliases
+/// (`"no-inline-html"`); both forms match identically. Canonical IDs are
+/// the norm — every `Config` produced through a mutation boundary
+/// (`From<SourcedConfig> for Config`, LSP `apply_lsp_settings_*`, WASM
+/// `to_config_with_warnings`) is canonicalised by
+/// `Config::canonicalize_rule_lists`. The defensive canonicalisation here
+/// keeps `filter_rules` correct for programmatic callers that build a
+/// `GlobalConfig` without going through those boundaries.
 pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Vec<Box<dyn Rule>> {
     let mut enabled_rules: Vec<Box<dyn Rule>> = Vec::new();
-    let disabled_rules: HashSet<String> = global_config.disable.iter().cloned().collect();
+    let disabled_rules: HashSet<String> = canonical_rule_set(&global_config.disable);
     let opt_in_set = opt_in_rules();
-    let extend_enable_set: HashSet<String> = global_config.extend_enable.iter().cloned().collect();
-    let extend_disable_set: HashSet<String> = global_config.extend_disable.iter().cloned().collect();
+    let extend_enable_set: HashSet<String> = canonical_rule_set(&global_config.extend_enable);
+    let extend_disable_set: HashSet<String> = canonical_rule_set(&global_config.extend_disable);
 
     let extend_enable_all = contains_all_keyword(&global_config.extend_enable);
     let extend_disable_all = contains_all_keyword(&global_config.extend_disable);
@@ -600,7 +628,7 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
                     enabled_rules.push(dyn_clone::clone_box(&**rule));
                 }
             } else {
-                let enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+                let enabled_set: HashSet<String> = canonical_rule_set(&global_config.enable);
                 for rule in rules {
                     if enabled_set.contains(rule.name()) {
                         enabled_rules.push(dyn_clone::clone_box(&**rule));
@@ -623,7 +651,7 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
             }
         } else {
             // Merge enable set with extend-enable
-            let mut enabled_set: HashSet<String> = global_config.enable.iter().cloned().collect();
+            let mut enabled_set: HashSet<String> = canonical_rule_set(&global_config.enable);
             for name in &extend_enable_set {
                 enabled_set.insert(name.clone());
             }
@@ -652,4 +680,94 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
     }
 
     enabled_rules
+}
+
+#[cfg(test)]
+mod filter_rules_alias_tests {
+    use super::*;
+    use crate::config::Config;
+
+    /// `filter_rules` must accept aliases in `disable` even when the caller
+    /// builds a `GlobalConfig` directly (bypassing the canonicalisation
+    /// boundary in `From<SourcedConfig> for Config`). This is the public-API
+    /// guarantee that programmatic library callers depend on.
+    #[test]
+    fn alias_in_disable_filters_canonical_rule() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let global = GlobalConfig {
+            disable: vec!["no-inline-html".to_string()],
+            ..Default::default()
+        };
+
+        let filtered = filter_rules(&rules, &global);
+        assert!(
+            !filtered.iter().any(|r| r.name() == "MD033"),
+            "filter_rules must drop MD033 when its alias `no-inline-html` is in disable, \
+             even on a hand-built GlobalConfig. Got: {:?}",
+            filtered.iter().map(|r| r.name()).collect::<Vec<_>>(),
+        );
+    }
+
+    /// Same guarantee for `extend_disable`.
+    #[test]
+    fn alias_in_extend_disable_filters_canonical_rule() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let global = GlobalConfig {
+            extend_disable: vec!["line-length".to_string()],
+            ..Default::default()
+        };
+
+        let filtered = filter_rules(&rules, &global);
+        assert!(
+            !filtered.iter().any(|r| r.name() == "MD013"),
+            "filter_rules must drop MD013 when alias `line-length` is in extend_disable. Got: {:?}",
+            filtered.iter().map(|r| r.name()).collect::<Vec<_>>(),
+        );
+    }
+
+    /// `enable` aliases must select the canonical rule.
+    #[test]
+    fn alias_in_enable_selects_canonical_rule() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+        let global = GlobalConfig {
+            enable: vec!["no-inline-html".to_string()],
+            ..Default::default()
+        };
+
+        let filtered = filter_rules(&rules, &global);
+        let names: Vec<&str> = filtered.iter().map(|r| r.name()).collect();
+        assert_eq!(
+            names,
+            vec!["MD033"],
+            "filter_rules must select only MD033 when alias `no-inline-html` is the sole enable. \
+             Got: {names:?}",
+        );
+    }
+
+    /// The canonical-IDs invariant is preserved: a config that is already
+    /// canonical produces the same filter result as one that uses aliases.
+    #[test]
+    fn alias_and_canonical_produce_identical_filter_result() {
+        let config = Config::default();
+        let rules = all_rules(&config);
+
+        let alias_global = GlobalConfig {
+            disable: vec!["no-inline-html".to_string(), "line-length".to_string()],
+            ..Default::default()
+        };
+        let canonical_global = GlobalConfig {
+            disable: vec!["MD033".to_string(), "MD013".to_string()],
+            ..Default::default()
+        };
+
+        let alias_names: Vec<&str> = filter_rules(&rules, &alias_global).iter().map(|r| r.name()).collect();
+        let canonical_names: Vec<&str> = filter_rules(&rules, &canonical_global)
+            .iter()
+            .map(|r| r.name())
+            .collect();
+        assert_eq!(alias_names, canonical_names);
+    }
 }

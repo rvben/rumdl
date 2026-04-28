@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::lint_context::LintContext;
-use crate::rule::{LintWarning, Rule};
+use crate::rule::{FixCapability, LintWarning, Rule};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -212,21 +212,10 @@ impl FixCoordinator {
         // Track which rules actually applied fixes
         let mut fixed_rule_names: HashSet<&str> = HashSet::new();
 
-        // Build set of unfixable rules for quick lookup, resolving aliases to canonical IDs
-        let unfixable_rules: HashSet<String> = config
-            .global
-            .unfixable
-            .iter()
-            .map(|s| crate::config::resolve_rule_name(s))
-            .collect();
-
-        // Build set of fixable rules (if specified), resolving aliases to canonical IDs
-        let fixable_rules: HashSet<String> = config
-            .global
-            .fixable
-            .iter()
-            .map(|s| crate::config::resolve_rule_name(s))
-            .collect();
+        // Config rule lists are guaranteed canonical by `Config::canonicalize_rule_lists`,
+        // so a plain string set matches `Rule::name()` directly.
+        let unfixable_rules: HashSet<String> = config.global.unfixable.iter().cloned().collect();
+        let fixable_rules: HashSet<String> = config.global.fixable.iter().cloned().collect();
         let has_fixable_allowlist = !fixable_rules.is_empty();
 
         // Ruff-style fix loop: keep applying fixes until content stabilizes
@@ -276,9 +265,18 @@ impl FixCoordinator {
                     continue;
                 }
 
-                // Check if any non-disabled warnings are fixable
-                let has_fixable = filtered_warnings.iter().any(|w| w.fix.is_some());
-                if !has_fixable {
+                // Decide whether to dispatch to rule.fix(). Two paths qualify:
+                //   1. Any non-disabled warning carries an inline Fix (the
+                //      common case — most rules attach per-warning edits).
+                //   2. The rule advertises a fix capability via Rule::fix_capability().
+                //      This is for rules whose fix() rewrites at the document
+                //      level rather than producing per-warning edits (e.g.
+                //      MD046 fence-style normalization, MD076 list spacing).
+                //      Rules that declare Unfixable are skipped here even if a
+                //      stray inline fix slipped through.
+                let has_inline_fix = filtered_warnings.iter().any(|w| w.fix.is_some());
+                let rule_advertises_fix = rule.fix_capability() != FixCapability::Unfixable;
+                if !has_inline_fix && !rule_advertises_fix {
                     continue;
                 }
 
@@ -662,6 +660,12 @@ mod tests {
         assert_eq!(result.rules_fixed, 1);
     }
 
+    /// Aliases in `unfixable` (e.g. `"heading-increment"`) must reach
+    /// `apply_fixes_iterative` already canonicalised — the runtime invariant
+    /// enforced by `Config::canonicalize_rule_lists` at every mutation
+    /// boundary (`From<SourcedConfig> for Config`, LSP `apply_lsp_settings_*`,
+    /// WASM `to_config_with_warnings`). The fix coordinator therefore matches
+    /// against `Rule::name()` with plain string equality.
     #[test]
     fn test_unfixable_rules_resolved_from_alias() {
         let coordinator = FixCoordinator::new();
@@ -674,18 +678,23 @@ mod tests {
 
         let mut content = "BAD content".to_string();
         let mut config = Config::default();
-        // Use the alias instead of canonical name
+        // Caller writes the alias…
         config.global.unfixable = vec!["heading-increment".to_string()];
+        // …and the boundary canonicalises it to "MD001" before lint/fix sees it.
+        config.canonicalize_rule_lists();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
-        assert_eq!(content, "BAD content"); // Should not be changed - alias resolved to MD001
+        assert_eq!(content, "BAD content");
         assert_eq!(result.rules_fixed, 0);
         assert!(result.converged);
     }
 
+    /// Counterpart to `test_unfixable_rules_resolved_from_alias` for the
+    /// fixable allowlist. Same invariant: callers may write aliases, but the
+    /// boundary canonicalises before the fix coordinator sees the config.
     #[test]
     fn test_fixable_allowlist_resolved_from_alias() {
         let coordinator = FixCoordinator::new();
@@ -698,14 +707,14 @@ mod tests {
 
         let mut content = "BAD content".to_string();
         let mut config = Config::default();
-        // Use the alias instead of canonical name
         config.global.fixable = vec!["heading-increment".to_string()];
+        config.canonicalize_rule_lists();
 
         let result = coordinator
             .apply_fixes_iterative(&rules, &[], &mut content, &config, 5, None)
             .unwrap();
 
-        assert_eq!(content, "GOOD content"); // Alias resolved, rule is in allowlist
+        assert_eq!(content, "GOOD content");
         assert_eq!(result.rules_fixed, 1);
     }
 

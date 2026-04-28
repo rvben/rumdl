@@ -3,7 +3,7 @@
 use core::error::Error;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
-use rumdl_config::{resolve_rule_name, resolve_rule_names};
+use rumdl_config::resolve_rule_names;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -97,21 +97,14 @@ pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_
         return final_rules;
     }
 
-    // Config file settings (resolved to canonical IDs)
-    let config_enable_set: HashSet<String> = config.global.enable.iter().map(|s| resolve_rule_name(s)).collect();
-    let config_disable_set: HashSet<String> = config.global.disable.iter().map(|s| resolve_rule_name(s)).collect();
-    let config_extend_enable_set: HashSet<String> = config
-        .global
-        .extend_enable
-        .iter()
-        .map(|s| resolve_rule_name(s))
-        .collect();
-    let config_extend_disable_set: HashSet<String> = config
-        .global
-        .extend_disable
-        .iter()
-        .map(|s| resolve_rule_name(s))
-        .collect();
+    // Config rule lists are guaranteed canonical by the runtime invariant
+    // enforced in `Config::canonicalize_rule_lists` (see `src/config/types.rs`),
+    // so a plain string set suffices here. CLI flags are still resolved above
+    // because they come from raw user input that hasn't been canonicalised.
+    let config_enable_set: HashSet<String> = config.global.enable.iter().cloned().collect();
+    let config_disable_set: HashSet<String> = config.global.disable.iter().cloned().collect();
+    let config_extend_enable_set: HashSet<String> = config.global.extend_enable.iter().cloned().collect();
+    let config_extend_disable_set: HashSet<String> = config.global.extend_disable.iter().cloned().collect();
 
     let config_enable_all = config.global.enable.iter().any(|s| s.eq_ignore_ascii_case("all"));
     let opt_in_set = rumdl_lib::rules::opt_in_rules();

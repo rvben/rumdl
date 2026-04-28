@@ -34,7 +34,11 @@ impl RumdlLanguageServer {
 
         // Apply enable_rules override (if specified, only these rules are active)
         if !enable_rules.is_empty() {
-            let enable_set: std::collections::HashSet<String> = enable_rules.into_iter().collect();
+            // Canonicalise so editor input (`"no-inline-html"`) matches `Rule::name()` (`"MD033"`).
+            let enable_set: std::collections::HashSet<String> = enable_rules
+                .into_iter()
+                .map(|s| crate::config::resolve_rule_name(&s))
+                .collect();
             filtered_rules.retain(|rule| enable_set.contains(rule.name()));
         }
 
@@ -51,7 +55,10 @@ impl RumdlLanguageServer {
 
         // Apply disable_rules override
         if !disable_rules.is_empty() {
-            let disable_set: std::collections::HashSet<String> = disable_rules.into_iter().collect();
+            let disable_set: std::collections::HashSet<String> = disable_rules
+                .into_iter()
+                .map(|s| crate::config::resolve_rule_name(&s))
+                .collect();
             filtered_rules.retain(|rule| !disable_set.contains(rule.name()));
         }
 
@@ -109,6 +116,12 @@ impl RumdlLanguageServer {
         for (rule_name, rule_config) in &settings.rules {
             self.apply_rule_config(config, rule_name, rule_config);
         }
+
+        // Re-establish the canonical-rule-IDs invariant: editor-supplied
+        // disable/enable lists may use aliases (e.g. "no-inline-html") and
+        // must be normalised so `rules::filter_rules` matches them against
+        // `Rule::name()`.
+        config.canonicalize_rule_lists();
     }
 
     /// Apply LSP settings to config only where file config doesn't specify values
@@ -134,6 +147,9 @@ impl RumdlLanguageServer {
         for (rule_name, rule_config) in &settings.rules {
             self.apply_rule_config_if_absent(config, rule_name, rule_config);
         }
+
+        // Re-establish the canonical-rule-IDs invariant after merging editor input.
+        config.canonicalize_rule_lists();
     }
 
     /// Apply per-rule configuration from LSP settings
