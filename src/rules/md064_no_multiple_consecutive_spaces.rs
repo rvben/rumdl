@@ -32,6 +32,7 @@ use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::sentence_utils::is_after_sentence_ending;
 use crate::utils::skip_context::is_table_line;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Regex to find multiple consecutive spaces (2 or more)
@@ -284,6 +285,48 @@ impl MD064NoMultipleConsecutiveSpaces {
         }
     }
 
+    /// Collect line numbers that belong to a "column-aligned" list block.
+    ///
+    /// A list block is column-aligned when it has at least two items and every
+    /// item's first line contains a run of two or more consecutive spaces
+    /// somewhere in its post-marker content (excluding trailing whitespace).
+    /// In that case the spacing is intentional column alignment — common in
+    /// `cdk init`-style "Useful commands" sections — and per-line MD064 fixes
+    /// would corrupt the layout while leaving lint green. Skipping the rule
+    /// for those item lines keeps detection block-consistent and the fix safe.
+    fn aligned_list_item_lines(&self, ctx: &crate::lint_context::LintContext) -> HashSet<usize> {
+        let mut aligned = HashSet::new();
+        for block in &ctx.list_blocks {
+            if block.item_lines.len() < 2 {
+                continue;
+            }
+            let all_aligned = block
+                .item_lines
+                .iter()
+                .all(|&line_num| self.item_line_has_internal_alignment(ctx, line_num));
+            if all_aligned {
+                aligned.extend(block.item_lines.iter().copied());
+            }
+        }
+        aligned
+    }
+
+    /// True when the given list-item line has a run of 2+ consecutive spaces
+    /// in its post-marker, non-trailing content.
+    fn item_line_has_internal_alignment(&self, ctx: &crate::lint_context::LintContext, line_num: usize) -> bool {
+        let Some(line_info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        let Some(item) = &line_info.list_item else {
+            return false;
+        };
+        let content = line_info.content(ctx.content);
+        if item.content_column >= content.len() {
+            return false;
+        }
+        content[item.content_column..].trim_end().contains("  ")
+    }
+
     /// Check if this is a table row without outer pipes (GFM extension)
     /// Pattern: text | text | text (no leading/trailing pipe)
     fn is_table_without_outer_pipes(&self, line: &str) -> bool {
@@ -339,6 +382,11 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
         let code_spans: Arc<Vec<crate::lint_context::CodeSpan>> = ctx.code_spans();
         let line_index = &ctx.line_index;
 
+        // Pre-compute lines belonging to column-aligned list blocks. The
+        // alignment whitespace there is intentional, and per-line fixes would
+        // corrupt the surrounding layout — see `aligned_list_item_lines`.
+        let aligned_lines = self.aligned_list_item_lines(ctx);
+
         // Process content lines, automatically skipping front matter, code blocks, HTML, PyMdown blocks, and Obsidian comments
         for line in ctx
             .filtered_lines()
@@ -355,6 +403,13 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
         {
             // Quick check: skip if line doesn't contain double spaces
             if !line.content.contains("  ") {
+                continue;
+            }
+
+            // Skip lines that belong to a column-aligned list block. The
+            // surrounding items use the same intentional alignment, so flagging
+            // outliers here would produce a destructive partial fix.
+            if aligned_lines.contains(&line.line_num) {
                 continue;
             }
 
@@ -697,7 +752,11 @@ mod tests {
     fn test_list_items_with_extra_spaces() {
         let rule = MD064NoMultipleConsecutiveSpaces::new();
 
-        let content = "- Item   one\n- Item   two\n";
+        // Multi-space within list-item content must be flagged when the
+        // surrounding block isn't column-aligned. The third item has no
+        // internal multi-space, so the "every item is aligned" heuristic
+        // doesn't apply and items 1 and 2 are reported normally.
+        let content = "- Item   one\n- Item   two\n- Item three\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 2, "Should flag spaces in list items");
@@ -1836,6 +1895,101 @@ That's right, no `width`, no `height`, no `viewBox`.  There is no easy
         assert!(
             !result.is_empty(),
             "MD064 must fire on content after a blank line inside a <div> block"
+        );
+    }
+
+    #[test]
+    fn test_column_aligned_list_not_flagged_cdk_template() {
+        // The "Useful commands" block produced by `cdk init` has every item
+        // column-aligned with a multi-space gap before the description. The
+        // alignment is intentional, so MD064 must report zero issues — and
+        // therefore offer no destructive partial fix.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "# Useful commands\n\n\
+            - `cdk ls`          list all stacks in the app\n\
+            - `cdk synth`       emits the synthesized CloudFormation template\n\
+            - `cdk deploy`      deploy this stack to your default AWS account/region\n\
+            - `cdk diff`        compare deployed stack with current state\n\
+            - `cdk docs`        open CDK documentation\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Column-aligned list (cdk init template) must not be flagged, got: {:?}",
+            result
+                .iter()
+                .map(|w| format!("L{}C{}: {}", w.line, w.column, w.message))
+                .collect::<Vec<_>>()
+        );
+
+        // And `fix` must leave the file unchanged.
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content, "fix must not collapse intentional alignment");
+    }
+
+    #[test]
+    fn test_column_aligned_two_item_list_not_flagged() {
+        // Smallest qualifying case: two items, both with internal multi-space.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "- `a`     alpha\n- `b`     beta\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Two-item aligned list must not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_partially_aligned_list_is_flagged_normally() {
+        // When alignment is broken (one item has no internal multi-space), the
+        // block is not column-aligned and MD064 must fire on the items that
+        // actually contain extra spaces.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "- `a`     alpha\n- short\n- `c`     gamma\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "Items with multi-space must be flagged when the surrounding list is not uniformly aligned, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_single_item_list_with_multi_space_still_flagged() {
+        // A list with only one item provides no surrounding alignment context,
+        // so the multi-space run is treated as an ordinary violation.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "- `a`     alpha\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Single-item list must still be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_nested_aligned_lists_evaluated_independently() {
+        // Both the outer and the inner list are column-aligned; both must be
+        // skipped without one masking the other.
+        let rule = MD064NoMultipleConsecutiveSpaces::default();
+
+        let content = "- `cmd1`     outer one\n\
+            \x20\x20- `sub-a`   inner one\n\
+            \x20\x20- `sub-b`   inner two\n\
+            - `cmd2`     outer two\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Nested column-aligned lists must not be flagged, got: {result:?}"
         );
     }
 }
