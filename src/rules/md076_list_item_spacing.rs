@@ -275,11 +275,17 @@ impl MD076ListItemSpacing {
                 if loose_count == 0 || tight_count == 0 {
                     return None; // Already consistent (structural gaps excluded)
                 }
-                // Majority wins; on a tie, prefer loose (warn tight).
-                if loose_count >= tight_count {
-                    (false, true)
-                } else {
+                // Majority wins. On a tie, prefer tight (warn loose):
+                //   - tight is the dominant style in real-world Markdown;
+                //     loose is opt-in for multi-paragraph items,
+                //   - matches the minimal-whitespace convention used by
+                //     Prettier and most other Markdown formatters,
+                //   - removes a blank line rather than inserting one, which
+                //     is the lower-impact edit on a tied document.
+                if tight_count >= loose_count {
                     (true, false)
+                } else {
+                    (false, true)
                 }
             }
         };
@@ -567,11 +573,14 @@ mod tests {
     }
 
     #[test]
-    fn consistent_tie_prefers_loose() {
+    fn consistent_tie_prefers_tight() {
+        // 1 loose + 1 tight gap → tied. Prefer tight: warn on the loose gap
+        // ("Unexpected blank line") so fmt removes the blank rather than
+        // inserting one. See `analyze_block` for the rationale.
         let content = "- Item 1\n\n- Item 2\n- Item 3\n";
         let warnings = check(content, ListItemSpacingStyle::Consistent);
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].message.contains("Missing"));
+        assert!(warnings[0].message.contains("Unexpected"));
     }
 
     // ── Edge cases ─────────────────────────────────────────────────────
@@ -1435,8 +1444,12 @@ mod tests {
     }
 
     #[test]
-    fn code_block_in_item_fix_adds_missing_blanks() {
-        // Items 1-2 are tight, items 3-4 are loose → majority loose → fix adds blank before item 2
+    fn code_block_in_item_fix_removes_loose_outlier_on_tie() {
+        // Gap classification: 1→2 tight, 2→3 structural (excluded — fenced
+        // code block in the body of item 2), 3→4 loose. After excluding the
+        // structural gap, that's a 1 tight / 1 loose tie. The tight
+        // tie-breaker (analyze_block) warns the loose gap, so fix removes the
+        // blank between items 3 and 4 rather than adding one between 1 and 2.
         let content = "\
 - Item 1
 - Item 2
@@ -1451,8 +1464,12 @@ mod tests {
 ";
         let fixed = fix(content, ListItemSpacingStyle::Consistent);
         assert!(
-            fixed.contains("- Item 1\n\n- Item 2"),
-            "Fix should add blank line between items 1 and 2"
+            fixed.contains("- Item 3\n- Item 4"),
+            "Fix should remove blank line between items 3 and 4. Got:\n{fixed}"
+        );
+        assert!(
+            !fixed.contains("- Item 1\n\n- Item 2"),
+            "Fix should not insert a blank between items 1 and 2. Got:\n{fixed}"
         );
     }
 
