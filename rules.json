@@ -479,8 +479,8 @@
     "aliases": [],
     "summary": "Link and image style should be consistent",
     "category": "link",
-    "fix": "Fix is not available.",
-    "fix_availability": "None",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
     "url": "https://rumdl.dev/md054/"
   },
   {

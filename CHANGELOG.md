@@ -26,6 +26,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.84](https://github.com/rvben/rumdl/compare/v0.1.83...v0.1.84) - 2026-04-28
+
+### Added
+
+- **md054**: atomic ref-emit fixes via Fix.additional_edits ([d1b757c](https://github.com/rvben/rumdl/commit/d1b757c5c48c2e891eeea67d1d98de9dde833054))
+
+### Fixed
+
+- **md054,lsp**: exact EOL counting and UTF-16 LSP positions ([b8488b5](https://github.com/rvben/rumdl/commit/b8488b5b109d51696dabd2f460e31f5e272e9a4a))
+- **fix_utils**: preserve source order for same-offset zero-width inserts ([06b786c](https://github.com/rvben/rumdl/commit/06b786cdd39a90342db3b41763fff8b32735615d))
+- **md064**: skip column-aligned list blocks ([0175b7c](https://github.com/rvben/rumdl/commit/0175b7cb690f2d1f642a80337ec6c65786721c86))
+- **md046**: recognize list-internal indented code blocks ([476c8d8](https://github.com/rvben/rumdl/commit/476c8d8b5b1b9fae29fd761d50629a5465c40f8d))
+- **md036**: default fix=true to match advertised FullyFixable capability ([3faac50](https://github.com/rvben/rumdl/commit/3faac5053f8ca66f66bbaf9ebd6259c02efae5b5))
+- **md076**: prefer tight on Consistent style ties ([8ed1e30](https://github.com/rvben/rumdl/commit/8ed1e30193596748b0550278c0309eaa66aacb09))
+- **lsp**: canonicalize rule-name lists at Config boundaries ([51932d9](https://github.com/rvben/rumdl/commit/51932d9dd68412868a110178a668789c73fb0938))
+
 ## [0.1.83](https://github.com/rvben/rumdl/compare/v0.1.82...v0.1.83) - 2026-04-26
 
 ### Fixed
