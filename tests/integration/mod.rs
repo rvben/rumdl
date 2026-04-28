@@ -6,6 +6,7 @@ mod cross_file_validation_test;
 mod cross_platform_compatibility_tests;
 mod doc_comment_lint_tests;
 mod fix_counting_test;
+mod fmt_dispatch_test;
 mod gfm_comprehensive_test;
 mod integration_tests;
 mod markdownlint_cli_integration;
