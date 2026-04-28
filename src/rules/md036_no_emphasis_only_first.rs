@@ -321,7 +321,11 @@ impl Rule for MD036NoEmphasisAsHeading {
             "punctuation".to_string(),
             toml::Value::String(self.config.punctuation.clone()),
         );
-        map.insert("fix".to_string(), toml::Value::Boolean(self.config.fix));
+        // Emit `fix = true` so the init-generated config matches the runtime
+        // default established by `from_config`. The rule advertises
+        // `FixCapability::FullyFixable`; users who want diagnostic-only
+        // behavior can flip this explicitly.
+        map.insert("fix".to_string(), toml::Value::Boolean(true));
         map.insert("heading-style".to_string(), toml::Value::String("atx".to_string()));
         map.insert(
             "heading-level".to_string(),
@@ -337,7 +341,13 @@ impl Rule for MD036NoEmphasisAsHeading {
         let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
             .unwrap_or_else(|| ".,;:!?".to_string());
 
-        let fix = crate::config::get_rule_config_value::<bool>(config, "MD036", "fix").unwrap_or(false);
+        // Default to true: MD036 advertises FixCapability::FullyFixable, and
+        // check() already excludes lists, blockquotes, code blocks, headings,
+        // TOC labels, and punctuation-terminated phrases — so any line that
+        // survives those filters is a genuine emphasis-as-heading that the
+        // rule should rewrite. Users who want diagnostic-only behavior can
+        // still set `fix = false` explicitly.
+        let fix = crate::config::get_rule_config_value::<bool>(config, "MD036", "fix").unwrap_or(true);
 
         // heading_style currently only supports "atx"
         let heading_style = HeadingStyle::Atx;
@@ -781,7 +791,9 @@ mod tests {
 
         let table = config.as_table().unwrap();
         assert_eq!(table.get("punctuation").unwrap().as_str().unwrap(), ".,;:!?");
-        assert!(!table.get("fix").unwrap().as_bool().unwrap());
+        // `fix = true` matches the runtime default in `from_config`, so the
+        // generated init config is consistent with no-config behavior.
+        assert!(table.get("fix").unwrap().as_bool().unwrap());
         assert_eq!(table.get("heading-style").unwrap().as_str().unwrap(), "atx");
         assert_eq!(table.get("heading-level").unwrap().as_integer().unwrap(), 2);
     }

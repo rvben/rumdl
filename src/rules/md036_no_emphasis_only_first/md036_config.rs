@@ -23,8 +23,11 @@ pub struct MD036Config {
     pub punctuation: String,
 
     /// Enable auto-fix to convert emphasis-as-heading to real headings.
-    /// Default: false - auto-fix is opt-in to avoid unexpected document changes.
-    /// When true, detected emphasis-only lines are converted to ATX headings.
+    /// `from_config` defaults this to true (matching the rule's advertised
+    /// FullyFixable capability), so `rumdl fmt` rewrites surviving lines —
+    /// `check()` already excludes lists, blockquotes, code blocks, headings,
+    /// TOC labels, and punctuation-terminated phrases. Set to false in TOML
+    /// for diagnostic-only behavior.
     #[serde(default)]
     pub fix: bool,
 
