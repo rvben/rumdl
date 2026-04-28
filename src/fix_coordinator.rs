@@ -409,10 +409,7 @@ mod tests {
                     message: format!("{} issue found", self.name),
                     rule_name: Some(self.name.to_string()),
                     severity: Severity::Error,
-                    fix: Some(Fix {
-                        range: 0..0,
-                        replacement: String::new(),
-                    }),
+                    fix: Some(Fix::new(0..0, String::new())),
                 }])
             } else {
                 Ok(vec![])
@@ -740,10 +737,7 @@ mod tests {
                     message: "Always".to_string(),
                     rule_name: Some("AlwaysChange".to_string()),
                     severity: Severity::Error,
-                    fix: Some(Fix {
-                        range: 0..0,
-                        replacement: String::new(),
-                    }),
+                    fix: Some(Fix::new(0..0, String::new())),
                 }])
             }
             fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {

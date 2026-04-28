@@ -133,6 +133,10 @@ pub struct ParsedLink<'a> {
     pub text: Cow<'a, str>,
     /// Link URL or reference
     pub url: Cow<'a, str>,
+    /// Inline title (without surrounding delimiters), as produced by pulldown-cmark
+    /// after backslash-escape handling. `None` when the link has no title or is a
+    /// reference style without a matched definition.
+    pub title: Option<Cow<'a, str>>,
     /// Whether this is a reference link `[text][ref]` vs inline `[text](url)`
     pub is_reference: bool,
     /// Reference ID for reference links
@@ -178,6 +182,10 @@ pub struct ParsedImage<'a> {
     pub alt_text: Cow<'a, str>,
     /// Image URL or reference
     pub url: Cow<'a, str>,
+    /// Inline title (without surrounding delimiters), as produced by pulldown-cmark
+    /// after backslash-escape handling. `None` when the image has no title or is a
+    /// reference style without a matched definition.
+    pub title: Option<Cow<'a, str>>,
     /// Whether this is a reference image ![alt][ref] vs inline ![alt](url)
     pub is_reference: bool,
     /// Reference ID for reference images

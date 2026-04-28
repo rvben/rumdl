@@ -175,10 +175,7 @@ impl MD077ListContinuationIndent {
             }
         }
 
-        Some(Fix {
-            range: fix_start..fix_end,
-            replacement,
-        })
+        Some(Fix::new(fix_start..fix_end, replacement))
     }
 
     /// Walk the continuation lines owned by a single list item, invoking
@@ -372,10 +369,7 @@ impl MD077ListContinuationIndent {
             end_column: line_content.len() + 1,
             message,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: fix_start..fix_end,
-                replacement: " ".repeat(fix_target),
-            }),
+            fix: Some(Fix::new(fix_start..fix_end, " ".repeat(fix_target))),
         }
     }
 
@@ -412,10 +406,7 @@ impl MD077ListContinuationIndent {
         } else {
             let fix_start = line.info.byte_offset;
             let fix_end = fix_start + line.info.indent;
-            let fix = Some(Fix {
-                range: fix_start..fix_end,
-                replacement: " ".repeat(required),
-            });
+            let fix = Some(Fix::new(fix_start..fix_end, " ".repeat(required)));
             (fix, line.line_num, line_content.len() + 1, None)
         };
 

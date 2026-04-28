@@ -198,10 +198,7 @@ impl Rule for MD056TableColumnCount {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: row_range,
-                            replacement: fixed_line,
-                        }),
+                        fix: Some(Fix::new(row_range, fixed_line)),
                     });
                 }
             }

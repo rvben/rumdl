@@ -327,10 +327,7 @@ impl MD037NoSpaceInEmphasis {
                     end_line: line_num,
                     end_column: offset + full_end + 1,
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: (offset + full_start)..(offset + full_end),
-                        replacement: fixed_text,
-                    }),
+                    fix: Some(Fix::new((offset + full_start)..(offset + full_end), fixed_text)),
                 };
 
                 warnings.push(warning);

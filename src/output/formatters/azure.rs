@@ -139,10 +139,7 @@ mod tests {
             rule_name: Some("MD022".to_string()),
             message: "Headings should be surrounded by blank lines".to_string(),
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 100..110,
-                replacement: "\n# Heading\n".to_string(),
-            }),
+            fix: Some(Fix::new(100..110, "\n# Heading\n".to_string())),
         }];
 
         let output = formatter.format_warnings(&warnings, "doc.md");

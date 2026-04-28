@@ -9,10 +9,6 @@ use rumdl_lib::rules::MD054LinkImageStyle;
 
 #[test]
 fn test_inherently_unfixable_rules_declare_capability() {
-    // MD054 is inherently unfixable
-    let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
-    assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
-
     // MD033 is inherently unfixable
     let rule = MD033NoInlineHtml::new();
     assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
@@ -20,6 +16,16 @@ fn test_inherently_unfixable_rules_declare_capability() {
     // MD045 is diagnostic-only (alt text requires human judgment)
     let rule = MD045NoAltText::new();
     assert_eq!(rule.fix_capability(), FixCapability::Unfixable);
+}
+
+#[test]
+fn test_md054_is_conditionally_fixable() {
+    // MD054 supports auto-fix for a defined set of style conversions, but
+    // some sources/targets are intentionally out of scope (e.g. renaming a
+    // ref def). It declares ConditionallyFixable so callers know fixes may
+    // not cover every warning.
+    let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
+    assert_eq!(rule.fix_capability(), FixCapability::ConditionallyFixable);
 }
 
 #[test]

@@ -980,10 +980,7 @@ impl Rule for MD060TableFormat {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        fix: Some(crate::rule::Fix {
-                            range: table_range.clone(),
-                            replacement: table_replacement.clone(),
-                        }),
+                        fix: Some(crate::rule::Fix::new(table_range.clone(), table_replacement.clone())),
                     });
                 }
             }

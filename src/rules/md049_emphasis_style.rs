@@ -170,10 +170,10 @@ impl Rule for MD049EmphasisStyle {
                             end_line: *line_num,
                             end_column: col + emphasis_len,
                             message: format!("Emphasis should use {target_marker} instead of {marker}"),
-                            fix: Some(Fix {
-                                range: *abs_pos..*abs_pos + emphasis_len,
-                                replacement: format!("{target_marker}{content}{target_marker}"),
-                            }),
+                            fix: Some(Fix::new(
+                                *abs_pos..*abs_pos + emphasis_len,
+                                format!("{target_marker}{content}{target_marker}"),
+                            )),
                             severity: Severity::Warning,
                         });
                     }
@@ -202,10 +202,10 @@ impl Rule for MD049EmphasisStyle {
                             end_line: *line_num,
                             end_column: col + emphasis_len,
                             message: format!("Emphasis should use {correct_marker} instead of {wrong_marker}"),
-                            fix: Some(Fix {
-                                range: *abs_pos..*abs_pos + emphasis_len,
-                                replacement: format!("{correct_marker}{content}{correct_marker}"),
-                            }),
+                            fix: Some(Fix::new(
+                                *abs_pos..*abs_pos + emphasis_len,
+                                format!("{correct_marker}{content}{correct_marker}"),
+                            )),
                             severity: Severity::Warning,
                         });
                     }

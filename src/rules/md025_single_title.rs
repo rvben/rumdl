@@ -314,10 +314,7 @@ impl Rule for MD025SingleTitle {
                         } else {
                             format!("{indentation}{hashes} {raw}{closing}")
                         };
-                        Some(Fix {
-                            range: fix_range,
-                            replacement,
-                        })
+                        Some(Fix::new(fix_range, replacement))
                     };
 
                     warnings.push(LintWarning {
@@ -428,10 +425,7 @@ impl Rule for MD025SingleTitle {
                     end_line: line_num + 1,
                     end_column: line_content.chars().count(),
                     severity: crate::rule::Severity::Error,
-                    fix: Some(Fix {
-                        range: fix_range,
-                        replacement,
-                    }),
+                    fix: Some(Fix::new(fix_range, replacement)),
                 });
             }
         }

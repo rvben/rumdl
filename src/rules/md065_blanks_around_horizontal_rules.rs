@@ -140,10 +140,10 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     end_line: i + 1,
                     end_column: 2,
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(i + 1, 1),
-                        replacement: format!("{bq_prefix}\n"),
-                    }),
+                    fix: Some(Fix::new(
+                        line_index.line_col_to_byte_range(i + 1, 1),
+                        format!("{bq_prefix}\n"),
+                    )),
                 });
             }
 
@@ -158,10 +158,10 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     end_line: i + 1,
                     end_column: lines[i].len() + 2,
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),
-                        replacement: format!("{bq_prefix}\n"),
-                    }),
+                    fix: Some(Fix::new(
+                        line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),
+                        format!("{bq_prefix}\n"),
+                    )),
                 });
             }
         }

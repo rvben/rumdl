@@ -142,10 +142,10 @@ impl Rule for MD035HRStyle {
                             format!("Horizontal rule style should be \"{expected_style}\"")
                         },
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
-                            replacement: expected_style.clone(),
-                        }),
+                        fix: Some(Fix::new(
+                            line_index.line_col_to_byte_range_with_length(i + 1, 1, line.chars().count()),
+                            expected_style.clone(),
+                        )),
                     });
                 }
             }

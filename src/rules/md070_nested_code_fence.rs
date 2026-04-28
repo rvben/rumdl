@@ -362,10 +362,7 @@ impl Rule for MD070NestedCodeFence {
                                 end_line: intended_close + 1,
                                 end_column: lines[intended_close].len() + 1,
                                 severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: (open_byte_start..close_byte_end),
-                                    replacement,
-                                }),
+                                fix: Some(Fix::new(open_byte_start..close_byte_end, replacement)),
                             });
                         }
                     }

@@ -298,14 +298,14 @@ impl Rule for MD050StrongStyle {
                 end_column: end_col,
                 message: message.to_string(),
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: span.start..span.end,
-                    replacement: match target_style {
+                fix: Some(Fix::new(
+                    span.start..span.end,
+                    match target_style {
                         StrongStyle::Asterisk => format!("**{inner_text}**"),
                         StrongStyle::Underscore => format!("__{inner_text}__"),
                         StrongStyle::Consistent => format!("**{inner_text}**"),
                     },
-                }),
+                )),
             });
         }
 

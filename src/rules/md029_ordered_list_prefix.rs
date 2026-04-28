@@ -280,10 +280,7 @@ impl MD029OrderedListPrefix {
                             end_column: list_item.marker_column + number_len + 1,
                             severity: Severity::Warning,
                             fix: if should_provide_fix {
-                                Some(Fix {
-                                    range: marker_start..marker_start + number_len,
-                                    replacement: expected_num.to_string(),
-                                })
+                                Some(Fix::new(marker_start..marker_start + number_len, expected_num.to_string()))
                             } else {
                                 None
                             },

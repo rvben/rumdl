@@ -397,10 +397,7 @@ impl Rule for MD055TablePipeStyle {
                             column: start_col,
                             end_line,
                             end_column: end_col,
-                            fix: Some(crate::rule::Fix {
-                                range: row_range,
-                                replacement: fixed_line,
-                            }),
+                            fix: Some(crate::rule::Fix::new(row_range, fixed_line)),
                         });
                     }
                 }

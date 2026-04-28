@@ -562,10 +562,7 @@ impl MD075OrphanedTableRows {
         if replacement == original_block {
             Ok(None)
         } else {
-            Ok(Some(Fix {
-                range: replacement_range,
-                replacement,
-            }))
+            Ok(Some(Fix::new(replacement_range, replacement)))
         }
     }
 }

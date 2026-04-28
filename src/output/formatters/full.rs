@@ -223,10 +223,7 @@ mod tests {
             rule_name: Some("MD022".to_string()),
             message: "Headings should be surrounded by blank lines".to_string(),
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..8,
-                replacement: "\n# Hello\n".to_string(),
-            }),
+            fix: Some(Fix::new(0..8, "\n# Hello\n".to_string())),
         }];
         let output = formatter.format_warnings_with_content(&warnings, "test.md", content);
         assert!(output.contains("[*]"));

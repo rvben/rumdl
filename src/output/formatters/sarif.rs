@@ -226,10 +226,7 @@ mod tests {
             rule_name: Some("MD001".to_string()),
             message: "Heading levels should only increment by one level at a time".to_string(),
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 100..110,
-                replacement: "## Heading".to_string(),
-            }),
+            fix: Some(Fix::new(100..110, "## Heading".to_string())),
         }];
 
         let output = formatter.format_warnings(&warnings, "README.md");

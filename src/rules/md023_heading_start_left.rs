@@ -84,14 +84,14 @@ impl Rule for MD023HeadingStartLeft {
                             end_column: end_col,
                             severity: Severity::Warning,
                             message: format!("Setext heading should not be indented by {indentation} spaces"),
-                            fix: Some(Fix {
-                                range: {
+                            fix: Some(Fix::new(
+                                {
                                     // indent is in bytes, so use byte offset directly
                                     let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
                                     line_start..line_start + indentation
                                 },
-                                replacement: String::new(),
-                            }),
+                                String::new(),
+                            )),
                         });
 
                         // Add warning for the underline - only if it's indented
@@ -109,14 +109,14 @@ impl Rule for MD023HeadingStartLeft {
                                     end_column: underline_end_col,
                                     severity: Severity::Warning,
                                     message: "Setext heading underline should not be indented".to_string(),
-                                    fix: Some(Fix {
-                                        range: {
+                                    fix: Some(Fix::new(
+                                        {
                                             let line_start =
                                                 ctx.line_index.get_line_start_byte(underline_line + 1).unwrap_or(0);
                                             line_start..line_start + underline_indentation
                                         },
-                                        replacement: String::new(),
-                                    }),
+                                        String::new(),
+                                    )),
                                 });
                             }
                         }
@@ -138,13 +138,13 @@ impl Rule for MD023HeadingStartLeft {
                             end_column: atx_end_col,
                             severity: Severity::Warning,
                             message: format!("Heading should not be indented by {indentation} spaces"),
-                            fix: Some(Fix {
-                                range: {
+                            fix: Some(Fix::new(
+                                {
                                     let line_start = ctx.line_index.get_line_start_byte(line_num + 1).unwrap_or(0);
                                     line_start..line_start + indentation
                                 },
-                                replacement: String::new(),
-                            }),
+                                String::new(),
+                            )),
                         });
                     }
                 }

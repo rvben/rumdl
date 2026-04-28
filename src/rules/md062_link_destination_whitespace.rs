@@ -222,10 +222,7 @@ impl Rule for MD062LinkDestinationWhitespace {
                     end_column: link.end_col + 1,
                     message: issue.message(false),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: link.byte_offset..link.byte_end,
-                        replacement: fixed,
-                    }),
+                    fix: Some(Fix::new(link.byte_offset..link.byte_end, fixed)),
                 });
             }
         }
@@ -262,10 +259,7 @@ impl Rule for MD062LinkDestinationWhitespace {
                     end_column: image.end_col + 1,
                     message: issue.message(true),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: image.byte_offset..image.byte_end,
-                        replacement: fixed,
-                    }),
+                    fix: Some(Fix::new(image.byte_offset..image.byte_end, fixed)),
                 });
             }
         }

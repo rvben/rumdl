@@ -514,10 +514,7 @@ impl Rule for MD064NoMultipleConsecutiveSpaces {
                     end_line: line.line_num,
                     end_column: match_end + 1, // 1-indexed
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: abs_byte_start..abs_byte_end,
-                        replacement,
-                    }),
+                    fix: Some(Fix::new(abs_byte_start..abs_byte_end, replacement)),
                 });
             }
         }

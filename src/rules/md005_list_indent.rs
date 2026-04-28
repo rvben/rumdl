@@ -412,10 +412,7 @@ impl MD005ListIndent {
             end_column: end_col,
             message,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: fix_range,
-                replacement,
-            }),
+            fix: Some(Fix::new(fix_range, replacement)),
         }
     }
 

@@ -112,10 +112,7 @@ fn test_warning_to_code_action_with_fix() {
         end_line: 1,
         end_column: 47,
         severity: Severity::Warning,
-        fix: Some(Fix {
-            range: 0..47,
-            replacement: "shorter text".to_string(),
-        }),
+        fix: Some(Fix::new(0..47, "shorter text".to_string())),
         rule_name: Some("MD013".to_string()),
     };
 

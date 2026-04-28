@@ -195,10 +195,7 @@ mod tests {
             rule_name: Some("MD001".to_string()),
             message: message.to_string(),
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..5,
-                replacement: fix_text.to_string(),
-            }),
+            fix: Some(Fix::new(0..5, fix_text.to_string())),
         }
     }
 

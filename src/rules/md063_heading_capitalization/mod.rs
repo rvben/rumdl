@@ -960,13 +960,13 @@ impl Rule for MD063HeadingCapitalization {
                         end_column: heading.content_column + 1 + original_text.len(),
                         message: format!("Heading should use {style_name}: '{original_text}' -> '{fixed_text}'"),
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: self.get_line_byte_range(content, line_num + 1, line_index),
-                            replacement: match heading.style {
+                        fix: Some(Fix::new(
+                            self.get_line_byte_range(content, line_num + 1, line_index),
+                            match heading.style {
                                 crate::lint_context::HeadingStyle::ATX => self.fix_atx_heading(line, heading),
                                 _ => self.fix_setext_heading(line, heading),
                             },
-                        }),
+                        )),
                     });
                 }
             }

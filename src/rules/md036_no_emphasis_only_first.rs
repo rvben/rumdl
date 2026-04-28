@@ -246,10 +246,7 @@ impl Rule for MD036NoEmphasisAsHeading {
                     let range = ctx.line_index.line_content_range(i + 1);
                     // Preserve leading whitespace by not including it in the replacement
                     let leading_ws: String = line.chars().take_while(|c| c.is_whitespace()).collect();
-                    Some(Fix {
-                        range,
-                        replacement: format!("{leading_ws}{prefix}{text}"),
-                    })
+                    Some(Fix::new(range, format!("{leading_ws}{prefix}{text}")))
                 } else {
                     None
                 };

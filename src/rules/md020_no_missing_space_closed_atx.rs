@@ -146,10 +146,7 @@ impl Rule for MD020NoMissingSpaceClosedAtx {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_range,
-                                replacement: self.fix_closed_atx_heading(line),
-                            }),
+                            fix: Some(Fix::new(line_range, self.fix_closed_atx_heading(line))),
                         });
                     }
                 }

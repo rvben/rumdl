@@ -451,12 +451,11 @@ impl Rule for MD028NoBlanksBlockquote {
                     end_line,
                     end_column: end_col,
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: ctx
-                            .line_index
+                    fix: Some(Fix::new(
+                        ctx.line_index
                             .line_col_to_byte_range_with_length(line_num, 1, line.len()),
-                        replacement: fix_content,
-                    }),
+                        fix_content,
+                    )),
                 });
             }
         }

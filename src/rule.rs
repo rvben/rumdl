@@ -46,10 +46,65 @@ pub struct LintWarning {
     pub rule_name: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+/// One atomic fix attached to a `LintWarning`.
+///
+/// `range`/`replacement` describe the primary edit. `additional_edits`
+/// carries any *paired* edits that must apply together with the primary one
+/// for the result to be a valid document — for example, MD054's conversion
+/// of an inline link to a reference style produces the in-place link rewrite
+/// **and** a reference-definition append at end-of-file; applying only one
+/// half would leave a dangling reference.
+///
+/// All fix consumers (the LSP code-action layer, CLI counters, the
+/// `apply_warning_fixes` helper) treat the primary edit and the
+/// `additional_edits` as a single unit. The field is empty by default so
+/// rules that only need a single-location fix can keep using
+/// `Fix::new(range, replacement)`; only rules that need multi-location
+/// atomicity populate it via `Fix::with_additional_edits(...)`.
+///
+/// `additional_edits` is intentionally a flat `Vec<Fix>` — nesting beyond
+/// one level isn't needed today and would complicate the apply contract.
+/// Apply order is "primary first, then additional in their declared order"
+/// when offsets are non-overlapping; consumers that batch multiple fixes
+/// across warnings still sort by `range.start` descending so earlier offsets
+/// remain valid as later edits mutate the buffer.
+#[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
 pub struct Fix {
     pub range: Range<usize>,
     pub replacement: String,
+    /// Edits applied atomically with the primary `range`/`replacement` pair.
+    /// Empty for the common single-edit case. See struct docs for semantics.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_edits: Vec<Fix>,
+}
+
+impl Fix {
+    /// Construct a single-edit fix. Use this for the overwhelming common case
+    /// where a fix is one in-place replacement.
+    pub fn new(range: Range<usize>, replacement: String) -> Self {
+        Self {
+            range,
+            replacement,
+            additional_edits: Vec::new(),
+        }
+    }
+
+    /// Construct a multi-edit fix bundle. The primary edit is applied first,
+    /// followed by every entry in `additional_edits` as part of the same
+    /// atomic operation.
+    pub fn with_additional_edits(range: Range<usize>, replacement: String, additional_edits: Vec<Fix>) -> Self {
+        Self {
+            range,
+            replacement,
+            additional_edits,
+        }
+    }
+
+    /// True iff this fix carries one or more secondary edits beyond the
+    /// primary `range`/`replacement` pair.
+    pub fn has_additional_edits(&self) -> bool {
+        !self.additional_edits.is_empty()
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, schemars::JsonSchema)]
@@ -153,6 +208,18 @@ pub trait Rule: DynClone + Send + Sync {
     /// This allows rules to accept alternative config key names for backwards compatibility
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
         None
+    }
+
+    /// Returns the list of config keys whose deserializer accepts more than one TOML
+    /// type (e.g. either a scalar or a list). The schema is built from a serialized
+    /// default that can only encode one variant, so the validator would reject the
+    /// alternative form. The registry replaces the schema entry for each listed key
+    /// with a polymorphic sentinel so type checking is skipped while the key name
+    /// is still validated. Keep `default_config_section()` returning clean defaults
+    /// — the sentinel is a schema concern and must not leak into user-facing output
+    /// like `rumdl config --defaults`.
+    fn polymorphic_config_keys(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// Declares the fix capability of this rule
@@ -270,10 +337,7 @@ mod tests {
 
     #[test]
     fn test_fix_serialization() {
-        let fix = Fix {
-            range: 0..10,
-            replacement: "fixed text".to_string(),
-        };
+        let fix = Fix::new(0..10, "fixed text".to_string());
 
         let warning = LintWarning {
             message: "Test warning".to_string(),

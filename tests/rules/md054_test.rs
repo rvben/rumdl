@@ -72,7 +72,9 @@ This is an inline code with a link: `<https://example.com>`
 }
 
 #[test]
-fn test_fix_unsupported() {
+fn test_fix_default_config_is_noop() {
+    // With the default config (all styles allowed), fix is a no-op even though
+    // the rule now supports auto-fixing in the general case.
     let rule = MD054LinkImageStyle::default();
 
     let content = r#"
@@ -80,8 +82,8 @@ This has [inline](https://example.com) and <https://example.org> links.
     "#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.fix(&ctx);
-    assert!(result.is_err());
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content);
 }
 
 #[test]
@@ -464,4 +466,183 @@ fn test_autolink_urls_still_detected() {
     // All autolinks should be flagged, but not the HTML tag
     assert_eq!(result.len(), 4, "Should flag all autolinks but not HTML tag");
     assert!(result.iter().all(|w| w.message.contains("autolink")));
+}
+
+// ---------------------------------------------------------------------------
+// Inline-disable directives must suppress *both* the warning and the auto-fix.
+//
+// Pre-fix behavior: the framework filtered the warning between `check()` and
+// the user, but `Rule::fix()` and the per-warning `Fix` field both bypassed
+// that filter — so a `<!-- markdownlint-disable-line MD054 -->` annotation
+// would silently rewrite the link anyway. These tests pin the new contract:
+// disabled lines are untouched at *every* layer (check, per-warning fix, and
+// rule-level fix).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_disable_line_skips_link_fix() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true); // inline disallowed
+
+    // The first line carries an inline-disable-line directive; the second
+    // does not. Both contain the same disallowed inline link.
+    let content = "[a](https://x.com) <!-- markdownlint-disable-line MD054 -->\n[b](https://y.com)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // Disabled link must remain bit-identical; non-disabled link is rewritten
+    // to one of the other allowed styles (full reference is the planner's
+    // default expansion). The exact target doesn't matter — what matters is
+    // that the disabled line is preserved verbatim.
+    assert!(
+        fixed.starts_with("[a](https://x.com) <!-- markdownlint-disable-line MD054 -->\n"),
+        "disable-line directive must protect link from fix; got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("[b](https://y.com)"),
+        "non-disabled inline link must be rewritten; got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_disable_next_line_skips_link_fix() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+
+    let content = "<!-- markdownlint-disable-next-line MD054 -->\n[a](https://x.com)\n[b](https://y.com)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("[a](https://x.com)"),
+        "disable-next-line must protect the following link; got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("[b](https://y.com)"),
+        "non-disabled inline link must be rewritten; got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_persistent_disable_skips_link_fix() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+
+    let content = concat!(
+        "[a](https://before.com)\n",
+        "<!-- markdownlint-disable MD054 -->\n",
+        "[b](https://disabled.com)\n",
+        "[c](https://still-disabled.com)\n",
+        "<!-- markdownlint-enable MD054 -->\n",
+        "[d](https://after.com)\n",
+    );
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("[b](https://disabled.com)"),
+        "persistent disable must protect [b]; got:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("[c](https://still-disabled.com)"),
+        "persistent disable must protect [c] until re-enabled; got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("[a](https://before.com)"),
+        "[a] (before disable) must still be rewritten; got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("[d](https://after.com)"),
+        "[d] (after re-enable) must still be rewritten; got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_disable_line_skips_image_fix() {
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+
+    let content = "![a](https://x.com/img.png) <!-- markdownlint-disable-line MD054 -->\n![b](https://y.com/img.png)\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.starts_with("![a](https://x.com/img.png) <!-- markdownlint-disable-line MD054 -->\n"),
+        "disable-line must protect image from fix; got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("![b](https://y.com/img.png)"),
+        "non-disabled image must be rewritten; got:\n{fixed}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Explicit empty titles (`[t](url "")`, `[t](url '')`, `[t](url ())`) carry
+// no semantic title text but do carry author intent — MD054's auto-fix must
+// preserve them. In particular, conversion to autolink (`<url>`) would silently
+// drop the delimiters, so the planner's `has_title` reachability check must
+// see explicit-empty as truthy.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_explicit_empty_title_blocks_autolink_conversion() {
+    // Allow only autolink. With `[https://x.com](https://x.com)` (url-inline)
+    // as the source, autolink is the only reachable target; the planner's
+    // `has_title` gate is the only thing standing between an explicit empty
+    // title and a destructive rewrite.
+    let rule = MD054LinkImageStyle::new(true, false, false, false, false, false); // autolink only
+
+    let with_title = "[https://x.com](https://x.com \"\")\n";
+    let ctx = LintContext::new(with_title, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, with_title,
+        "explicit empty title must block autolink conversion (no other reachable target); got:\n{fixed}"
+    );
+
+    // Sanity-check the converse — without the explicit empty title, the same
+    // input *does* convert to autolink, proving the title is the deciding
+    // factor.
+    let without_title = "[https://x.com](https://x.com)\n";
+    let ctx = LintContext::new(without_title, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "<https://x.com>\n",
+        "without explicit empty title, url-inline must convert to autolink; got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_explicit_empty_title_round_trips_to_full_reference() {
+    // When autolink isn't reachable (because of `has_title`) but `full` is
+    // allowed, the planner must fall through to a target that *does* preserve
+    // the title delimiters. The emitted ref-def must carry `""` so the
+    // round-trip stays lossless.
+    let rule = MD054LinkImageStyle::new(false, false, true, false, false, false); // full only
+
+    let content = "[t](https://x.com \"\")\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert!(
+        fixed.contains("[t][") && fixed.contains("\"\""),
+        "fix must convert to a ref form whose definition preserves \"\"; got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_disable_line_clears_per_warning_fix_metadata() {
+    // `check()` itself doesn't filter disabled warnings (the framework does
+    // that on the way out), so the per-warning `Fix` it attaches is observed
+    // directly by tooling that bypasses the framework filter (snapshot tests,
+    // LSP single-warning code actions in some paths). Pin that the planner
+    // produces no edit for a disabled line in the first place — there's
+    // nothing for downstream consumers to misuse.
+    let rule = MD054LinkImageStyle::new(true, true, true, false, true, true);
+    let content = "[a](https://x.com) <!-- markdownlint-disable-line MD054 -->\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    for w in result {
+        assert!(
+            w.fix.is_none(),
+            "disabled line must not produce a per-warning Fix; got fix={:?}",
+            w.fix
+        );
+    }
 }

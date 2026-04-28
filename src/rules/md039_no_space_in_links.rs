@@ -153,10 +153,7 @@ impl Rule for MD039NoSpaceInLinks {
                     end_column: link.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: link.byte_offset..link.byte_end,
-                        replacement: fixed,
-                    }),
+                    fix: Some(Fix::new(link.byte_offset..link.byte_end, fixed)),
                 });
             }
         }
@@ -222,10 +219,7 @@ impl Rule for MD039NoSpaceInLinks {
                     end_column: image.end_col + 1, // Convert to 1-indexed
                     message: WARNING_MESSAGE.to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: image.byte_offset..image.byte_end,
-                        replacement: fixed,
-                    }),
+                    fix: Some(Fix::new(image.byte_offset..image.byte_end, fixed)),
                 });
             }
         }

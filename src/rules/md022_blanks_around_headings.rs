@@ -628,10 +628,7 @@ impl Rule for MD022BlanksAroundHeadings {
                 end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: byte_range,
-                    replacement: line_ending.repeat(needed_blanks),
-                }),
+                fix: Some(Fix::new(byte_range, line_ending.repeat(needed_blanks))),
             });
         }
 

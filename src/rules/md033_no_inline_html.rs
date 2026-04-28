@@ -1131,7 +1131,7 @@ impl Rule for MD033NoInlineHtml {
             // Calculate fix to remove HTML tags but keep content
             let fix = self
                 .calculate_fix(content, tag, tag_byte_start, in_html_block)
-                .map(|(range, replacement)| Fix { range, replacement });
+                .map(|(range, replacement)| Fix::new(range, replacement));
 
             // Calculate actual end line and column for multiline tags
             // Use byte_end - 1 to get the last character position of the tag

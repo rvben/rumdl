@@ -251,14 +251,14 @@ impl Rule for MD026NoTrailingPunctuation {
                             end_column: end_col,
                             message: format!("Heading '{text_to_check}' ends with punctuation '{last_char}'"),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: self.get_line_byte_range(content, line_num + 1, line_index),
-                                replacement: if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
+                            fix: Some(Fix::new(
+                                self.get_line_byte_range(content, line_num + 1, line_index),
+                                if matches!(heading.style, crate::lint_context::HeadingStyle::ATX) {
                                     self.fix_atx_heading(line, &re)
                                 } else {
                                     self.fix_setext_heading(line, &re)
                                 },
-                            }),
+                            )),
                         });
                     }
                 }

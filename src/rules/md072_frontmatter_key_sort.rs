@@ -271,10 +271,7 @@ impl Rule for MD072FrontmatterKeySort {
                     // Compute the actual fix: full content replacement
                     let fixed_content = self.fix_yaml(content);
                     if fixed_content != content {
-                        Some(Fix {
-                            range: 0..content.len(),
-                            replacement: fixed_content,
-                        })
+                        Some(Fix::new(0..content.len(), fixed_content))
                     } else {
                         None
                     }
@@ -324,10 +321,7 @@ impl Rule for MD072FrontmatterKeySort {
                     // Compute the actual fix: full content replacement
                     let fixed_content = self.fix_toml(content);
                     if fixed_content != content {
-                        Some(Fix {
-                            range: 0..content.len(),
-                            replacement: fixed_content,
-                        })
+                        Some(Fix::new(0..content.len(), fixed_content))
                     } else {
                         None
                     }
@@ -369,10 +363,7 @@ impl Rule for MD072FrontmatterKeySort {
                 // Compute the actual fix: full content replacement
                 let fixed_content = self.fix_json(content);
                 let fix = if fixed_content != content {
-                    Some(Fix {
-                        range: 0..content.len(),
-                        replacement: fixed_content,
-                    })
+                    Some(Fix::new(0..content.len(), fixed_content))
                 } else {
                     None
                 };

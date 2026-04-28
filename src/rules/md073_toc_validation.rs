@@ -649,10 +649,7 @@ impl Rule for MD073TocValidation {
                 end_line: region.end_line,
                 end_column: 1,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: fix_range,
-                    replacement: new_toc,
-                }),
+                fix: Some(Fix::new(fix_range, new_toc)),
             });
         }
 

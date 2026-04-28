@@ -576,10 +576,7 @@ impl Rule for MD041FirstLineHeading {
                             } else {
                                 heading_line.to_string()
                             };
-                            Some(Fix {
-                                range: range_start..range_end,
-                                replacement,
-                            })
+                            Some(Fix::new(range_start..range_end, replacement))
                         }
                         FixPlan::PromotePlainText { title_line_idx, .. } if *title_line_idx == first_line_idx => {
                             let replacement = format!(
@@ -587,19 +584,15 @@ impl Rule for MD041FirstLineHeading {
                                 "#".repeat(self.level),
                                 ctx.lines[*title_line_idx].content(ctx.content).trim()
                             );
-                            Some(Fix {
-                                range: range_start..range_end,
-                                replacement,
-                            })
+                            Some(Fix::new(range_start..range_end, replacement))
                         }
                         _ => {
                             // Complex multi-line operations (moving headings, inserting
                             // derived titles, promoting non-first-line text): replace
                             // the entire document via fix().
-                            self.fix(ctx).ok().map(|fixed_content| Fix {
-                                range: 0..ctx.content.len(),
-                                replacement: fixed_content,
-                            })
+                            self.fix(ctx)
+                                .ok()
+                                .map(|fixed_content| Fix::new(0..ctx.content.len(), fixed_content))
                         }
                     }
                 })

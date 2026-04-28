@@ -199,8 +199,8 @@ impl Rule for MD014CommandsShowOutput {
                     if self.is_command_without_output(&current_block, &current_lang) {
                         // Find all command lines that should produce output
                         let command_lines = self.find_all_command_lines(&current_block);
-                        let fix = Fix {
-                            range: {
+                        let fix = Fix::new(
+                            {
                                 // Replace the content line(s) between the fences
                                 let content_start_line = block_start_line + 1; // Line after opening fence (0-indexed)
                                 let content_end_line = line_num - 1; // Line before closing fence (0-indexed)
@@ -212,8 +212,8 @@ impl Rule for MD014CommandsShowOutput {
                                     .unwrap_or(start_byte); // +2 to include newline after last content line
                                 start_byte..end_byte
                             },
-                            replacement: format!("{}\n", self.fix_command_block(&current_block)),
-                        };
+                            format!("{}\n", self.fix_command_block(&current_block)),
+                        );
 
                         for (cmd_line_idx, cmd_line) in &command_lines {
                             let cmd_line_num = block_start_line + 1 + cmd_line_idx + 1; // +1 for fence, +1 for 1-indexed

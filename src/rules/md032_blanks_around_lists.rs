@@ -193,10 +193,7 @@ impl MD032BlanksAroundLists {
             let end_byte = start_byte + lazy_info.current_indent;
             let replacement = " ".repeat(lazy_info.expected_indent);
 
-            Some(Fix {
-                range: start_byte..end_byte,
-                replacement,
-            })
+            Some(Fix::new(start_byte..end_byte, replacement))
         } else {
             // List inside blockquote: preserve blockquote prefix, fix indent after it
             let after_bq = content_after_blockquote(line_content, lazy_info.blockquote_level);
@@ -210,10 +207,7 @@ impl MD032BlanksAroundLists {
             let end_byte = start_byte + current_indent;
             let replacement = " ".repeat(lazy_info.expected_indent);
 
-            Some(Fix {
-                range: start_byte..end_byte,
-                replacement,
-            })
+            Some(Fix::new(start_byte..end_byte, replacement))
         }
     }
 
@@ -573,10 +567,10 @@ impl MD032BlanksAroundLists {
                             severity: Severity::Warning,
                             rule_name: Some(self.name().to_string()),
                             message: "Ordered list starting with non-1 should be preceded by blank line".to_string(),
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
-                                replacement: format!("{bq_prefix}\n"),
-                            }),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(line_num, 1, 0),
+                                format!("{bq_prefix}\n"),
+                            )),
                         });
                     }
 
@@ -610,10 +604,10 @@ impl MD032BlanksAroundLists {
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name().to_string()),
                                     message: "List should be followed by blank line".to_string(),
-                                    fix: Some(Fix {
-                                        range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
-                                        replacement: format!("{bq_prefix}\n"),
-                                    }),
+                                    fix: Some(Fix::new(
+                                        line_index.line_col_to_byte_range_with_length(line_num + 1, 1, 0),
+                                        format!("{bq_prefix}\n"),
+                                    )),
                                 });
                             }
                         }
@@ -662,10 +656,10 @@ impl MD032BlanksAroundLists {
                             severity: Severity::Warning,
                             rule_name: Some(self.name().to_string()),
                             message: "List should be preceded by blank line".to_string(),
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
-                                replacement: format!("{prefix}\n"),
-                            }),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(start_line, 1, 0),
+                                format!("{prefix}\n"),
+                            )),
                         });
                     }
                 }
@@ -733,10 +727,10 @@ impl MD032BlanksAroundLists {
                             severity: Severity::Warning,
                             rule_name: Some(self.name().to_string()),
                             message: "List should be followed by blank line".to_string(),
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
-                                replacement: format!("{prefix}\n"),
-                            }),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(end_line + 1, 1, 0),
+                                format!("{prefix}\n"),
+                            )),
                         });
                     }
                 }

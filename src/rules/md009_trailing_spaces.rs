@@ -152,10 +152,7 @@ impl Rule for MD009TrailingSpaces {
                         end_column: end_col,
                         message: "Empty line has trailing spaces".to_string(),
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: fix_range,
-                            replacement: String::new(),
-                        }),
+                        fix: Some(Fix::new(fix_range, String::new())),
                     });
                 }
                 continue;
@@ -228,10 +225,7 @@ impl Rule for MD009TrailingSpaces {
                     format!("{trailing_all_whitespace} trailing spaces found")
                 },
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: fix_range,
-                    replacement: String::new(),
-                }),
+                fix: Some(Fix::new(fix_range, String::new())),
             });
         }
 

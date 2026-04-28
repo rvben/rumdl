@@ -633,6 +633,69 @@ fn test_default_config_passes_validation() {
 }
 
 #[test]
+fn test_md054_preferred_style_accepts_scalar_form() {
+    use crate::rules;
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(&config_path, "[MD054]\npreferred-style = \"autolink\"\n").unwrap();
+
+    let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("Config should load");
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = validate_config_sourced(&sourced, &registry);
+
+    let md054_warnings: Vec<_> = warnings.iter().filter(|w| w.rule.as_deref() == Some("MD054")).collect();
+    assert!(
+        md054_warnings.is_empty(),
+        "Scalar preferred-style should pass validation, got: {md054_warnings:?}"
+    );
+}
+
+#[test]
+fn test_md054_preferred_style_accepts_list_form() {
+    use crate::rules;
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(&config_path, "[MD054]\npreferred-style = [\"autolink\", \"full\"]\n").unwrap();
+
+    let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("Config should load");
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = validate_config_sourced(&sourced, &registry);
+
+    let md054_warnings: Vec<_> = warnings.iter().filter(|w| w.rule.as_deref() == Some("MD054")).collect();
+    assert!(
+        md054_warnings.is_empty(),
+        "List preferred-style should pass validation (polymorphic schema), got: {md054_warnings:?}"
+    );
+}
+
+#[test]
+fn test_md054_preferred_style_unknown_key_still_warns() {
+    use crate::rules;
+
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    fs::write(&config_path, "[MD054]\npreferred-styel = \"autolink\"\n").unwrap();
+
+    let sourced = SourcedConfig::load(Some(config_path.to_str().unwrap()), None).expect("Config should load");
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = validate_config_sourced(&sourced, &registry);
+
+    let unknown_key_warnings: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule.as_deref() == Some("MD054") && w.message.contains("Unknown option"))
+        .collect();
+    assert!(
+        !unknown_key_warnings.is_empty(),
+        "Polymorphic schema must still detect typos in key names; got warnings: {warnings:?}"
+    );
+}
+
+#[test]
 fn test_enabled_key_valid_for_any_rule() {
     use crate::rules;
 

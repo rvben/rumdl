@@ -514,10 +514,7 @@ mod tests {
                     end_line: 3,
                     end_column: 6,
                     message: "test".to_string(),
-                    fix: Some(Fix {
-                        range: 0..0,
-                        replacement: "REPLACED".to_string(),
-                    }),
+                    fix: Some(Fix::new(0..0, "REPLACED".to_string())),
                     severity: Severity::Warning,
                     rule_name: Some("TEST".to_string()),
                 }])

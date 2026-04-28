@@ -203,14 +203,14 @@ impl Rule for MD011NoReversedLinks {
                     end_line,
                     end_column: end_col,
                     severity: Severity::Error,
-                    fix: Some(Fix {
-                        range: {
+                    fix: Some(Fix::new(
+                        {
                             let match_start_byte = byte_pos + match_start;
                             let match_end_byte = match_start_byte + actual_length;
                             match_start_byte..match_end_byte
                         },
-                        replacement: format!("[{text}]({url})"),
-                    }),
+                        format!("[{text}]({url})"),
+                    )),
                 });
 
                 last_end += match_obj.end();

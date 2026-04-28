@@ -835,10 +835,7 @@ impl MD013LineLength {
             end_line: warning_end_line,
             end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
             severity: Severity::Warning,
-            fix: Some(crate::rule::Fix {
-                range: byte_range,
-                replacement,
-            }),
+            fix: Some(crate::rule::Fix::new(byte_range, replacement)),
         };
 
         (Some(warning), next_idx)
@@ -1320,10 +1317,7 @@ impl MD013LineLength {
                         end_line: last_consumed + 1,
                         end_column: lines[last_consumed].len() + 1,
                         severity: Severity::Warning,
-                        fix: Some(crate::rule::Fix {
-                            range: byte_range,
-                            replacement,
-                        }),
+                        fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });
                 }
                 continue;
@@ -1487,10 +1481,7 @@ impl MD013LineLength {
                         end_line: end_line + 1,
                         end_column: lines[end_line].len() + 1,
                         severity: Severity::Warning,
-                        fix: Some(crate::rule::Fix {
-                            range: byte_range,
-                            replacement,
-                        }),
+                        fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });
                 }
                 continue;
@@ -2897,10 +2888,7 @@ impl MD013LineLength {
                             end_line: end_line + 1,
                             end_column: lines[end_line].len() + 1,
                             severity: Severity::Warning,
-                            fix: Some(crate::rule::Fix {
-                                range: byte_range,
-                                replacement,
-                            }),
+                            fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                         });
                     }
                 }
@@ -3213,10 +3201,7 @@ impl MD013LineLength {
                         end_line: warning_end_line,
                         end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
                         severity: Severity::Warning,
-                        fix: Some(crate::rule::Fix {
-                            range: byte_range,
-                            replacement,
-                        }),
+                        fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });
                 }
             }

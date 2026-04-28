@@ -41,6 +41,13 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
         .iter()
         .enumerate()
         .filter_map(|(i, w)| w.fix.as_ref().map(|fix| (i, fix)))
+        .flat_map(|(i, fix)| {
+            // A logical fix may carry additional edits at separate ranges
+            // (e.g. MD054 ref-emit fixes that rewrite a link in place AND
+            // append a new ref definition at EOF). Flatten so each edit
+            // participates in the same dedup/sort/apply pipeline.
+            std::iter::once((i, fix)).chain(fix.additional_edits.iter().map(move |e| (i, e)))
+        })
         .collect();
 
     // No-op fast path: if there are no actual fixes to apply, return the
@@ -202,10 +209,7 @@ mod tests {
             end_line: 1,
             end_column: 5,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 2..4,                  // "  " (two spaces)
-                replacement: " ".to_string(), // single space
-            }),
+            fix: Some(Fix::new(2..4, " ".to_string())),
             rule_name: Some("MD030".to_string()),
         };
 
@@ -224,10 +228,7 @@ mod tests {
                 end_line: 1,
                 end_column: 5,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 2..4, // First line "  "
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(2..4, " ".to_string())),
                 rule_name: Some("MD030".to_string()),
             },
             LintWarning {
@@ -237,10 +238,7 @@ mod tests {
                 end_line: 2,
                 end_column: 5,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 11..14, // Second line "   " (after newline + "*")
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(11..14, " ".to_string())),
                 rule_name: Some("MD030".to_string()),
             },
         ];
@@ -264,10 +262,7 @@ mod tests {
                 end_line: 1,
                 end_column: 7,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 4..6, // "  " after "Test"
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(4..6, " ".to_string())),
                 rule_name: Some("MD009".to_string()),
             },
             LintWarning {
@@ -277,10 +272,7 @@ mod tests {
                 end_line: 1,
                 end_column: 19,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 14..18, // "    " after "multiple"
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(14..18, " ".to_string())),
                 rule_name: Some("MD009".to_string()),
             },
         ];
@@ -300,10 +292,7 @@ mod tests {
                 end_line: 1,
                 end_column: 7,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 4..6,
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(4..6, " ".to_string())),
                 rule_name: Some("MD009".to_string()),
             },
             LintWarning {
@@ -313,10 +302,7 @@ mod tests {
                 end_line: 1,
                 end_column: 7,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 4..6,
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(4..6, " ".to_string())),
                 rule_name: Some("MD009".to_string()),
             },
         ];
@@ -337,10 +323,7 @@ mod tests {
                 end_line: 1,
                 end_column: 5,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 2..4,
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(2..4, " ".to_string())),
                 rule_name: Some("MD030".to_string()),
             },
             LintWarning {
@@ -350,10 +333,7 @@ mod tests {
                 end_line: 2,
                 end_column: 5,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 12..15, // Account for \r\n
-                    replacement: " ".to_string(),
-                }),
+                fix: Some(Fix::new(12..15, " ".to_string())),
                 rule_name: Some("MD030".to_string()),
             },
         ];
@@ -375,10 +355,7 @@ mod tests {
             end_line: 1,
             end_column: 10,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..100, // Out of bounds
-                replacement: "Replacement".to_string(),
-            }),
+            fix: Some(Fix::new(0..100, "Replacement".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -388,6 +365,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::reversed_empty_ranges)]
     fn test_apply_fix_with_reversed_range() {
         let content = "Hello world";
         let warning = LintWarning {
@@ -397,11 +375,7 @@ mod tests {
             end_line: 1,
             end_column: 3,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                #[allow(clippy::reversed_empty_ranges)]
-                range: 10..5, // start > end - intentionally invalid for testing
-                replacement: "Test".to_string(),
-            }),
+            fix: Some(Fix::new(10..5, "Test".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -443,10 +417,7 @@ mod tests {
                 end_line: 1,
                 end_column: 22,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 0..22,
-                    replacement: "[![alt](img)](url)".to_string(),
-                }),
+                fix: Some(Fix::new(0..22, "[![alt](img)](url)".to_string())),
                 rule_name: Some("MD039".to_string()),
             },
             LintWarning {
@@ -456,10 +427,7 @@ mod tests {
                 end_line: 1,
                 end_column: 15,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 2..15,
-                    replacement: "![alt](img)".to_string(),
-                }),
+                fix: Some(Fix::new(2..15, "![alt](img)".to_string())),
                 rule_name: Some("MD039".to_string()),
             },
         ];
@@ -468,6 +436,45 @@ mod tests {
         // Inner fix applied: "![ alt ](img)" → "![alt](img)"
         // Outer fix skipped (overlaps). Suffix preserved.
         assert_eq!(result, "[ ![alt](img) ](url) suffix");
+    }
+
+    #[test]
+    fn test_apply_fix_with_additional_edits_atomic() {
+        // Models the MD054 ref-emit shape: a single Fix with a primary in-place
+        // rewrite of an inline link plus an additional_edit that appends a new
+        // reference definition at EOF. apply_warning_fixes must apply both halves
+        // — applying only the primary would leave a dangling reference.
+        let content = "See [docs](https://example.com) for details.\n";
+        let primary_range = content.find("[docs](https://example.com)").unwrap()..content.find(" for details").unwrap();
+        let appended = "\n[docs]: https://example.com\n".to_string();
+        let warnings = vec![LintWarning {
+            message: "Inconsistent link style".to_string(),
+            line: 1,
+            column: 5,
+            end_line: 1,
+            end_column: 32,
+            severity: Severity::Warning,
+            fix: Some(Fix::with_additional_edits(
+                primary_range,
+                "[docs]".to_string(),
+                vec![Fix::new(content.len()..content.len(), appended)],
+            )),
+            rule_name: Some("MD054".to_string()),
+        }];
+
+        let result = apply_warning_fixes(content, &warnings).unwrap();
+        assert!(
+            result.contains("See [docs] for details."),
+            "primary edit must rewrite the inline link in place: {result:?}"
+        );
+        assert!(
+            result.contains("[docs]: https://example.com"),
+            "additional edit must append the ref-def at EOF: {result:?}"
+        );
+        assert!(
+            !result.contains("[docs](https://example.com)"),
+            "the inline form must be gone after the atomic fix: {result:?}"
+        );
     }
 
     #[test]
@@ -480,10 +487,7 @@ mod tests {
             end_line: 1,
             end_column: 5,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..5,
-                replacement: "Hi".to_string(),
-            }),
+            fix: Some(Fix::new(0..5, "Hi".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -520,10 +524,7 @@ mod tests {
             end_line: 1,
             end_column: 10,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..100,
-                replacement: "Long replacement".to_string(),
-            }),
+            fix: Some(Fix::new(0..100, "Long replacement".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -537,26 +538,17 @@ mod tests {
         let content = "Hello world";
 
         // Valid range
-        let valid_fix = Fix {
-            range: 0..5,
-            replacement: "Hi".to_string(),
-        };
+        let valid_fix = Fix::new(0..5, "Hi".to_string());
         assert!(validate_fix_range(content, &valid_fix).is_ok());
 
         // Invalid range (end > content length)
-        let invalid_fix = Fix {
-            range: 0..20,
-            replacement: "Hi".to_string(),
-        };
+        let invalid_fix = Fix::new(0..20, "Hi".to_string());
         assert!(validate_fix_range(content, &invalid_fix).is_err());
 
         // Invalid range (start > end) - create reversed range
         let start = 5;
         let end = 3;
-        let invalid_fix2 = Fix {
-            range: start..end,
-            replacement: "Hi".to_string(),
-        };
+        let invalid_fix2 = Fix::new(start..end, "Hi".to_string());
         assert!(validate_fix_range(content, &invalid_fix2).is_err());
     }
 
@@ -565,31 +557,19 @@ mod tests {
         let content = "Test";
 
         // Empty range at start
-        let fix1 = Fix {
-            range: 0..0,
-            replacement: "Insert".to_string(),
-        };
+        let fix1 = Fix::new(0..0, "Insert".to_string());
         assert!(validate_fix_range(content, &fix1).is_ok());
 
         // Empty range at end
-        let fix2 = Fix {
-            range: 4..4,
-            replacement: " append".to_string(),
-        };
+        let fix2 = Fix::new(4..4, " append".to_string());
         assert!(validate_fix_range(content, &fix2).is_ok());
 
         // Full content replacement
-        let fix3 = Fix {
-            range: 0..4,
-            replacement: "Replace".to_string(),
-        };
+        let fix3 = Fix::new(0..4, "Replace".to_string());
         assert!(validate_fix_range(content, &fix3).is_ok());
 
         // Start exceeds content
-        let fix4 = Fix {
-            range: 10..11,
-            replacement: "Invalid".to_string(),
-        };
+        let fix4 = Fix::new(10..11, "Invalid".to_string());
         let result = validate_fix_range(content, &fix4);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("start 10 exceeds"));
@@ -607,10 +587,7 @@ mod tests {
                 end_line: 1,
                 end_column: 13,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 5..12, // "content"
-                    replacement: "stuff".to_string(),
-                }),
+                fix: Some(Fix::new(5..12, "stuff".to_string())),
                 rule_name: Some("MD001".to_string()),
             },
             LintWarning {
@@ -620,10 +597,7 @@ mod tests {
                 end_line: 1,
                 end_column: 13,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: 5..12, // Same range
-                    replacement: "stuff".to_string(),
-                }),
+                fix: Some(Fix::new(5..12, "stuff".to_string())),
                 rule_name: Some("MD002".to_string()),
             },
         ];
@@ -644,10 +618,7 @@ mod tests {
             end_line: 1,
             end_column: 7,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 6..6,
-                replacement: " added".to_string(),
-            }),
+            fix: Some(Fix::new(6..6, " added".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -663,10 +634,7 @@ mod tests {
             end_line: 1,
             end_column: 7,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 6..6,
-                replacement: " added".to_string(),
-            }),
+            fix: Some(Fix::new(6..6, " added".to_string())),
             rule_name: Some("TEST".to_string()),
         };
 
@@ -684,10 +652,7 @@ mod tests {
             end_line,
             end_column: 1,
             severity: Severity::Warning,
-            fix: Some(Fix {
-                range: 0..1,
-                replacement: "x".to_string(),
-            }),
+            fix: Some(Fix::new(0..1, "x".to_string())),
             rule_name: Some(rule_name.to_string()),
         }
     }

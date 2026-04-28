@@ -125,10 +125,10 @@ impl Rule for MD030ListMarkerSpace {
                         let whitespace_start_byte = line_start_byte + whitespace_start_pos;
                         let whitespace_end_byte = whitespace_start_byte + whitespace_len;
 
-                        let fix = Some(crate::rule::Fix {
-                            range: whitespace_start_byte..whitespace_end_byte,
-                            replacement: correct_spaces,
-                        });
+                        let fix = Some(crate::rule::Fix::new(
+                            whitespace_start_byte..whitespace_end_byte,
+                            correct_spaces,
+                        ));
 
                         let message =
                             format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
@@ -385,10 +385,7 @@ impl MD030ListMarkerSpace {
                             end_line,
                             end_column: end_col,
                             message: format!("Spaces after list markers (Expected: {expected_spaces}; Actual: 0)"),
-                            fix: Some(crate::rule::Fix {
-                                range: fix_position..fix_position,
-                                replacement: correct_spaces,
-                            }),
+                            fix: Some(crate::rule::Fix::new(fix_position..fix_position, correct_spaces)),
                         });
                     }
                 }

@@ -55,10 +55,10 @@ impl Rule for MD071BlankLineAfterFrontmatter {
                 end_line: fm_end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    range: ctx.line_index.line_col_to_byte_range(fm_end_line, end_col),
-                    replacement: "\n".to_string(),
-                }),
+                fix: Some(Fix::new(
+                    ctx.line_index.line_col_to_byte_range(fm_end_line, end_col),
+                    "\n".to_string(),
+                )),
             });
         }
 

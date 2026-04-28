@@ -346,13 +346,13 @@ impl MD034NoBareUrls {
                     end_column: end_col,
                     message: format!("URL without angle brackets or link formatting: '{trimmed_url}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: {
+                    fix: Some(Fix::new(
+                        {
                             let line_start_byte = line_index.get_line_start_byte(line_number).unwrap_or(0);
                             (line_start_byte + start)..(line_start_byte + start + trimmed_len)
                         },
                         replacement,
-                    }),
+                    )),
                 });
             }
         }
@@ -407,10 +407,10 @@ impl MD034NoBareUrls {
                             end_column: end_col,
                             message: format!("Email address without angle brackets or link formatting: '{email}'"),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: (line_start_byte + start)..(line_start_byte + end),
-                                replacement: format!("<{email}>"),
-                            }),
+                            fix: Some(Fix::new(
+                                (line_start_byte + start)..(line_start_byte + end),
+                                format!("<{email}>"),
+                            )),
                         });
                     }
                 }

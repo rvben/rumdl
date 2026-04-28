@@ -89,10 +89,7 @@ impl Rule for MD019NoMultipleSpaceAtx {
                                 end_line,
                                 end_column: end_col,
                                 severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: extra_spaces_start..extra_spaces_end,
-                                    replacement: " ".to_string(), // Replace extra spaces with single space
-                                }),
+                                fix: Some(Fix::new(extra_spaces_start..extra_spaces_end, " ".to_string())),
                             });
                         }
                     }

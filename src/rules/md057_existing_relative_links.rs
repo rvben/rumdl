@@ -763,10 +763,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                     "Relative link '{full_url_for_compact}' can be simplified to '{suggestion}'"
                                 ),
                                 severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: fix_byte_start..fix_byte_end,
-                                    replacement: suggestion,
-                                }),
+                                fix: Some(Fix::new(fix_byte_start..fix_byte_end, suggestion)),
                             });
                         }
 
@@ -905,10 +902,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 let fix = content[image.byte_offset..image.byte_end].find(url).map(|url_offset| {
                     let fix_byte_start = image.byte_offset + url_offset;
                     let fix_byte_end = fix_byte_start + url.len();
-                    Fix {
-                        range: fix_byte_start..fix_byte_end,
-                        replacement: suggestion.clone(),
-                    }
+                    Fix::new(fix_byte_start..fix_byte_end, suggestion.clone())
                 });
 
                 let img_line_start_byte = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
@@ -1072,10 +1066,7 @@ impl Rule for MD057ExistingRelativeLinks {
                     end_column: col + url.len(),
                     message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: fix_byte_start..fix_byte_end,
-                        replacement: suggestion,
-                    }),
+                    fix: Some(Fix::new(fix_byte_start..fix_byte_end, suggestion)),
                 });
             }
 

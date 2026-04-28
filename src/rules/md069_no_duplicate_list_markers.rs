@@ -121,10 +121,7 @@ impl Rule for MD069NoDuplicateListMarkers {
                     end_line: line_num,
                     end_column: match_len + 1,
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_start..line_end,
-                        replacement,
-                    }),
+                    fix: Some(Fix::new(line_start..line_end, replacement)),
                 });
             }
         }

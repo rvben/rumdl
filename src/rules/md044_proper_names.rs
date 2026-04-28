@@ -963,10 +963,7 @@ impl Rule for MD044ProperNames {
                         end_column: column + found_name.len(),
                         message: format!("Proper name '{found_name}' should be '{proper_name}'"),
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: byte_start..byte_end,
-                            replacement: proper_name,
-                        }),
+                        fix: Some(Fix::new(byte_start..byte_end, proper_name)),
                     }
                 })
             })

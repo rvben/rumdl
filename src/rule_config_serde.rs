@@ -52,9 +52,31 @@ pub fn load_rule_config<T: RuleConfig>(config: &crate::config::Config) -> T {
 /// so config validation recognizes it as valid.
 const NULLABLE_SENTINEL: &str = "\0__nullable__";
 
+/// Sentinel value used in config schema tables to mark fields that accept multiple TOML
+/// types (e.g. a custom deserializer that takes either a scalar or a list). The schema
+/// is derived from a serialized default which can only encode one type, so without a
+/// sentinel the validator would reject the documented alternative form. Marking the key
+/// polymorphic tells the validator to accept any value type for that key while still
+/// preserving key-name validation and alias resolution.
+const POLYMORPHIC_SENTINEL: &str = "\0__polymorphic__";
+
 /// Returns true if the TOML value is a nullable sentinel placeholder.
 pub fn is_nullable_sentinel(value: &toml::Value) -> bool {
     matches!(value, toml::Value::String(s) if s == NULLABLE_SENTINEL)
+}
+
+/// Returns true if the TOML value is a polymorphic sentinel placeholder.
+pub fn is_polymorphic_sentinel(value: &toml::Value) -> bool {
+    matches!(value, toml::Value::String(s) if s == POLYMORPHIC_SENTINEL)
+}
+
+/// Construct a polymorphic sentinel TOML value. Used by the `RuleRegistry` to overwrite
+/// schema entries for keys returned by `Rule::polymorphic_config_keys()`, so the validator
+/// skips the type check rather than flagging the alternative form as invalid. Rules must
+/// not call this from `default_config_section()` — the sentinel is a schema-only concern
+/// and would leak into user-facing output (e.g. `rumdl config --defaults`).
+pub fn polymorphic_sentinel_value() -> toml::Value {
+    toml::Value::String(POLYMORPHIC_SENTINEL.to_string())
 }
 
 /// Build a TOML schema table from a rule config struct, preserving nullable (Option) keys.
@@ -280,6 +302,20 @@ mod tests {
 
         let integer = toml::Value::Integer(42);
         assert!(!is_nullable_sentinel(&integer));
+    }
+
+    #[test]
+    fn test_is_polymorphic_sentinel() {
+        let sentinel = polymorphic_sentinel_value();
+        assert!(is_polymorphic_sentinel(&sentinel));
+
+        // Polymorphic and nullable sentinels are distinct
+        let nullable = toml::Value::String(NULLABLE_SENTINEL.to_string());
+        assert!(!is_polymorphic_sentinel(&nullable));
+        assert!(!is_nullable_sentinel(&sentinel));
+
+        let regular = toml::Value::String("normal".to_string());
+        assert!(!is_polymorphic_sentinel(&regular));
     }
 
     #[test]

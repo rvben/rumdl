@@ -219,6 +219,177 @@ fn test_blockquote_spaced_nested_markers_are_detected() {
 }
 
 #[test]
+fn test_ref_def_with_angle_bracket_destination_containing_space() {
+    // CommonMark §6.6 admits <...>-form destinations that contain spaces.
+    // Without this, the auto-fix output `[id]: <./has space.md>` (which
+    // `format_url_destination` chooses for whitespace-bearing URLs) silently
+    // disappears from `ctx.reference_defs` on the next parse, breaking
+    // dedup in MD054 and ref-def discovery in MD053/MD057.
+    let content = "[docs]: <./has space.md>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1, "angle-bracket destination must parse");
+    assert_eq!(ctx.reference_defs[0].id, "docs");
+    assert_eq!(
+        ctx.reference_defs[0].url, "./has space.md",
+        "URL should be the destination content, not the angle-bracketed form"
+    );
+    assert_eq!(ctx.reference_defs[0].title, None);
+}
+
+#[test]
+fn test_ref_def_with_angle_bracket_destination_and_title() {
+    // The optional title still parses after an angle-bracket destination.
+    let content = "[docs]: <./has space.md> \"Help me\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].url, "./has space.md");
+    assert_eq!(ctx.reference_defs[0].title.as_deref(), Some("Help me"));
+}
+
+#[test]
+fn test_ref_def_paren_title_with_escaped_parens() {
+    // CommonMark §4.7 paren-form titles may contain `(`/`)` only when
+    // backslash-escaped. Both pulldown-cmark and the rumdl ref-def regex
+    // unescape the captured title (per CommonMark §6.1) so downstream rules
+    // see the same value regardless of which path produced it.
+    let content = "[docs]: https://example.com (title \\(x\\))\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].url, "https://example.com");
+    assert_eq!(
+        ctx.reference_defs[0].title.as_deref(),
+        Some("title (x)"),
+        "title must be unescaped to match pulldown-cmark's parsed value"
+    );
+}
+
+#[test]
+fn test_mkdocs_admonition_link_with_paren_title() {
+    // pulldown-cmark treats indented MkDocs admonition content as a code block,
+    // so the inline link is recovered by the regex fallback in
+    // `parse_links_images_pulldown`. The fallback must recognize all three
+    // CommonMark §6.7 title delimiter forms — including `(...)` — otherwise
+    // a link like `[doc](url (title))` is parsed with title=None and MD054
+    // auto-fix silently strips the title when rewriting the link.
+    let content = "!!! note\n    See [doc](https://example.com (paren title)) here.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let link = ctx
+        .links
+        .iter()
+        .find(|l| l.url == "https://example.com")
+        .expect("MkDocs fallback must surface the link");
+    assert_eq!(
+        link.title.as_deref(),
+        Some("paren title"),
+        "paren-form title must be captured by the MkDocs link fallback"
+    );
+}
+
+#[test]
+fn test_mkdocs_admonition_image_with_paren_title() {
+    // Mirror of the link test for images.
+    let content = "!!! note\n    See ![alt](https://example.com/x.png (paren title)) here.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    let img = ctx
+        .images
+        .iter()
+        .find(|i| i.url == "https://example.com/x.png")
+        .expect("MkDocs fallback must surface the image");
+    assert_eq!(
+        img.title.as_deref(),
+        Some("paren title"),
+        "paren-form title must be captured by the MkDocs image fallback"
+    );
+}
+
+#[test]
+fn test_ref_def_angle_bracket_destination_with_escaped_brackets() {
+    // CommonMark §6.6 angle-bracket destinations admit `\<` and `\>` so the
+    // round-trip from `format_url_destination` (which emits `<a\<b\>c>` when
+    // a URL contains `<` or `>`) is recovered on the next parse instead of
+    // silently dropping the def out of `ctx.reference_defs`.
+    let content = "[id]: <a\\<b\\>c>\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        ctx.reference_defs.len(),
+        1,
+        "escaped angle-bracket destination must round-trip through the regex"
+    );
+    assert_eq!(ctx.reference_defs[0].id, "id");
+    assert_eq!(ctx.reference_defs[0].title, None);
+}
+
+#[test]
+fn test_ref_def_double_quoted_title_with_escaped_quote() {
+    // Title delimiter `"` may appear inside the title only when backslash-escaped;
+    // `format_title` produces this form whenever the unescaped title contains `"`,
+    // so the regex must accept it or the freshly generated def disappears from
+    // the next pass and MD053/MD057/dedup all break. The captured title is
+    // unescaped (CommonMark §6.1) so it matches pulldown-cmark's parsed value.
+    let content = "[id]: https://example.com \"he said \\\"hi\\\"\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].url, "https://example.com");
+    assert_eq!(
+        ctx.reference_defs[0].title.as_deref(),
+        Some("he said \"hi\""),
+        "title must be unescaped to match pulldown-cmark's parsed value"
+    );
+}
+
+#[test]
+fn test_ref_def_single_quoted_title_with_escaped_quote() {
+    let content = "[id]: https://example.com 'it\\'s fine'\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].url, "https://example.com");
+    assert_eq!(
+        ctx.reference_defs[0].title.as_deref(),
+        Some("it's fine"),
+        "title must be unescaped to match pulldown-cmark's parsed value"
+    );
+}
+
+#[test]
+fn test_ref_def_url_unescapes_backslash_escapes() {
+    // CommonMark §6.1: a backslash before any ASCII punctuation character
+    // produces the literal character; the backslash itself is removed. The
+    // rumdl regex fallback must apply this transform so `ctx.reference_defs[i].url`
+    // matches what pulldown-cmark exposes via `Tag::Link`/`Tag::Image`. Without
+    // this, MD053/MD054/MD057 would see `https://e.com/path\(1\)` while the
+    // parser sees `https://e.com/path(1)`, and any rule that copies the value
+    // back into the document would corrupt it.
+    let content = "[id]: https://e.com/path\\(1\\)\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(
+        ctx.reference_defs[0].url, "https://e.com/path(1)",
+        "URL must be unescaped per CommonMark §6.1"
+    );
+}
+
+#[test]
+fn test_ref_def_unescape_preserves_non_punctuation_backslash() {
+    // CommonMark §6.1 explicitly limits the escape to ASCII punctuation. A
+    // backslash followed by a letter, digit, or whitespace is preserved
+    // verbatim (the backslash stays in the output). Verifying this guards
+    // against an over-eager unescape that would silently drop backslashes
+    // from URL paths and titles.
+    let content = "[id]: https://e.com/p\\ath \"a\\b c\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(
+        ctx.reference_defs[0].url, "https://e.com/p\\ath",
+        "backslash before non-punctuation must remain in URL"
+    );
+    assert_eq!(
+        ctx.reference_defs[0].title.as_deref(),
+        Some("a\\b c"),
+        "backslash before non-punctuation must remain in title"
+    );
+}
+
+#[test]
 fn test_footnote_definitions_not_parsed_as_reference_defs() {
     // Footnote definitions use [^id]: syntax and should NOT be parsed as reference definitions
     let content = r#"# Title
@@ -1169,4 +1340,78 @@ fn test_html_block_unclosed_pre_extends_to_eof() {
             "line {line_num} of an unclosed <pre> should extend to EOF",
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pulldown-cmark gives the same empty CowStr for both "no title" and "explicit
+// empty title" (`""`/`''`/`()`). The link parser now rescans the source span
+// to recover the distinction so MD054's auto-fix can't silently drop the
+// delimiters when converting `[t](url "")` to autolink.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_link_no_title_yields_none() {
+    let ctx = LintContext::new("[t](https://x.com)\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert!(ctx.links[0].title.is_none(), "no title delimiter must be None");
+}
+
+#[test]
+fn test_link_explicit_empty_double_quote_title_yields_some_empty() {
+    let ctx = LintContext::new(r#"[t](https://x.com "")"#, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert_eq!(
+        ctx.links[0].title.as_deref(),
+        Some(""),
+        "`\"\"` must be preserved as Some(\"\"), not collapsed to None"
+    );
+}
+
+#[test]
+fn test_link_explicit_empty_single_quote_title_yields_some_empty() {
+    let ctx = LintContext::new("[t](https://x.com '')\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert_eq!(ctx.links[0].title.as_deref(), Some(""));
+}
+
+#[test]
+fn test_link_explicit_empty_paren_title_yields_some_empty() {
+    let ctx = LintContext::new("[t](https://x.com ())\n", MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert_eq!(ctx.links[0].title.as_deref(), Some(""));
+}
+
+#[test]
+fn test_image_explicit_empty_title_yields_some_empty() {
+    let ctx = LintContext::new(r#"![alt](https://x.com/img.png "")"#, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.images.len(), 1);
+    assert_eq!(ctx.images[0].title.as_deref(), Some(""));
+}
+
+#[test]
+fn test_link_non_empty_title_is_unaffected() {
+    let ctx = LintContext::new(r#"[t](https://x.com "real")"#, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert_eq!(ctx.links[0].title.as_deref(), Some("real"));
+}
+
+#[test]
+fn test_link_title_with_trailing_whitespace_inside_parens() {
+    // CommonMark allows whitespace between the closing title delimiter and
+    // the link's closing `)`. The detector must skip that whitespace so it
+    // still recognizes the explicit-empty-title pair.
+    let ctx = LintContext::new(r#"[t](https://x.com ""    )"#, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.links.len(), 1);
+    assert_eq!(ctx.links[0].title.as_deref(), Some(""));
+}
+
+#[test]
+fn test_reference_link_empty_title_in_definition() {
+    // Reference links carry their title in the *definition*, parsed by the
+    // REF_DEF_PATTERN regex (which already distinguishes `Some("")` from
+    // `None` via `cap.get(...)`); make sure that path keeps working.
+    let content = "[t][r]\n\n[r]: https://x.com \"\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title.as_deref(), Some(""));
 }

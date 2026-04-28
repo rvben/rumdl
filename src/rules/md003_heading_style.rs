@@ -187,10 +187,7 @@ impl Rule for MD003HeadingStyle {
                         // Calculate the correct range for the heading
                         let range = ctx.line_index.line_content_range(line_num + 1);
 
-                        Some(crate::rule::Fix {
-                            range,
-                            replacement: final_heading,
-                        })
+                        Some(crate::rule::Fix::new(range, final_heading))
                     };
 
                     // Calculate precise character range for the heading marker

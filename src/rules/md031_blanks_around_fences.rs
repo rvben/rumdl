@@ -238,10 +238,10 @@ impl Rule for MD031BlanksAroundFences {
                     end_column: end_col,
                     message: "No blank line before fenced code block".to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
-                        replacement: format!("{bq_prefix}\n"),
-                    }),
+                    fix: Some(Fix::new(
+                        line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                        format!("{bq_prefix}\n"),
+                    )),
                 });
             }
 
@@ -269,10 +269,10 @@ impl Rule for MD031BlanksAroundFences {
                     end_column: end_col,
                     message: "No blank line after fenced code block".to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
-                        replacement: format!("{bq_prefix}\n"),
-                    }),
+                    fix: Some(Fix::new(
+                        line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
+                        format!("{bq_prefix}\n"),
+                    )),
                 });
             }
         }
@@ -318,10 +318,10 @@ impl Rule for MD031BlanksAroundFences {
                             end_column: end_col,
                             message: "No blank line before admonition block".to_string(),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                                replacement: format!("{bq_prefix}\n"),
-                            }),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                                format!("{bq_prefix}\n"),
+                            )),
                         });
                     }
 
@@ -356,10 +356,10 @@ impl Rule for MD031BlanksAroundFences {
                             end_column: end_col,
                             message: "No blank line after admonition block".to_string(),
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
-                                replacement: format!("{bq_prefix}\n"),
-                            }),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(i + 1, 1, 0),
+                                format!("{bq_prefix}\n"),
+                            )),
                         });
                     }
 

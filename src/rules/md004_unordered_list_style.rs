@@ -183,10 +183,7 @@ impl Rule for MD004UnorderedListStyle {
                                     message: format!("List marker '{marker}' does not match expected style '{target}'"),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name().to_string()),
-                                    fix: Some(Fix {
-                                        range: offset..offset + 1,
-                                        replacement: target.to_string(),
-                                    }),
+                                    fix: Some(Fix::new(offset..offset + 1, target.to_string())),
                                 });
                             }
                         }
@@ -216,10 +213,7 @@ impl Rule for MD004UnorderedListStyle {
                                         ),
                                         severity: Severity::Warning,
                                         rule_name: Some(self.name().to_string()),
-                                        fix: Some(Fix {
-                                            range: offset..offset + 1,
-                                            replacement: expected_marker.to_string(),
-                                        }),
+                                        fix: Some(Fix::new(offset..offset + 1, expected_marker.to_string())),
                                     });
                             }
                         }
@@ -247,10 +241,7 @@ impl Rule for MD004UnorderedListStyle {
                                     ),
                                     severity: Severity::Warning,
                                     rule_name: Some(self.name().to_string()),
-                                    fix: Some(Fix {
-                                        range: offset..offset + 1,
-                                        replacement: target_marker.to_string(),
-                                    }),
+                                    fix: Some(Fix::new(offset..offset + 1, target_marker.to_string())),
                                 });
                             }
                         }

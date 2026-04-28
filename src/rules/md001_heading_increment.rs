@@ -244,10 +244,10 @@ impl Rule for MD001HeadingIncrement {
                         fix_info.fixed_level, level
                     ),
                     severity: Severity::Error,
-                    fix: Some(Fix {
-                        range: ctx.line_index.line_content_range(valid_heading.line_num),
-                        replacement: format!("{original_indent}{replacement}"),
-                    }),
+                    fix: Some(Fix::new(
+                        ctx.line_index.line_content_range(valid_heading.line_num),
+                        format!("{original_indent}{replacement}"),
+                    )),
                 });
             }
         }

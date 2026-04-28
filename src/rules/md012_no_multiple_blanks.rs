@@ -107,16 +107,16 @@ impl MD012NoMultipleBlanks {
                     column: start_col,
                     end_line,
                     end_column: end_col,
-                    fix: Some(Fix {
-                        range: {
+                    fix: Some(Fix::new(
+                        {
                             let line_start = line_index.get_line_start_byte(excess_line).unwrap_or(0);
                             let line_end = line_index
                                 .get_line_start_byte(excess_line + 1)
                                 .unwrap_or(line_start + 1);
                             line_start..line_end
                         },
-                        replacement: String::new(),
-                    }),
+                        String::new(),
+                    )),
                 });
             }
         }
@@ -335,13 +335,7 @@ impl Rule for MD012NoMultipleBlanks {
                 column: 1,
                 end_line: report_line,
                 end_column: 1,
-                fix: Some(Fix {
-                    range: fix_start..fix_end,
-                    // The fix_start already points to the first blank line, which is AFTER
-                    // the last content line's newline. So we just remove everything from
-                    // fix_start to end, and the last content line's newline is preserved.
-                    replacement: String::new(),
-                }),
+                fix: Some(Fix::new(fix_start..fix_end, String::new())),
             });
         }
 

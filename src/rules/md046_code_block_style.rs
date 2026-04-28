@@ -701,10 +701,10 @@ impl MD046CodeBlockStyle {
                     end_column: end_col,
                     message: format!("Code block opened with '{fence_marker}' but never closed"),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: (ctx.content.len()..ctx.content.len()),
-                        replacement: format!("\n{fence_marker}"),
-                    }),
+                    fix: Some(Fix::new(
+                        ctx.content.len()..ctx.content.len(),
+                        format!("\n{fence_marker}"),
+                    )),
                 });
             }
         }

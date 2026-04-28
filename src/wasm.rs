@@ -77,6 +77,8 @@ struct JsWarning {
 struct JsFix {
     range: JsRange,
     replacement: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    additional_edits: Vec<JsFix>,
 }
 
 /// Range with character offsets for JavaScript
@@ -88,13 +90,17 @@ struct JsRange {
 
 /// Convert a LintWarning to a JsWarning with character offsets
 fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
-    let js_fix = warning.fix.as_ref().map(|fix| JsFix {
-        range: JsRange {
-            start: byte_offset_to_char_offset(content, fix.range.start),
-            end: byte_offset_to_char_offset(content, fix.range.end),
-        },
-        replacement: fix.replacement.clone(),
-    });
+    fn fix_to_js(fix: &crate::rule::Fix, content: &str) -> JsFix {
+        JsFix {
+            range: JsRange {
+                start: byte_offset_to_char_offset(content, fix.range.start),
+                end: byte_offset_to_char_offset(content, fix.range.end),
+            },
+            replacement: fix.replacement.clone(),
+            additional_edits: fix.additional_edits.iter().map(|e| fix_to_js(e, content)).collect(),
+        }
+    }
+    let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, content));
 
     // Convert byte-based columns to character-based columns
     let column = get_line_content(content, warning.line)

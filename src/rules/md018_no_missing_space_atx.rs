@@ -254,15 +254,12 @@ impl Rule for MD018NoMissingSpaceAtx {
                                 end_line,
                                 end_column: end_col,
                                 severity: Severity::Warning,
-                                fix: Some(Fix {
-                                    range: self.get_line_byte_range(ctx.content, line_num + 1),
-                                    replacement: {
-                                        // Preserve original indentation (including tabs)
-                                        let line = line_info.content(ctx.content);
-                                        let original_indent = &line[..line_info.indent];
-                                        format!("{original_indent}{} {after_marker}", heading.marker)
-                                    },
-                                }),
+                                fix: Some(Fix::new(self.get_line_byte_range(ctx.content, line_num + 1), {
+                                    // Preserve original indentation (including tabs)
+                                    let line = line_info.content(ctx.content);
+                                    let original_indent = &line[..line_info.indent];
+                                    format!("{original_indent}{} {after_marker}", heading.marker)
+                                })),
                             });
                         }
                     }
@@ -291,10 +288,10 @@ impl Rule for MD018NoMissingSpaceAtx {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: self.get_line_byte_range(ctx.content, line_num + 1),
-                            replacement: fixed_line,
-                        }),
+                        fix: Some(Fix::new(
+                            self.get_line_byte_range(ctx.content, line_num + 1),
+                            fixed_line,
+                        )),
                     });
                 }
             }

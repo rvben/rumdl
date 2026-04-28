@@ -331,15 +331,15 @@ impl Rule for MD038NoSpaceInCode {
                     end_column: code_span.end_col, // Don't add 1 to match test expectation
                     message: "Spaces inside code span elements".to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: code_span.byte_offset..code_span.byte_end,
-                        replacement: format!(
+                    fix: Some(Fix::new(
+                        code_span.byte_offset..code_span.byte_end,
+                        format!(
                             "{}{}{}",
                             "`".repeat(code_span.backtick_count),
                             trimmed,
                             "`".repeat(code_span.backtick_count)
                         ),
-                    }),
+                    )),
                 });
             }
         }

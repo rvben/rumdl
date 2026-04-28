@@ -362,10 +362,7 @@ impl Rule for MD007ULIndent {
                             end_byte += ch.len_utf8();
                         }
 
-                        Some(crate::rule::Fix {
-                            range: start_byte..end_byte,
-                            replacement,
-                        })
+                        Some(crate::rule::Fix::new(start_byte..end_byte, replacement))
                     };
 
                     warnings.push(LintWarning {

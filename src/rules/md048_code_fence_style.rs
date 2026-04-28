@@ -258,10 +258,10 @@ impl Rule for MD048CodeFenceStyle {
                         end_line,
                         end_column: end_col,
                         severity: Severity::Warning,
-                        fix: Some(Fix {
-                            range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                        fix: Some(Fix::new(
+                            line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                             replacement,
-                        }),
+                        )),
                     });
                 } else {
                     // Already the correct style. Check for fence-length ambiguity:
@@ -296,10 +296,10 @@ impl Rule for MD048CodeFenceStyle {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                                 replacement,
-                            }),
+                            )),
                         });
                     } else {
                         converted_fence_len = fence_len;
@@ -363,10 +363,10 @@ impl Rule for MD048CodeFenceStyle {
                             end_line,
                             end_column: end_col,
                             severity: Severity::Warning,
-                            fix: Some(Fix {
-                                range: line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
+                            fix: Some(Fix::new(
+                                line_index.line_col_to_byte_range_with_length(line_num + 1, 1, line.len()),
                                 replacement,
-                            }),
+                            )),
                         });
                     }
 

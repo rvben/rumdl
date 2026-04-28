@@ -61,12 +61,7 @@ impl Rule for MD047SingleTrailingNewline {
                 end_line,
                 end_column: end_col,
                 severity: Severity::Warning,
-                fix: Some(Fix {
-                    // For missing newline, insert at the end of the file
-                    range: content.len()..content.len(),
-                    // Always add LF - will be converted to CRLF at I/O boundary if needed
-                    replacement: "\n".to_string(),
-                }),
+                fix: Some(Fix::new(content.len()..content.len(), "\n".to_string())),
             });
         }
 

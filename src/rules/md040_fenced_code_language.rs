@@ -286,8 +286,8 @@ impl Rule for MD040FencedCodeLanguage {
                     end_column: end_col,
                     message: "Code block (```) missing language".to_string(),
                     severity: Severity::Warning,
-                    fix: Some(Fix {
-                        range: {
+                    fix: Some(Fix::new(
+                        {
                             let trimmed = line.trim_start();
                             let trimmed_start = line.len() - trimmed.len();
                             let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
@@ -298,7 +298,7 @@ impl Rule for MD040FencedCodeLanguage {
                             let line_end_byte = line_start_byte + line.len();
                             fence_end_byte..line_end_byte
                         },
-                        replacement: {
+                        {
                             let trimmed = line.trim_start();
                             let after_fence = &trimmed[block.fence_marker.len()..];
                             let after_fence_trimmed = after_fence.trim();
@@ -308,7 +308,7 @@ impl Rule for MD040FencedCodeLanguage {
                                 format!("text {after_fence_trimmed}")
                             }
                         },
-                    }),
+                    )),
                 });
                 continue;
             }
@@ -365,10 +365,10 @@ impl Rule for MD040FencedCodeLanguage {
 
                 let fix = find_label_span(line, &block.fence_marker).map(|(label_start, label_end)| {
                     let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                    Fix {
-                        range: (line_start_byte + label_start)..(line_start_byte + label_end),
-                        replacement: preferred.clone(),
-                    }
+                    Fix::new(
+                        (line_start_byte + label_start)..(line_start_byte + label_end),
+                        preferred.clone(),
+                    )
                 });
                 let lang = &block.language;
                 let canonical = canonical.unwrap();
