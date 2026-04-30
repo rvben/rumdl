@@ -438,6 +438,13 @@ fn is_unordered_list_marker(s: &str) -> bool {
         && (s.len() == 1 || s.as_bytes().get(1) == Some(&b' '))
 }
 
+/// Check if a trimmed line starts with a bold BDD/Gherkin step keyword.
+fn is_bdd_step_line(s: &str) -> bool {
+    ["**Given**", "**When**", "**Then**", "**And**", "**But**"]
+        .iter()
+        .any(|keyword| s.starts_with(keyword))
+}
+
 /// Shared structural checks for block boundary detection.
 /// Checks elements that only depend on the trimmed line content.
 fn is_block_boundary_core(trimmed: &str) -> bool {
@@ -450,6 +457,7 @@ fn is_block_boundary_core(trimmed: &str) -> bool {
         || is_horizontal_rule(trimmed)
         || is_unordered_list_marker(trimmed)
         || is_numbered_list_item(trimmed)
+        || is_bdd_step_line(trimmed)
         || is_definition_list_item(trimmed)
         || trimmed.starts_with(":::")
 }
