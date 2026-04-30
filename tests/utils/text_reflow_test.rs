@@ -88,6 +88,41 @@ fn test_preserve_links() {
 }
 
 #[test]
+fn test_reflow_preserves_bdd_step_line_boundaries() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "\
+### Scenario: Preserve line-oriented steps
+
+**Given** a customer account has an active subscription with several linked devices
+**When** the operator disables access for one linked device from the support console
+**Then** the audit trail records the device-specific access change without changing other devices
+";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("\n**Given**"),
+        "Given step should remain at the start of its own line:\n{result}"
+    );
+    assert!(
+        result.contains("\n**When**"),
+        "When step should remain at the start of its own line:\n{result}"
+    );
+    assert!(
+        result.contains("\n**Then**"),
+        "Then step should remain at the start of its own line:\n{result}"
+    );
+    assert!(
+        !result.contains("devices **When**"),
+        "Step boundaries must not be collapsed into one paragraph:\n{result}"
+    );
+}
+
+#[test]
 fn test_reference_link_patterns_fixed() {
     let options = ReflowOptions {
         line_length: 80,
