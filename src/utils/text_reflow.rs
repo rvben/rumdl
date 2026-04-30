@@ -1508,6 +1508,7 @@ fn handle_emphasis_sentence_split(
             && !current_line.ends_with(' ')
             && !current_line.ends_with('(')
             && !current_line.ends_with('[')
+            && !current_line.ends_with('-')
         {
             current_line.push(' ');
         }
@@ -1536,6 +1537,7 @@ fn handle_emphasis_sentence_split(
                     && !current_line.ends_with(' ')
                     && !current_line.ends_with('(')
                     && !current_line.ends_with('[')
+                    && !current_line.ends_with('-')
                 {
                     current_line.push(' ');
                 }
