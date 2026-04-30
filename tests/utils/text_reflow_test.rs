@@ -109,6 +109,27 @@ fn test_reflow_keeps_closing_quote_with_parenthetical_placeholder() {
 }
 
 #[test]
+fn test_reflow_preserves_literal_wildcard_asterisks() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "- **Catalog layout.** Reference files live under `docs/items/<name>/` (`README.md`, `notes.md`, `checks.md`) and `examples/items/<name>.md`. IDs (TICKET-*, TASK-*, CASE-*) stay in the shared namespace: TICKET-17 is still called TICKET-17 inside the nested catalog.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("TICKET-*"),
+        "literal wildcard ID should be preserved during reflow:\n{result}"
+    );
+    assert!(
+        !result.contains("TICKET- *"),
+        "reflow should not insert whitespace before a literal wildcard asterisk:\n{result}"
+    );
+}
+
+#[test]
 fn test_reference_link_patterns_fixed() {
     let options = ReflowOptions {
         line_length: 80,
