@@ -88,6 +88,27 @@ fn test_preserve_links() {
 }
 
 #[test]
+fn test_reflow_keeps_closing_quote_with_parenthetical_placeholder() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+
+    let input = "The toolbar surfaces the action with a hint of the form \"Retry (may still fail — check: <provider-specific remediation hint>)\" for delayed failures.";
+    let result = reflow_markdown(input, &options);
+
+    assert!(
+        result.contains("<provider-specific remediation hint>)\""),
+        "closing quote should stay attached to the parenthetical placeholder:\n{result}"
+    );
+    assert!(
+        !result.contains("\n\" for delayed"),
+        "reflow should not move the closing quote to its own continuation line:\n{result}"
+    );
+}
+
+#[test]
 fn test_reference_link_patterns_fixed() {
     let options = ReflowOptions {
         line_length: 80,
