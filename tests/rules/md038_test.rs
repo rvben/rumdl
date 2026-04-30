@@ -85,3 +85,17 @@ fn test_code_with_punctuation() {
     let result = rule.check(&ctx).unwrap();
     assert!(result.is_empty(), "Single space at both ends is valid CommonMark");
 }
+
+#[test]
+fn test_nested_backticks_do_not_lose_boundary_spaces() {
+    let rule = MD038NoSpaceInCode::new();
+    let content = "Schema example: `{ kind, mode, label (same enum as `Widget.mode` per MODEL-12) }`.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(
+        fixed, content,
+        "MD038 should not remove spaces around backticks that appear to be nested inside a larger code-like span"
+    );
+}
