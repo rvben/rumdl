@@ -205,6 +205,26 @@ impl MD038NoSpaceInCode {
 
         false
     }
+
+    /// Check for a CommonMark parse shape produced by nested single backticks.
+    ///
+    /// In text like `` `{ outer `inner` outer }` ``, CommonMark sees two adjacent
+    /// code spans rather than one nested span. Removing the apparent leading or
+    /// trailing space from those parsed spans moves prose across the inner
+    /// backticks and changes the rendered text.
+    fn has_attached_nested_backtick_boundary(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        code_span: &crate::lint_context::CodeSpan,
+    ) -> bool {
+        let content = code_span.content.as_str();
+
+        let next_char = ctx.content[code_span.byte_end..].chars().next();
+        let prev_char = ctx.content[..code_span.byte_offset].chars().next_back();
+
+        (content.ends_with(char::is_whitespace) && next_char.is_some_and(|c| !c.is_whitespace()))
+            || (content.starts_with(char::is_whitespace) && prev_char.is_some_and(|c| !c.is_whitespace()))
+    }
 }
 
 impl Rule for MD038NoSpaceInCode {
@@ -320,6 +340,10 @@ impl Rule for MD038NoSpaceInCode {
                 // Check if this might be part of a nested backtick structure
                 // by looking for other code spans nearby that might indicate nesting
                 if self.is_likely_nested_backticks(ctx, i) {
+                    continue;
+                }
+
+                if self.has_attached_nested_backtick_boundary(ctx, code_span) {
                     continue;
                 }
 
