@@ -973,6 +973,37 @@ Another paragraph to wrap.";
 }
 
 #[test]
+fn test_reflow_preserves_tables_nested_in_list_items() {
+    use rumdl_lib::rules::md013_line_length::md013_config::{MD013Config, ReflowMode};
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "- Error mappings should remain tabular when nested under a list item and the introductory sentence is intentionally long enough to trigger semantic reflow.\n  | Code | Meaning |\n  |---|---|\n  | `LIMIT_REACHED` | The configured quota was reached. |\n  | `TOKEN_EXPIRED` | The session token expired. |\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.contains("  | Code | Meaning |\n  |---|---|\n"),
+        "Indented table header and delimiter should remain separate rows:\n{fixed}"
+    );
+    assert!(
+        fixed.contains("  | `LIMIT_REACHED` | The configured quota was reached. |\n"),
+        "Indented table body rows should remain intact:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("| Code | Meaning | |---|---|"),
+        "Table rows must not be collapsed into list paragraph text:\n{fixed}"
+    );
+}
+
+#[test]
 fn test_reflow_edge_cases() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
