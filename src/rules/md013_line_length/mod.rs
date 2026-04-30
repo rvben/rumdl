@@ -1688,9 +1688,8 @@ impl MD013LineLength {
                             if line_info.is_div_marker {
                                 list_item_lines.push(LineType::DivMarker(content));
                             }
-                            // Check if this is a fence marker (opening or closing)
-                            // These should be treated as code block lines, not paragraph content
-                            else if is_fence_marker(&content) {
+                            // Check for structural lines that must not be merged into paragraphs.
+                            else if is_fence_marker(&content) || TableUtils::is_potential_table_row(&content) {
                                 list_item_lines.push(LineType::CodeBlock(content, indent));
                             }
                             // Check if this is a semantic line (NOTE:, WARNING:, etc.)
