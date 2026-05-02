@@ -1004,6 +1004,28 @@ fn test_reflow_preserves_tables_nested_in_list_items() {
 }
 
 #[test]
+fn test_reflow_wraps_pipe_prose_nested_in_list_items() {
+    use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
+
+    let config = MD013Config {
+        line_length: LineLength::from_const(70),
+        reflow: true,
+        ..Default::default()
+    };
+
+    let rule = MD013LineLength::from_config_struct(config);
+    let content = "- Pipeline guidance:\n  alpha | beta | gamma is prose with literal pipe characters that should wrap to the configured width instead of being preserved as a structural table row.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(
+        fixed,
+        "- Pipeline guidance: alpha | beta | gamma is prose with literal pipe\n  characters that should wrap to the configured width instead of being\n  preserved as a structural table row.\n"
+    );
+}
+
+#[test]
 fn test_reflow_edge_cases() {
     use rumdl_lib::rules::md013_line_length::md013_config::MD013Config;
 
