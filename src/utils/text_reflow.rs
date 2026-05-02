@@ -1350,6 +1350,14 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
     elements
 }
 
+fn should_insert_space_before_join(current: &str) -> bool {
+    !current.is_empty()
+        && !current.ends_with(' ')
+        && !current.ends_with('(')
+        && !current.ends_with('[')
+        && !current.ends_with('-')
+}
+
 /// Reflow elements for sentence-per-line mode
 fn reflow_elements_sentence_per_line(
     elements: &[Element],
@@ -1471,12 +1479,7 @@ fn reflow_elements_sentence_per_line(
             };
 
             // Add space before element if needed, but not for adjacent elements
-            if !is_adjacent
-                && !current_line.is_empty()
-                && !current_line.ends_with(' ')
-                && !current_line.ends_with('(')
-                && !current_line.ends_with('[')
-            {
+            if !is_adjacent && should_insert_space_before_join(&current_line) {
                 current_line.push(' ');
             }
             current_line.push_str(&element_str);
@@ -1504,12 +1507,7 @@ fn handle_emphasis_sentence_split(
 
     if sentences.len() <= 1 {
         // Single sentence or no boundaries - treat as atomic
-        if !current_line.is_empty()
-            && !current_line.ends_with(' ')
-            && !current_line.ends_with('(')
-            && !current_line.ends_with('[')
-            && !current_line.ends_with('-')
-        {
+        if should_insert_space_before_join(current_line) {
             current_line.push(' ');
         }
         current_line.push_str(marker);
@@ -1533,12 +1531,7 @@ fn handle_emphasis_sentence_split(
 
             if i == 0 {
                 // First sentence: combine with current_line and emit
-                if !current_line.is_empty()
-                    && !current_line.ends_with(' ')
-                    && !current_line.ends_with('(')
-                    && !current_line.ends_with('[')
-                    && !current_line.ends_with('-')
-                {
+                if should_insert_space_before_join(current_line) {
                     current_line.push(' ');
                 }
                 current_line.push_str(marker);
