@@ -265,6 +265,13 @@ impl MD063HeadingCapitalization {
             return true;
         }
 
+        // Numeric ordinals like "5Th", "1St" superficially look like internal-capital
+        // words but are actually miscapitalized ordinals; do not preserve them so the
+        // style-specific path can normalize them ("5Th" -> "5th" in title/sentence case).
+        if Self::is_numeric_ordinal(word) {
+            return false;
+        }
+
         // Check if word has internal capitals and preserve_cased_words is enabled
         if self.config.preserve_cased_words && self.has_internal_capitals(word) {
             return true;
@@ -308,6 +315,16 @@ impl MD063HeadingCapitalization {
             return word.to_string();
         }
 
+        // Numeric ordinals like "5th", "1st", "21st", "2nd", "3rd" must keep
+        // their alphabetic suffix lowercase, even at the start or end of a
+        // heading. Without this guard, capitalize_first finds the first
+        // alphabetic character and yields wrong forms like "5Th" or "1St".
+        // Checked before should_preserve_word because the internal-capitals
+        // heuristic would otherwise treat "5Th" as a preserved cased word.
+        if Self::is_numeric_ordinal(word) {
+            return Self::lowercase_preserving_composition(word);
+        }
+
         // Preserve words in ignore list or with internal capitals
         if self.should_preserve_word(word) {
             return word.to_string();
@@ -325,6 +342,27 @@ impl MD063HeadingCapitalization {
 
         // Regular word - capitalize first letter
         self.capitalize_first(word)
+    }
+
+    /// Check whether `word` is an English numeric ordinal: one or more ASCII
+    /// digits followed by `st`, `nd`, `rd`, or `th` (case-insensitive).
+    /// Examples: "1st", "2ND", "21st", "5Th" all return true.
+    fn is_numeric_ordinal(word: &str) -> bool {
+        let bytes = word.as_bytes();
+        let n = bytes.len();
+        if n < 3 {
+            return false;
+        }
+        let mut i = 0;
+        while i < n && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == 0 || n - i != 2 {
+            return false;
+        }
+        let s0 = bytes[i].to_ascii_lowercase();
+        let s1 = bytes[i + 1].to_ascii_lowercase();
+        matches!((s0, s1), (b's', b't') | (b'n', b'd') | (b'r', b'd') | (b't', b'h'))
     }
 
     /// Apply canonical proper-name casing while preserving any trailing punctuation
@@ -1118,6 +1156,63 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Self-Documenting Code"));
+    }
+
+    // Numeric ordinal tests (regression for #608)
+    #[test]
+    fn test_title_case_numeric_ordinal_already_correct() {
+        let rule = create_rule();
+        for content in [
+            "# 1st Test Markdown File for This Issue\n",
+            "# May 3rd\n",
+            "# 21st Century\n",
+            "# 2nd Edition\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(result.is_empty(), "Heading {content:?} should not be flagged");
+        }
+    }
+
+    #[test]
+    fn test_title_case_numeric_ordinal_miscapitalized() {
+        let rule = create_rule();
+        let content = "# May 5Th\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("May 5th"),
+            "expected suggestion to lowercase ordinal suffix, got: {}",
+            result[0].message
+        );
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# May 5th\n");
+    }
+
+    #[test]
+    fn test_title_case_numeric_ordinal_fix_lowercase() {
+        let rule = create_rule();
+        let content = "# 1st Place and 2Nd Edition\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "# 1st Place and 2nd Edition\n");
+    }
+
+    #[test]
+    fn test_is_numeric_ordinal_helper() {
+        for word in ["1st", "2nd", "3rd", "4th", "21st", "22ND", "33Rd", "5Th"] {
+            assert!(
+                MD063HeadingCapitalization::is_numeric_ordinal(word),
+                "{word:?} should match",
+            );
+        }
+        for word in ["", "th", "5", "5K", "100MB", "5kg", "1stplace", "first"] {
+            assert!(
+                !MD063HeadingCapitalization::is_numeric_ordinal(word),
+                "{word:?} should not match",
+            );
+        }
     }
 
     // Sentence case tests
