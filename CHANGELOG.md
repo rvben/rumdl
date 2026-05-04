@@ -29,6 +29,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.87](https://github.com/rvben/rumdl/compare/v0.1.86...v0.1.87) - 2026-05-02
+
+### Added
+
+- **config**: fall back to ~/.rumdl.toml and ~/rumdl.toml as user config ([8557089](https://github.com/rvben/rumdl/commit/855708960aa85877d1fb4aff0c116cb01348020c))
+
+### Fixed
+
+- **code-block-tools**: use yamlfmt lint mode for YAML (#606) ([0296f86](https://github.com/rvben/rumdl/commit/0296f8691e253baa77b53a3c52f7c95f4b7acbf2))
+- **MD038**: preserve spaces around nested backticks (#605) ([a9552c6](https://github.com/rvben/rumdl/commit/a9552c652e070e34042e47e07096ef16730a19d6))
+- **MD013**: keep closing quote with parenthetical splits (#601) ([9a47b99](https://github.com/rvben/rumdl/commit/9a47b99ba60771902c3d0d3346456e0ae38a3d6e))
+
 ## [0.1.86](https://github.com/rvben/rumdl/compare/v0.1.85...v0.1.86) - 2026-05-01
 
 ### Added

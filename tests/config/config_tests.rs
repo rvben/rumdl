@@ -977,8 +977,9 @@ indent = 4
 
     // Test that user config is loaded when no project config exists
     // Pass the config_dir directly instead of setting XDG_CONFIG_HOME
-    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
-        .expect("Should load user config");
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
+            .expect("Should load user config");
 
     let config: Config = sourced.into_validated_unchecked().into();
 
@@ -1011,7 +1012,7 @@ indent = 2
 
     // Test that project config takes precedence over user config
     let sourced_with_project =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
             .expect("Should load project config");
 
     let config_with_project: Config = sourced_with_project.into_validated_unchecked().into();
@@ -1081,8 +1082,9 @@ line-length = 99"#,
     env::set_current_dir(&project_dir).unwrap();
 
     // Test that .rumdl.toml is loaded first - pass config_dir directly
-    let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
-        .expect("Should load user config");
+    let sourced =
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
+            .expect("Should load user config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(
@@ -1094,8 +1096,9 @@ line-length = 99"#,
     // Remove .rumdl.toml and test again
     fs::remove_file(&dot_rumdl_path).unwrap();
 
-    let sourced2 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
-        .expect("Should load user config");
+    let sourced2 =
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
+            .expect("Should load user config");
 
     let config2: Config = sourced2.into_validated_unchecked().into();
     assert_eq!(
@@ -1107,8 +1110,9 @@ line-length = 99"#,
     // Remove rumdl.toml and test again
     fs::remove_file(&rumdl_path).unwrap();
 
-    let sourced3 = rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir))
-        .expect("Should load user config");
+    let sourced3 =
+        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
+            .expect("Should load user config");
 
     let config3: Config = sourced3.into_validated_unchecked().into();
     assert_eq!(

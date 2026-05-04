@@ -734,7 +734,7 @@ rumdl can be configured in several ways:
 2. Using a `<project>/.config/rumdl.toml` file (following the [config-dir convention](https://github.com/pi0/config-dir))
 3. Using the `[tool.rumdl]` section in your project's `pyproject.toml` file (for Python projects)
 4. Using command-line arguments
-5. Using a **global user config** at `~/.config/rumdl/rumdl.toml` (see [Global Configuration](#global-configuration) below)
+5. Using a **global user config** at `~/.config/rumdl/rumdl.toml` or a home-directory dotfile at `~/.rumdl.toml` (see [Global Configuration](#global-configuration) below)
 6. **Automatic markdownlint compatibility**: rumdl automatically discovers and loads existing markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.)
 
 ### Configuration Discovery
@@ -802,22 +802,22 @@ If your editor doesn't support SchemaStore, associate this schema URL with `.rum
 
 ### Global Configuration
 
-When no project configuration is found, rumdl will check for a user-level configuration file in your platform's standard config directory:
+When no project configuration is found, rumdl looks for a user-level configuration file in two locations, in this order:
 
-**Location:**
+**1. Platform user-config directory** (preferred):
 
 - **Linux/macOS**: `~/.config/rumdl/` (respects `XDG_CONFIG_HOME` if set)
 - **Windows**: `%APPDATA%\rumdl\`
 
-**Files checked (in order):**
+Files checked (in order): `.rumdl.toml`, `rumdl.toml`, `pyproject.toml` (must contain `[tool.rumdl]` section).
 
-1. `.rumdl.toml`
-2. `rumdl.toml`
-3. `pyproject.toml` (must contain `[tool.rumdl]` section)
+**2. Home-directory dotfile** (fallback):
+
+If nothing is found in the platform config directory, rumdl also checks for `~/.rumdl.toml`, then `~/rumdl.toml`. This honors the classic Unix dotfile convention used by tools like `git` and `npm`.
 
 This allows you to set personal preferences that apply to all projects without local configuration.
 
-**Example:** Create `~/.config/rumdl/rumdl.toml`:
+**Example:** Create `~/.config/rumdl/rumdl.toml` (preferred) or `~/.rumdl.toml`:
 
 ```toml
 [global]
@@ -828,7 +828,9 @@ disable = ["MD013", "MD041"]
 indent = 2
 ```
 
-**Note:** User configuration is only used when no project configuration exists. Project configurations always take precedence.
+**Note:** User configuration is only used when no project configuration exists.
+Project configurations always take precedence. When both a platform user-config
+file and a home-directory dotfile exist, the platform user-config file wins.
 
 ### Markdownlint Migration
 

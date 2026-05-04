@@ -618,6 +618,67 @@ impl SourcedConfig<ConfigLoaded> {
         None
     }
 
+    /// Internal implementation that accepts the home directory for testing.
+    ///
+    /// Probes `<home>/.rumdl.toml` then `<home>/rumdl.toml`, returning the first match.
+    ///
+    /// `pyproject.toml` is intentionally **not** searched in `$HOME`, even though
+    /// `user_configuration_path_impl` does check it inside the platform config dir.
+    /// The asymmetry is deliberate: a `pyproject.toml` directly in `$HOME` almost
+    /// always belongs to unrelated python tooling (poetry/uv/pip's user-level config),
+    /// and silently picking it up as a rumdl config would surprise users. The
+    /// platform config dir (`~/.config/rumdl/`) is rumdl-scoped, so the same
+    /// concern doesn't apply there.
+    fn home_configuration_path_impl(home_dir: &Path) -> Option<std::path::PathBuf> {
+        const HOME_CONFIG_FILES: &[&str] = &[".rumdl.toml", "rumdl.toml"];
+
+        log::debug!(
+            "[rumdl-config] Checking for home-directory configuration in: {}",
+            home_dir.display()
+        );
+
+        for filename in HOME_CONFIG_FILES {
+            let config_path = home_dir.join(filename);
+            if config_path.exists() {
+                log::debug!(
+                    "[rumdl-config] Found home-directory configuration at: {}",
+                    config_path.display()
+                );
+                return Some(config_path);
+            }
+        }
+
+        log::debug!(
+            "[rumdl-config] No home-directory configuration found in: {}",
+            home_dir.display()
+        );
+        None
+    }
+
+    /// Discover a home-directory configuration file (`~/.rumdl.toml` or `~/rumdl.toml`).
+    ///
+    /// This is a final fallback after the platform user-config directory
+    /// (`user_configuration_path`). It honors the classic Unix dotfile convention so
+    /// users who keep tool config in `$HOME` rather than `$XDG_CONFIG_HOME` are picked up.
+    #[cfg(feature = "native")]
+    fn home_configuration_path() -> Option<std::path::PathBuf> {
+        use etcetera::{BaseStrategy, choose_base_strategy};
+
+        match choose_base_strategy() {
+            Ok(strategy) => Self::home_configuration_path_impl(strategy.home_dir()),
+            Err(e) => {
+                log::debug!("[rumdl-config] Failed to determine home directory: {e}");
+                None
+            }
+        }
+    }
+
+    /// Stub for WASM builds - home config not supported
+    #[cfg(not(feature = "native"))]
+    fn home_configuration_path() -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Load an explicit config file (standalone, no user config merging)
     fn load_explicit_config(sourced_config: &mut Self, path: &str) -> Result<(), ConfigError> {
         let path_obj = Path::new(path);
@@ -673,21 +734,35 @@ impl SourcedConfig<ConfigLoaded> {
 
     /// Load and merge user-level configuration into this `SourcedConfig`.
     ///
-    /// Discovers the user config file from the platform config directory
-    /// (or `user_config_dir` if provided for testing). Resolves any `extends`
-    /// chain and merges each fragment with `ConfigSource::UserConfig` precedence.
+    /// Discovers the user config file in this order, taking the first match:
+    /// 1. Platform user-config directory (XDG on Linux, `~/Library/Application Support`
+    ///    on macOS, `%APPDATA%` on Windows). Override with `user_config_dir` for tests.
+    /// 2. Home-directory dotfile (`~/.rumdl.toml`, then `~/rumdl.toml`). Override with
+    ///    `home_dir` for tests. Honors the classic Unix dotfile convention.
+    ///
+    /// Resolves any `extends` chain and merges each fragment with
+    /// `ConfigSource::UserConfig` precedence.
     ///
     /// Called in two contexts:
     /// - When no project config is found: provides user defaults as the sole base
     /// - When a markdownlint project config is found: provides rumdl-specific
     ///   defaults that the markdownlint format cannot express; the markdownlint
     ///   fragment is merged on top and wins on any overlapping key
-    fn load_user_config(sourced_config: &mut Self, user_config_dir: Option<&Path>) -> Result<(), ConfigError> {
+    fn load_user_config(
+        sourced_config: &mut Self,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> Result<(), ConfigError> {
         let user_config_path = if let Some(dir) = user_config_dir {
             Self::user_configuration_path_impl(dir)
         } else {
             Self::user_configuration_path()
         };
+
+        let user_config_path = user_config_path.or_else(|| match home_dir {
+            Some(home) => Self::home_configuration_path_impl(home),
+            None => Self::home_configuration_path(),
+        });
 
         if let Some(user_config_path) = user_config_path {
             let path_str = user_config_path.display().to_string();
@@ -710,13 +785,14 @@ impl SourcedConfig<ConfigLoaded> {
         Ok(())
     }
 
-    /// Internal implementation that accepts user config directory for testing
+    /// Internal implementation that accepts user config directory and home directory for testing
     #[doc(hidden)]
     pub fn load_with_discovery_impl(
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
         skip_auto_discovery: bool,
         user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
     ) -> Result<Self, ConfigError> {
         use std::env;
         log::debug!("[rumdl-config] Current working directory: {:?}", env::current_dir());
@@ -772,7 +848,7 @@ impl SourcedConfig<ConfigLoaded> {
                     // cache) take effect. Markdownlint configs cannot express these settings.
                     // The markdownlint fragment uses ConfigSource::ProjectConfig (precedence 3)
                     // vs UserConfig (precedence 1), so project settings always win on overlap.
-                    Self::load_user_config(&mut sourced_config, user_config_dir)?;
+                    Self::load_user_config(&mut sourced_config, user_config_dir, home_dir)?;
                     match parsers::load_from_markdownlint(&path_str) {
                         Ok(fragment) => {
                             sourced_config.merge(fragment);
@@ -785,7 +861,7 @@ impl SourcedConfig<ConfigLoaded> {
                 } else {
                     // No project config at all - use user config as fallback
                     log::debug!("[rumdl-config] No project config found, using user config as fallback");
-                    Self::load_user_config(&mut sourced_config, user_config_dir)?;
+                    Self::load_user_config(&mut sourced_config, user_config_dir, home_dir)?;
                 }
             }
         }
@@ -837,7 +913,7 @@ impl SourcedConfig<ConfigLoaded> {
         cli_overrides: Option<&SourcedGlobalConfig>,
         skip_auto_discovery: bool,
     ) -> Result<Self, ConfigError> {
-        Self::load_with_discovery_impl(config_path, cli_overrides, skip_auto_discovery, None)
+        Self::load_with_discovery_impl(config_path, cli_overrides, skip_auto_discovery, None, None)
     }
 
     /// Validate the configuration against a rule registry.

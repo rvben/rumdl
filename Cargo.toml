@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.1.86"
+version = "0.1.87"
 edition = "2024"
 rust-version = "1.94.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"

@@ -1979,6 +1979,7 @@ enable = ["MD001"]
         None,
         false,
         Some(&user_config_dir),
+        None,
     )
     .unwrap();
 
@@ -2032,7 +2033,7 @@ line-length = 88
     env::set_current_dir(&project_dir).unwrap();
 
     // Load config - should use user config as fallback
-    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None).unwrap();
 
     let config: Config = sourced.into_validated_unchecked().into();
 
@@ -2100,7 +2101,7 @@ extend-disable = ["MD033"]
     env::set_current_dir(&project_dir).unwrap();
 
     // Load config - should use user config as fallback and resolve extends
-    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None).unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
     // Inherited from base config
@@ -2108,6 +2109,281 @@ extend-disable = ["MD033"]
     assert_eq!(config.global.line_length.get(), 92);
     // Added by child fallback config
     assert!(config.global.extend_disable.contains(&"MD033".to_string()));
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_home_dotfile_used_when_no_xdg_or_project_config() {
+    // ~/.rumdl.toml is honored as a final fallback when neither a project config
+    // nor a platform user-config file exists.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // Fake $HOME containing only a dotfile rumdl config
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(
+        fake_home.join(".rumdl.toml"),
+        r#"
+[global]
+disable = ["MD041"]
+line-length = 77
+"#,
+    )
+    .unwrap();
+
+    // Empty XDG config dir: present but contains no rumdl files
+    let user_config_dir = temp_dir.path().join("user_config_empty");
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    // Project dir without any config
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config.global.disable.contains(&"MD041".to_string()),
+        "~/.rumdl.toml should be loaded as fallback when no project or XDG config exists"
+    );
+    assert_eq!(
+        config.global.line_length.get(),
+        77,
+        "line-length from ~/.rumdl.toml should apply"
+    );
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_home_rumdl_toml_used_when_no_dotfile_present() {
+    // ~/rumdl.toml (no leading dot) is also honored, after ~/.rumdl.toml.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(fake_home.join("rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let user_config_dir = temp_dir.path().join("user_config_empty");
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "~/rumdl.toml should be loaded when ~/.rumdl.toml is absent"
+    );
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_xdg_config_wins_over_home_dotfile() {
+    // When both XDG (~/.config/rumdl/...) and ~/.rumdl.toml exist, XDG wins.
+    // This preserves backwards-compatible behavior for users who already configured
+    // the platform user-config directory.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // XDG config: disables MD013
+    let user_config_dir = temp_dir.path().join("user_config");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+    fs::write(rumdl_config_dir.join("rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    // Home dotfile: would disable MD041 if used
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(fake_home.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "XDG config should take precedence over ~/.rumdl.toml"
+    );
+    assert!(
+        !config.global.disable.contains(&"MD041".to_string()),
+        "Home dotfile should be ignored when XDG config exists"
+    );
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_project_config_wins_over_home_dotfile() {
+    // Project config is standalone -- a home dotfile must not bleed in.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(
+        fake_home.join(".rumdl.toml"),
+        "[global]\ndisable = [\"MD041\"]\nline-length = 77\n",
+    )
+    .unwrap();
+
+    // Empty XDG dir
+    let user_config_dir = temp_dir.path().join("user_config_empty");
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    // Project with its own config
+    let project_dir = temp_dir.path().join("project_with_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(
+        project_dir.join(".rumdl.toml"),
+        "[global]\nenable = [\"MD001\"]\nline-length = 120\n",
+    )
+    .unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config.global.enable.contains(&"MD001".to_string()),
+        "Project config should be loaded"
+    );
+    assert!(
+        !config.global.disable.contains(&"MD041".to_string()),
+        "Home dotfile must NOT bleed into project (project is standalone)"
+    );
+    assert_eq!(
+        config.global.line_length.get(),
+        120,
+        "Project line-length wins, not home dotfile's"
+    );
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_home_dotfile_supports_extends() {
+    // ~/.rumdl.toml must support `extends` chains -- a relative `extends` resolves
+    // against the dotfile's parent directory ($HOME), and the inherited config is
+    // merged with UserConfig precedence just like the XDG path.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // Fake $HOME with a base config and a child that extends it
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(
+        fake_home.join("base.toml"),
+        r#"
+[global]
+disable = ["MD013"]
+line-length = 92
+"#,
+    )
+    .unwrap();
+    fs::write(
+        fake_home.join(".rumdl.toml"),
+        r#"extends = "base.toml"
+
+[global]
+extend-disable = ["MD033"]
+"#,
+    )
+    .unwrap();
+
+    let user_config_dir = temp_dir.path().join("user_config_empty");
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    // Inherited from base.toml via extends
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "extends from ~/.rumdl.toml should pull base.toml's disable list"
+    );
+    assert_eq!(
+        config.global.line_length.get(),
+        92,
+        "extends from ~/.rumdl.toml should pull base.toml's line-length"
+    );
+    // Added by the home dotfile itself
+    assert!(
+        config.global.extend_disable.contains(&"MD033".to_string()),
+        "child fragment in ~/.rumdl.toml should still apply on top of extends"
+    );
+
+    env::set_current_dir(original_dir).unwrap();
+}
+
+#[serial_test::serial]
+#[test]
+fn test_home_dotfile_picked_up_over_rumdl_toml() {
+    // ~/.rumdl.toml takes precedence over ~/rumdl.toml when both exist.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(fake_home.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(fake_home.join("rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    let user_config_dir = temp_dir.path().join("user_config_empty");
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    let project_dir = temp_dir.path().join("project_no_config");
+    fs::create_dir_all(&project_dir).unwrap();
+    env::set_current_dir(&project_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        ".rumdl.toml (dotfile) should win over rumdl.toml in $HOME"
+    );
+    assert!(
+        !config.global.disable.contains(&"MD041".to_string()),
+        "rumdl.toml in $HOME should be ignored when .rumdl.toml is present"
+    );
 
     env::set_current_dir(original_dir).unwrap();
 }
@@ -3285,6 +3561,7 @@ fn test_extends_base_values_propagate_when_child_silent() {
         None,
         true,
         None,
+        None,
     )
     .unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
@@ -3307,6 +3584,7 @@ fn test_extends_child_disable_replaces_base() {
         None,
         true,
         None,
+        None,
     )
     .unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
@@ -3326,6 +3604,7 @@ fn test_extends_three_level_chain_propagates_from_root() {
         None,
         true,
         None,
+        None,
     )
     .unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
@@ -3343,6 +3622,7 @@ fn test_extends_rule_config_inherits_from_base() {
         Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
         None,
         true,
+        None,
         None,
     )
     .unwrap();
@@ -3366,6 +3646,7 @@ fn test_extends_child_rule_config_overrides_base() {
         Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
         None,
         true,
+        None,
         None,
     )
     .unwrap();
@@ -3394,6 +3675,7 @@ fn test_extends_enable_wins_over_inherited_disable() {
         None,
         true,
         None,
+        None,
     )
     .unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
@@ -3414,8 +3696,13 @@ fn test_extends_cycle_returns_error() {
     fs::write(dir.path().join("a.toml"), "extends = \"b.toml\"\n").unwrap();
     fs::write(dir.path().join("b.toml"), "extends = \"a.toml\"\n").unwrap();
 
-    let result =
-        SourcedConfig::load_with_discovery_impl(Some(dir.path().join("a.toml").to_str().unwrap()), None, true, None);
+    let result = SourcedConfig::load_with_discovery_impl(
+        Some(dir.path().join("a.toml").to_str().unwrap()),
+        None,
+        true,
+        None,
+        None,
+    );
 
     assert!(
         matches!(result, Err(ConfigError::CircularExtends { .. })),
@@ -3432,6 +3719,7 @@ fn test_extends_missing_file_returns_error() {
         Some(dir.path().join(".rumdl.toml").to_str().unwrap()),
         None,
         true,
+        None,
         None,
     );
 
@@ -3460,6 +3748,7 @@ fn test_extends_depth_limit_returns_error() {
         Some(dir.path().join(format!("level_{max_depth}.toml")).to_str().unwrap()),
         None,
         true,
+        None,
         None,
     );
 
@@ -3492,7 +3781,7 @@ fn test_user_config_loaded_alongside_markdownlint_config() {
 
     env::set_current_dir(&project_dir).unwrap();
 
-    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None).unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
     env::set_current_dir(&original_dir).unwrap();
@@ -3535,7 +3824,7 @@ fn test_user_config_settings_apply_when_markdownlint_present() {
 
     env::set_current_dir(&project_dir).unwrap();
 
-    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None).unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
     env::set_current_dir(&original_dir).unwrap();
@@ -3575,7 +3864,7 @@ fn test_markdownlint_config_overrides_user_config_on_conflict() {
 
     env::set_current_dir(&project_dir).unwrap();
 
-    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir)).unwrap();
+    let sourced = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None).unwrap();
     let config: Config = sourced.into_validated_unchecked().into();
 
     env::set_current_dir(&original_dir).unwrap();
@@ -3615,7 +3904,7 @@ fn test_user_config_applies_when_markdownlint_config_is_malformed() {
 
     env::set_current_dir(&project_dir).unwrap();
 
-    let result = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir));
+    let result = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), None);
 
     env::set_current_dir(&original_dir).unwrap();
 
