@@ -4,6 +4,62 @@ use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD031BlanksAroundFences;
 use rumdl_lib::rules::{CodeBlockStyle, MD046CodeBlockStyle};
 
+// ==================== MD031 fix() integration tests ====================
+
+#[test]
+fn test_md031_fix_inserts_blank_before_colon_fence() {
+    // Missing blank line before ::: opener — fix() must insert one.
+    let content = "Some text\n:::python\ncode\n:::\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::AzureDevOps, None);
+    let rule = MD031BlanksAroundFences::new(true);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Some text\n\n:::python\ncode\n:::\n");
+}
+
+#[test]
+fn test_md031_fix_inserts_blank_after_colon_fence() {
+    // Missing blank line after ::: closer — fix() must insert one.
+    let content = ":::python\ncode\n:::\nSome text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::AzureDevOps, None);
+    let rule = MD031BlanksAroundFences::new(true);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, ":::python\ncode\n:::\n\nSome text\n");
+}
+
+#[test]
+fn test_md031_fix_inserts_blanks_both_sides_of_colon_fence() {
+    // Missing blank lines on BOTH sides — fix() must insert both.
+    let content = "Some text\n:::python\ncode\n:::\nMore text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::AzureDevOps, None);
+    let rule = MD031BlanksAroundFences::new(true);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "Some text\n\n:::python\ncode\n:::\n\nMore text\n");
+}
+
+#[test]
+fn test_md031_fix_leaves_conforming_colon_fence_unchanged() {
+    // Document already has correct blank lines — fix() must be idempotent.
+    let content = "Some text\n\n:::python\ncode\n:::\n\nMore text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::AzureDevOps, None);
+    let rule = MD031BlanksAroundFences::new(true);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "fix() must not alter a conforming document");
+}
+
+#[test]
+fn test_md031_fix_standard_flavor_ignores_colon_fences() {
+    // Standard flavor does not recognise ::: fences, so no blank-line fix is applied.
+    let content = "Some text\n:::python\ncode\n:::\nMore text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let rule = MD031BlanksAroundFences::new(true);
+    let fixed = rule.fix(&ctx).unwrap();
+    // Standard flavor treats ::: lines as plain prose; no colon-fence fix should be emitted.
+    assert_eq!(
+        fixed, content,
+        "Standard flavor: fix() must not alter content around colon fences"
+    );
+}
+
 fn azure_ctx(content: &str) -> LintContext<'_> {
     LintContext::new(content, MarkdownFlavor::AzureDevOps, None)
 }
