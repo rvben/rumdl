@@ -167,7 +167,7 @@ pub struct CheckArgs {
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, or kramdown"
+        help = "Markdown flavor to use: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, or azure_devops (also accepts azure/ado)"
     )]
     pub flavor: Option<Flavor>,
 
@@ -257,7 +257,7 @@ pub struct FmtArgs {
     #[arg(
         long,
         value_enum,
-        help = "Markdown flavor to use while formatting: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, or kramdown"
+        help = "Markdown flavor to use while formatting: standard (also accepts gfm/github/commonmark), mkdocs, mdx, pandoc, quarto, obsidian, kramdown, or azure_devops (also accepts azure/ado)"
     )]
     pub flavor: Option<Flavor>,
 

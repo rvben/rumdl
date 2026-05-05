@@ -456,13 +456,17 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 
 ### Supported Flavors
 
-| Flavor                                              | Use Case                     | Key Features                                      |
-| --------------------------------------------------- | ---------------------------- | ------------------------------------------------- |
-| [standard](docs/flavors/standard.md)                | Default Markdown             | CommonMark + GFM extensions (tables, task lists)  |
-| [gfm](docs/flavors/gfm.md)                          | GitHub Flavored Markdown     | Extended autolinks, security-sensitive HTML       |
-| [mkdocs](docs/flavors/mkdocs.md)                    | MkDocs / Material for MkDocs | Admonitions, content tabs, mkdocstrings           |
-| [mdx](docs/flavors/mdx.md)                          | MDX (JSX in Markdown)        | JSX components, ESM imports, expressions          |
-| [quarto](docs/flavors/quarto.md)                    | Quarto / RMarkdown           | Citations, shortcodes, executable code blocks     |
+| Flavor                                       | Use Case                     | Key Features                                        |
+| -------------------------------------------- | ---------------------------- | --------------------------------------------------- |
+| [standard](docs/flavors/standard.md)         | Default Markdown             | CommonMark + GFM extensions (tables, task lists)    |
+| [gfm](docs/flavors/gfm.md)                   | GitHub Flavored Markdown     | Extended autolinks, security-sensitive HTML         |
+| [mkdocs](docs/flavors/mkdocs.md)             | MkDocs / Material for MkDocs | Admonitions, content tabs, mkdocstrings             |
+| [mdx](docs/flavors/mdx.md)                   | MDX (JSX in Markdown)        | JSX components, ESM imports, expressions            |
+| [quarto](docs/flavors/quarto.md)             | Quarto / RMarkdown           | Citations, shortcodes, executable code blocks       |
+| [pandoc](docs/flavors/pandoc.md)             | Pandoc Markdown              | Fenced divs, attribute lists, citations, math       |
+| [obsidian](docs/flavors/obsidian.md)         | Obsidian                     | Tag syntax (#tagname treated as tags, not headings) |
+| [kramdown](docs/flavors/kramdown.md)         | Jekyll / kramdown            | IALs, ALDs, extension blocks                        |
+| [azure_devops](docs/flavors/azure_devops.md) | Azure DevOps Wiki            | Colon code fences (:::lang ... :::)                 |
 
 ### Configuring Flavors
 
