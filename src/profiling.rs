@@ -194,7 +194,12 @@ impl Drop for ScopedTimer {
     }
 }
 
-/// Convenience macro to time a block of code
+/// Convenience macro to time a block of code.
+///
+/// When the `profiling` feature is disabled this expands to just the block,
+/// avoiding the `String` allocation that `ScopedTimer::new` would otherwise
+/// perform on every call. Hot-path call sites pay nothing in the default build.
+#[cfg(feature = "profiling")]
 #[macro_export]
 macro_rules! time_section {
     ($section:expr, $block:block) => {{
@@ -203,13 +208,28 @@ macro_rules! time_section {
     }};
 }
 
-/// Convenience macro to time a function call
+#[cfg(not(feature = "profiling"))]
+#[macro_export]
+macro_rules! time_section {
+    ($section:expr, $block:block) => {{ $block }};
+}
+
+/// Convenience macro to time a function call.
+///
+/// See `time_section!` for the rationale behind the feature gate.
+#[cfg(feature = "profiling")]
 #[macro_export]
 macro_rules! time_function {
     ($section:expr, $func:expr) => {{
         let _timer = $crate::profiling::ScopedTimer::new($section);
         $func
     }};
+}
+
+#[cfg(not(feature = "profiling"))]
+#[macro_export]
+macro_rules! time_function {
+    ($section:expr, $func:expr) => {{ $func }};
 }
 
 #[cfg(test)]
