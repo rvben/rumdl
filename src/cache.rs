@@ -10,10 +10,33 @@
 use rumdl_lib::rule::LintWarning;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Per-process counter that disambiguates concurrent temp files written by
+/// `atomic_write`. Combined with the process id, this guarantees a unique
+/// temp path even when many threads write to the same cache key at once.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `bytes` to `target` atomically by writing to a sibling temp file
+/// and renaming into place. Required because parallel workers may produce
+/// identical cache keys (same content + config + rules) for different files,
+/// and concurrent `fs::write` calls to the same path can interleave bytes
+/// because `CacheEntry.timestamp` differs per write.
+fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = target.with_extension(format!("tmp.{}.{counter}", std::process::id()));
+    match fs::write(&tmp_path, bytes).and_then(|()| fs::rename(&tmp_path, target)) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(e)
+        }
+    }
+}
 
 /// Reason a cache lookup could not be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,7 +344,7 @@ impl LintCache {
         if let Ok(json) = json {
             #[cfg(feature = "profiling")]
             let start = std::time::Instant::now();
-            match fs::write(&cache_path, &json) {
+            match atomic_write(&cache_path, json.as_bytes()) {
                 Ok(()) => self.record_write(),
                 Err(e) => log::debug!("Cache write failed for {}: {}", cache_path.display(), e),
             }
@@ -640,5 +663,43 @@ mod tests {
 
         // Non-version directory should still exist
         assert!(cache_dir.join("some_other_dir").exists());
+    }
+
+    /// Concurrent writers targeting the same cache key must never produce a
+    /// truncated or interleaved file. With direct `fs::write` two parallel
+    /// `open(O_TRUNC) + write` sequences can race; the atomic tempfile +
+    /// rename path serializes via the filesystem so the final contents are
+    /// always one of the writers' full payloads.
+    #[test]
+    fn test_atomic_write_concurrent_no_corruption() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = TempDir::new().unwrap();
+        let target = Arc::new(temp_dir.path().join("entry.json"));
+
+        let mut handles = Vec::new();
+        for writer_id in 0..16u8 {
+            let target = Arc::clone(&target);
+            handles.push(thread::spawn(move || {
+                // Distinct payload per thread; size varies so a partial write
+                // would be detectable. Repeated 4096 times to exceed typical
+                // pipe-buffer / single-write atomicity boundaries.
+                let payload = vec![b'a' + writer_id; 4096 * (writer_id as usize + 1)];
+                for _ in 0..32 {
+                    atomic_write(&target, &payload).expect("atomic write succeeds");
+                }
+                payload
+            }));
+        }
+
+        let payloads: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let final_bytes = fs::read(&*target).expect("target file readable");
+
+        assert!(
+            payloads.iter().any(|p| p == &final_bytes),
+            "final cache file must equal exactly one writer's full payload, got {} bytes",
+            final_bytes.len()
+        );
     }
 }
