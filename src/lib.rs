@@ -217,7 +217,12 @@ impl ContentCharacteristics {
 /// Falls back to std::hash for WASM builds
 #[cfg(feature = "native")]
 fn compute_content_hash(content: &str) -> String {
-    blake3::hash(content.as_bytes()).to_hex().to_string()
+    #[cfg(feature = "profiling")]
+    let start = std::time::Instant::now();
+    let hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+    #[cfg(feature = "profiling")]
+    profiling::record_duration("index: hash content", start.elapsed());
+    hash
 }
 
 /// Compute content hash for WASM builds using std::hash
@@ -267,14 +272,19 @@ pub fn build_file_index_only(
     }
 
     // Parse LintContext once with the provided flavor
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
+    let lint_ctx = time_function!(
+        "index: parse lint context",
+        crate::lint_context::LintContext::new(content, flavor, source_file)
+    );
 
     // Only call contribute_to_index for cross-file rules (no rule checking!)
-    for rule in rules {
-        if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
-            rule.contribute_to_index(&lint_ctx, &mut file_index);
+    time_section!("index: contribute cross-file data", {
+        for rule in rules {
+            if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
+                rule.contribute_to_index(&lint_ctx, &mut file_index);
+            }
         }
-    }
+    });
 
     file_index
 }
@@ -306,7 +316,10 @@ pub fn lint_and_index(
     }
 
     // Parse LintContext once (includes inline config parsing)
-    let lint_ctx = crate::lint_context::LintContext::new(content, flavor, source_file);
+    let lint_ctx = time_function!(
+        "lint: parse lint context",
+        crate::lint_context::LintContext::new(content, flavor, source_file)
+    );
     let inline_config = lint_ctx.inline_config();
 
     // Export inline config data to FileIndex for cross-file rule filtering
@@ -316,7 +329,10 @@ pub fn lint_and_index(
     file_index.line_disabled_rules = line_disabled;
 
     // Analyze content characteristics for rule filtering
-    let characteristics = ContentCharacteristics::analyze(content);
+    let characteristics = time_function!(
+        "lint: analyze content characteristics",
+        ContentCharacteristics::analyze(content)
+    );
 
     // Filter rules based on content characteristics
     let applicable_rules: Vec<_> = rules
@@ -356,91 +372,94 @@ pub fn lint_and_index(
         }
     }
 
-    for rule in &applicable_rules {
-        #[cfg(not(target_arch = "wasm32"))]
-        let rule_start = Instant::now();
+    {
+        let _timer = profiling::ScopedTimer::new("lint: run single-file rules");
+        for rule in &applicable_rules {
+            #[cfg(not(target_arch = "wasm32"))]
+            let rule_start = Instant::now();
 
-        // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-        if rule.should_skip(&lint_ctx) {
-            continue;
-        }
+            // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
+            if rule.should_skip(&lint_ctx) {
+                continue;
+            }
 
-        // Use recreated rule if inline config overrides exist for this rule
-        let effective_rule: &dyn crate::rule::Rule = recreated_rules
-            .get(rule.name())
-            .map_or(rule.as_ref(), std::convert::AsRef::as_ref);
+            // Use recreated rule if inline config overrides exist for this rule
+            let effective_rule: &dyn crate::rule::Rule = recreated_rules
+                .get(rule.name())
+                .map_or(rule.as_ref(), std::convert::AsRef::as_ref);
 
-        // Run single-file check with the effective rule (possibly with inline config applied)
-        let result = effective_rule.check(&lint_ctx);
+            // Run single-file check with the effective rule (possibly with inline config applied)
+            let result = effective_rule.check(&lint_ctx);
 
-        match result {
-            Ok(rule_warnings) => {
-                // Filter out warnings inside kramdown extension blocks (Layer 3 safety net)
-                // and warnings for rules disabled via inline comments
-                let filtered_warnings: Vec<_> = rule_warnings
-                    .into_iter()
-                    .filter(|warning| {
-                        // Layer 3: Suppress warnings inside kramdown extension blocks
-                        if lint_ctx
-                            .line_info(warning.line)
-                            .is_some_and(|info| info.in_kramdown_extension_block)
-                        {
-                            return false;
-                        }
-
-                        // Use the warning's rule_name if available, otherwise use the rule's name
-                        let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-
-                        // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
-                        let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
-                            &rule_name_to_check[..dash_pos]
-                        } else {
-                            rule_name_to_check
-                        };
-
-                        // Check if the rule is disabled at any line in the warning's range.
-                        // Multi-line warnings (e.g., reflow) report on the first line,
-                        // but inline disable comments may appear later in the range.
-                        // Guard: if end_line < line (e.g., end_line=0), fall back to
-                        // checking only the warning's line to match original behavior.
-                        {
-                            let end = if warning.end_line >= warning.line {
-                                warning.end_line
-                            } else {
-                                warning.line
-                            };
-                            !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
-                        }
-                    })
-                    .map(|mut warning| {
-                        // Apply severity override from config if present
-                        if let Some(cfg) = config {
-                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-                            if let Some(override_severity) = cfg.get_rule_severity(rule_name_to_check) {
-                                warning.severity = override_severity;
+            match result {
+                Ok(rule_warnings) => {
+                    // Filter out warnings inside kramdown extension blocks (Layer 3 safety net)
+                    // and warnings for rules disabled via inline comments
+                    let filtered_warnings: Vec<_> = rule_warnings
+                        .into_iter()
+                        .filter(|warning| {
+                            // Layer 3: Suppress warnings inside kramdown extension blocks
+                            if lint_ctx
+                                .line_info(warning.line)
+                                .is_some_and(|info| info.in_kramdown_extension_block)
+                            {
+                                return false;
                             }
-                        }
-                        warning
-                    })
-                    .collect();
-                warnings.extend(filtered_warnings);
-            }
-            Err(e) => {
-                log::error!("Error checking rule {}: {}", rule.name(), e);
-                return (Err(e), file_index);
-            }
-        }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let rule_duration = rule_start.elapsed();
-            if profile_rules {
-                eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
+                            // Use the warning's rule_name if available, otherwise use the rule's name
+                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
+
+                            // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
+                            let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
+                                &rule_name_to_check[..dash_pos]
+                            } else {
+                                rule_name_to_check
+                            };
+
+                            // Check if the rule is disabled at any line in the warning's range.
+                            // Multi-line warnings (e.g., reflow) report on the first line,
+                            // but inline disable comments may appear later in the range.
+                            // Guard: if end_line < line (e.g., end_line=0), fall back to
+                            // checking only the warning's line to match original behavior.
+                            {
+                                let end = if warning.end_line >= warning.line {
+                                    warning.end_line
+                                } else {
+                                    warning.line
+                                };
+                                !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
+                            }
+                        })
+                        .map(|mut warning| {
+                            // Apply severity override from config if present
+                            if let Some(cfg) = config {
+                                let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
+                                if let Some(override_severity) = cfg.get_rule_severity(rule_name_to_check) {
+                                    warning.severity = override_severity;
+                                }
+                            }
+                            warning
+                        })
+                        .collect();
+                    warnings.extend(filtered_warnings);
+                }
+                Err(e) => {
+                    log::error!("Error checking rule {}: {}", rule.name(), e);
+                    return (Err(e), file_index);
+                }
             }
 
-            #[cfg(not(test))]
-            if verbose && rule_duration.as_millis() > 500 {
-                log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let rule_duration = rule_start.elapsed();
+                if profile_rules {
+                    eprintln!("[RULE] {:6} {:?}", rule.name(), rule_duration);
+                }
+
+                #[cfg(not(test))]
+                if verbose && rule_duration.as_millis() > 500 {
+                    log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+                }
             }
         }
     }
@@ -451,11 +470,13 @@ pub fn lint_and_index(
     // that file has content that would trigger the rule. For example, MD051 needs to
     // index headings from files that have no links (like target.md) so that links
     // FROM other files TO those headings can be validated.
-    for rule in rules {
-        if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
-            rule.contribute_to_index(&lint_ctx, &mut file_index);
+    time_section!("lint: contribute cross-file data", {
+        for rule in rules {
+            if rule.cross_file_scope() == crate::rule::CrossFileScope::Workspace {
+                rule.contribute_to_index(&lint_ctx, &mut file_index);
+            }
         }
-    }
+    });
 
     #[cfg(not(test))]
     if verbose {
@@ -497,7 +518,10 @@ pub fn run_cross_file_checks(
             continue;
         }
 
-        match rule.cross_file_check(file_path, file_index, workspace_index) {
+        match time_function!(
+            "workspace: cross-file rule check",
+            rule.cross_file_check(file_path, file_index, workspace_index)
+        ) {
             Ok(rule_warnings) => {
                 // Filter cross-file warnings based on inline config stored in file_index
                 let filtered: Vec<_> = rule_warnings

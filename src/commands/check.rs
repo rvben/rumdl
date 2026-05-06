@@ -137,8 +137,8 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
             // Continue without cache
             None
         } else {
-            // Wrap in Arc<Mutex<>> for thread-safe sharing across parallel workers
-            Some(std::sync::Arc::new(std::sync::Mutex::new(cache_instance)))
+            // Wrap in Arc for thread-safe sharing across parallel workers.
+            Some(std::sync::Arc::new(cache_instance))
         }
     } else {
         None

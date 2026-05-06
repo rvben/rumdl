@@ -20,7 +20,7 @@ pub struct CheckRunContext<'a> {
     pub args: &'a crate::CheckArgs,
     pub config: &'a rumdl_config::Config,
     pub quiet: bool,
-    pub cache: Option<Arc<std::sync::Mutex<crate::cache::LintCache>>>,
+    pub cache: Option<Arc<crate::cache::LintCache>>,
     pub workspace_cache_dir: Option<&'a Path>,
     pub project_root: Option<&'a Path>,
     pub explicit_config: bool,
@@ -86,7 +86,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     }
 
     // Find all markdown files to check
-    let file_paths = match crate::file_processor::find_markdown_files(&args.paths, args, config, project_root) {
+    let file_paths = match rumdl_lib::time_function!(
+        "check: discover markdown files",
+        crate::file_processor::find_markdown_files(&args.paths, args, config, project_root)
+    ) {
         Ok(paths) => paths,
         Err(e) => {
             if !args.silent {
@@ -103,32 +106,51 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     }
 
     // Resolve files into config groups (per-directory config discovery)
-    let config_groups = crate::resolution::resolve_config_groups(
-        &file_paths,
-        config,
-        args,
-        project_root,
-        cache,
-        explicit_config,
-        isolated,
+    let config_groups = rumdl_lib::time_function!(
+        "check: resolve config groups",
+        crate::resolution::resolve_config_groups(
+            &file_paths,
+            config,
+            args,
+            project_root,
+            cache,
+            explicit_config,
+            isolated,
+        )
     );
 
     // Build file → group index mapping for cross-file analysis (Phase 2)
-    let file_group_map: HashMap<PathBuf, usize> = config_groups
-        .iter()
-        .enumerate()
-        .flat_map(|(gi, g)| {
-            g.files.iter().map(move |f| {
-                let canonical = std::fs::canonicalize(f).unwrap_or_else(|_| PathBuf::from(f));
-                (canonical, gi)
+    let file_group_map: HashMap<PathBuf, usize> = rumdl_lib::time_function!(
+        "check: build file group map",
+        config_groups
+            .iter()
+            .enumerate()
+            .flat_map(|(gi, g)| {
+                g.files.iter().map(move |f| {
+                    let canonical = std::fs::canonicalize(f).unwrap_or_else(|_| PathBuf::from(f));
+                    (canonical, gi)
+                })
             })
-        })
-        .collect();
+            .collect()
+    );
 
     // Check if any enabled rule across any group needs cross-file analysis
     let needs_cross_file = config_groups
         .iter()
         .any(|g| g.rules.iter().any(|r| r.cross_file_scope() != CrossFileScope::None));
+
+    // Load the workspace index before file processing so cache-hit files can reuse
+    // their existing FileIndex when the content hash still matches.
+    let cached_workspace_index = if needs_cross_file {
+        Some(Arc::new(rumdl_lib::time_function!(
+            "workspace: load index cache",
+            workspace_cache_dir
+                .and_then(WorkspaceIndex::load_from_cache)
+                .unwrap_or_default()
+        )))
+    } else {
+        None
+    };
 
     // Batch output formats need to collect all warnings before formatting
     let needs_collection = matches!(
@@ -155,17 +177,20 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     let mut all_warnings_for_stats = Vec::new();
 
     // For cross-file analysis, we collect FileIndex data during linting (no second pass needed)
-    let mut file_indices: HashMap<PathBuf, rumdl_lib::workspace_index::FileIndex> = HashMap::new();
+    let mut file_indices: HashMap<PathBuf, (rumdl_lib::workspace_index::FileIndex, bool)> = HashMap::new();
 
     // Track files that already have issues from Phase 1 to avoid double-counting in Phase 2
     let mut files_already_with_issues: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
     // Build flat list of (file_path, group_index) for parallel processing
-    let file_tasks: Vec<(usize, &str)> = config_groups
-        .iter()
-        .enumerate()
-        .flat_map(|(gi, g)| g.files.iter().map(move |f| (gi, f.as_str())))
-        .collect();
+    let file_tasks: Vec<(usize, &str)> = rumdl_lib::time_function!(
+        "check: build file tasks",
+        config_groups
+            .iter()
+            .enumerate()
+            .flat_map(|(gi, g)| g.files.iter().map(move |f| (gi, f.as_str())))
+            .collect()
+    );
 
     // For batch formats, collect (display_path, warnings) tuples
     let mut batch_file_warnings: Vec<(String, Vec<rumdl_lib::rule::LintWarning>)> = Vec::new();
@@ -183,29 +208,33 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         total_files_processed,
     ) = if use_parallel {
         // Parallel processing for multiple files with thread-safe cache
-        let results: Vec<_> = file_tasks
-            .par_iter()
-            .map(|(gi, file_path)| {
-                let group = &config_groups[*gi];
-                let result = crate::file_processor::process_file_with_formatter(
-                    file_path,
-                    &group.rules,
-                    args.fix_mode,
-                    args.diff,
-                    args.verbose && !args.silent,
-                    quiet,
-                    args.silent,
-                    &output_format,
-                    effective_output_writer,
-                    &group.config,
-                    cache.as_ref().map(Arc::clone),
-                    project_root,
-                    args.show_full_path,
-                    group.cache_hashes.as_deref(),
-                );
-                (file_path.to_string(), result)
-            })
-            .collect();
+        let results: Vec<_> = rumdl_lib::time_function!(
+            "check: process files parallel",
+            file_tasks
+                .par_iter()
+                .map(|(gi, file_path)| {
+                    let group = &config_groups[*gi];
+                    let result = crate::file_processor::process_file_with_formatter(
+                        file_path,
+                        &group.rules,
+                        args.fix_mode,
+                        args.diff,
+                        args.verbose && !args.silent,
+                        quiet,
+                        args.silent,
+                        &output_format,
+                        effective_output_writer,
+                        &group.config,
+                        cache.as_ref().map(Arc::clone),
+                        cached_workspace_index.as_ref().map(Arc::clone),
+                        project_root,
+                        args.show_full_path,
+                        group.cache_hashes.as_deref(),
+                    );
+                    (file_path.to_string(), result)
+                })
+                .collect()
+        );
 
         // Aggregate results and extract FileIndex for cross-file analysis
         let mut has_issues = false;
@@ -219,63 +248,66 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut total_fixable_issues = 0;
         let total_files_processed = results.len();
 
-        for (file_path, result) in results {
-            let crate::file_processor::FileProcessResult {
-                has_issues: file_has_issues,
-                issues_found,
-                issues_fixed,
-                summary_issues_fixed: file_summary_issues_fixed,
-                fixable_issues,
-                warnings,
-                file_index,
-            } = result;
+        rumdl_lib::time_section!("check: aggregate file results", {
+            for (file_path, result) in results {
+                let crate::file_processor::FileProcessResult {
+                    has_issues: file_has_issues,
+                    issues_found,
+                    issues_fixed,
+                    summary_issues_fixed: file_summary_issues_fixed,
+                    fixable_issues,
+                    warnings,
+                    file_index,
+                    file_index_reused,
+                } = result;
 
-            summary_issues_fixed += file_summary_issues_fixed;
-            total_issues_fixed += issues_fixed;
-            total_fixable_issues += fixable_issues;
-            total_issues += issues_found;
+                summary_issues_fixed += file_summary_issues_fixed;
+                total_issues_fixed += issues_fixed;
+                total_fixable_issues += fixable_issues;
+                total_issues += issues_found;
 
-            if issues_fixed > 0 {
-                files_fixed += 1;
+                if issues_fixed > 0 {
+                    files_fixed += 1;
+                }
+
+                let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
+
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    files_already_with_issues.insert(canonical.clone());
+                }
+
+                if warnings
+                    .iter()
+                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
+                {
+                    has_warnings = true;
+                }
+
+                if warnings.iter().any(|w| w.severity == Severity::Error) {
+                    has_errors = true;
+                }
+
+                // Collect warnings for batch output formats
+                if needs_collection && !warnings.is_empty() {
+                    let display_path = if args.show_full_path {
+                        file_path.clone()
+                    } else {
+                        crate::file_processor::to_display_path(&file_path, project_root)
+                    };
+                    batch_file_warnings.push((display_path, warnings.clone()));
+                }
+
+                if args.statistics {
+                    all_warnings_for_stats.extend(warnings);
+                }
+
+                if needs_cross_file {
+                    file_indices.insert(canonical, (file_index, file_index_reused));
+                }
             }
-
-            let canonical = std::fs::canonicalize(&file_path).unwrap_or_else(|_| PathBuf::from(&file_path));
-
-            if file_has_issues {
-                has_issues = true;
-                files_with_issues += 1;
-                files_already_with_issues.insert(canonical.clone());
-            }
-
-            if warnings
-                .iter()
-                .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
-            {
-                has_warnings = true;
-            }
-
-            if warnings.iter().any(|w| w.severity == Severity::Error) {
-                has_errors = true;
-            }
-
-            // Collect warnings for batch output formats
-            if needs_collection && !warnings.is_empty() {
-                let display_path = if args.show_full_path {
-                    file_path.clone()
-                } else {
-                    crate::file_processor::to_display_path(&file_path, project_root)
-                };
-                batch_file_warnings.push((display_path, warnings.clone()));
-            }
-
-            if args.statistics {
-                all_warnings_for_stats.extend(warnings);
-            }
-
-            if needs_cross_file {
-                file_indices.insert(canonical, file_index);
-            }
-        }
+        });
 
         (
             has_issues,
@@ -302,80 +334,84 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         let mut total_fixable_issues = 0;
         let mut total_files_processed = 0;
 
-        for &(gi, file_path) in &file_tasks {
-            let group = &config_groups[gi];
-            let crate::file_processor::FileProcessResult {
-                has_issues: file_has_issues,
-                issues_found,
-                issues_fixed,
-                summary_issues_fixed: file_summary_issues_fixed,
-                fixable_issues,
-                warnings,
-                file_index,
-            } = crate::file_processor::process_file_with_formatter(
-                file_path,
-                &group.rules,
-                args.fix_mode,
-                args.diff,
-                args.verbose && !args.silent,
-                quiet,
-                args.silent,
-                &output_format,
-                effective_output_writer,
-                &group.config,
-                cache.as_ref().map(Arc::clone),
-                project_root,
-                args.show_full_path,
-                group.cache_hashes.as_deref(),
-            );
+        rumdl_lib::time_section!("check: process files sequential", {
+            for &(gi, file_path) in &file_tasks {
+                let group = &config_groups[gi];
+                let crate::file_processor::FileProcessResult {
+                    has_issues: file_has_issues,
+                    issues_found,
+                    issues_fixed,
+                    summary_issues_fixed: file_summary_issues_fixed,
+                    fixable_issues,
+                    warnings,
+                    file_index,
+                    file_index_reused,
+                } = crate::file_processor::process_file_with_formatter(
+                    file_path,
+                    &group.rules,
+                    args.fix_mode,
+                    args.diff,
+                    args.verbose && !args.silent,
+                    quiet,
+                    args.silent,
+                    &output_format,
+                    effective_output_writer,
+                    &group.config,
+                    cache.as_ref().map(Arc::clone),
+                    cached_workspace_index.as_ref().map(Arc::clone),
+                    project_root,
+                    args.show_full_path,
+                    group.cache_hashes.as_deref(),
+                );
 
-            if needs_cross_file {
-                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                file_indices.insert(canonical, file_index);
+                if needs_cross_file {
+                    let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                    file_indices.insert(canonical, (file_index, file_index_reused));
+                }
+
+                total_files_processed += 1;
+                summary_issues_fixed += file_summary_issues_fixed;
+                total_issues_fixed += issues_fixed;
+                total_fixable_issues += fixable_issues;
+                total_issues += issues_found;
+
+                if issues_fixed > 0 {
+                    files_fixed += 1;
+                }
+
+                if file_has_issues {
+                    has_issues = true;
+                    files_with_issues += 1;
+                    let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
+                    files_already_with_issues.insert(canonical);
+                }
+
+                if warnings
+                    .iter()
+                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
+                {
+                    has_warnings = true;
+                }
+
+                if warnings.iter().any(|w| w.severity == Severity::Error) {
+                    has_errors = true;
+                }
+
+                // Collect warnings for batch output formats
+                if needs_collection && !warnings.is_empty() {
+                    let display_path = if args.show_full_path {
+                        file_path.to_string()
+                    } else {
+                        crate::file_processor::to_display_path(file_path, project_root)
+                    };
+                    batch_file_warnings.push((display_path, warnings.clone()));
+                }
+
+                if args.statistics {
+                    all_warnings_for_stats.extend(warnings);
+                }
             }
-
-            total_files_processed += 1;
-            summary_issues_fixed += file_summary_issues_fixed;
-            total_issues_fixed += issues_fixed;
-            total_fixable_issues += fixable_issues;
-            total_issues += issues_found;
-
-            if issues_fixed > 0 {
-                files_fixed += 1;
-            }
-
-            if file_has_issues {
-                has_issues = true;
-                files_with_issues += 1;
-                let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
-                files_already_with_issues.insert(canonical);
-            }
-
-            if warnings
-                .iter()
-                .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
-            {
-                has_warnings = true;
-            }
-
-            if warnings.iter().any(|w| w.severity == Severity::Error) {
-                has_errors = true;
-            }
-
-            // Collect warnings for batch output formats
-            if needs_collection && !warnings.is_empty() {
-                let display_path = if args.show_full_path {
-                    file_path.to_string()
-                } else {
-                    crate::file_processor::to_display_path(file_path, project_root)
-                };
-                batch_file_warnings.push((display_path, warnings.clone()));
-            }
-
-            if args.statistics {
-                all_warnings_for_stats.extend(warnings);
-            }
-        }
+        });
 
         (
             has_issues,
@@ -395,9 +431,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     if needs_cross_file && !file_indices.is_empty() {
         let index_start = Instant::now();
 
-        // Load workspace index from cache if available, otherwise start fresh
-        let mut workspace_index = workspace_cache_dir
-            .and_then(WorkspaceIndex::load_from_cache)
+        // Reuse the workspace index snapshot loaded before file processing.
+        let mut workspace_index = cached_workspace_index
+            .as_ref()
+            .map(|index| (**index).clone())
             .unwrap_or_default();
 
         let loaded_from_cache = workspace_index.file_count() > 0;
@@ -411,21 +448,29 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         // Incremental update: only update files that have changed (stale)
         let mut updated_count = 0;
         let mut skipped_count = 0;
-        for (path, file_index) in file_indices {
-            if workspace_index.is_file_stale(&path, &file_index.content_hash) {
-                workspace_index.update_file(&path, file_index);
-                updated_count += 1;
-            } else {
-                skipped_count += 1;
+        rumdl_lib::time_section!("workspace: update stale file indexes", {
+            for (path, (file_index, file_index_reused)) in file_indices {
+                if !file_index_reused || workspace_index.is_file_stale(&path, &file_index.content_hash) {
+                    workspace_index.update_file(&path, file_index);
+                    updated_count += 1;
+                } else {
+                    skipped_count += 1;
+                }
             }
-        }
+        });
 
         // Prune deleted files from workspace index (use canonical paths for matching)
-        let current_files: std::collections::HashSet<PathBuf> = file_paths
-            .iter()
-            .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p)))
-            .collect();
-        let pruned_count = workspace_index.retain_only(&current_files);
+        let current_files: std::collections::HashSet<PathBuf> = rumdl_lib::time_function!(
+            "workspace: canonicalize current files",
+            file_paths
+                .iter()
+                .map(|p| std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from(p)))
+                .collect()
+        );
+        let pruned_count = rumdl_lib::time_function!(
+            "workspace: prune deleted files",
+            workspace_index.retain_only(&current_files)
+        );
 
         if args.verbose && !args.silent {
             eprintln!(
@@ -440,70 +485,77 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
         // Run cross-file checks using per-file config group rules
         let formatter = output_format.create_formatter();
-        for (file_path, file_index) in workspace_index.files() {
-            // Use the file's own config group for cross-file rules
-            let (cf_rules, cf_config) = match file_group_map.get(file_path) {
-                Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
-                None => continue,
-            };
-
-            if let Ok(cross_file_warnings) =
-                rumdl_lib::run_cross_file_checks(file_path, file_index, cf_rules, &workspace_index, Some(cf_config))
-                && !cross_file_warnings.is_empty()
-            {
-                has_issues = true;
-                if !files_already_with_issues.contains(file_path) {
-                    files_with_issues += 1;
-                }
-                total_issues += cross_file_warnings.len();
-
-                if cross_file_warnings
-                    .iter()
-                    .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
-                {
-                    has_warnings = true;
-                }
-
-                if cross_file_warnings.iter().any(|w| w.severity == Severity::Error) {
-                    has_errors = true;
-                }
-
-                let display_path = if args.show_full_path {
-                    file_path.to_string_lossy().to_string()
-                } else {
-                    crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
+        rumdl_lib::time_section!("workspace: run cross-file checks", {
+            for (file_path, file_index) in workspace_index.files() {
+                // Use the file's own config group for cross-file rules
+                let (cf_rules, cf_config) = match file_group_map.get(file_path) {
+                    Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
+                    None => continue,
                 };
 
-                if needs_collection {
-                    // Collect cross-file warnings for batch output
-                    if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(p, _)| p == &display_path) {
-                        warnings.extend(cross_file_warnings.clone());
-                    } else {
-                        batch_file_warnings.push((display_path, cross_file_warnings.clone()));
+                if let Ok(cross_file_warnings) =
+                    rumdl_lib::run_cross_file_checks(file_path, file_index, cf_rules, &workspace_index, Some(cf_config))
+                    && !cross_file_warnings.is_empty()
+                {
+                    has_issues = true;
+                    if !files_already_with_issues.contains(file_path) {
+                        files_with_issues += 1;
                     }
-                } else {
-                    // Stream cross-file warnings immediately
-                    if !args.silent {
-                        let file_content = std::fs::read_to_string(file_path).unwrap_or_default();
-                        let formatted =
-                            formatter.format_warnings_with_content(&cross_file_warnings, &display_path, &file_content);
-                        if !formatted.is_empty() {
-                            output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                                eprintln!("Error writing output: {e}");
-                            });
+                    total_issues += cross_file_warnings.len();
+
+                    if cross_file_warnings
+                        .iter()
+                        .any(|w| matches!(w.severity, Severity::Warning | Severity::Error))
+                    {
+                        has_warnings = true;
+                    }
+
+                    if cross_file_warnings.iter().any(|w| w.severity == Severity::Error) {
+                        has_errors = true;
+                    }
+
+                    let display_path = if args.show_full_path {
+                        file_path.to_string_lossy().to_string()
+                    } else {
+                        crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
+                    };
+
+                    if needs_collection {
+                        // Collect cross-file warnings for batch output
+                        if let Some((_, warnings)) = batch_file_warnings.iter_mut().find(|(p, _)| p == &display_path) {
+                            warnings.extend(cross_file_warnings.clone());
+                        } else {
+                            batch_file_warnings.push((display_path, cross_file_warnings.clone()));
+                        }
+                    } else {
+                        // Stream cross-file warnings immediately
+                        if !args.silent {
+                            let file_content = std::fs::read_to_string(file_path).unwrap_or_default();
+                            let formatted = formatter.format_warnings_with_content(
+                                &cross_file_warnings,
+                                &display_path,
+                                &file_content,
+                            );
+                            if !formatted.is_empty() {
+                                output_writer.writeln(&formatted).unwrap_or_else(|e| {
+                                    eprintln!("Error writing output: {e}");
+                                });
+                            }
                         }
                     }
-                }
 
-                if args.statistics {
-                    all_warnings_for_stats.extend(cross_file_warnings);
+                    if args.statistics {
+                        all_warnings_for_stats.extend(cross_file_warnings);
+                    }
                 }
             }
-        }
+        });
 
         // Save workspace index to cache
         if let Some(cache_dir) = workspace_cache_dir {
-            if let Err(e) = workspace_index.save_to_cache(cache_dir) {
+            if let Err(e) =
+                rumdl_lib::time_function!("workspace: save index cache", workspace_index.save_to_cache(cache_dir))
+            {
                 log::warn!("Failed to save workspace index cache: {e}");
             } else if args.verbose && !args.silent {
                 eprintln!(

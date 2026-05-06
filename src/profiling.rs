@@ -51,15 +51,20 @@ impl Profiler {
             let section_name = section.to_string();
             if let Some(start_time) = self.active_timers.remove(&section_name) {
                 let elapsed = start_time.elapsed();
-
-                // Update or insert the measurement
-                let entry = self
-                    .measurements
-                    .entry(section_name)
-                    .or_insert((Duration::new(0, 0), 0));
-                entry.0 += elapsed;
-                entry.1 += 1;
+                self.record_duration(&section_name, elapsed);
             }
+        }
+    }
+
+    /// Record a completed measurement.
+    pub fn record_duration(&mut self, section: &str, duration: Duration) {
+        if PROFILING_ENABLED {
+            let entry = self
+                .measurements
+                .entry(section.to_string())
+                .or_insert((Duration::new(0, 0), 0));
+            entry.0 += duration;
+            entry.1 += 1;
         }
     }
 
@@ -80,7 +85,7 @@ impl Profiler {
         let mut report = String::new();
         report.push_str("=== Profiling Report ===\n");
         report.push_str(&format!(
-            "Total execution time: {:.6} seconds\n\n",
+            "Total measured time: {:.6} seconds (parallel sections may overlap)\n\n",
             total_time.as_secs_f64()
         ));
         report.push_str(
@@ -128,6 +133,15 @@ pub fn stop_timer(section: &str) {
     }
 }
 
+/// Record a completed duration for a section.
+///
+/// If the mutex is poisoned, this is a no-op. Profiling failures should not crash the application.
+pub fn record_duration(section: &str, duration: Duration) {
+    if PROFILING_ENABLED && let Ok(mut profiler) = PROFILER.lock() {
+        profiler.record_duration(section, duration);
+    }
+}
+
 /// Get a report of all measurements
 ///
 /// If the mutex is poisoned, returns a message indicating the error rather than panicking.
@@ -155,26 +169,27 @@ pub fn reset() {
 pub struct ScopedTimer {
     section: String,
     enabled: bool,
+    start: Option<Instant>,
 }
 
 impl ScopedTimer {
     /// Create a new scoped timer
     pub fn new(section: &str) -> Self {
         let enabled = PROFILING_ENABLED;
-        if enabled {
-            start_timer(section);
-        }
         ScopedTimer {
             section: section.to_string(),
             enabled,
+            start: enabled.then(Instant::now),
         }
     }
 }
 
 impl Drop for ScopedTimer {
     fn drop(&mut self) {
-        if self.enabled {
-            stop_timer(&self.section);
+        if self.enabled
+            && let Some(start) = self.start.take()
+        {
+            record_duration(&self.section, start.elapsed());
         }
     }
 }
@@ -270,7 +285,7 @@ mod tests {
             assert!(report.contains("Profiling Report"));
             assert!(report.contains("section1"));
             assert!(report.contains("section2"));
-            assert!(report.contains("Total execution time"));
+            assert!(report.contains("Total measured time"));
         } else {
             let report = profiler.get_report();
             assert_eq!(report, "Profiling disabled or no measurements recorded.");
