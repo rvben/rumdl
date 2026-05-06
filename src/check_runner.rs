@@ -566,14 +566,23 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         formatter::print_statistics(&all_warnings_for_stats);
     }
 
-    // Print profiling information if enabled and not in quiet or silent mode
-    if args.profile && !quiet && !args.silent {
+    // Print profiling information when explicitly requested. This intentionally
+    // ignores --silent because --profile is itself an explicit output request.
+    if args.profile && !quiet {
         match std::panic::catch_unwind(rumdl_lib::profiling::get_report) {
             Ok(report) => {
-                output_writer.writeln(&format!("\n{report}")).ok();
+                if args.stderr {
+                    eprintln!("\n{report}");
+                } else {
+                    println!("\n{report}");
+                }
             }
             Err(_) => {
-                output_writer.writeln("\nProfiling information not available").ok();
+                if args.stderr {
+                    eprintln!("\nProfiling information not available");
+                } else {
+                    println!("\nProfiling information not available");
+                }
             }
         }
     }
