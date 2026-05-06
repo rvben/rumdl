@@ -211,7 +211,7 @@ impl LintCache {
             return Err(CacheMissReason::Disabled);
         }
 
-        let cache_path = self.cache_file_path(&file_hash, rules_hash);
+        let cache_path = self.cache_file_path(file_hash, rules_hash);
 
         // Try to read cache file
         #[cfg(feature = "profiling")]
@@ -294,7 +294,7 @@ impl LintCache {
             return;
         }
 
-        let cache_path = self.cache_file_path(&file_hash, rules_hash);
+        let cache_path = self.cache_file_path(file_hash, rules_hash);
 
         // Create cache directory if it doesn't exist
         if let Some(parent) = cache_path.parent() {
