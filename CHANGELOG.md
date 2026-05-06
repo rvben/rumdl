@@ -31,6 +31,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.89](https://github.com/rvben/rumdl/compare/v0.1.88...v0.1.89) - 2026-05-06
+
+### Added
+
+- **md031**: enforce blank lines around Azure DevOps colon code fences ([488a157](https://github.com/rvben/rumdl/commit/488a157100483f759e83ec1ba5de95304229bb9e))
+- **lint_context**: wire Azure DevOps colon fence detection and extend code_blocks ([a9dc0cd](https://github.com/rvben/rumdl/commit/a9dc0cda40768c856fa6aa2ffda0ca051f0cf6f5))
+- **lint_context**: add colon fence detection for Azure DevOps flavor ([b2a742b](https://github.com/rvben/rumdl/commit/b2a742b3c428603f15829e1896067c9a3bf4a19f))
+- **flavor**: add AzureDevOps flavor variant with colon code fence support ([59592e5](https://github.com/rvben/rumdl/commit/59592e54f7f38e6f12d98df648bd352871958062))
+
+### Fixed
+
+- **md046**: replace index loop with iterator to satisfy clippy needless_range_loop ([605c3da](https://github.com/rvben/rumdl/commit/605c3da577d2db53f29b09786bcfc271ba544b7e))
+- **md048**: skip colon fence lines in style detection for Azure DevOps flavor ([b4833fa](https://github.com/rvben/rumdl/commit/b4833fac7403dab16c710f22312f1f2c76be5edc))
+- **md046**: skip colon fence lines in style detection for Azure DevOps flavor ([386330c](https://github.com/rvben/rumdl/commit/386330cb0d1b315fe82eb15c7102ef54e03ff9b1))
+- **md055**: normalize style config to snake_case so kebab-case values are applied ([8d4dfd2](https://github.com/rvben/rumdl/commit/8d4dfd2c6d93ffd6622464130e178f4d00ace75b))
+
 ## [0.1.88](https://github.com/rvben/rumdl/compare/v0.1.87...v0.1.88) - 2026-05-04
 
 ### Added
