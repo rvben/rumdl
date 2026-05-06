@@ -10,9 +10,33 @@
 use rumdl_lib::rule::LintWarning;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Per-process counter that disambiguates concurrent temp files written by
+/// `atomic_write`. Combined with the process id, this guarantees a unique
+/// temp path even when many threads write to the same cache key at once.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `bytes` to `target` atomically by writing to a sibling temp file
+/// and renaming into place. Required because parallel workers may produce
+/// identical cache keys (same content + config + rules) for different files,
+/// and concurrent `fs::write` calls to the same path can interleave bytes
+/// because `CacheEntry.timestamp` differs per write.
+fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = target.with_extension(format!("tmp.{}.{counter}", std::process::id()));
+    match fs::write(&tmp_path, bytes).and_then(|()| fs::rename(&tmp_path, target)) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp_path);
+            Err(e)
+        }
+    }
+}
 
 /// Reason a cache lookup could not be used.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,7 +116,7 @@ pub struct LintCache {
     /// Whether caching is enabled
     enabled: bool,
     /// Cache statistics
-    stats: CacheStats,
+    stats: Mutex<CacheStats>,
 }
 
 impl LintCache {
@@ -105,34 +129,67 @@ impl LintCache {
         Self {
             cache_dir,
             enabled,
-            stats: CacheStats::default(),
+            stats: Mutex::new(CacheStats::default()),
+        }
+    }
+
+    fn record_hit(&self) {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.hits += 1;
+        }
+    }
+
+    fn record_miss(&self) {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.misses += 1;
+        }
+    }
+
+    fn record_write(&self) {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.writes += 1;
         }
     }
 
     /// Compute Blake3 hash of content
-    fn hash_content(content: &str) -> String {
-        blake3::hash(content.as_bytes()).to_hex().to_string()
+    pub fn hash_content(content: &str) -> String {
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
+        let hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: hash content", start.elapsed());
+        hash
     }
 
     /// Compute hash of config
     /// This is a public function that can be called from file_processor
     pub fn hash_config(config: &rumdl_lib::config::Config) -> String {
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
         // Serialize config to JSON and hash it
         // If serialization fails, return a default hash
         let config_json = serde_json::to_string(config).unwrap_or_default();
-        blake3::hash(config_json.as_bytes()).to_hex().to_string()
+        let hash = blake3::hash(config_json.as_bytes()).to_hex().to_string();
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: hash config", start.elapsed());
+        hash
     }
 
     /// Compute hash of enabled rules (Ruff-style)
     /// This ensures different rule configurations get different cache entries
     pub fn hash_rules(rules: &[Box<dyn rumdl_lib::rule::Rule>]) -> String {
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
         // Sort rule names for deterministic hashing
         let mut rule_names: Vec<&str> = rules.iter().map(|r| r.name()).collect();
         rule_names.sort_unstable();
 
         // Hash the sorted rule names
         let rules_str = rule_names.join(",");
-        blake3::hash(rules_str.as_bytes()).to_hex().to_string()
+        let hash = blake3::hash(rules_str.as_bytes()).to_hex().to_string();
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: hash rules", start.elapsed());
+        hash
     }
 
     /// Get the cache file path for a given content and config hash
@@ -150,14 +207,26 @@ impl LintCache {
     ///
     /// Returns Some(warnings) if cache hit, None if cache miss
     #[cfg(test)]
-    pub fn get(&mut self, content: &str, config_hash: &str, rules_hash: &str) -> Option<Vec<LintWarning>> {
+    pub fn get(&self, content: &str, config_hash: &str, rules_hash: &str) -> Option<Vec<LintWarning>> {
         self.get_with_reason(content, config_hash, rules_hash).ok()
     }
 
     /// Try to get cached results for a file, preserving the miss reason for diagnostics.
+    #[cfg(test)]
     pub fn get_with_reason(
-        &mut self,
+        &self,
         content: &str,
+        config_hash: &str,
+        rules_hash: &str,
+    ) -> Result<Vec<LintWarning>, CacheMissReason> {
+        let file_hash = Self::hash_content(content);
+        self.get_with_reason_for_hash(&file_hash, config_hash, rules_hash)
+    }
+
+    /// Try to get cached results for a precomputed file hash.
+    pub fn get_with_reason_for_hash(
+        &self,
+        file_hash: &str,
         config_hash: &str,
         rules_hash: &str,
     ) -> Result<Vec<LintWarning>, CacheMissReason> {
@@ -165,52 +234,65 @@ impl LintCache {
             return Err(CacheMissReason::Disabled);
         }
 
-        let file_hash = Self::hash_content(content);
-        let cache_path = self.cache_file_path(&file_hash, rules_hash);
+        let cache_path = self.cache_file_path(file_hash, rules_hash);
 
         // Try to read cache file
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
         let cache_data = match fs::read_to_string(&cache_path) {
             Ok(data) => data,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.stats.misses += 1;
+                #[cfg(feature = "profiling")]
+                rumdl_lib::profiling::record_duration("cache: read entry", start.elapsed());
+                self.record_miss();
                 return Err(CacheMissReason::MissingEntry { path: cache_path });
             }
             Err(e) => {
-                self.stats.misses += 1;
+                #[cfg(feature = "profiling")]
+                rumdl_lib::profiling::record_duration("cache: read entry", start.elapsed());
+                self.record_miss();
                 return Err(CacheMissReason::UnreadableEntry {
                     path: cache_path,
                     error: e.to_string(),
                 });
             }
         };
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: read entry", start.elapsed());
 
         // Try to parse cache entry
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
         let entry: CacheEntry = match serde_json::from_str(&cache_data) {
             Ok(entry) => entry,
             Err(e) => {
-                self.stats.misses += 1;
+                #[cfg(feature = "profiling")]
+                rumdl_lib::profiling::record_duration("cache: parse entry", start.elapsed());
+                self.record_miss();
                 return Err(CacheMissReason::InvalidEntry {
                     path: cache_path,
                     error: e.to_string(),
                 });
             }
         };
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: parse entry", start.elapsed());
 
         // Validate cache entry (Ruff-style: file content + config + enabled rules)
         if entry.file_hash != file_hash {
-            self.stats.misses += 1;
+            self.record_miss();
             return Err(CacheMissReason::FileChanged);
         }
         if entry.config_hash != config_hash {
-            self.stats.misses += 1;
+            self.record_miss();
             return Err(CacheMissReason::ConfigChanged);
         }
         if entry.rules_hash != rules_hash {
-            self.stats.misses += 1;
+            self.record_miss();
             return Err(CacheMissReason::RulesChanged);
         }
         if entry.version != VERSION {
-            self.stats.misses += 1;
+            self.record_miss();
             return Err(CacheMissReason::VersionChanged {
                 cached: entry.version,
                 current: VERSION,
@@ -218,18 +300,24 @@ impl LintCache {
         }
 
         // Cache hit!
-        self.stats.hits += 1;
+        self.record_hit();
         Ok(entry.warnings)
     }
 
     /// Store lint results in cache
-    pub fn set(&mut self, content: &str, config_hash: &str, rules_hash: &str, warnings: Vec<LintWarning>) {
+    #[cfg(test)]
+    pub fn set(&self, content: &str, config_hash: &str, rules_hash: &str, warnings: Vec<LintWarning>) {
+        let file_hash = Self::hash_content(content);
+        self.set_with_hash(&file_hash, config_hash, rules_hash, warnings);
+    }
+
+    /// Store lint results in cache using a precomputed file hash.
+    pub fn set_with_hash(&self, file_hash: &str, config_hash: &str, rules_hash: &str, warnings: Vec<LintWarning>) {
         if !self.enabled {
             return;
         }
 
-        let file_hash = Self::hash_content(content);
-        let cache_path = self.cache_file_path(&file_hash, rules_hash);
+        let cache_path = self.cache_file_path(file_hash, rules_hash);
 
         // Create cache directory if it doesn't exist
         if let Some(parent) = cache_path.parent() {
@@ -238,7 +326,7 @@ impl LintCache {
 
         // Create cache entry
         let entry = CacheEntry {
-            file_hash,
+            file_hash: file_hash.to_string(),
             config_hash: config_hash.to_string(),
             rules_hash: rules_hash.to_string(),
             version: VERSION.to_string(),
@@ -247,11 +335,21 @@ impl LintCache {
         };
 
         // Write to cache (log errors but don't fail - cache is optional)
-        if let Ok(json) = serde_json::to_string_pretty(&entry) {
-            match fs::write(&cache_path, &json) {
-                Ok(()) => self.stats.writes += 1,
+        #[cfg(feature = "profiling")]
+        let start = std::time::Instant::now();
+        let json = serde_json::to_string_pretty(&entry);
+        #[cfg(feature = "profiling")]
+        rumdl_lib::profiling::record_duration("cache: serialize entry", start.elapsed());
+
+        if let Ok(json) = json {
+            #[cfg(feature = "profiling")]
+            let start = std::time::Instant::now();
+            match atomic_write(&cache_path, json.as_bytes()) {
+                Ok(()) => self.record_write(),
                 Err(e) => log::debug!("Cache write failed for {}: {}", cache_path.display(), e),
             }
+            #[cfg(feature = "profiling")]
+            rumdl_lib::profiling::record_duration("cache: write entry", start.elapsed());
         }
     }
 
@@ -338,8 +436,8 @@ impl LintCache {
 
     /// Get cache statistics
     #[cfg(test)]
-    pub fn stats(&self) -> &CacheStats {
-        &self.stats
+    pub fn stats(&self) -> CacheStats {
+        self.stats.lock().map(|stats| stats.clone()).unwrap_or_default()
     }
 }
 
@@ -351,7 +449,7 @@ mod tests {
     #[test]
     fn test_cache_disabled() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), false);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), false);
 
         let content = "# Test";
         let config_hash = "abc123";
@@ -368,7 +466,7 @@ mod tests {
     #[test]
     fn test_cache_miss() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
 
         let content = "# Test";
         let config_hash = "abc123";
@@ -383,7 +481,7 @@ mod tests {
     #[test]
     fn test_cache_miss_reason_missing_entry() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
 
         let content = "# Test";
         let config_hash = "abc123";
@@ -400,7 +498,7 @@ mod tests {
     #[test]
     fn test_cache_hit() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let content = "# Test";
@@ -421,7 +519,7 @@ mod tests {
     #[test]
     fn test_cache_invalidation_on_content_change() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let content1 = "# Test 1";
@@ -439,7 +537,7 @@ mod tests {
     #[test]
     fn test_cache_invalidation_on_config_change() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let content = "# Test";
@@ -457,7 +555,7 @@ mod tests {
     #[test]
     fn test_cache_miss_reason_config_changed() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let content = "# Test";
@@ -494,7 +592,7 @@ mod tests {
     #[test]
     fn test_cache_stats() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let content = "# Test";
@@ -521,7 +619,7 @@ mod tests {
     #[test]
     fn test_cache_clear() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
         cache.init().unwrap();
 
         let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -565,5 +663,43 @@ mod tests {
 
         // Non-version directory should still exist
         assert!(cache_dir.join("some_other_dir").exists());
+    }
+
+    /// Concurrent writers targeting the same cache key must never produce a
+    /// truncated or interleaved file. With direct `fs::write` two parallel
+    /// `open(O_TRUNC) + write` sequences can race; the atomic tempfile +
+    /// rename path serializes via the filesystem so the final contents are
+    /// always one of the writers' full payloads.
+    #[test]
+    fn test_atomic_write_concurrent_no_corruption() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp_dir = TempDir::new().unwrap();
+        let target = Arc::new(temp_dir.path().join("entry.json"));
+
+        let mut handles = Vec::new();
+        for writer_id in 0..16u8 {
+            let target = Arc::clone(&target);
+            handles.push(thread::spawn(move || {
+                // Distinct payload per thread; size varies so a partial write
+                // would be detectable. Repeated 4096 times to exceed typical
+                // pipe-buffer / single-write atomicity boundaries.
+                let payload = vec![b'a' + writer_id; 4096 * (writer_id as usize + 1)];
+                for _ in 0..32 {
+                    atomic_write(&target, &payload).expect("atomic write succeeds");
+                }
+                payload
+            }));
+        }
+
+        let payloads: Vec<Vec<u8>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let final_bytes = fs::read(&*target).expect("target file readable");
+
+        assert!(
+            payloads.iter().any(|p| p == &final_bytes),
+            "final cache file must equal exactly one writer's full payload, got {} bytes",
+            final_bytes.len()
+        );
     }
 }

@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::rule::Rule;
@@ -54,7 +54,7 @@ pub fn resolve_config_groups(
     root_config: &rumdl_config::Config,
     args: &crate::CheckArgs,
     project_root: Option<&Path>,
-    cache: &Option<Arc<Mutex<LintCache>>>,
+    cache: &Option<Arc<LintCache>>,
     explicit_config: bool,
     isolated: bool,
 ) -> Vec<ConfigGroup> {
