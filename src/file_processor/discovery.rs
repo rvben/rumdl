@@ -1,6 +1,7 @@
 //! File discovery, path utilities, and pattern expansion
 
 use core::error::Error;
+use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use rumdl_config::resolve_rule_names;
@@ -199,6 +200,19 @@ fn canonicalize_path_safe(path_str: &str) -> String {
         .unwrap_or_else(|_| path_str.to_string())
 }
 
+fn compile_exclude_matchers(patterns: &[String]) -> Vec<(String, GlobMatcher)> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Glob::new(pattern) {
+            Ok(glob) => Some((pattern.clone(), glob.compile_matcher())),
+            Err(e) => {
+                eprintln!("Warning: Invalid exclude pattern '{pattern}': {e}");
+                None
+            }
+        })
+        .collect()
+}
+
 /// Convert an absolute file path to a relative path for display purposes.
 ///
 /// Tries to make the path relative to project_root first, then falls back to CWD.
@@ -349,6 +363,8 @@ pub fn find_markdown_files(
     if args.verbose {
         eprintln!("Exclude patterns: {final_exclude_patterns:?}");
     }
+    let exclude_matchers = compile_exclude_matchers(&final_exclude_patterns);
+    let canonical_project_root = project_root.and_then(|root| root.canonicalize().ok());
     // --- End Pattern Determination ---
 
     // Apply overrides using the determined patterns
@@ -454,16 +470,12 @@ pub fn find_markdown_files(
                 if !final_exclude_patterns.is_empty() {
                     // Compute path relative to project_root for pattern matching
                     // This ensures patterns like "subdir/file.md" work regardless of cwd
-                    let path_for_matching = if let Some(root) = project_root {
+                    let path_for_matching = if let Some(canonical_root) = canonical_project_root.as_deref() {
                         if let Ok(canonical_path) = path.canonicalize() {
-                            if let Ok(canonical_root) = root.canonicalize() {
-                                if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
-                                    relative.to_string_lossy().to_string()
-                                } else {
-                                    // Path is not under project_root, fall back to cleaned_path
-                                    cleaned_path.clone()
-                                }
+                            if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
+                                relative.to_string_lossy().to_string()
                             } else {
+                                // Path is not under project_root, fall back to cleaned_path
                                 cleaned_path.clone()
                             }
                         } else {
@@ -474,14 +486,10 @@ pub fn find_markdown_files(
                     };
 
                     let mut matching_pattern: Option<&str> = None;
-                    for pattern in &final_exclude_patterns {
-                        // Use globset for pattern matching
-                        if let Ok(glob) = globset::Glob::new(pattern) {
-                            let matcher = glob.compile_matcher();
-                            if matcher.is_match(&path_for_matching) {
-                                matching_pattern = Some(pattern);
-                                break;
-                            }
+                    for (pattern, matcher) in &exclude_matchers {
+                        if matcher.is_match(&path_for_matching) {
+                            matching_pattern = Some(pattern.as_str());
+                            break;
                         }
                     }
                     if let Some(pattern) = matching_pattern {
@@ -516,7 +524,7 @@ pub fn find_markdown_files(
                 let path = entry.path();
                 // We are primarily interested in files. ignore crate handles dir traversal.
                 // Check if it's a file and if it wasn't explicitly excluded by overrides
-                if path.is_file() {
+                if entry.file_type().is_some_and(|file_type| file_type.is_file()) {
                     let file_path = path.to_string_lossy().to_string();
                     // Clean the path before pushing
                     let cleaned_path = if let Some(stripped) = file_path.strip_prefix("./") {
@@ -543,19 +551,15 @@ pub fn find_markdown_files(
     // --- Post-walk exclude pattern filtering ---
     // The ignore crate's overrides may not work correctly when the walker path prefix
     // differs from the config file location. Apply exclude patterns manually here.
-    if !final_exclude_patterns.is_empty()
-        && let Some(root) = project_root
+    if !exclude_matchers.is_empty()
+        && let Some(canonical_root) = canonical_project_root.as_deref()
     {
         file_paths.retain(|file_path| {
             let path = Path::new(file_path);
             // Compute path relative to project_root for pattern matching
             let path_for_matching = if let Ok(canonical_path) = path.canonicalize() {
-                if let Ok(canonical_root) = root.canonicalize() {
-                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_root) {
-                        relative.to_string_lossy().to_string()
-                    } else {
-                        file_path.clone()
-                    }
+                if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
+                    relative.to_string_lossy().to_string()
                 } else {
                     file_path.clone()
                 }
@@ -564,12 +568,9 @@ pub fn find_markdown_files(
             };
 
             // Check if any exclude pattern matches
-            for pattern in &final_exclude_patterns {
-                if let Ok(glob) = globset::Glob::new(pattern) {
-                    let matcher = glob.compile_matcher();
-                    if matcher.is_match(&path_for_matching) {
-                        return false; // Exclude this file
-                    }
+            for (_, matcher) in &exclude_matchers {
+                if matcher.is_match(&path_for_matching) {
+                    return false; // Exclude this file
                 }
             }
             true // Keep this file
