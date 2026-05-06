@@ -14,6 +14,40 @@ use std::path::PathBuf;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Reason a cache lookup could not be used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CacheMissReason {
+    Disabled,
+    MissingEntry { path: PathBuf },
+    UnreadableEntry { path: PathBuf, error: String },
+    InvalidEntry { path: PathBuf, error: String },
+    FileChanged,
+    ConfigChanged,
+    RulesChanged,
+    VersionChanged { cached: String, current: &'static str },
+}
+
+impl std::fmt::Display for CacheMissReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disabled => write!(f, "cache is disabled"),
+            Self::MissingEntry { path } => write!(f, "no cache entry at {}", path.display()),
+            Self::UnreadableEntry { path, error } => {
+                write!(f, "could not read cache entry at {}: {error}", path.display())
+            }
+            Self::InvalidEntry { path, error } => {
+                write!(f, "cache entry at {} is invalid: {error}", path.display())
+            }
+            Self::FileChanged => write!(f, "file content hash changed"),
+            Self::ConfigChanged => write!(f, "configuration hash changed"),
+            Self::RulesChanged => write!(f, "enabled rules hash changed"),
+            Self::VersionChanged { cached, current } => {
+                write!(f, "rumdl version changed from {cached} to {current}")
+            }
+        }
+    }
+}
+
 /// Cache statistics for reporting
 #[derive(Debug, Default, Clone)]
 pub struct CacheStats {
@@ -115,9 +149,20 @@ impl LintCache {
     /// Try to get cached results for a file
     ///
     /// Returns Some(warnings) if cache hit, None if cache miss
+    #[cfg(test)]
     pub fn get(&mut self, content: &str, config_hash: &str, rules_hash: &str) -> Option<Vec<LintWarning>> {
+        self.get_with_reason(content, config_hash, rules_hash).ok()
+    }
+
+    /// Try to get cached results for a file, preserving the miss reason for diagnostics.
+    pub fn get_with_reason(
+        &mut self,
+        content: &str,
+        config_hash: &str,
+        rules_hash: &str,
+    ) -> Result<Vec<LintWarning>, CacheMissReason> {
         if !self.enabled {
-            return None;
+            return Err(CacheMissReason::Disabled);
         }
 
         let file_hash = Self::hash_content(content);
@@ -126,34 +171,55 @@ impl LintCache {
         // Try to read cache file
         let cache_data = match fs::read_to_string(&cache_path) {
             Ok(data) => data,
-            Err(_) => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 self.stats.misses += 1;
-                return None;
+                return Err(CacheMissReason::MissingEntry { path: cache_path });
+            }
+            Err(e) => {
+                self.stats.misses += 1;
+                return Err(CacheMissReason::UnreadableEntry {
+                    path: cache_path,
+                    error: e.to_string(),
+                });
             }
         };
 
         // Try to parse cache entry
         let entry: CacheEntry = match serde_json::from_str(&cache_data) {
             Ok(entry) => entry,
-            Err(_) => {
+            Err(e) => {
                 self.stats.misses += 1;
-                return None;
+                return Err(CacheMissReason::InvalidEntry {
+                    path: cache_path,
+                    error: e.to_string(),
+                });
             }
         };
 
         // Validate cache entry (Ruff-style: file content + config + enabled rules)
-        if entry.file_hash != file_hash
-            || entry.config_hash != config_hash
-            || entry.rules_hash != rules_hash
-            || entry.version != VERSION
-        {
+        if entry.file_hash != file_hash {
             self.stats.misses += 1;
-            return None;
+            return Err(CacheMissReason::FileChanged);
+        }
+        if entry.config_hash != config_hash {
+            self.stats.misses += 1;
+            return Err(CacheMissReason::ConfigChanged);
+        }
+        if entry.rules_hash != rules_hash {
+            self.stats.misses += 1;
+            return Err(CacheMissReason::RulesChanged);
+        }
+        if entry.version != VERSION {
+            self.stats.misses += 1;
+            return Err(CacheMissReason::VersionChanged {
+                cached: entry.version,
+                current: VERSION,
+            });
         }
 
         // Cache hit!
         self.stats.hits += 1;
-        Some(entry.warnings)
+        Ok(entry.warnings)
     }
 
     /// Store lint results in cache
@@ -315,6 +381,23 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_miss_reason_missing_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+
+        let content = "# Test";
+        let config_hash = "abc123";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        let reason = cache
+            .get_with_reason(content, config_hash, rules_hash)
+            .expect_err("empty cache should miss");
+        assert!(matches!(reason, CacheMissReason::MissingEntry { .. }));
+        assert!(reason.to_string().contains("no cache entry at"));
+        assert_eq!(cache.stats().misses, 1);
+    }
+
+    #[test]
     fn test_cache_hit() {
         let temp_dir = TempDir::new().unwrap();
         let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
@@ -369,6 +452,26 @@ mod tests {
 
         // Should miss with config2 (different config)
         assert!(cache.get(content, config_hash2, rules_hash).is_none());
+    }
+
+    #[test]
+    fn test_cache_miss_reason_config_changed() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut cache = LintCache::new(temp_dir.path().to_path_buf(), true);
+        cache.init().unwrap();
+
+        let content = "# Test";
+        let config_hash1 = "abc123";
+        let config_hash2 = "def456";
+        let rules_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        cache.set(content, config_hash1, rules_hash, vec![]);
+
+        let reason = cache
+            .get_with_reason(content, config_hash2, rules_hash)
+            .expect_err("changed config hash should miss");
+        assert_eq!(reason, CacheMissReason::ConfigChanged);
+        assert_eq!(reason.to_string(), "configuration hash changed");
     }
 
     #[test]

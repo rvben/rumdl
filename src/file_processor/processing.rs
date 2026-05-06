@@ -654,39 +654,58 @@ pub fn process_file_with_index(
     // Try to get from cache first (lock briefly for cache read)
     // Note: Cache only stores single-file warnings; cross-file checks must run fresh
     if let Some(ref cache_arc) = cache {
-        let cache_result = cache_arc
-            .lock()
-            .ok()
-            .and_then(|mut guard| guard.get(&content, &config_hash, &rules_hash));
-        if let Some(cached_warnings) = cache_result {
-            if verbose && !quiet {
-                println!("Cache hit for {file_path}");
+        let cache_lookup = match cache_arc.lock() {
+            Ok(mut guard) => Some(guard.get_with_reason(&content, &config_hash, &rules_hash)),
+            Err(e) => {
+                if verbose && !quiet {
+                    println!("Cache miss for {file_path}: cache lock unavailable: {e}");
+                }
+                None
             }
-            // Count fixable warnings from cache (using capability-based check)
-            let fixable_warnings = cached_warnings
-                .iter()
-                .filter(|w| {
-                    w.fix.is_some()
-                        && w.rule_name
-                            .as_ref()
-                            .is_some_and(|name| is_rule_cli_fixable(rules, config, name))
-                })
-                .count();
+        };
 
-            // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
-            let flavor = config.get_flavor_for_file(Path::new(file_path));
-            let file_index =
-                rumdl_lib::build_file_index_only(&content, rules, flavor, Some(std::path::PathBuf::from(file_path)));
+        if let Some(cache_lookup) = cache_lookup {
+            match cache_lookup {
+                Ok(cached_warnings) => {
+                    if verbose && !quiet {
+                        println!("Cache hit for {file_path}");
+                    }
+                    // Count fixable warnings from cache (using capability-based check)
+                    let fixable_warnings = cached_warnings
+                        .iter()
+                        .filter(|w| {
+                            w.fix.is_some()
+                                && w.rule_name
+                                    .as_ref()
+                                    .is_some_and(|name| is_rule_cli_fixable(rules, config, name))
+                        })
+                        .count();
 
-            let total_warnings = cached_warnings.len();
-            return ProcessFileResult {
-                warnings: cached_warnings,
-                content,
-                total_warnings,
-                fixable_warnings,
-                original_line_ending,
-                file_index,
-            };
+                    // Build FileIndex for cross-file analysis on cache hit (lightweight, no rule checking)
+                    let flavor = config.get_flavor_for_file(Path::new(file_path));
+                    let file_index = rumdl_lib::build_file_index_only(
+                        &content,
+                        rules,
+                        flavor,
+                        Some(std::path::PathBuf::from(file_path)),
+                    );
+
+                    let total_warnings = cached_warnings.len();
+                    return ProcessFileResult {
+                        warnings: cached_warnings,
+                        content,
+                        total_warnings,
+                        fixable_warnings,
+                        original_line_ending,
+                        file_index,
+                    };
+                }
+                Err(reason) => {
+                    if verbose && !quiet {
+                        println!("Cache miss for {file_path}: {reason}");
+                    }
+                }
+            }
         }
     }
 
