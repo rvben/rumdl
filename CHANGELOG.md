@@ -32,6 +32,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.90](https://github.com/rvben/rumdl/compare/v0.1.89...v0.1.90) - 2026-05-06
+
+### Added
+
+- **cache**: add structured cache miss reasons for verbose mode (#618) ([5c4f418](https://github.com/rvben/rumdl/commit/5c4f418a4de7d43d7bc6fae650ab77e75ccd312e))
+
+### Fixed
+
+- **cli**: allow --profile output in --silent mode (#619) ([d9cde4d](https://github.com/rvben/rumdl/commit/d9cde4d6f3f02f2b3b5184f36c63a91ee30664a1))
+
+### Performance
+
+- **cache**: warm cache profiling path with concurrent-safe writes (#616) ([5c2a00b](https://github.com/rvben/rumdl/commit/5c2a00b0deb43a883949857a5715a7f3132ed756))
+- **discovery**: precompile exclude matchers and reuse walker file types (#617) ([49a1de2](https://github.com/rvben/rumdl/commit/49a1de2c49890b4ec76103ce1030ab5064c5c0ca))
+
 ## [0.1.89](https://github.com/rvben/rumdl/compare/v0.1.88...v0.1.89) - 2026-05-06
 
 ### Added
