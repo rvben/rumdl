@@ -110,19 +110,17 @@ jobs:
           VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           BRANCH="rumdl-schema-update"
 
-          # Always sync fork with upstream for clean base
-          echo "Syncing fork with upstream..."
-          gh repo sync rvben/schemastore --source SchemaStore/schemastore --force
-
           # Check for existing PR (to decide whether to create one later)
           EXISTING_PR_NUM=$(gh pr list --repo SchemaStore/schemastore --author rvben --head "rvben:${BRANCH}" --state open --json number --jq '.[0].number // empty')
 
-          # Clone fork
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/rvben/schemastore.git" schemastore-repo
+          # Clone upstream directly. The fork (rvben/schemastore) is only the PR
+          # head — we push our branch to it but never sync its master, so the bot
+          # doesn't need the `workflow` scope when upstream changes
+          # .github/workflows/*.
+          git clone --depth=1 https://github.com/SchemaStore/schemastore.git schemastore-repo
           cd schemastore-repo
-
-          # Always create/reset branch from master for clean history
-          git checkout -B "${BRANCH}" origin/master
+          git remote add fork "https://x-access-token:${GH_TOKEN}@github.com/rvben/schemastore.git"
+          git checkout -B "${BRANCH}"
 
           # Install dependencies first (Prettier needs prettier-plugin-sort-json)
           npm ci
@@ -158,7 +156,7 @@ jobs:
           # Commit and push
           git add src/schemas/json/rumdl.json
           git commit -m "feat(rumdl): update schema to v${VERSION}"
-          git push origin "${BRANCH}" --force
+          git push fork "${BRANCH}" --force
 
           # Create PR only if none exists
           if [ -n "$EXISTING_PR_NUM" ]; then
