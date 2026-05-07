@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.91](https://github.com/rvben/rumdl/compare/v0.1.90...v0.1.91) - 2026-05-07
+
+### Fixed
+
+- **cache**: stabilize `hash_config` across identical config loads, eliminating spurious "configuration hash changed" cache misses caused by `HashMap` iteration order (#622, fixes #621) ([f46be05](https://github.com/rvben/rumdl/commit/f46be05814e3241f82cc67c2fd40343d2506d379)) — thanks @mattiasgronlund
+- **ci**: branch off upstream master in sync-schemastore ([787a7ea](https://github.com/rvben/rumdl/commit/787a7eaf003f29a843f8ffc38128612c2919245a))
+
 ## [0.1.90](https://github.com/rvben/rumdl/compare/v0.1.89...v0.1.90) - 2026-05-06
 
 ### Added
