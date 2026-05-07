@@ -142,6 +142,12 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
 Choose the installation method that works best for you:
 
+### Using winget (Windows)
+
+```powershell
+winget install --id rvben.rumdl --exact
+```
+
 ### Using Homebrew (macOS/Linux)
 
 ```bash

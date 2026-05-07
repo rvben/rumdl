@@ -28,6 +28,11 @@ on:
         required: false
         default: false
         type: boolean
+      skip_winget:
+        description: 'Skip submitting the Windows Package Manager manifest update'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -956,3 +961,43 @@ jobs:
           echo "To do an actual release:"
           echo "1. Uncheck 'Dry run mode' when running manually, OR"
           echo "2. Create and push a version tag (e.g., v0.0.85)"
+
+  publish-winget:
+    runs-on: windows-latest
+    needs: release
+    if: ${{ inputs.skip_winget != true }}
+    permissions:
+      contents: read
+    steps:
+      - name: Submit winget manifest update
+        if: ${{ inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if ($env:GITHUB_REF -notmatch '^refs/tags/v\d+\.\d+\.\d+$') {
+            Write-Host "Current ref is not a semver release tag; skipping winget manifest submission."
+            exit 0
+          }
+
+          if (-not $env:WINGET_TOKEN) {
+            Write-Host "WINGET_TOKEN is not configured; skipping winget manifest submission."
+            exit 0
+          }
+
+          $tagName = $env:GITHUB_REF -replace '^refs/tags/', ''
+          $version = $tagName -replace '^v', ''
+          $installerUrl = "https://github.com/rvben/rumdl/releases/download/$tagName/rumdl-$tagName-x86_64-pc-windows-msvc.zip"
+
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile wingetcreate.exe
+          .\wingetcreate.exe update rvben.rumdl -u $installerUrl -v $version -t $env:WINGET_TOKEN --submit
+
+      - name: Test winget submission (dry run)
+        if: ${{ inputs.dry_run == true }}
+        shell: pwsh
+        run: |
+          $tagName = $env:GITHUB_REF -replace '^refs/tags/', ''
+          $version = $tagName -replace '^v', ''
+          $installerUrl = "https://github.com/rvben/rumdl/releases/download/$tagName/rumdl-$tagName-x86_64-pc-windows-msvc.zip"
+          Write-Host "DRY RUN: Would submit winget update for rvben.rumdl $version"
+          Write-Host "Installer URL: $installerUrl"
