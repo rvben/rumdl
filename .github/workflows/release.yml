@@ -52,10 +52,14 @@ jobs:
       - name: Install mise tools
         run: |
           for attempt in 1 2 3; do
-            mise install --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
+            if mise install --yes; then
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 10s..." >&2
             sleep 10
           done
+          echo "All 3 install attempts failed" >&2
+          exit 1
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -131,15 +135,26 @@ jobs:
           experimental: false  # Use stable releases only
           install: false
 
-      # Install only build-required tools (skip uv, nextest, watch, etc.)
+      # Install only build-required tools (skip uv, nextest, watch, etc.).
+      # zig + cargo-zigbuild are only needed for cross-compiled Linux targets;
+      # the mise registry's `core:zig@0.13.0` download is currently broken on
+      # Windows and macOS runners, so we omit it on platforms that never use it.
       - name: Install mise tools
         shell: bash
         run: |
+          tools=(rust python cargo:maturin)
+          case "${{ matrix.target }}" in
+            *-linux-*) tools+=(cargo:cargo-zigbuild zig) ;;
+          esac
           for attempt in 1 2 3; do
-            mise install rust python "cargo:maturin" "cargo:cargo-zigbuild" zig --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
+            if mise install "${tools[@]}" --yes; then
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 10s..." >&2
             sleep 10
           done
+          echo "All 3 install attempts failed" >&2
+          exit 1
 
       # Verify zig installation on Linux only
       - name: Verify zig installation
@@ -286,10 +301,14 @@ jobs:
       - name: Install mise tools
         run: |
           for attempt in 1 2 3; do
-            mise install rust python "cargo:maturin" --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
+            if mise install rust python "cargo:maturin" --yes; then
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 10s..." >&2
             sleep 10
           done
+          echo "All 3 install attempts failed" >&2
+          exit 1
       - name: Build source distribution
         run: mise exec -- maturin sdist
       - uses: actions/upload-artifact@v6
