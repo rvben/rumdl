@@ -633,6 +633,52 @@ line-length = 100
     }
 
     #[test]
+    fn test_hash_config_is_stable_with_code_block_tools_maps() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join(".rumdl.toml");
+
+        let mut config_content = String::from(
+            r#"
+[global]
+line-length = 100
+
+[code-block-tools]
+enabled = true
+
+[code-block-tools.language-aliases]
+"#,
+        );
+        for i in 0..32 {
+            config_content.push_str(&format!("\"alias-{i:02}\" = \"lang-{i:02}\"\n"));
+        }
+        for i in 0..32 {
+            config_content.push_str(&format!(
+                "\n[code-block-tools.languages.\"lang-{i:02}\"]\nenabled = false\n",
+            ));
+            config_content.push_str(&format!(
+                "\n[code-block-tools.tools.\"tool-{i:02}\"]\ncommand = [\"tool-{i:02}\"]\n",
+            ));
+        }
+        std::fs::write(&config_path, config_content).unwrap();
+
+        let mut hashes = std::collections::BTreeSet::new();
+        for _ in 0..128 {
+            let sourced =
+                rumdl_lib::config::SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+                    .unwrap();
+            let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
+            hashes.insert(LintCache::hash_config(&config));
+        }
+
+        let unique_count = hashes.len();
+        let sample: Vec<_> = hashes.iter().take(3).cloned().collect();
+        assert_eq!(
+            unique_count, 1,
+            "code-block-tools maps must serialize deterministically, got {unique_count} unique hashes; sample: {sample:?}",
+        );
+    }
+
+    #[test]
     fn test_cache_stats() {
         let temp_dir = TempDir::new().unwrap();
         let cache = LintCache::new(temp_dir.path().to_path_buf(), true);
