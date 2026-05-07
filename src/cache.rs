@@ -161,8 +161,16 @@ impl LintCache {
         hash
     }
 
-    /// Compute hash of config
-    /// This is a public function that can be called from file_processor
+    /// Compute hash of config.
+    ///
+    /// The hash must be stable across repeated loads of the same config file:
+    /// otherwise warm-cache runs see spurious "configuration hash changed" misses.
+    /// Hashing serialized JSON means every map field reachable from `Config`
+    /// must iterate in a deterministic order. Use `BTreeMap` for keyed config
+    /// (sorted), `IndexMap` when config-file order is semantically required
+    /// (e.g. `per-file-flavor`'s first-match-wins), or `Vec` for ordered lists.
+    /// Never use `HashMap` in a serialized config field — Rust's `RandomState`
+    /// randomizes iteration per-instance and breaks this invariant.
     pub fn hash_config(config: &rumdl_lib::config::Config) -> String {
         #[cfg(feature = "profiling")]
         let start = std::time::Instant::now();
