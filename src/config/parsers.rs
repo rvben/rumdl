@@ -1,7 +1,7 @@
 use crate::types::LineLength;
 use indexmap::IndexMap;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::str::FromStr;
 use toml_edit::DocumentMut;
 
@@ -229,7 +229,7 @@ pub(super) fn parse_pyproject_toml(
         if let Some(per_file_ignores_value) = per_file_ignores_key
             && let Some(per_file_table) = per_file_ignores_value.as_table()
         {
-            let mut per_file_map = HashMap::new();
+            let mut per_file_map = BTreeMap::new();
             for (pattern, rules_value) in per_file_table {
                 warn_comma_without_brace_in_pattern(pattern, &display_path);
                 if let Ok(rules) = Vec::<String>::deserialize(rules_value.clone()) {
@@ -799,7 +799,7 @@ pub(super) fn parse_rumdl_toml(
     if let Some(per_file_item) = doc.get("per-file-ignores")
         && let Some(per_file_table) = per_file_item.as_table()
     {
-        let mut per_file_map = HashMap::new();
+        let mut per_file_map = BTreeMap::new();
         for (pattern, value_item) in per_file_table {
             warn_comma_without_brace_in_pattern(pattern, &display_path);
             if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {

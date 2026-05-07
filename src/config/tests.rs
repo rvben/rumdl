@@ -1681,13 +1681,13 @@ fn test_per_file_ignores_matches_absolute_path_with_cwd_fallback() {
     // Sibling end-to-end test for the per-file-ignores path, which uses the
     // same normalize_match_path helper. An absolute file path under cwd must
     // resolve the rule list correctly when project_root is None.
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     let temp = tempdir().unwrap();
     let file = make_file(&temp, "docs/guide.md");
     let cwd = temp.path().canonicalize().unwrap();
 
-    let mut per_file_ignores = HashMap::new();
+    let mut per_file_ignores = BTreeMap::new();
     per_file_ignores.insert("docs/**/*.md".to_string(), vec!["MD013".to_string()]);
     let config = Config {
         per_file_ignores,

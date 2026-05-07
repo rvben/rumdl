@@ -4756,7 +4756,7 @@ fn make_embedded_markdown_config() -> crate::code_block_tools::CodeBlockToolsCon
         format: Vec::new(),
         on_error: None,
     };
-    let mut languages = std::collections::HashMap::new();
+    let mut languages = std::collections::BTreeMap::new();
     languages.insert("markdown".to_string(), lang);
     crate::code_block_tools::CodeBlockToolsConfig {
         enabled: true,
@@ -4886,7 +4886,7 @@ async fn test_lint_document_embedded_markdown_md_alias() {
     // Enable for "md" alias instead of "markdown"
     {
         let mut cfg = server.rumdl_config.write().await;
-        let mut languages = std::collections::HashMap::new();
+        let mut languages = std::collections::BTreeMap::new();
         languages.insert(
             "md".to_string(),
             crate::code_block_tools::LanguageToolConfig {

@@ -4,18 +4,19 @@
 //! shellcheck, etc. Users can override these in their configuration.
 
 use super::config::ToolDefinition;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Registry of built-in tool definitions.
 pub struct ToolRegistry {
     /// User-defined tools (override built-ins)
-    user_tools: HashMap<String, ToolDefinition>,
+    user_tools: BTreeMap<String, ToolDefinition>,
 }
 
 impl ToolRegistry {
     /// Create a new registry with user-defined tools.
-    pub fn new(user_tools: HashMap<String, ToolDefinition>) -> Self {
+    pub fn new(user_tools: BTreeMap<String, ToolDefinition>) -> Self {
         Self { user_tools }
     }
 
@@ -46,7 +47,7 @@ impl ToolRegistry {
 
 impl Default for ToolRegistry {
     fn default() -> Self {
-        Self::new(HashMap::new())
+        Self::new(BTreeMap::new())
     }
 }
 
@@ -627,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_get_user_tool_overrides_builtin() {
-        let mut user_tools = HashMap::new();
+        let mut user_tools = BTreeMap::new();
         user_tools.insert(
             "ruff:check".to_string(),
             ToolDefinition {
@@ -672,7 +673,7 @@ mod tests {
 
     #[test]
     fn test_user_tools_in_list() {
-        let mut user_tools = HashMap::new();
+        let mut user_tools = BTreeMap::new();
         user_tools.insert("my-custom-tool".to_string(), ToolDefinition::default());
 
         let registry = ToolRegistry::new(user_tools);
