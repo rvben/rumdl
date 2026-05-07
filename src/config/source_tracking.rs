@@ -1,7 +1,6 @@
 use crate::types::LineLength;
 use indexmap::IndexMap;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
 use super::flavor::{ConfigLoaded, MarkdownFlavor};
@@ -199,7 +198,7 @@ pub struct SourcedConfigFragment {
     /// Path to a base config file to inherit from (consumed during loading, not a config setting)
     pub extends: Option<String>,
     pub global: SourcedGlobalConfig,
-    pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
+    pub per_file_ignores: SourcedValue<BTreeMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
@@ -216,7 +215,7 @@ impl Default for SourcedConfigFragment {
         Self {
             extends: None,
             global: SourcedGlobalConfig::default(),
-            per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            per_file_ignores: SourcedValue::new(BTreeMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
             code_block_tools: SourcedValue::new(
                 crate::code_block_tools::CodeBlockToolsConfig::default(),
@@ -257,7 +256,7 @@ pub struct ConfigValidationWarning {
 #[derive(Debug, Clone)]
 pub struct SourcedConfig<State = ConfigLoaded> {
     pub global: SourcedGlobalConfig,
-    pub per_file_ignores: SourcedValue<HashMap<String, Vec<String>>>,
+    pub per_file_ignores: SourcedValue<BTreeMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
@@ -275,7 +274,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
     fn default() -> Self {
         Self {
             global: SourcedGlobalConfig::default(),
-            per_file_ignores: SourcedValue::new(HashMap::new(), ConfigSource::Default),
+            per_file_ignores: SourcedValue::new(BTreeMap::new(), ConfigSource::Default),
             per_file_flavor: SourcedValue::new(IndexMap::new(), ConfigSource::Default),
             code_block_tools: SourcedValue::new(
                 crate::code_block_tools::CodeBlockToolsConfig::default(),

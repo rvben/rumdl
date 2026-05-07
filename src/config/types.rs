@@ -2,8 +2,7 @@ use crate::types::LineLength;
 use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -51,13 +50,13 @@ pub struct Config {
     /// Per-file rule ignores: maps file patterns to lists of rules to ignore
     /// Example: { "README.md": ["MD033"], "docs/**/*.md": ["MD013"] }
     #[serde(default, rename = "per-file-ignores")]
-    pub per_file_ignores: HashMap<String, Vec<String>>,
+    pub per_file_ignores: BTreeMap<String, Vec<String>>,
 
     /// Per-file flavor overrides: maps file patterns to Markdown flavors
     /// Example: { "docs/**/*.md": MkDocs, "**/*.mdx": MDX }
     /// Uses IndexMap to preserve config file order for "first match wins" semantics
     #[serde(default, rename = "per-file-flavor")]
-    #[schemars(with = "HashMap<String, MarkdownFlavor>")]
+    #[schemars(with = "BTreeMap<String, MarkdownFlavor>")]
     pub per_file_flavor: IndexMap<String, MarkdownFlavor>,
 
     /// Code block tools configuration for per-language linting and formatting
@@ -489,7 +488,7 @@ pub(super) fn json_to_toml(json: &serde_json::Value) -> Option<toml::Value> {
 }
 
 impl PerFileIgnoreCache {
-    fn new(per_file_ignores: &HashMap<String, Vec<String>>) -> Self {
+    fn new(per_file_ignores: &BTreeMap<String, Vec<String>>) -> Self {
         let mut builder = GlobSetBuilder::new();
         let mut rules = Vec::new();
 

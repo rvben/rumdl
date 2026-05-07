@@ -4,7 +4,7 @@
 //! linting and formatting using external tools.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Master configuration for code block tools.
 ///
@@ -40,16 +40,16 @@ pub struct CodeBlockToolsConfig {
 
     /// Per-language tool configuration
     #[serde(default)]
-    pub languages: HashMap<String, LanguageToolConfig>,
+    pub languages: BTreeMap<String, LanguageToolConfig>,
 
     /// User-defined language aliases (override built-in resolution)
     /// Example: { "py": "python", "bash": "shell" }
     #[serde(default)]
-    pub language_aliases: HashMap<String, String>,
+    pub language_aliases: BTreeMap<String, String>,
 
     /// Custom tool definitions (override built-ins)
     #[serde(default)]
-    pub tools: HashMap<String, ToolDefinition>,
+    pub tools: BTreeMap<String, ToolDefinition>,
 }
 
 fn default_timeout() -> u64 {
@@ -73,9 +73,9 @@ impl Default for CodeBlockToolsConfig {
             on_missing_language_definition: OnMissing::default(),
             on_missing_tool_binary: OnMissing::default(),
             timeout: default_timeout(),
-            languages: HashMap::new(),
-            language_aliases: HashMap::new(),
-            tools: HashMap::new(),
+            languages: BTreeMap::new(),
+            language_aliases: BTreeMap::new(),
+            tools: BTreeMap::new(),
         }
     }
 }
