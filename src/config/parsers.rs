@@ -264,7 +264,7 @@ pub(super) fn parse_pyproject_toml(
                     per_file_map.insert(pattern.clone(), flavor);
                 } else {
                     log::warn!(
-                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, quarto"
+                        "[WARN] Invalid flavor for per-file-flavor pattern '{pattern}' in {display_path}, found {flavor_value:?}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops"
                     );
                 }
             }
@@ -835,7 +835,7 @@ pub(super) fn parse_rumdl_toml(
                     }
                     Err(_) => {
                         log::warn!(
-                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, quarto"
+                            "[WARN] Invalid flavor '{flavor_str}' for pattern '{pattern}' in {display_path}. Valid values: standard, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops"
                         );
                     }
                 }

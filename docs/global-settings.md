@@ -69,7 +69,7 @@ respect-gitignore = false
 # Set global line length (used by MD013 and other line-length rules)
 line-length = 120
 
-# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, kramdown, azure_devops)
+# Set markdown flavor (standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops)
 flavor = "mkdocs"
 
 # Per-file flavor overrides (pattern → flavor)

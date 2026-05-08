@@ -69,7 +69,7 @@ pip install mdformat-gfm mdformat-frontmatter
 
 ```toml
 [global]
-flavor = "gfm"  # or: mkdocs, mdx, obsidian, quarto
+flavor = "gfm"  # or: mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops
 ```
 
 | Syntax              | mdformat             | rumdl               |
