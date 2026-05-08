@@ -996,6 +996,11 @@ jobs:
         if: ${{ inputs.dry_run == true }}
         shell: pwsh
         run: |
+          if ($env:GITHUB_REF -notmatch '^refs/tags/v\d+\.\d+\.\d+$') {
+            Write-Host "Current ref is not a semver release tag; skipping winget dry-run preview."
+            exit 0
+          }
+
           $tagName = $env:GITHUB_REF -replace '^refs/tags/', ''
           $version = $tagName -replace '^v', ''
           $installerUrl = "https://github.com/rvben/rumdl/releases/download/$tagName/rumdl-$tagName-x86_64-pc-windows-msvc.zip"
