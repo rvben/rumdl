@@ -47,6 +47,9 @@ jobs:
           bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           echo "${PWD}" >> "$GITHUB_PATH"
 
+      - name: Check version references in sync with Cargo.toml
+        run: make check-versions
+
       - name: Run linting
         run: make lint
 

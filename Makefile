@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke release-patch release-minor release-major
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke release-patch release-minor release-major
 
 # Development environment setup
 setup-mise:
@@ -162,6 +162,12 @@ schema:
 # Check if JSON schema is up-to-date
 check-schema:
 	cargo run --bin rumdl -- schema check
+
+# Verify version references in vership-tracked files are in sync with Cargo.toml.
+# Guards against vership's text-mode version_files silently no-op'ing when the
+# {prev} pattern drifts out of the file.
+check-versions:
+	python3 scripts/check-versions.py
 
 doc:
 	cargo doc --no-deps

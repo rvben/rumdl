@@ -40,6 +40,7 @@ command = "cargo run --release --bin rumdl -- schema generate"
 files = ["rumdl.schema.json"]
 
 [hooks]
+pre-bump = "python3 scripts/check-versions.py"
 post-push = "gh api repos/rvben/rumdl-pre-commit/dispatches -f event_type=pypi_release"
 
 [checks]
