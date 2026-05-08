@@ -8,6 +8,12 @@ Choose the installation method that works best for your workflow.
 
 ## Package Managers
 
+=== "winget"
+
+    ```powershell
+    winget install --id rvben.rumdl --exact
+    ```
+
 === "Homebrew"
 
     ```bash
