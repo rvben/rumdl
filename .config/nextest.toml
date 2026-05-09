@@ -69,8 +69,8 @@ status-level = "fail"
 # No retries for faster feedback
 retries = 0
 
-# Ultra-fast profile for pre-commit hooks
-[profile.pre-commit]
+# Ultra-fast profile for prek hooks
+[profile.prek]
 
 # Only run unit tests in lib, skip all integration tests and binaries
 default-filter = 'package(rumdl) and kind(lib) and not test(/slow|stress|large|integration|comprehensive|cli|config|advanced|commonmark|consistency|performance|benchmark|parity|error_propagation|deeply_nested|memory/)'

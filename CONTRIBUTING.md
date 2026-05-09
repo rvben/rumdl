@@ -39,12 +39,12 @@ Thank you for your interest in contributing to rumdl! This document provides gui
    cargo install cargo-nextest cargo-watch maturin
    ```
 
-3. **Install pre-commit hooks**:
+3. **Install prek hooks**:
 
    ```bash
-   pre-commit install                        # Code quality hooks
-   pre-commit install --hook-type commit-msg # Conventional commits validation
-   pre-commit install --hook-type pre-push   # Comprehensive validation
+   prek install                        # Code quality hooks
+   prek install --hook-type commit-msg # Conventional commits validation
+   prek install --hook-type pre-push   # Comprehensive validation
    ```
 
 4. **Verify installation**:
@@ -203,7 +203,7 @@ rumdl uses [cargo-nextest](https://nexte.st/) with optimized test profiles:
 
 | Command                | Duration | Use Case                            |
 | ---------------------- | -------- | ----------------------------------- |
-| `make test-pre-commit` | ~6s      | Pre-commit hook (lib tests only)    |
+| `make test-prek`       | ~6s      | prek hook (lib tests only)          |
 | `make test-quick`      | ~15s     | Quick feedback (skips slow tests)   |
 | `make test-dev`        | ~20s     | Development default (skips slowest) |
 | `make test`            | ~30s     | Full suite with dev profile         |
