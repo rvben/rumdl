@@ -51,9 +51,8 @@ repos:
     hooks:
       - id: actionlint
 
-  # General file quality checks (pre-commit built-in implementations)
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+  # General file quality checks (prek built-in Rust implementations)
+  - repo: builtin
     hooks:
       - id: trailing-whitespace
         exclude: \.md$|tests/inline_config_test\.rs$|tests/output_format_integration_tests\.rs$|tests/lsp_editor_integration_tests\.rs$|tests/utils_markdown_edge_cases\.rs$

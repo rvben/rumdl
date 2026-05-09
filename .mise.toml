@@ -50,6 +50,10 @@ idiomatic_version_file_enable_tools = ["rust"]
 # rust_cache_dir = "./.mise/rust"
 # cargo_home = "./.mise/cargo"
 
+[settings.cargo]
+# Use cargo-binstall when available for faster installations
+binstall = true
+
 [tasks.setup]
 description = "Set up the complete development environment"
 run = """
