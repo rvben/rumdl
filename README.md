@@ -47,6 +47,8 @@ rumdl init
 rumdl is a high-performance Markdown linter and formatter that helps ensure consistency and best practices in your Markdown files. Inspired by [ruff](https://github.com/astral-sh/ruff) 's approach to
 Python linting, rumdl brings similar speed and developer experience improvements to the Markdown ecosystem.
 
+> Questions or feedback? Join us on [Discord](https://discord.gg/ADTJFSFUyn).
+
 It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
