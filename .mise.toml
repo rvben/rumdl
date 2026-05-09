@@ -38,9 +38,6 @@ zig = "0.13"
 # separately. maturin is already installed via cargo above.
 
 [settings]
-# Use cargo-binstall when available for faster installations
-cargo_binstall = true
-
 # Experimental features
 experimental = true
 

@@ -26,7 +26,7 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: []  # Optional: add --strict for stricter validation
+        args: [] # Optional: add --strict for stricter validation
 
   # Rust formatting and linting
   - repo: local
@@ -46,16 +46,14 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
       - id: actionlint
-        name: actionlint (GitHub Actions)
-        entry: actionlint
-        language: system
-        files: ^\.github/workflows/.*\.ya?ml$
-        pass_filenames: false
-        stages: [pre-commit]
 
-  # General file quality checks (prek built-in Rust implementations)
-  - repo: builtin
+  # General file quality checks (pre-commit built-in implementations)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
     hooks:
       - id: trailing-whitespace
         exclude: \.md$|tests/inline_config_test\.rs$|tests/output_format_integration_tests\.rs$|tests/lsp_editor_integration_tests\.rs$|tests/utils_markdown_edge_cases\.rs$
