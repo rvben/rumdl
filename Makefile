@@ -91,8 +91,8 @@ test-dev:
 test-quick:
 	cargo nextest run --profile quick
 
-test-pre-commit:
-	cargo nextest run --profile pre-commit
+test-prek:
+	cargo nextest run --profile prek
 
 test-smoke:
 	cargo nextest run --profile smoke
