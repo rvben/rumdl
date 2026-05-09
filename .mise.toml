@@ -15,6 +15,8 @@ python = "3.12"
 # UV - Fast Python package and tool manager
 uv = "latest"
 
+actionlint = "latest"
+
 # Development tools installed via cargo
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-watch" = "latest"
