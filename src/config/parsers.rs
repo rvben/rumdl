@@ -317,35 +317,48 @@ pub(super) fn parse_pyproject_toml(
                 continue;
             }
 
+            // Handle [tool.rumdl.rules.MDxxx] — accepted as an alias for [tool.rumdl.MDxxx].
+            if norm_rule_key == "rules" {
+                if let Some(inner_table) = value.as_table() {
+                    for (inner_key, inner_value) in inner_table {
+                        if let Some(resolved_inner_rule) = registry.resolve_rule_name(inner_key) {
+                            if let Some(inner_rule_table) = inner_value.as_table() {
+                                apply_rule_table_toml(
+                                    &resolved_inner_rule,
+                                    inner_rule_table,
+                                    &mut fragment,
+                                    source,
+                                    &file,
+                                    &display_path,
+                                );
+                            }
+                        } else {
+                            // Store without the "rules." prefix so validation's edit-distance
+                            // suggestion logic sees the bare rule name, not "rules.MD999".
+                            fragment.unknown_keys.push((
+                                format!("[tool.rumdl.{inner_key}]"),
+                                String::new(),
+                                Some(path.to_string()),
+                            ));
+                        }
+                    }
+                }
+                continue;
+            }
+
             // Try to resolve as a rule name (handles both canonical names and aliases)
             if let Some(resolved_rule_name) = registry.resolve_rule_name(key)
                 && value.is_table()
                 && let Some(rule_config_table) = value.as_table()
             {
-                let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
-                for (rk, rv) in rule_config_table {
-                    let norm_rk = normalize_key(rk);
-
-                    // Special handling for severity - store in rule_entry.severity
-                    if norm_rk == "severity" {
-                        if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                            if let Some(ref mut sv) = rule_entry.severity {
-                                sv.push_override(severity, source, file.clone(), None);
-                            } else {
-                                rule_entry.severity = Some(SourcedValue::new(severity, source));
-                            }
-                        }
-                        continue; // Skip regular value processing for severity
-                    }
-
-                    let toml_val = rv.clone();
-
-                    let sv = rule_entry
-                        .values
-                        .entry(norm_rk.clone())
-                        .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                    sv.push_override(toml_val, source, file.clone(), None);
-                }
+                apply_rule_table_toml(
+                    &resolved_rule_name,
+                    rule_config_table,
+                    &mut fragment,
+                    source,
+                    &file,
+                    &display_path,
+                );
             } else if registry.resolve_rule_name(key).is_none() {
                 // Key is not a global/special key and not a recognized rule name
                 // Track unknown keys under [tool.rumdl] for validation
@@ -356,40 +369,25 @@ pub(super) fn parse_pyproject_toml(
         }
     }
 
-    // 2. Handle [tool.rumdl.MDxxx] sections as rule-specific config (nested under [tool])
+    // 2. Handle [tool.rumdl.MDxxx] and [tool.rumdl.rules.MDxxx] nested under [tool]
     if let Some(tool_table) = doc.get("tool").and_then(|t| t.as_table()) {
         for (key, value) in tool_table {
-            if let Some(rule_name) = key.strip_prefix("rumdl.") {
-                // Try to resolve as a rule name (handles both canonical names and aliases)
+            // Accept both "rumdl.MDxxx" and "rumdl.rules.MDxxx" prefixes
+            let rule_name = key.strip_prefix("rumdl.rules.").or_else(|| key.strip_prefix("rumdl."));
+            if let Some(rule_name) = rule_name {
                 if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
                     if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
-                        for (rk, rv) in rule_table {
-                            let norm_rk = normalize_key(rk);
-
-                            // Special handling for severity - store in rule_entry.severity
-                            if norm_rk == "severity" {
-                                if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if let Some(ref mut sv) = rule_entry.severity {
-                                        sv.push_override(severity, source, file.clone(), None);
-                                    } else {
-                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
-                                    }
-                                }
-                                continue; // Skip regular value processing for severity
-                            }
-
-                            let toml_val = rv.clone();
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_rk.clone())
-                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                            sv.push_override(toml_val, source, file.clone(), None);
-                        }
+                        apply_rule_table_toml(
+                            &resolved_rule_name,
+                            rule_table,
+                            &mut fragment,
+                            source,
+                            &file,
+                            &display_path,
+                        );
                     }
                 } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
-                    // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
                         format!("[tool.rumdl.{rule_name}]"),
                         String::new(),
@@ -400,40 +398,27 @@ pub(super) fn parse_pyproject_toml(
         }
     }
 
-    // 3. Handle [tool.rumdl.MDxxx] sections as top-level keys (e.g., [tool.rumdl.MD007] or [tool.rumdl.line-length])
+    // 3. Handle [tool.rumdl.MDxxx] and [tool.rumdl.rules.MDxxx] as top-level dotted keys
     if let Some(doc_table) = doc.as_table() {
         for (key, value) in doc_table {
-            if let Some(rule_name) = key.strip_prefix("tool.rumdl.") {
-                // Try to resolve as a rule name (handles both canonical names and aliases)
+            // Accept both "tool.rumdl.MDxxx" and "tool.rumdl.rules.MDxxx" prefixes
+            let rule_name = key
+                .strip_prefix("tool.rumdl.rules.")
+                .or_else(|| key.strip_prefix("tool.rumdl."));
+            if let Some(rule_name) = rule_name {
                 if let Some(resolved_rule_name) = registry.resolve_rule_name(rule_name) {
                     if let Some(rule_table) = value.as_table() {
-                        let rule_entry = fragment.rules.entry(resolved_rule_name.clone()).or_default();
-                        for (rk, rv) in rule_table {
-                            let norm_rk = normalize_key(rk);
-
-                            // Special handling for severity - store in rule_entry.severity
-                            if norm_rk == "severity" {
-                                if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
-                                    if let Some(ref mut sv) = rule_entry.severity {
-                                        sv.push_override(severity, source, file.clone(), None);
-                                    } else {
-                                        rule_entry.severity = Some(SourcedValue::new(severity, source));
-                                    }
-                                }
-                                continue; // Skip regular value processing for severity
-                            }
-
-                            let toml_val = rv.clone();
-                            let sv = rule_entry
-                                .values
-                                .entry(norm_rk.clone())
-                                .or_insert_with(|| SourcedValue::new(toml_val.clone(), source));
-                            sv.push_override(toml_val, source, file.clone(), None);
-                        }
+                        apply_rule_table_toml(
+                            &resolved_rule_name,
+                            rule_table,
+                            &mut fragment,
+                            source,
+                            &file,
+                            &display_path,
+                        );
                     }
                 } else if rule_name.to_ascii_uppercase().starts_with("MD") || rule_name.chars().any(char::is_alphabetic)
                 {
-                    // Track unknown rule sections like [tool.rumdl.MD999] or [tool.rumdl.unknown-rule]
                     fragment.unknown_keys.push((
                         format!("[tool.rumdl.{rule_name}]"),
                         String::new(),
@@ -461,6 +446,45 @@ pub(super) fn parse_pyproject_toml(
         || !fragment.per_file_flavor.value.is_empty()
         || !fragment.rules.is_empty();
     if has_any { Ok(Some(fragment)) } else { Ok(None) }
+}
+
+/// Applies a rule configuration table (in standard `toml` format) into the fragment.
+/// Used for rule sections parsed from pyproject.toml, including `[tool.rumdl.MDxxx]`
+/// and `[tool.rumdl.rules.MDxxx]` forms.
+fn apply_rule_table_toml(
+    norm_rule_name: &str,
+    rule_config_table: &toml::value::Table,
+    fragment: &mut SourcedConfigFragment,
+    source: ConfigSource,
+    file: &Option<String>,
+    display_path: &str,
+) {
+    let rule_entry = fragment.rules.entry(norm_rule_name.to_string()).or_default();
+    for (rk, rv) in rule_config_table {
+        let norm_rk = normalize_key(rk);
+
+        if norm_rk == "severity" {
+            if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
+                if let Some(ref mut sv) = rule_entry.severity {
+                    sv.push_override(severity, source, file.clone(), None);
+                } else {
+                    rule_entry.severity = Some(SourcedValue::new(severity, source));
+                }
+            } else if let Some(severity_str) = rv.as_str() {
+                log::warn!(
+                    "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
+                );
+            }
+            continue;
+        }
+
+        let toml_val = rv.clone();
+        let sv = rule_entry
+            .values
+            .entry(norm_rk.clone())
+            .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
+        sv.push_override(toml_val, source, file.clone(), None);
+    }
 }
 
 /// Set of top-level keys that are global config keys (not rule sections).
@@ -894,6 +918,39 @@ pub(super) fn parse_rumdl_toml(
             }
         }
 
+        // Handle [rules.MDxxx] wrapper — accepted as an alias for flat [MDxxx] sections.
+        // This lets users port markdownlint configs that group rules under a [rules] heading.
+        if key == "rules" {
+            if let Some(rules_tbl) = item.as_table() {
+                for (inner_key, inner_item) in rules_tbl {
+                    if let Some(norm_inner_rule) = registry.resolve_rule_name(inner_key) {
+                        if let Some(inner_tbl) = inner_item.as_table() {
+                            apply_rule_table_toml_edit(
+                                &norm_inner_rule,
+                                inner_tbl,
+                                &mut fragment,
+                                source,
+                                &file,
+                                &display_path,
+                            );
+                        } else {
+                            let type_name = inner_item.type_name();
+                            log::warn!(
+                                "[WARN] Expected table for rule '{inner_key}' in [rules] section of {display_path}, found {type_name}; ignoring"
+                            );
+                        }
+                    } else {
+                        // Store without the "rules." prefix so validation's edit-distance
+                        // suggestion logic sees the bare rule name (e.g. "MD999"), not "rules.MD999".
+                        fragment
+                            .unknown_keys
+                            .push((format!("[{inner_key}]"), String::new(), Some(path.to_string())));
+                    }
+                }
+            }
+            continue;
+        }
+
         // Resolve rule name (handles both canonical names like "MD004" and aliases like "ul-style")
         let Some(norm_rule_name) = registry.resolve_rule_name(key) else {
             // Unknown rule - always track it for validation and suggestions
@@ -904,88 +961,7 @@ pub(super) fn parse_rumdl_toml(
         };
 
         if let Some(tbl) = item.as_table() {
-            let rule_entry = fragment.rules.entry(norm_rule_name.clone()).or_default();
-            for (rk, rv_item) in tbl {
-                let norm_rk = normalize_key(rk);
-
-                // Special handling for severity - store in rule_entry.severity
-                if norm_rk == "severity" {
-                    if let Some(toml_edit::Value::String(formatted_string)) = rv_item.as_value() {
-                        let severity_str = formatted_string.value();
-                        match crate::rule::Severity::deserialize(toml::Value::String(severity_str.clone())) {
-                            Ok(severity) => {
-                                if let Some(ref mut sv) = rule_entry.severity {
-                                    sv.push_override(severity, source, file.clone(), None);
-                                } else {
-                                    rule_entry.severity = Some(SourcedValue::new(severity, source));
-                                }
-                            }
-                            Err(_) => {
-                                log::warn!(
-                                    "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
-                                );
-                            }
-                        }
-                    }
-                    continue; // Skip regular value processing for severity
-                }
-
-                let maybe_toml_val: Option<toml::Value> = match rv_item.as_value() {
-                    Some(toml_edit::Value::String(formatted)) => Some(toml::Value::String(formatted.value().clone())),
-                    Some(toml_edit::Value::Integer(formatted)) => Some(toml::Value::Integer(*formatted.value())),
-                    Some(toml_edit::Value::Float(formatted)) => Some(toml::Value::Float(*formatted.value())),
-                    Some(toml_edit::Value::Boolean(formatted)) => Some(toml::Value::Boolean(*formatted.value())),
-                    Some(toml_edit::Value::Datetime(formatted)) => Some(toml::Value::Datetime(*formatted.value())),
-                    Some(toml_edit::Value::Array(formatted_array)) => {
-                        // Convert toml_edit Array to toml::Value::Array
-                        let mut values = Vec::new();
-                        for item in formatted_array {
-                            match item {
-                                toml_edit::Value::String(formatted) => {
-                                    values.push(toml::Value::String(formatted.value().clone()))
-                                }
-                                toml_edit::Value::Integer(formatted) => {
-                                    values.push(toml::Value::Integer(*formatted.value()))
-                                }
-                                toml_edit::Value::Float(formatted) => {
-                                    values.push(toml::Value::Float(*formatted.value()))
-                                }
-                                toml_edit::Value::Boolean(formatted) => {
-                                    values.push(toml::Value::Boolean(*formatted.value()))
-                                }
-                                toml_edit::Value::Datetime(formatted) => {
-                                    values.push(toml::Value::Datetime(*formatted.value()))
-                                }
-                                _ => {
-                                    log::warn!(
-                                        "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {display_path}"
-                                    );
-                                }
-                            }
-                        }
-                        Some(toml::Value::Array(values))
-                    }
-                    Some(toml_edit::Value::InlineTable(_)) => {
-                        log::warn!(
-                            "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {display_path}. Table conversion not yet fully implemented in parser."
-                        );
-                        None
-                    }
-                    None => {
-                        log::warn!(
-                            "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
-                        );
-                        None
-                    }
-                };
-                if let Some(toml_val) = maybe_toml_val {
-                    let sv = rule_entry
-                        .values
-                        .entry(norm_rk.clone())
-                        .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-                    sv.push_override(toml_val, source, file.clone(), None);
-                }
-            }
+            apply_rule_table_toml_edit(&norm_rule_name, tbl, &mut fragment, source, &file, &display_path);
         } else if item.is_value() {
             log::warn!(
                 "[WARN] Ignoring top-level value key in {display_path}: '{key}'. Expected a table like [{key}]."
@@ -994,6 +970,92 @@ pub(super) fn parse_rumdl_toml(
     }
 
     Ok(fragment)
+}
+
+/// Applies a rule configuration table (in toml_edit format) into the fragment.
+/// Used for both `[MDxxx]` and `[rules.MDxxx]` top-level table forms in rumdl.toml.
+fn apply_rule_table_toml_edit(
+    norm_rule_name: &str,
+    tbl: &toml_edit::Table,
+    fragment: &mut SourcedConfigFragment,
+    source: ConfigSource,
+    file: &Option<String>,
+    display_path: &str,
+) {
+    let rule_entry = fragment.rules.entry(norm_rule_name.to_string()).or_default();
+    for (rk, rv_item) in tbl {
+        let norm_rk = normalize_key(rk);
+
+        // Special handling for severity - store in rule_entry.severity
+        if norm_rk == "severity" {
+            if let Some(toml_edit::Value::String(formatted_string)) = rv_item.as_value() {
+                let severity_str = formatted_string.value();
+                match crate::rule::Severity::deserialize(toml::Value::String(severity_str.clone())) {
+                    Ok(severity) => {
+                        if let Some(ref mut sv) = rule_entry.severity {
+                            sv.push_override(severity, source, file.clone(), None);
+                        } else {
+                            rule_entry.severity = Some(SourcedValue::new(severity, source));
+                        }
+                    }
+                    Err(_) => {
+                        log::warn!(
+                            "[WARN] Invalid severity '{severity_str}' for rule {norm_rule_name} in {display_path}. Valid values: error, warning"
+                        );
+                    }
+                }
+            }
+            continue; // Skip regular value processing for severity
+        }
+
+        let maybe_toml_val: Option<toml::Value> = match rv_item.as_value() {
+            Some(toml_edit::Value::String(formatted)) => Some(toml::Value::String(formatted.value().clone())),
+            Some(toml_edit::Value::Integer(formatted)) => Some(toml::Value::Integer(*formatted.value())),
+            Some(toml_edit::Value::Float(formatted)) => Some(toml::Value::Float(*formatted.value())),
+            Some(toml_edit::Value::Boolean(formatted)) => Some(toml::Value::Boolean(*formatted.value())),
+            Some(toml_edit::Value::Datetime(formatted)) => Some(toml::Value::Datetime(*formatted.value())),
+            Some(toml_edit::Value::Array(formatted_array)) => {
+                // Convert toml_edit Array to toml::Value::Array
+                let mut values = Vec::new();
+                for item in formatted_array {
+                    match item {
+                        toml_edit::Value::String(formatted) => {
+                            values.push(toml::Value::String(formatted.value().clone()))
+                        }
+                        toml_edit::Value::Integer(formatted) => values.push(toml::Value::Integer(*formatted.value())),
+                        toml_edit::Value::Float(formatted) => values.push(toml::Value::Float(*formatted.value())),
+                        toml_edit::Value::Boolean(formatted) => values.push(toml::Value::Boolean(*formatted.value())),
+                        toml_edit::Value::Datetime(formatted) => values.push(toml::Value::Datetime(*formatted.value())),
+                        _ => {
+                            log::warn!(
+                                "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {display_path}"
+                            );
+                        }
+                    }
+                }
+                Some(toml::Value::Array(values))
+            }
+            Some(toml_edit::Value::InlineTable(_)) => {
+                log::warn!(
+                    "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {display_path}. Table conversion not yet fully implemented in parser."
+                );
+                None
+            }
+            None => {
+                log::warn!(
+                    "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
+                );
+                None
+            }
+        };
+        if let Some(toml_val) = maybe_toml_val {
+            let sv = rule_entry
+                .values
+                .entry(norm_rk.clone())
+                .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
+            sv.push_override(toml_val, source, file.clone(), None);
+        }
+    }
 }
 
 /// Loads and converts a markdownlint config file (.json or .yaml) into a SourcedConfigFragment.

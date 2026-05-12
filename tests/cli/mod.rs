@@ -10,6 +10,7 @@ mod cli_flavor_test;
 mod cli_integration_tests;
 mod cli_lsp_fix_consistency;
 mod cli_respect_gitignore_test;
+mod cli_rules_wrapper_test;
 mod cli_show_full_path_test;
 mod cli_statistics_test;
 mod exclude_with_explicit_paths_test;

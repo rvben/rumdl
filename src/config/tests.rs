@@ -3921,3 +3921,199 @@ fn test_user_config_applies_when_markdownlint_config_is_malformed() {
         "User config flavor should apply when markdownlint config is malformed"
     );
 }
+
+// --- [rules.MDxxx] wrapper section tests (issue #627) ---
+
+#[test]
+fn test_parse_rules_wrapper_basic() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    // [rules.MD033] should be treated identically to [MD033]
+    let config_content = r#"
+[rules.MD033]
+allowed-elements = ["div"]
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let rule_cfg = sourced
+        .rules
+        .get("MD033")
+        .expect("MD033 rule config must exist when written under [rules.MD033]");
+    let val = rule_cfg
+        .values
+        .get("allowed-elements")
+        .expect("allowed-elements must be present");
+    match &val.value {
+        toml::Value::Array(elems) => {
+            assert_eq!(elems.len(), 1);
+            assert_eq!(elems[0], toml::Value::String("div".to_string()));
+        }
+        other => panic!("expected array for allowed-elements, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_rules_wrapper_multiple_rules() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[rules.MD033]
+allowed-elements = ["div", "img"]
+
+[rules.MD007]
+indent = 4
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    assert!(
+        sourced.rules.contains_key("MD033"),
+        "MD033 must be parsed from [rules.MD033]"
+    );
+    assert!(
+        sourced.rules.contains_key("MD007"),
+        "MD007 must be parsed from [rules.MD007]"
+    );
+    let md033 = &sourced.rules["MD033"];
+    let elems = md033
+        .values
+        .get("allowed-elements")
+        .expect("allowed-elements must exist");
+    if let toml::Value::Array(arr) = &elems.value {
+        assert_eq!(arr.len(), 2);
+    } else {
+        panic!("expected array");
+    }
+    let md007 = &sourced.rules["MD007"];
+    let indent = md007.values.get("indent").expect("indent must exist");
+    assert_eq!(indent.value.as_integer(), Some(4));
+}
+
+#[test]
+fn test_parse_rules_wrapper_with_aliases() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    // MD033 alias is "no-inline-html"
+    let config_content = r#"
+[rules.no-inline-html]
+allowed-elements = ["span"]
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let rule_cfg = sourced
+        .rules
+        .get("MD033")
+        .expect("MD033 must be resolved from no-inline-html alias under [rules.no-inline-html]");
+    let val = rule_cfg
+        .values
+        .get("allowed-elements")
+        .expect("allowed-elements must be present");
+    if let toml::Value::Array(arr) = &val.value {
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0], toml::Value::String("span".to_string()));
+    } else {
+        panic!("expected array");
+    }
+}
+
+#[test]
+fn test_parse_rules_wrapper_mixed_with_flat() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    // Both forms in the same file must both apply
+    let config_content = r#"
+[MD007]
+indent = 2
+
+[rules.MD033]
+allowed-elements = ["div"]
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    assert!(sourced.rules.contains_key("MD007"), "flat [MD007] must still apply");
+    assert!(
+        sourced.rules.contains_key("MD033"),
+        "[rules.MD033] must apply alongside flat sections"
+    );
+}
+
+#[test]
+fn test_parse_rules_wrapper_unknown_rule_warns() {
+    use crate::rules;
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[rules.MD999]
+foo = 1
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    // MD999 must not appear in rules — it's unknown
+    assert!(
+        !sourced.rules.contains_key("MD999"),
+        "unknown rule MD999 must not be stored"
+    );
+    // Validation must produce a warning mentioning MD999, and the message must NOT
+    // contain "rules.MD999" (the prefix must be stripped before the edit-distance
+    // lookup so "did you mean" suggestions work correctly).
+    let all_rules = rules::all_rules(&Config::default());
+    let registry = RuleRegistry::from_rules(&all_rules);
+    let warnings = validate_config_sourced(&sourced, &registry);
+    assert!(
+        warnings.iter().any(|w| {
+            w.message.contains("MD999") && !w.message.contains("rules.MD999") && w.message.contains("did you mean")
+        }),
+        "[rules.MD999] must generate an unknown-rule warning with a suggestion and without 'rules.' prefix, got: {warnings:?}",
+    );
+}
+
+#[test]
+fn test_parse_rules_wrapper_non_table_value_does_not_panic() {
+    // When a resolved rule name inside [rules] has a scalar value rather than a
+    // table (e.g. `MD033 = true`), the parser must not crash and must not store
+    // any config for that rule (the log::warn! branch fires instead).
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let config_content = "[rules]\nMD033 = true\n";
+    fs::write(&config_path, config_content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    // The scalar value must be silently ignored — no rule config stored
+    assert!(
+        !sourced.rules.contains_key("MD033"),
+        "MD033 must not be stored when written as a scalar under [rules]; got rules={:?}",
+        sourced.rules.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_parse_rules_wrapper_pyproject() {
+    let temp_dir = tempdir().unwrap();
+    let config_path = temp_dir.path().join("pyproject.toml");
+    let content = r#"
+[tool.rumdl.rules.MD033]
+allowed-elements = ["div", "img"]
+"#;
+    fs::write(&config_path, content).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let rule_cfg = sourced
+        .rules
+        .get("MD033")
+        .expect("MD033 must be parsed from [tool.rumdl.rules.MD033]");
+    let val = rule_cfg
+        .values
+        .get("allowed-elements")
+        .expect("allowed-elements must be present");
+    if let toml::Value::Array(arr) = &val.value {
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], toml::Value::String("div".to_string()));
+        assert_eq!(arr[1], toml::Value::String("img".to_string()));
+    } else {
+        panic!("expected array for allowed-elements, got {val:?}");
+    }
+}
