@@ -3522,3 +3522,97 @@ fn test_md060_aligned_style_ignores_aligned_delimiter() {
         "aligned style ignores aligned_delimiter (already implies it)"
     );
 }
+
+#[test]
+fn test_md060_compact_accepts_mdformat_empty_cell() {
+    // mdformat writes empty compact cells as `| |` (single space between pipes).
+    // rumdl's compact style must accept this form without warnings.
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "| A | B |\n| --- | --- |\n| x | |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "mdformat-style empty cell `| |` must not trigger MD060 warnings under compact style, got: {warnings:?}"
+    );
+}
+
+#[test]
+fn test_md060_compact_fix_idempotent_with_mdformat_empty_cell() {
+    // fix() on a compact table with mdformat-style empty cells must be a no-op,
+    // otherwise rumdl and mdformat will fight over `| |` vs `|  |`.
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "| A | B |\n| --- | --- |\n| x | |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "compact fix must leave mdformat's single-space empty cell unchanged"
+    );
+}
+
+#[test]
+fn test_md060_compact_normalizes_two_space_empty_cell() {
+    // The canonical compact empty cell is `| |` (single space). A two-space
+    // empty cell `|  |` in otherwise-compact input must normalize to `| |`.
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "| A | B |\n| --- | --- |\n| x |  |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "| A | B |\n| --- | --- |\n| x | |";
+    assert_eq!(
+        fixed, expected,
+        "two-space empty cell must normalize to single-space empty cell in compact style"
+    );
+}
+
+#[test]
+fn test_md060_compact_multiple_and_positional_empty_cells() {
+    // Empty cells at the start, middle, end, and in runs must all be accepted
+    // as compact when expressed in mdformat's single-space form.
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "\
+| A | B | C | D |
+| --- | --- | --- | --- |
+| | x | | |
+| | | | y |
+| | | | |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "single-space empty cells in any position must not trigger MD060, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, content, "fix must be a no-op on canonical compact input");
+}
+
+#[test]
+fn test_md060_compact_fix_is_idempotent() {
+    // After one fix pass, a second pass must produce identical output and no
+    // warnings. This guards against silent oscillation in mixed input.
+    let rule = MD060TableFormat::new(true, "compact".to_string());
+
+    let content = "| A | B | C |\n|---|---|---|\n|  | x |  |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let once = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&once, MarkdownFlavor::Standard, None);
+    let twice = rule.fix(&ctx2).unwrap();
+    let warnings = rule.check(&ctx2).unwrap();
+
+    assert_eq!(once, twice, "compact fix must be idempotent");
+    assert!(
+        warnings.is_empty(),
+        "fixed output must not re-trigger MD060, got: {warnings:?}"
+    );
+}

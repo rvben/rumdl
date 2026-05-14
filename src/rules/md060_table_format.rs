@@ -472,7 +472,16 @@ impl MD060TableFormat {
     }
 
     fn format_table_compact(cells: &[String]) -> String {
-        let formatted_cells: Vec<String> = cells.iter().map(|cell| format!(" {} ", cell.trim())).collect();
+        // An empty compact cell is a single space between pipes (`| |`),
+        // matching mdformat's canonical form. This keeps rumdl's output stable
+        // when both tools format the same file.
+        let formatted_cells: Vec<String> = cells
+            .iter()
+            .map(|cell| match cell.trim() {
+                "" => " ".to_string(),
+                trimmed => format!(" {trimmed} "),
+            })
+            .collect();
         format!("|{}|", formatted_cells.join("|"))
     }
 
@@ -698,10 +707,12 @@ impl MD060TableFormat {
             // Check if this row has no padding
             let row_has_no_padding = cells.iter().all(|cell| !cell.starts_with(' ') && !cell.ends_with(' '));
 
-            // Check if this row has exactly single-space padding
-            let row_has_single_space = cells.iter().all(|cell| {
-                let trimmed = cell.trim();
-                cell == &format!(" {trimmed} ")
+            // Compact rows pad every cell with one space on each side. An
+            // empty compact cell is the special case `" "` (single space
+            // between pipes), matching mdformat's canonical empty cell.
+            let row_has_single_space = cells.iter().all(|cell| match cell.trim() {
+                "" => cell == " ",
+                trimmed => cell == &format!(" {trimmed} "),
             });
 
             // If any row doesn't match tight, the table isn't tight
