@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.92](https://github.com/rvben/rumdl/compare/v0.1.91...v0.1.92) - 2026-05-14
+
+### Added
+
+- **config**: accept [rules.X] wrapper as alias for [X] ([229ff7d](https://github.com/rvben/rumdl/commit/229ff7de14afa950991f42265860fc1da54ef6c8))
+
+### Fixed
+
+- **md060**: accept single-space empty cells in compact style ([9518a81](https://github.com/rvben/rumdl/commit/9518a815f272822dd0e208f87c81c001e90689e8))
+
 ## [0.1.91](https://github.com/rvben/rumdl/compare/v0.1.90...v0.1.91) - 2026-05-07
 
 ### Fixed
