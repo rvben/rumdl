@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke release-patch release-minor release-major
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke release-patch release-minor release-major test-idempotency
 
 # Development environment setup
 setup-mise:
@@ -115,6 +115,15 @@ test-complexity:
 	@echo "Running O(n²) complexity regression tests..."
 	@echo "These tests verify all rules maintain linear O(n) complexity."
 	cargo nextest run --profile performance -E 'test(linear_complexity)'
+
+# Run idempotency property tests with elevated PROPTEST_CASES.
+# This is on-demand because 2000 cases per rule is slow.
+test-idempotency:
+	@echo "Running idempotency property tests (2000 cases each, may take several minutes)..."
+	PROPTEST_CASES=2000 cargo nextest run \
+		--test lib \
+		--run-ignored all \
+		-E 'test(/rules::(formatter_proptest|idempotency_pipeline|idempotency_corpus)::/)'
 
 # Fuzz testing (requires nightly Rust)
 fuzz:
