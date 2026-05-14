@@ -203,6 +203,9 @@ proptest! {
             Box::new(MD072FrontmatterKeySort::default()),
             Box::new(MD073TocValidation::default()),
             Box::new(MD074MkDocsNav::default()),
+            Box::new(MD075OrphanedTableRows::default()),
+            Box::new(MD076ListItemSpacing::default()),
+            Box::new(MD077ListContinuationIndent::default()),
         ];
 
         for rule in &rules {
@@ -292,6 +295,7 @@ idempotent_rule!(
     markdown_content_strategy(),
     Standard
 );
+idempotent_rule!(md013, MD013LineLength::default(), markdown_content_strategy(), Standard);
 idempotent_rule!(
     md014,
     MD014CommandsShowOutput::default(),
@@ -593,6 +597,24 @@ idempotent_rule!(
 idempotent_rule!(
     md073,
     MD073TocValidation::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md075,
+    MD075OrphanedTableRows::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md076,
+    MD076ListItemSpacing::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md077,
+    MD077ListContinuationIndent::default(),
     markdown_content_strategy(),
     Standard
 );
