@@ -92,6 +92,9 @@ mod md054_unicode_test;
 mod formatter_idempotency_test;
 mod formatter_proptest;
 
+// Full-pipeline idempotency (all default rules together, all flavors)
+mod idempotency_pipeline;
+
 // Cross-rule integration test modules
 mod emphasis_edge_cases_test;
 mod heading_edge_cases_test;
