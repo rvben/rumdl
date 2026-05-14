@@ -84,6 +84,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Using pacman (Arch Linux)](#using-pacman-arch-linux)
   - [Download binary](#download-binary)
   - [Editor Plugins](#editor-plugins)
+  - [Shell Completions](#shell-completions)
 - [Usage](#usage)
   - [Stdin/Stdout Formatting](#stdinstdout-formatting)
   - [Editor Integration](#editor-integration)
@@ -107,6 +108,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
     - [`config [OPTIONS] [COMMAND]`](#config-options-command)
     - [`server [OPTIONS]`](#server-options)
     - [`vscode [OPTIONS]`](#vscode-options)
+    - [`completions [SHELL]`](#completions-shell)
     - [`version`](#version)
   - [Global Options](#global-options)
   - [Exit Codes](#exit-codes)
@@ -259,6 +261,48 @@ Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 | JetBrains (PyCharm, IntelliJ, etc.) | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/29943-rumdl)                        |
 
 All plugins provide real-time linting, formatting on save, hover documentation, and automatic configuration discovery.
+
+### Shell Completions
+
+rumdl can generate tab-completion scripts via `rumdl completions [SHELL]`. Supported shells: `bash`, `zsh`, `fish`, `powershell`, `elvish`.
+
+When `SHELL` is omitted, rumdl auto-detects it from `$SHELL`. Run `rumdl completions --list` to see all supported shells.
+
+**Bash** — add to `~/.bashrc`:
+
+```bash
+source <(rumdl completions bash)
+```
+
+**Zsh** — add to `~/.zshrc`:
+
+```bash
+source <(rumdl completions zsh)
+```
+
+Or install system-wide for `zsh`:
+
+```bash
+rumdl completions zsh > "${fpath[1]}/_rumdl"
+```
+
+**Fish** — write the completion file once:
+
+```fish
+rumdl completions fish > ~/.config/fish/completions/rumdl.fish
+```
+
+**PowerShell** — add to your `$PROFILE`:
+
+```powershell
+rumdl completions powershell | Out-String | Invoke-Expression
+```
+
+**Elvish** — add to `~/.config/elvish/rc.elv`:
+
+```elvish
+eval (rumdl completions elvish | slurp)
+```
 
 ## Usage
 
@@ -636,6 +680,18 @@ Install the rumdl VS Code extension
 - `--force`: Force reinstall even if already installed
 - `--update`: Update to the latest version (only if newer version is available)
 - `--status`: Show installation status without installing
+
+#### `completions [SHELL]`
+
+Print a shell completion script for `rumdl` to stdout. See [Shell Completions](#shell-completions) for installation snippets.
+
+**Arguments:**
+
+- `[SHELL]`: One of `bash`, `zsh`, `fish`, `powershell`, `elvish`. Auto-detected from `$SHELL` when omitted.
+
+**Options:**
+
+- `-l, --list`: List available shells and exit
 
 #### `version`
 
