@@ -250,11 +250,49 @@ line-length = 80
 
 ## Using Both Tools Together
 
-Some teams use mdformat for formatting and a separate linter. With rumdl, you can:
+Some teams run mdformat as the formatter and rumdl as the linter. The pipeline
+is "format first, lint after": mdformat normalizes the file, then rumdl checks
+the structural rules that mdformat does not cover (broken links, heading
+hierarchy, alt text, etc.).
 
-1. **Replace both** with `rumdl check --fix` (lint + format)
-2. **Use rumdl for linting only** and keep mdformat for formatting
-3. **Migrate incrementally** by starting with `rumdl check` then adding `rumdl fmt`
+This works, but a few rumdl rules have opinions about syntax that mdformat also
+rewrites. With default rumdl settings, two of those rules will fight mdformat
+in a `mdformat -> rumdl --fix -> mdformat` loop. Use the preset below to make
+rumdl yield to mdformat's canonical output on render-identical details:
+
+```toml
+# .rumdl.toml -- run rumdl alongside mdformat
+# Pins rumdl rules whose defaults disagree with mdformat output.
+
+# Horizontal rules: mdformat emits 70 underscores. Match it so
+# rumdl does not rewrite back to "---".
+[MD035]
+style = "______________________________________________________________________"
+
+# Code blocks: mdformat converts indented blocks to fenced.
+[MD046]
+style = "fenced"
+
+# Code fence character: mdformat uses backticks.
+[MD048]
+style = "backtick"
+
+# Unordered list markers: mdformat uses "-".
+[MD004]
+style = "dash"
+
+# Heading style: mdformat uses ATX.
+[MD003]
+style = "atx"
+```
+
+`<br>` handling is not in the preset because rumdl's MD033 auto-fix is off by default. If you enable it (`[MD033] fix = true`), also set `br-style = "backslash"` to match mdformat.
+
+### Alternatives
+
+1. **Replace both** with `rumdl check --fix`: rumdl handles lint and the formatting subset most projects need. Simpler toolchain, single binary.
+2. **Use mdformat + rumdl together** with the preset above when you specifically need mdformat plugins (Jupyter Book, MyST, code-block reformatting via Black/Prettier).
+3. **Migrate incrementally** by starting with `rumdl check` then adding `rumdl fmt`.
 
 ## Summary
 
