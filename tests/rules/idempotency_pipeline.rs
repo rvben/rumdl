@@ -1,6 +1,6 @@
 //! Full-pipeline idempotency: applying the entire default rule chain twice
 //! must produce identical output. This is the property `rumdl fmt` guarantees
-//! externally — users expect `fmt(fmt(x)) == fmt(x)`.
+//! externally. Users expect `fmt(fmt(x)) == fmt(x)`.
 
 use proptest::prelude::*;
 use rumdl_lib::config::{Config, MarkdownFlavor};
@@ -59,7 +59,7 @@ proptest! {
     // or MD009 + MD019 interact to leave "# " (heading with trailing space).
     // Pass 2: trailing space after "#" is then stripped, yielding "#".
     // Root cause: rule interaction between MD019 (multi-space-atx) and MD009
-    // (trailing-spaces) — one rule's output is invalid input for the other.
+    // (trailing-spaces): one rule's output is invalid input for the other.
     #[ignore = "idempotency bug: Standard - MD019+MD009 interaction leaves trailing space in ATX heading text that a second pass then removes; minimized input: \"#   Aa \""]
     #[test]
     fn fmt_is_idempotent_standard(content in markdown_content_strategy()) {
