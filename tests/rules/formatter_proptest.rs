@@ -280,7 +280,15 @@ idempotent_rule!(
     Standard
 );
 idempotent_rule!(md005, MD005ListIndent::default(), markdown_content_strategy(), Standard);
-idempotent_rule!(md007, MD007ULIndent::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md007,
+    MD007ULIndent::default(),
+    markdown_content_strategy(),
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
+);
 idempotent_rule!(
     md009,
     MD009TrailingSpaces::default(),
@@ -295,7 +303,15 @@ idempotent_rule!(
     markdown_content_strategy(),
     Standard
 );
-idempotent_rule!(md013, MD013LineLength::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md013,
+    MD013LineLength::default(),
+    markdown_content_strategy(),
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
+);
 idempotent_rule!(
     md014,
     MD014CommandsShowOutput::default(),
@@ -346,7 +362,15 @@ idempotent_rule!(
     markdown_content_strategy(),
     Standard
 );
-idempotent_rule!(md028, MD028NoBlanksBlockquote, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md028,
+    MD028NoBlanksBlockquote,
+    markdown_content_strategy(),
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
+);
 idempotent_rule!(
     md029,
     MD029OrderedListPrefix::default(),
@@ -363,7 +387,10 @@ idempotent_rule!(
     md031,
     MD031BlanksAroundFences::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 
 // MD032 uses a structural fix() method because inserting blank lines changes
@@ -395,9 +422,20 @@ idempotent_rule!(
     md033,
     MD033NoInlineHtml::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
-idempotent_rule!(md034, MD034NoBareUrls, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md034,
+    MD034NoBareUrls,
+    markdown_content_strategy(),
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
+);
 idempotent_rule!(md035, MD035HRStyle::default(), markdown_content_strategy(), Standard);
 idempotent_rule!(
     md036,
@@ -410,26 +448,38 @@ idempotent_rule!(
     md038,
     MD038NoSpaceInCode::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(md039, MD039NoSpaceInLinks, markdown_content_strategy(), Standard);
 idempotent_rule!(
     md040,
     MD040FencedCodeLanguage::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md041,
     MD041FirstLineHeading::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md042,
     MD042NoEmptyLinks::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md044,
@@ -442,7 +492,10 @@ idempotent_rule!(
     md046,
     MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(md047, MD047SingleTrailingNewline, markdown_content_strategy(), Standard);
 idempotent_rule!(
@@ -455,7 +508,10 @@ idempotent_rule!(
     md049,
     MD049EmphasisStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md050,
@@ -467,13 +523,19 @@ idempotent_rule!(
     md051,
     MD051LinkFragments::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md052,
     MD052ReferenceLinkImages::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md054,
