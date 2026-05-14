@@ -341,7 +341,10 @@ idempotent_rule!(
     md022,
     MD022BlanksAroundHeadings::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(md023, MD023HeadingStartLeft, markdown_content_strategy(), Standard);
 idempotent_rule!(
@@ -443,7 +446,15 @@ idempotent_rule!(
     markdown_content_strategy(),
     Standard
 );
-idempotent_rule!(md037, MD037NoSpaceInEmphasis, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md037,
+    MD037NoSpaceInEmphasis,
+    markdown_content_strategy(),
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
+);
 idempotent_rule!(
     md038,
     MD038NoSpaceInCode::default(),
@@ -517,7 +528,10 @@ idempotent_rule!(
     md050,
     MD050StrongStyle::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
 idempotent_rule!(
     md051,
@@ -678,5 +692,8 @@ idempotent_rule!(
     md077,
     MD077ListContinuationIndent::default(),
     markdown_content_strategy(),
-    Standard
+    Standard,
+    MkDocs,
+    MDX,
+    Quarto
 );
