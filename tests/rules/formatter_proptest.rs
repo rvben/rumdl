@@ -219,9 +219,11 @@ proptest! {
 // apply fix twice -> result should be identical.
 // Rules without auto-fix (MD024, MD053, MD057, MD066, MD068, MD074) are skipped.
 
-/// Generates a proptest verifying `rule.fix` is idempotent for the given flavor(s).
+/// Generates a proptest verifying that applying all fixes from `rule.check()`
+/// is idempotent for the given flavor(s).
 ///
-/// Expands to one `#[test]` per (rule, flavor) pair.
+/// Expands to one `#[test]` per (rule, flavor) pair, named
+/// `test_<name>_idempotent_<flavor>` (flavor lowercased).
 macro_rules! idempotent_rule {
     ($name:ident, $rule:expr, $strategy:expr $(, $flavor:ident)+ $(,)?) => {
         $(
@@ -230,7 +232,7 @@ macro_rules! idempotent_rule {
                     #![proptest_config(ProptestConfig::with_cases(50))]
 
                     #[test]
-                    fn [<$name _idempotent_ $flavor:lower>](content in $strategy) {
+                    fn [<test_ $name _idempotent_ $flavor:lower>](content in $strategy) {
                         let rule = $rule;
                         let flavor = MarkdownFlavor::$flavor;
 
