@@ -205,7 +205,7 @@ proptest! {
             Box::new(MD074MkDocsNav::default()),
             Box::new(MD075OrphanedTableRows::default()),
             Box::new(MD076ListItemSpacing::default()),
-            Box::new(MD077ListContinuationIndent::default()),
+            Box::new(MD077ListContinuationIndent),
         ];
 
         for rule in &rules {
@@ -690,7 +690,7 @@ idempotent_rule!(
 );
 idempotent_rule!(
     md077,
-    MD077ListContinuationIndent::default(),
+    MD077ListContinuationIndent,
     markdown_content_strategy(),
     Standard,
     MkDocs,
