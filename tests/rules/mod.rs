@@ -93,6 +93,7 @@ mod formatter_idempotency_test;
 mod formatter_proptest;
 
 // Full-pipeline idempotency (all default rules together, all flavors)
+mod idempotency_corpus;
 mod idempotency_pipeline;
 
 // Cross-rule integration test modules
