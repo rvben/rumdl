@@ -216,26 +216,54 @@ proptest! {
 // Idempotency Tests
 // ============================================================================
 // Rules with auto-fix capability are tested for idempotency:
-// apply fix twice → result should be identical.
+// apply fix twice -> result should be identical.
 // Rules without auto-fix (MD024, MD053, MD057, MD066, MD068, MD074) are skipped.
+
+/// Generates a proptest verifying `rule.fix` is idempotent for the given flavor(s).
+///
+/// Expands to one `#[test]` per (rule, flavor) pair.
+macro_rules! idempotent_rule {
+    ($name:ident, $rule:expr, $strategy:expr $(, $flavor:ident)+ $(,)?) => {
+        $(
+            paste::paste! {
+                proptest! {
+                    #![proptest_config(ProptestConfig::with_cases(50))]
+
+                    #[test]
+                    fn [<$name _idempotent_ $flavor:lower>](content in $strategy) {
+                        let rule = $rule;
+                        let flavor = MarkdownFlavor::$flavor;
+
+                        let ctx1 = LintContext::new(&content, flavor, None);
+                        let warnings1 = rule.check(&ctx1).unwrap_or_default();
+                        let fixed1 = apply_all_fixes(&content, &warnings1);
+
+                        let ctx2 = LintContext::new(&fixed1, flavor, None);
+                        let warnings2 = rule.check(&ctx2).unwrap_or_default();
+                        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
+
+                        prop_assert_eq!(
+                            fixed1, fixed2,
+                            "{} fix not idempotent (flavor={:?})",
+                            stringify!($name),
+                            flavor
+                        );
+                    }
+                }
+            }
+        )+
+    };
+}
+
+idempotent_rule!(
+    md001,
+    MD001HeadingIncrement::default(),
+    markdown_content_strategy(),
+    Standard
+);
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(50))]
-
-    #[test]
-    fn test_md001_idempotent(content in markdown_content_strategy()) {
-        let rule = MD001HeadingIncrement::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD001 fix not idempotent");
-    }
 
     #[test]
     fn test_md003_idempotent(content in markdown_content_strategy()) {
