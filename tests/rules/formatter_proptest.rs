@@ -264,345 +264,113 @@ idempotent_rule!(
     Standard
 );
 
+idempotent_rule!(
+    md003,
+    MD003HeadingStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md004,
+    MD004UnorderedListStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md005, MD005ListIndent::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md007, MD007ULIndent::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md009,
+    MD009TrailingSpaces::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md010, MD010NoHardTabs::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md011, MD011NoReversedLinks, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md012,
+    MD012NoMultipleBlanks::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md014,
+    MD014CommandsShowOutput::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md018,
+    MD018NoMissingSpaceAtx::new(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md019, MD019NoMultipleSpaceAtx, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md020,
+    MD020NoMissingSpaceClosedAtx,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md021,
+    MD021NoMultipleSpaceClosedAtx,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md022,
+    MD022BlanksAroundHeadings::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md023, MD023HeadingStartLeft, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md025,
+    MD025SingleTitle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md026,
+    MD026NoTrailingPunctuation::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md027,
+    MD027MultipleSpacesBlockquote::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md028, MD028NoBlanksBlockquote, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md029,
+    MD029OrderedListPrefix::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md030,
+    MD030ListMarkerSpace::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md031,
+    MD031BlanksAroundFences::default(),
+    markdown_content_strategy(),
+    Standard
+);
+
+// MD032 uses a structural fix() method because inserting blank lines changes
+// CommonMark list block boundaries. For complex inputs (blockquotes inside
+// lists, code fences adjacent to lists), the fix may need 2 passes to
+// stabilize. We verify convergence within 3 passes.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(50))]
 
     #[test]
-    fn test_md003_idempotent(content in markdown_content_strategy()) {
-        let rule = MD003HeadingStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD003 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md004_idempotent(content in markdown_content_strategy()) {
-        let rule = MD004UnorderedListStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD004 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md005_idempotent(content in markdown_content_strategy()) {
-        let rule = MD005ListIndent::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD005 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md007_idempotent(content in markdown_content_strategy()) {
-        let rule = MD007ULIndent::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD007 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md009_idempotent(content in markdown_content_strategy()) {
-        let rule = MD009TrailingSpaces::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD009 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md010_idempotent(content in markdown_content_strategy()) {
-        let rule = MD010NoHardTabs::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD010 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md011_idempotent(content in markdown_content_strategy()) {
-        let rule = MD011NoReversedLinks;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD011 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md012_idempotent(content in markdown_content_strategy()) {
-        let rule = MD012NoMultipleBlanks::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD012 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md014_idempotent(content in markdown_content_strategy()) {
-        let rule = MD014CommandsShowOutput::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD014 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md018_idempotent(content in markdown_content_strategy()) {
-        let rule = MD018NoMissingSpaceAtx::new();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD018 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md019_idempotent(content in markdown_content_strategy()) {
-        let rule = MD019NoMultipleSpaceAtx;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD019 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md020_idempotent(content in markdown_content_strategy()) {
-        let rule = MD020NoMissingSpaceClosedAtx;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD020 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md021_idempotent(content in markdown_content_strategy()) {
-        let rule = MD021NoMultipleSpaceClosedAtx;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD021 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md022_idempotent(content in markdown_content_strategy()) {
-        let rule = MD022BlanksAroundHeadings::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD022 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md023_idempotent(content in markdown_content_strategy()) {
-        let rule = MD023HeadingStartLeft;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD023 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md025_idempotent(content in markdown_content_strategy()) {
-        let rule = MD025SingleTitle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD025 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md026_idempotent(content in markdown_content_strategy()) {
-        let rule = MD026NoTrailingPunctuation::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD026 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md027_idempotent(content in markdown_content_strategy()) {
-        let rule = MD027MultipleSpacesBlockquote::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD027 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md028_idempotent(content in markdown_content_strategy()) {
-        let rule = MD028NoBlanksBlockquote;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD028 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md029_idempotent(content in markdown_content_strategy()) {
-        let rule = MD029OrderedListPrefix::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD029 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md030_idempotent(content in markdown_content_strategy()) {
-        let rule = MD030ListMarkerSpace::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD030 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md031_idempotent(content in markdown_content_strategy()) {
-        let rule = MD031BlanksAroundFences::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD031 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md032_idempotent(content in markdown_content_strategy()) {
-        // MD032 uses a structural fix() method because inserting blank lines
-        // changes CommonMark list block boundaries. For complex inputs
-        // (blockquotes inside lists, code fences adjacent to lists), the fix
-        // may need 2 passes to stabilize. We verify convergence within 3 passes.
+    fn test_md032_idempotent_standard(content in markdown_content_strategy()) {
         let rule = MD032BlanksAroundLists::default();
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
@@ -612,348 +380,119 @@ proptest! {
         let fixed2 = rule.fix(&ctx2).unwrap_or_else(|_| fixed1.clone());
 
         if fixed1 != fixed2 {
-            // Allow one more pass for complex cases (blockquotes in lists, etc.)
             let ctx3 = LintContext::new(&fixed2, MarkdownFlavor::Standard, None);
             let fixed3 = rule.fix(&ctx3).unwrap_or_else(|_| fixed2.clone());
             prop_assert_eq!(fixed2, fixed3, "MD032 fix did not converge within 3 passes");
         }
     }
+}
+
+idempotent_rule!(
+    md033,
+    MD033NoInlineHtml::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md034, MD034NoBareUrls, markdown_content_strategy(), Standard);
+idempotent_rule!(md035, MD035HRStyle::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md036,
+    MD036NoEmphasisAsHeading::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md037, MD037NoSpaceInEmphasis, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md038,
+    MD038NoSpaceInCode::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md039, MD039NoSpaceInLinks, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md040,
+    MD040FencedCodeLanguage::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md041,
+    MD041FirstLineHeading::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md042,
+    MD042NoEmptyLinks::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md044,
+    MD044ProperNames::new(vec![], true),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md045, MD045NoAltText::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md046,
+    MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md047, MD047SingleTrailingNewline, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md048,
+    MD048CodeFenceStyle::new(rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md049,
+    MD049EmphasisStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md050,
+    MD050StrongStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md051,
+    MD051LinkFragments::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md052,
+    MD052ReferenceLinkImages::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md054,
+    MD054LinkImageStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md055,
+    MD055TablePipeStyle::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md056, MD056TableColumnCount, markdown_content_strategy(), Standard);
+
+// MD058 uses fix() because inserting blank lines around tables changes
+// document structure, which can reveal new tables. Like MD032, the fix
+// may need 2 passes to stabilize. We verify convergence within 3 passes.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
 
     #[test]
-    fn test_md033_idempotent(content in markdown_content_strategy()) {
-        let rule = MD033NoInlineHtml::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD033 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md034_idempotent(content in markdown_content_strategy()) {
-        let rule = MD034NoBareUrls;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD034 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md035_idempotent(content in markdown_content_strategy()) {
-        let rule = MD035HRStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD035 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md036_idempotent(content in markdown_content_strategy()) {
-        let rule = MD036NoEmphasisAsHeading::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD036 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md037_idempotent(content in markdown_content_strategy()) {
-        let rule = MD037NoSpaceInEmphasis;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD037 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md038_idempotent(content in markdown_content_strategy()) {
-        let rule = MD038NoSpaceInCode::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD038 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md039_idempotent(content in markdown_content_strategy()) {
-        let rule = MD039NoSpaceInLinks;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD039 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md040_idempotent(content in markdown_content_strategy()) {
-        let rule = MD040FencedCodeLanguage::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD040 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md041_idempotent(content in markdown_content_strategy()) {
-        let rule = MD041FirstLineHeading::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD041 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md042_idempotent(content in markdown_content_strategy()) {
-        let rule = MD042NoEmptyLinks::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD042 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md044_idempotent(content in markdown_content_strategy()) {
-        let rule = MD044ProperNames::new(vec![], true);
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD044 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md045_idempotent(content in markdown_content_strategy()) {
-        let rule = MD045NoAltText::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD045 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md046_idempotent(content in markdown_content_strategy()) {
-        let rule = MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced);
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD046 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md047_idempotent(content in markdown_content_strategy()) {
-        let rule = MD047SingleTrailingNewline;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD047 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md048_idempotent(content in markdown_content_strategy()) {
-        let rule = MD048CodeFenceStyle::new(rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick);
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD048 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md049_idempotent(content in markdown_content_strategy()) {
-        let rule = MD049EmphasisStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD049 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md050_idempotent(content in markdown_content_strategy()) {
-        let rule = MD050StrongStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD050 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md051_idempotent(content in markdown_content_strategy()) {
-        let rule = MD051LinkFragments::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD051 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md052_idempotent(content in markdown_content_strategy()) {
-        let rule = MD052ReferenceLinkImages::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD052 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md054_idempotent(content in markdown_content_strategy()) {
-        let rule = MD054LinkImageStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD054 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md055_idempotent(content in markdown_content_strategy()) {
-        let rule = MD055TablePipeStyle::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD055 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md056_idempotent(content in markdown_content_strategy()) {
-        let rule = MD056TableColumnCount;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD056 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md058_idempotent(content in markdown_content_strategy()) {
-        // MD058 uses fix() because inserting blank lines around tables changes
-        // document structure, which can reveal new tables. Like MD032, the fix
-        // may need 2 passes to stabilize. We verify convergence within 3 passes.
+    fn test_md058_idempotent_standard(content in markdown_content_strategy()) {
         let rule = MD058BlanksAroundTables::default();
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
@@ -963,33 +502,23 @@ proptest! {
         let fixed2 = rule.fix(&ctx2).unwrap_or_else(|_| fixed1.clone());
 
         if fixed1 != fixed2 {
-            // Allow one more pass for complex cases (tables in lists, etc.)
             let ctx3 = LintContext::new(&fixed2, MarkdownFlavor::Standard, None);
             let fixed3 = rule.fix(&ctx3).unwrap_or_else(|_| fixed2.clone());
             prop_assert_eq!(fixed2, fixed3, "MD058 fix did not converge within 3 passes");
         }
     }
+}
+
+idempotent_rule!(md059, MD059LinkText::default(), markdown_content_strategy(), Standard);
+
+// MD060 uses fix() because each warning carries the same whole-table
+// replacement. apply_all_fixes would apply the replacement N times,
+// corrupting the output. Like MD032 and MD058, we allow up to 3 passes.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(50))]
 
     #[test]
-    fn test_md059_idempotent(content in markdown_content_strategy()) {
-        let rule = MD059LinkText::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD059 fix not idempotent");
-    }
-
-    // MD060 uses fix() because each warning carries the same whole-table
-    // replacement. apply_all_fixes would apply the replacement N times,
-    // corrupting the output. Like MD032 and MD058, we allow up to 3 passes.
-    #[test]
-    fn test_md060_idempotent(content in markdown_content_strategy()) {
+    fn test_md060_idempotent_standard(content in markdown_content_strategy()) {
         let rule = MD060TableFormat::new(true, "aligned".to_string());
 
         let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
@@ -1004,169 +533,66 @@ proptest! {
             prop_assert_eq!(fixed2, fixed3, "MD060 fix did not converge within 3 passes");
         }
     }
-
-    #[test]
-    fn test_md061_idempotent(content in markdown_content_strategy()) {
-        let rule = MD061ForbiddenTerms::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD061 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md062_idempotent(content in markdown_content_strategy()) {
-        let rule = MD062LinkDestinationWhitespace;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD062 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md063_idempotent(content in markdown_content_strategy()) {
-        let rule = MD063HeadingCapitalization::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD063 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md064_idempotent(content in markdown_content_strategy()) {
-        let rule = MD064NoMultipleConsecutiveSpaces::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD064 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md065_idempotent(content in markdown_content_strategy()) {
-        let rule = MD065BlanksAroundHorizontalRules;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD065 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md067_idempotent(content in markdown_content_strategy()) {
-        let rule = MD067FootnoteDefinitionOrder;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD067 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md069_idempotent(content in markdown_content_strategy()) {
-        let rule = MD069NoDuplicateListMarkers;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD069 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md070_idempotent(content in markdown_content_strategy()) {
-        let rule = MD070NestedCodeFence;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD070 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md071_idempotent(content in markdown_content_strategy()) {
-        let rule = MD071BlankLineAfterFrontmatter;
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD071 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md072_idempotent(content in markdown_content_strategy()) {
-        let rule = MD072FrontmatterKeySort::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD072 fix not idempotent");
-    }
-
-    #[test]
-    fn test_md073_idempotent(content in markdown_content_strategy()) {
-        let rule = MD073TocValidation::default();
-
-        let ctx1 = LintContext::new(&content, MarkdownFlavor::Standard, None);
-        let warnings1 = rule.check(&ctx1).unwrap_or_default();
-        let fixed1 = apply_all_fixes(&content, &warnings1);
-
-        let ctx2 = LintContext::new(&fixed1, MarkdownFlavor::Standard, None);
-        let warnings2 = rule.check(&ctx2).unwrap_or_default();
-        let fixed2 = apply_all_fixes(&fixed1, &warnings2);
-
-        prop_assert_eq!(fixed1, fixed2, "MD073 fix not idempotent");
-    }
 }
+
+idempotent_rule!(
+    md061,
+    MD061ForbiddenTerms::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md062,
+    MD062LinkDestinationWhitespace,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md063,
+    MD063HeadingCapitalization::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md064,
+    MD064NoMultipleConsecutiveSpaces::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md065,
+    MD065BlanksAroundHorizontalRules,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md067,
+    MD067FootnoteDefinitionOrder,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md069,
+    MD069NoDuplicateListMarkers,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(md070, MD070NestedCodeFence, markdown_content_strategy(), Standard);
+idempotent_rule!(
+    md071,
+    MD071BlankLineAfterFrontmatter,
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md072,
+    MD072FrontmatterKeySort::default(),
+    markdown_content_strategy(),
+    Standard
+);
+idempotent_rule!(
+    md073,
+    MD073TocValidation::default(),
+    markdown_content_strategy(),
+    Standard
+);
