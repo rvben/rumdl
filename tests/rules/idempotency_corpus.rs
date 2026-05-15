@@ -7,36 +7,28 @@
 //! Files lacking a recognised flavor suffix default to Standard.
 
 use rumdl_lib::config::{Config, MarkdownFlavor};
-use rumdl_lib::lint_context::LintContext;
-use rumdl_lib::rule::{LintWarning, Rule};
-use rumdl_lib::rules::all_rules;
+use rumdl_lib::fix_coordinator::FixCoordinator;
+use rumdl_lib::rules::{all_rules, filter_rules};
 use std::fs;
 use std::path::Path;
 
-fn apply_all_fixes(content: &str, warnings: &[LintWarning]) -> String {
-    let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
-    fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+fn fmt(content: &str, flavor: MarkdownFlavor) -> String {
+    let mut config = Config::default();
+    config.global.flavor = flavor;
+    let rules = filter_rules(&all_rules(&config), &config.global);
+    let coordinator = FixCoordinator::new();
     let mut result = content.to_string();
-    for fix in fixes {
-        if fix.range.end <= result.len()
-            && result.is_char_boundary(fix.range.start)
-            && result.is_char_boundary(fix.range.end)
-        {
-            result.replace_range(fix.range.clone(), &fix.replacement);
-        }
-    }
+    // Match the production file processor's iteration cap so the test
+    // models user-visible behavior. See src/file_processor/processing.rs.
+    let fix_result = coordinator
+        .apply_fixes_iterative(&rules, &[], &mut result, &config, 100, None)
+        .expect("fix coordinator returned Err");
+    assert!(
+        fix_result.converged,
+        "fix coordinator did not converge (conflicting rules: {:?}, cycle: {:?})",
+        fix_result.conflicting_rules, fix_result.conflict_cycle
+    );
     result
-}
-
-fn fmt_once(content: &str, flavor: MarkdownFlavor, rules: &[Box<dyn Rule>]) -> String {
-    let ctx = LintContext::new(content, flavor, None);
-    let mut warnings = Vec::new();
-    for rule in rules {
-        if let Ok(ws) = rule.check(&ctx) {
-            warnings.extend(ws);
-        }
-    }
-    apply_all_fixes(content, &warnings)
 }
 
 fn flavor_from_filename(path: &Path) -> MarkdownFlavor {
@@ -51,10 +43,8 @@ fn flavor_from_filename(path: &Path) -> MarkdownFlavor {
 }
 
 #[test]
-#[ignore = "pipeline idempotency bug, see tests/rules/idempotency_pipeline.rs"]
 fn regression_corpus_is_idempotent() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/regressions/idempotency");
-    let rules = all_rules(&Config::default());
 
     let entries = fs::read_dir(&dir).expect("read corpus dir");
     let mut checked = 0;
@@ -67,8 +57,8 @@ fn regression_corpus_is_idempotent() {
         let content = fs::read_to_string(&path).expect("read fixture");
         let flavor = flavor_from_filename(&path);
 
-        let once = fmt_once(&content, flavor, &rules);
-        let twice = fmt_once(&once, flavor, &rules);
+        let once = fmt(&content, flavor);
+        let twice = fmt(&once, flavor);
 
         if once != twice {
             failures.push(format!(

@@ -4,7 +4,5 @@
 #
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
-cc dd9108e611ed3a1b649cd92cf12c6054ea7b33db1a4cbe42907e99f0222f5c63 # shrinks to content = "# a "
-cc bf23ac5c0330cbd00140c2737761a7a9e3fc506f957c6fbbfe8b807a53cbda02 # shrinks to content = "#    a "
-cc 24544e5ece0f6e7df8672b9d967aa96869a0fed252bdc78371b3af1bbdfbef29 # shrinks to content = "#  0 "
-cc 66cbe31de369a1e2d7017d62bf7ff9d89925ab7492540b65ca29a76d3554a16b # shrinks to content = "#   Aa "
+cc 6b19661ed353b1096ad5a42e18dcccfe00bf3d2ede82980dba0d48f1d6fa80b4 # shrinks to content = "# \n### a \n- \n A  0\n>  \n\n\n-  0"
+cc d02bc64bc73df7d9ea400bd0f46ebd5372c2fd26d579d5712e1ee0e86b2ab058 # shrinks to content = "# a \n- \n### \n>  a  A\n-  A\n   \n a\n- 0  a\n- A  a"
