@@ -64,6 +64,18 @@ impl Rule for MD079ChunkLabelSpaces {
                         &detail.info_string,
                         &combined,
                     ));
+                } else if let Some(label) = positional.first()
+                    && label.value.chars().any(char::is_whitespace)
+                {
+                    // Quoted positional like `{r "my label"}` is a single
+                    // token whose value already contains the offending space.
+                    warnings.push(make_warning(
+                        self.name(),
+                        ctx,
+                        detail.start,
+                        &detail.info_string,
+                        &label.value,
+                    ));
                 }
 
                 // Quoted `label="..."` containing spaces.
@@ -241,5 +253,14 @@ mod tests {
     fn no_auto_fix_offered() {
         let warnings = check_quarto("```{r several words}\n1 + 1\n```\n");
         assert!(warnings[0].fix.is_none());
+    }
+
+    #[test]
+    fn flags_quoted_positional_with_spaces() {
+        // `{r "my label"}` parses as a single quoted positional. The value
+        // still contains a space, so it must be flagged.
+        let warnings = check_quarto("```{r \"my label\"}\n1 + 1\n```\n");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("my label"));
     }
 }
