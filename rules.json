@@ -714,5 +714,25 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md077/"
+  },
+  {
+    "code": "MD078",
+    "name": "missing-chunk-labels",
+    "aliases": [],
+    "summary": "Executable Quarto chunks should have a label",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md078/"
+  },
+  {
+    "code": "MD079",
+    "name": "chunk-label-spaces",
+    "aliases": [],
+    "summary": "Quarto chunk labels must not contain whitespace",
+    "category": "code-block",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md079/"
   }
 ]

@@ -35,6 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.93](https://github.com/rvben/rumdl/compare/v0.1.92...v0.1.93) - 2026-05-15
+
+### Added
+
+- **quarto**: add MD078 missing-chunk-labels and MD079 chunk-label-spaces ([818cba4](https://github.com/rvben/rumdl/commit/818cba4df79cae1e339d976faba08ab15ef16db7))
+
+### Fixed
+
+- **md079**: flag whitespace in quoted positional chunk labels ([ea069c5](https://github.com/rvben/rumdl/commit/ea069c5023dcbca9ff683b259f37eaf4ac8a31bc))
+- **quarto**: harden chunk header parser against codex review findings ([9ee8e28](https://github.com/rvben/rumdl/commit/9ee8e2892dfed842c8688f35e535b9c953093e1e))
+- **test**: drive pipeline idempotency tests through real fix coordinator ([5f9fdb9](https://github.com/rvben/rumdl/commit/5f9fdb9efd818611ba75034ba5ed8f9b5d781931))
+- **test**: remove redundant default on MD077 unit struct ([6b383b0](https://github.com/rvben/rumdl/commit/6b383b0a46be1ddbc1a9311b3323486265c75e6e))
+
 ## [0.1.92](https://github.com/rvben/rumdl/compare/v0.1.91...v0.1.92) - 2026-05-14
 
 ### Added
