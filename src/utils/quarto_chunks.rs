@@ -55,7 +55,13 @@ pub fn parse_inline_chunk_header(info_string: &str) -> Option<InlineChunkHeader>
 
     let mut tokens = tokenize_chunk_args(inner);
 
-    let engine = tokens.next().map(|t| t.value).unwrap_or_default();
+    // The engine must be a bare identifier at the head of the token stream.
+    // A leading `key=value` (e.g. `{=html}`) or no tokens at all means no
+    // engine, which `is_executable_chunk` uses to reject Pandoc raw fences.
+    let engine = match tokens.next() {
+        Some(tok) if matches!(tok.kind, TokenKind::Bare) => tok.value,
+        _ => String::new(),
+    };
 
     let mut labels: Vec<ChunkLabel> = Vec::new();
     let mut seen_kv = false;
@@ -123,10 +129,13 @@ pub fn parse_hashpipe_labels(body: &str) -> Vec<ChunkLabel> {
 
 /// Return `true` if the chunk header denotes an *executable* Quarto chunk.
 ///
-/// Quarto treats braced info strings with a non-empty engine as executable.
-/// Plain display blocks like ` ```r ` are not executable.
+/// Executable engines are identifiers like `r`, `python`, `julia`, `bash` -
+/// the first character is ASCII alphabetic. Pandoc attribute fences such as
+/// `{.python}` (display block with a class) and raw-format fences like
+/// `{=html}` are not executable and must not be flagged by MD078/MD079.
 pub fn is_executable_chunk(info_string: &str) -> bool {
-    parse_inline_chunk_header(info_string).is_some_and(|h| !h.engine.is_empty())
+    parse_inline_chunk_header(info_string)
+        .is_some_and(|h| h.engine.chars().next().is_some_and(|c| c.is_ascii_alphabetic()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,64 +173,48 @@ impl Iterator for ChunkArgIter<'_> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
-        // Skip separators: whitespace and commas.
-        while self.pos < self.bytes.len() {
-            let b = self.bytes[self.pos];
-            if b == b',' || b.is_ascii_whitespace() {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
+        self.skip_separators();
         if self.pos >= self.bytes.len() {
             return None;
+        }
+
+        // A quoted string at this position is a standalone bare token.
+        if matches!(self.bytes[self.pos], b'"' | b'\'') {
+            let value = self.read_quoted();
+            return Some(Token {
+                value,
+                kind: TokenKind::Bare,
+            });
         }
 
         // Read a key or bare word: run of non-separator, non-`=`, non-quote chars.
         let key_start = self.pos;
         while self.pos < self.bytes.len() {
             let b = self.bytes[self.pos];
-            if b == b',' || b == b'=' || b.is_ascii_whitespace() {
-                break;
-            }
-            if b == b'"' || b == b'\'' {
+            if b == b',' || b == b'=' || b == b'"' || b == b'\'' || b.is_ascii_whitespace() {
                 break;
             }
             self.pos += 1;
         }
         let key = &self.input[key_start..self.pos];
 
-        // No `=` follows -> bare token.
-        if self.pos >= self.bytes.len() || self.bytes[self.pos] != b'=' {
+        // Allow optional whitespace between key and `=` so `label = setup`
+        // parses as a key/value, matching knitr's tolerance for spacing.
+        let lookahead = self.skip_inline_whitespace_peek();
+        if lookahead.is_none_or(|b| b != b'=') {
             return Some(Token {
                 value: key.to_string(),
                 kind: TokenKind::Bare,
             });
         }
 
-        // Consume `=` and read the value (quoted or unquoted).
+        // Consume `=` and any whitespace before the value.
         self.pos += 1;
-        if self.pos >= self.bytes.len() {
-            return Some(Token {
-                value: String::new(),
-                kind: TokenKind::KeyValue { key: key.to_string() },
-            });
-        }
+        self.skip_inline_whitespace();
 
-        let value = match self.bytes[self.pos] {
-            q @ (b'"' | b'\'') => {
-                self.pos += 1;
-                let val_start = self.pos;
-                while self.pos < self.bytes.len() && self.bytes[self.pos] != q {
-                    self.pos += 1;
-                }
-                let val = self.input[val_start..self.pos].to_string();
-                if self.pos < self.bytes.len() {
-                    self.pos += 1; // consume closing quote
-                }
-                val
-            }
-            _ => {
+        let value = match self.bytes.get(self.pos).copied() {
+            Some(b'"') | Some(b'\'') => self.read_quoted(),
+            Some(_) => {
                 let val_start = self.pos;
                 while self.pos < self.bytes.len() {
                     let b = self.bytes[self.pos];
@@ -232,12 +225,61 @@ impl Iterator for ChunkArgIter<'_> {
                 }
                 self.input[val_start..self.pos].to_string()
             }
+            None => String::new(),
         };
 
         Some(Token {
             value,
             kind: TokenKind::KeyValue { key: key.to_string() },
         })
+    }
+}
+
+impl ChunkArgIter<'_> {
+    fn skip_separators(&mut self) {
+        while self.pos < self.bytes.len() {
+            let b = self.bytes[self.pos];
+            if b == b',' || b.is_ascii_whitespace() {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn skip_inline_whitespace(&mut self) {
+        while self.pos < self.bytes.len() && self.bytes[self.pos].is_ascii_whitespace() {
+            self.pos += 1;
+        }
+    }
+
+    /// Peek past inline whitespace without committing the advance. Returns the
+    /// next non-whitespace byte if any. Used to look for `=` after a key.
+    fn skip_inline_whitespace_peek(&mut self) -> Option<u8> {
+        let saved = self.pos;
+        self.skip_inline_whitespace();
+        let next = self.bytes.get(self.pos).copied();
+        if next != Some(b'=') {
+            self.pos = saved;
+        }
+        next
+    }
+
+    /// Consume a quoted string starting at the current position. Advances `pos`
+    /// past the closing quote (or to end of input if unterminated). Always
+    /// advances at least one byte, so callers cannot livelock on a stray quote.
+    fn read_quoted(&mut self) -> String {
+        let q = self.bytes[self.pos];
+        self.pos += 1;
+        let start = self.pos;
+        while self.pos < self.bytes.len() && self.bytes[self.pos] != q {
+            self.pos += 1;
+        }
+        let val = self.input[start..self.pos].to_string();
+        if self.pos < self.bytes.len() {
+            self.pos += 1;
+        }
+        val
     }
 }
 
@@ -369,5 +411,58 @@ mod tests {
         // `{}` and `{ , label=foo}` have no engine.
         assert!(!is_executable_chunk("{}"));
         assert!(!is_executable_chunk("{ }"));
+    }
+
+    #[test]
+    fn pandoc_attribute_fences_are_not_executable() {
+        // `{.python}` is a display block with a class, not an executable chunk.
+        assert!(!is_executable_chunk("{.python}"));
+        assert!(!is_executable_chunk("{.haskell .numberLines}"));
+        assert!(!is_executable_chunk("{#snippet .python startFrom=\"10\"}"));
+    }
+
+    #[test]
+    fn pandoc_raw_format_fences_are_not_executable() {
+        // `{=html}`, `{=latex}` are raw-format blocks, not executable chunks.
+        assert!(!is_executable_chunk("{=html}"));
+        assert!(!is_executable_chunk("{=latex}"));
+    }
+
+    #[test]
+    fn spaces_around_equals_in_key_value() {
+        // knitr accepts `label = setup`; we must parse the assignment, not
+        // treat `label` as a bare positional.
+        let h = header("{r, label = setup}");
+        assert_eq!(h.labels.len(), 1);
+        assert_eq!(h.labels[0].value, "setup");
+        assert_eq!(h.labels[0].source, ChunkLabelSource::InlineKey);
+    }
+
+    #[test]
+    fn spaces_around_equals_with_quoted_value() {
+        let h = header(r#"{r, label = "my label"}"#);
+        assert_eq!(h.labels.len(), 1);
+        assert_eq!(h.labels[0].value, "my label");
+        assert_eq!(h.labels[0].source, ChunkLabelSource::InlineKey);
+    }
+
+    #[test]
+    fn quoted_bare_token_does_not_livelock() {
+        // A quoted positional like `{r "setup"}` must terminate parsing.
+        let h = header(r#"{r "setup"}"#);
+        assert_eq!(h.engine, "r");
+        // The quoted bare token is captured as a positional label.
+        assert_eq!(h.labels.len(), 1);
+        assert_eq!(h.labels[0].value, "setup");
+        assert_eq!(h.labels[0].source, ChunkLabelSource::InlinePositional);
+    }
+
+    #[test]
+    fn stray_quote_does_not_livelock() {
+        // Malformed header with an unterminated quote must still terminate.
+        let h = header(r#"{r, label="oops}"#);
+        assert_eq!(h.engine, "r");
+        // The unterminated string captures the rest as the value.
+        assert!(!h.labels.is_empty());
     }
 }
