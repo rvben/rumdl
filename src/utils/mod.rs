@@ -30,6 +30,7 @@ pub mod pandoc;
 pub mod parser_options;
 pub mod project_root;
 pub mod pymdown_blocks;
+pub mod quarto_chunks;
 pub mod range_utils;
 pub mod regex_cache;
 pub mod sentence_utils;

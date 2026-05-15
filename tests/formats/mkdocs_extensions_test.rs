@@ -3935,8 +3935,11 @@ mod per_extension_regression {
         let config = create_mkdocs_config();
         let rules = filter_rules(&all_rules(&config), &config.global);
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        // MD054 intentionally returns Err (doesn't support auto-fix)
-        let unfixable_rules: &[&str] = &["MD054"];
+        // These rules intentionally return Err (no auto-fix):
+        //   MD054 - link/image style is user choice
+        //   MD078 - chunk label is a human-chosen identifier
+        //   MD079 - renaming a label (hyphen vs underscore vs collapse) is a semantic choice
+        let unfixable_rules: &[&str] = &["MD054", "MD078", "MD079"];
         for rule in &rules {
             match rule.fix(&ctx) {
                 Ok(fixed) => {

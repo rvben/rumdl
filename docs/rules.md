@@ -216,6 +216,8 @@ Severity affects:
 | [MD040](md040.md) | Fenced code language | Fenced code blocks should have a language specified |
 | [MD046](md046.md) | Code block style     | Code block style                                    |
 | [MD048](md048.md) | Code fence style     | Code fence style                                    |
+| [MD078](md078.md) | Missing chunk labels | Executable Quarto chunks should have a label        |
+| [MD079](md079.md) | Chunk label spaces   | Quarto chunk labels must not contain whitespace     |
 
 ## Link and Image Rules
 
