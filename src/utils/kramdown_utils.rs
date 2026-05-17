@@ -21,9 +21,6 @@ static EXTENSION_SELF_CLOSING_PATTERN: LazyLock<Regex> =
 /// Pattern for Kramdown extensions closing: {:/comment}, {:/}, etc.
 static EXTENSION_CLOSE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*\{:/([a-z]+)?\}\s*$").unwrap());
 
-/// Pattern for math blocks: $$
-static MATH_BLOCK_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\$\$").unwrap());
-
 /// Check if a line is a Kramdown block attribute (IAL - Inline Attribute List)
 ///
 /// Kramdown IAL syntax allows adding attributes to block elements:
@@ -89,12 +86,6 @@ pub fn is_kramdown_extension_open(line: &str) -> bool {
 /// Check if a line is a Kramdown extension closing tag
 pub fn is_kramdown_extension_close(line: &str) -> bool {
     EXTENSION_CLOSE_PATTERN.is_match(line)
-}
-
-/// Check if a line starts a math block
-pub fn is_math_block_delimiter(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed == "$$" || MATH_BLOCK_PATTERN.is_match(trimmed)
 }
 
 #[cfg(test)]

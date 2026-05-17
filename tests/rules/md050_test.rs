@@ -416,3 +416,35 @@ fn test_issue_482_no_emphasis_warning_in_table_code_spans() {
         "Should not flag __or__ in table code spans as emphasis, got: {result:?}"
     );
 }
+
+#[test]
+fn test_md050_flags_violation_after_content_sharing_math_close() {
+    // The `$$` block closes on a line that also carries LaTeX content
+    // (`\end{cases}$$`). The block must end there, so the underscore-style
+    // strong emphasis in the prose below is a real MD050 violation.
+    let content = "# T\n\n**bold one**\n\n$$\nf(x) = x\n\\end{cases}$$\n\nThis __should be flagged__ outside math.\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "underscore strong after a content-sharing math close must be flagged, got: {result:?}"
+    );
+}
+
+#[test]
+fn test_md050_flags_strong_after_inline_display_math_on_same_line() {
+    // A self-contained single-line `$$...$$` must not turn the trailing prose
+    // on the same line into math. The underscore strong after it is a real
+    // MD050 violation (document style is asterisk).
+    let content = "# T\n\n**real bold**\n\n$$x = y$$ and __wrong strong__ after.\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "strong after a self-contained single-line $$...$$ must be flagged, got: {result:?}"
+    );
+}

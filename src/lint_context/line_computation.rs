@@ -323,16 +323,22 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
         let content_after_blockquote =
             crate::utils::blockquote::parse_blockquote_prefix(trimmed).map_or(trimmed, |p| p.content.trim());
 
-        if content_after_blockquote == "$$" {
-            if inside_math {
-                in_math_block[i] = true;
-                inside_math = false;
-            } else {
-                in_math_block[i] = true;
-                inside_math = true;
-            }
-        } else if inside_math {
+        if inside_math {
+            // Every line inside the block is math, including a closing fence
+            // that shares its line with content (e.g. `\end{cases}$$`).
             in_math_block[i] = true;
+            if content_after_blockquote.contains("$$") {
+                inside_math = false;
+            }
+        } else if content_after_blockquote.starts_with("$$")
+            && crate::utils::skip_context::count_double_dollar(content_after_blockquote) % 2 == 1
+        {
+            // Odd `$$` count opens a multi-line block, so this fence line is
+            // math. A self-contained single-line `$$...$$` (even count) is not
+            // line-flagged so trailing prose on the same line stays lintable;
+            // byte-level inline-math detection still protects the span itself.
+            in_math_block[i] = true;
+            inside_math = true;
         }
     }
 

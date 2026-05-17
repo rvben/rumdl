@@ -5,7 +5,6 @@
 
 use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
-use crate::utils::kramdown_utils::is_math_block_delimiter;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_critic;
 use crate::utils::mkdocs_extensions;
@@ -149,25 +148,55 @@ pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
     false
 }
 
+/// Count non-overlapping `$$` tokens in a string.
+pub(crate) fn count_double_dollar(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'$' && bytes[i + 1] == b'$' {
+            count += 1;
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+    count
+}
+
 /// Check if a byte position is within a math block ($$...$$)
+///
+/// A display-math block only *opens* on a line whose trimmed text starts with
+/// `$$` (a stray `$$` mid-prose is not a block). Once open, the block *closes*
+/// on the first line containing `$$`, even when that `$$` shares the line with
+/// LaTeX content such as `\end{cases}$$`. A line that both opens and closes
+/// (even number of `$$`, e.g. `$$ a $$`) is self-contained display math.
 pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
-    let mut in_math_block = false;
+    let mut in_block = false;
     let mut current_pos = 0;
 
     for line in content.lines() {
         let line_start = current_pos;
         let line_end = current_pos + line.len();
+        let on_this_line = byte_pos >= line_start && byte_pos <= line_end;
 
-        // Check if this line is a math block delimiter
-        if is_math_block_delimiter(line) {
-            if byte_pos >= line_start && byte_pos <= line_end {
-                // Position is on the delimiter line itself
+        if in_block {
+            // Every line inside the block is math, including the closing fence.
+            if on_this_line {
                 return true;
             }
-            in_math_block = !in_math_block;
-        } else if in_math_block && byte_pos >= line_start && byte_pos <= line_end {
-            // Position is inside a math block
-            return true;
+            if line.contains("$$") {
+                in_block = false;
+            }
+        } else if line.trim_start().starts_with("$$") && count_double_dollar(line) % 2 == 1 {
+            // Odd `$$` count: this line opens a multi-line block, so the whole
+            // fence line is math. A self-contained single-line `$$...$$` (even
+            // count) is left to inline-math detection so trailing prose on the
+            // same line stays lintable.
+            in_block = true;
+            if on_this_line {
+                return true;
+            }
         }
 
         current_pos = line_end + 1; // +1 for newline
@@ -381,6 +410,23 @@ mod tests {
         assert!(is_in_math_block(content, 15)); // Inside math block
         assert!(!is_in_math_block(content, 0)); // Before math block
         assert!(!is_in_math_block(content, 30)); // After math block
+    }
+
+    #[test]
+    fn test_math_block_closes_with_content_before_fence() {
+        // A display-math block whose closing `$$` shares its line with
+        // content (e.g. `\end{aligned}$$`) must still close the block.
+        // Content after the block is prose, not math.
+        let content = "$$\nx = y\n\\end{x}$$\nafter __text__ here";
+
+        let inside = content.find("x = y").unwrap();
+        assert!(is_in_math_block(content, inside), "interior must be math");
+
+        let after = content.find("after").unwrap();
+        assert!(
+            !is_in_math_block(content, after),
+            "content after a content-sharing closing fence must NOT be math"
+        );
     }
 
     #[test]
