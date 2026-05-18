@@ -734,5 +734,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md079/"
+  },
+  {
+    "code": "MD080",
+    "name": "heading-anchor-collision",
+    "aliases": [],
+    "summary": "Heading anchors must be unique",
+    "category": "heading",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md080/"
   }
 ]
