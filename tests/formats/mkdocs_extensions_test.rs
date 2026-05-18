@@ -832,7 +832,9 @@ mod negative_tests {
 
     #[test]
     fn test_hard_tabs_detected() {
-        let content = "# Test\n\n\tIndented with tab.\n";
+        // Use a tab mid-line in a paragraph (not at column 0 after a blank line,
+        // which would be an indented code block skipped by default).
+        let content = "# Test\n\nParagraph with\ta hard tab.\n";
         let warnings = lint_mkdocs(content);
         let md010 = warnings
             .iter()
