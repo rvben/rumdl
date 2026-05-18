@@ -339,7 +339,11 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
                 if !after.is_empty() {
                     in_math_block[i] = false;
                 }
-                inside_math = crate::utils::skip_context::count_double_dollar(after) % 2 == 1;
+                // The block closes here. Any further `$$` in the trailing
+                // prose is mid-line and cannot open a new multi-line block
+                // (openers must begin a line), so the block stays closed -
+                // matching the byte-level `math_block_ranges` model.
+                inside_math = false;
             }
             // No `$$` on this line: still interior, stay inside.
         } else if ic.starts_with("$$") {

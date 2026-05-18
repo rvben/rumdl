@@ -765,6 +765,26 @@ fn test_md037_flags_emphasis_after_closing_fence_on_same_line() {
     assert_eq!(result[0].line, 3);
 }
 
+/// Test: a closing fence whose trailing prose itself contains a literal `$$`.
+/// That mid-line `$$` cannot open a new multi-line block, so following lines
+/// must stay lintable (the line-level map must not re-enter math state).
+#[test]
+fn test_md037_lints_after_closing_fence_with_dollar_in_prose() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "$$\nx = y\n$$ note the $$ symbol\nprose with * spaced emphasis * here\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "prose after a closed block must stay lintable even when the closing \
+         fence line carries a literal `$$`, got: {result:?}"
+    );
+    assert_eq!(result[0].line, 4);
+}
+
 /// Test: Display math ($$...$$) with content spanning patterns
 #[test]
 fn test_md037_display_math_protection() {
