@@ -98,6 +98,7 @@ fn test_empty_line_tabs() {
 
 #[test]
 fn test_code_blocks_allowed() {
+    // Intentionally mirrors test_code_blocks_not_allowed; do not delete the redundancy.
     let rule = MD010NoHardTabs::new(4);
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
@@ -108,12 +109,32 @@ fn test_code_blocks_allowed() {
 
 #[test]
 fn test_code_blocks_not_allowed() {
-    let rule = MD010NoHardTabs::default(); // code blocks are always skipped now
+    // Fenced code block tabs are skipped by default (flagged when code_blocks=true).
     let content = "Normal line\n```\n\tCode with tab\n\tMore code\n```\nNormal\tline";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1); // Only tab outside code block is flagged
-    assert_eq!(result[0].line, 6);
+
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(result_off.len(), 1); // Only tab outside code block is flagged
+    assert_eq!(result_off[0].line, 6);
+
+    // code_blocks=true: tabs inside the fenced block are also flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 3, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 3);
+    assert_eq!(result_on[0].message, "Found leading tab, use 4 spaces instead");
+    assert_eq!(result_on[1].line, 4);
+    assert_eq!(result_on[1].message, "Found leading tab, use 4 spaces instead");
+    assert_eq!(result_on[2].line, 6);
+    assert_eq!(result_on[2].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
+        "Normal line\n```\n    Code with tab\n    More code\n```\nNormal    line"
+    );
 }
 
 #[test]
@@ -158,8 +179,9 @@ fn test_fix_with_code_blocks_true_variant() {
 
 #[test]
 fn test_fix_without_code_blocks() {
-    // Same content as test_fix_with_code_blocks; default behavior (code_blocks=false)
-    // preserves all tab-starting lines as code block content.
+    // Intentionally duplicates test_fix_with_code_blocks content as a historical regression
+    // counterpart; do not merge or delete either. The code_blocks=true behavior for this
+    // content lives in test_fix_with_code_blocks_true_variant.
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 
