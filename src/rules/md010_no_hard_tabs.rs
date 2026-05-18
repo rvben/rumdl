@@ -5,8 +5,8 @@ use crate::rule_config_serde::RuleConfig;
 /// See [docs/md010.md](../../docs/md010.md) for full documentation, configuration, and examples.
 use crate::utils::range_utils::calculate_match_range;
 
-mod md010_config;
-use md010_config::MD010Config;
+pub mod md010_config;
+pub use md010_config::MD010Config;
 
 /// Rule MD010: Hard tabs
 #[derive(Clone, Default)]
@@ -19,6 +19,7 @@ impl MD010NoHardTabs {
         Self {
             config: MD010Config {
                 spaces_per_tab: crate::types::PositiveUsize::from_const(spaces_per_tab),
+                code_blocks: false,
             },
         }
     }
