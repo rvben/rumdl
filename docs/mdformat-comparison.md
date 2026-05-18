@@ -47,7 +47,7 @@ Both tools format Markdown to a consistent style:
 
 ### Linting (rumdl only)
 
-rumdl provides 68 linting rules that mdformat does not have:
+rumdl provides <!-- RULE_COUNT -->74<!-- /RULE_COUNT --> linting rules that mdformat does not have:
 
 - **Broken link detection** (MD051, MD052, MD057)
 - **Accessibility checks** (MD045 - image alt text)

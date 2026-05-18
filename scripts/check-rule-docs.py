@@ -35,6 +35,12 @@ ROOT = Path(__file__).resolve().parent.parent
 # itself changes its rule set and the comparison docs are re-baselined.
 MARKDOWNLINT_BASE = 53
 
+# Rule counts that legitimately appear unsentineled because they describe
+# *other* tools, not rumdl: markdownlint (53), pymarkdown (46), mado (38).
+# Any other "N rules" phrase outside a sentinel is an unsynced rumdl claim.
+# If a competitor's rule count changes, update the doc and this set together.
+ALLOWED_OTHER_TOOL_COUNTS = {MARKDOWNLINT_BASE, 46, 38}
+
 # Files whose rule-count sentinels are kept in sync.
 DOC_FILES = [
     "README.md",
@@ -50,6 +56,13 @@ RULES_REFERENCE = "docs/rules.md"
 
 # A table row in docs/rules.md, e.g. `| [MD080](md080.md) | ... | ... |`.
 RULES_TABLE_ROW = re.compile(r"\|\s*\[(MD\d{3})\]\(")
+
+# Any rule-count sentinel span, used to blank out machine-owned values
+# before scanning for stray unwrapped counts.
+ANY_SENTINEL = re.compile(r"<!-- (RULE_\w+) -->[^\n<]*<!-- /\1 -->")
+
+# A bare "N rules" / "N lint(ing) rules" claim, e.g. "68 linting rules".
+RULE_COUNT_PHRASE = re.compile(r"\b(\d+)\s+(?:lint|linting\s+)?rules?\b")
 
 
 def registry_rule_ids() -> list[str]:
@@ -145,6 +158,34 @@ def check_rules_table(ids: list[str]) -> list[str]:
     return problems
 
 
+def check_no_unwrapped_counts() -> list[str]:
+    """Fail on any rule-count claim that is not wrapped in a sentinel.
+
+    The sentinel checks only validate counts that already have markers, so a
+    stale number left unwrapped (e.g. `rumdl provides 68 linting rules`)
+    would otherwise be invisible to CI. Blank out sentinel spans first so
+    their machine-owned values are not re-flagged, then any remaining
+    `N rules` phrase whose number is not a known other-tool count is an
+    unsynced rumdl claim that must be wrapped.
+    """
+    problems: list[str] = []
+    for rel in DOC_FILES:
+        content = (ROOT / rel).read_text()
+        # Replace each sentinel span with same-length spaces so byte offsets
+        # (and thus line numbers) are preserved.
+        masked = ANY_SENTINEL.sub(lambda m: " " * len(m.group(0)), content)
+        for m in RULE_COUNT_PHRASE.finditer(masked):
+            count = int(m.group(1))
+            if count in ALLOWED_OTHER_TOOL_COUNTS:
+                continue
+            line_no = masked.count("\n", 0, m.start()) + 1
+            problems.append(
+                f"  {rel}:{line_no}: unwrapped rule count {m.group(0)!r}; "
+                f"wrap the number in a <!-- RULE_COUNT --> sentinel"
+            )
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -165,20 +206,22 @@ def main() -> int:
                 print(f"  {rel}")
         else:
             print("Rule-count sentinels already in sync.")
-        # Surface table gaps even in write mode; the table is curated, not
-        # generated, so it cannot be auto-fixed here.
-        table_problems = check_rules_table(ids)
-        if table_problems:
+        # Surface issues that cannot be auto-fixed: the rules.md table is
+        # curated, and an unwrapped count needs a human to place sentinels.
+        residual = check_rules_table(ids) + check_no_unwrapped_counts()
+        if residual:
             print(
-                f"\ndocs/rules.md table is out of sync (total {values['RULE_COUNT']} rules):",
+                f"\nResidual drift that --write cannot fix (total {values['RULE_COUNT']} rules):",
                 file=sys.stderr,
             )
-            for line in table_problems:
+            for line in residual:
                 print(line, file=sys.stderr)
             return 1
         return 0
 
-    problems = check_sentinels(values) + check_rules_table(ids)
+    problems = (
+        check_sentinels(values) + check_rules_table(ids) + check_no_unwrapped_counts()
+    )
     if problems:
         print(
             f"Rule-doc drift detected. Registry has {values['RULE_COUNT']} rules "
