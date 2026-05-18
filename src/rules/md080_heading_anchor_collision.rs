@@ -18,7 +18,7 @@
 //! auto-suffixing and flagging it changes established lint output.
 
 use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::utils::range_utils::calculate_match_range;
@@ -195,9 +195,14 @@ impl Rule for MD080HeadingAnchorCollision {
         Ok(warnings)
     }
 
-    fn fix(&self, _ctx: &LintContext) -> Result<String, LintError> {
+    fn fix_capability(&self) -> FixCapability {
         // Renaming a heading (and every link that targets it) is a semantic
-        // decision the linter must not make automatically.
+        // decision the linter must not make automatically, so the fix
+        // coordinator must treat MD080 as diagnostic-only.
+        FixCapability::Unfixable
+    }
+
+    fn fix(&self, _ctx: &LintContext) -> Result<String, LintError> {
         Err(LintError::FixFailed("MD080 has no auto-fix".to_string()))
     }
 

@@ -129,13 +129,35 @@ impl Rule for MD049EmphasisStyle {
         // `$$ _x_ $$ $$ _y_ $$`) stays lintable so trailing prose is checked;
         // this byte-level guard then exempts only the underscores that fall
         // inside the line-start `$$...$$` span, matching MD037/MD050.
+        // `math_byte_ranges` has no code-block awareness, so a `$$` inside a
+        // fenced code block would wrongly open a span that swallows real
+        // prose up to the next `$$`. Neutralize `$` bytes inside code-block
+        // ranges first (replacing only the ASCII `$` keeps every byte offset
+        // and UTF-8 validity intact) so the byte model agrees with the
+        // code-block-aware line-level math map.
         // Sort and merge so membership is a binary search rather than a
         // per-span linear scan: a math-heavy document (many `$x$` spans
         // alternating with emphasis) would otherwise be O(spans x ranges).
         // Ranges may overlap (e.g. a `$b$` inside a `$$...$$` block), so the
         // merge collapses them into disjoint, ascending intervals.
         let math_ranges: Vec<(usize, usize)> = {
-            let mut r = crate::utils::skip_context::math_byte_ranges(ctx.content);
+            let math_source: std::borrow::Cow<'_, str> = if ctx.code_blocks.is_empty() {
+                std::borrow::Cow::Borrowed(ctx.content)
+            } else {
+                let mut bytes = ctx.content.as_bytes().to_vec();
+                let len = bytes.len();
+                for &(start, end) in &ctx.code_blocks {
+                    for b in &mut bytes[start.min(len)..end.min(len)] {
+                        if *b == b'$' {
+                            *b = b' ';
+                        }
+                    }
+                }
+                // Only ASCII `$` was replaced with ASCII space, so the buffer
+                // is still valid UTF-8 and the same length.
+                std::borrow::Cow::Owned(String::from_utf8(bytes).expect("ASCII-only substitution"))
+            };
+            let mut r = crate::utils::skip_context::math_byte_ranges(&math_source);
             r.sort_unstable_by_key(|&(start, _)| start);
             let mut merged: Vec<(usize, usize)> = Vec::with_capacity(r.len());
             for (start, end) in r {

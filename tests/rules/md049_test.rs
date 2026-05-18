@@ -409,3 +409,20 @@ fn test_genuine_multiline_block_still_suppresses_interior() {
     );
     assert_eq!(result[0].line, 7);
 }
+
+#[test]
+fn test_fenced_code_dollars_do_not_mask_emphasis() {
+    // A `$$` inside a fenced code block must not open a math span that
+    // swallows real prose up to a later `$$`. The byte-level math filter
+    // must be as code-block aware as the line-level math map.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "set style *a* *b*.\n\n```\n$$\n```\n\nThen _bad_ here\n\n$$\nx = y\n$$\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "`_bad_` between a fenced `$$` and a real `$$` must still be linted: {result:?}"
+    );
+    assert_eq!(result[0].line, 7);
+}
