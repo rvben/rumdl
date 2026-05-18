@@ -90,7 +90,7 @@ impl Rule for MD010NoHardTabs {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
 
-        // When code_blocks is disabled, skip tabs inside ANY code block -
+        // When `code_blocks` is false (the default), skip tabs inside ANY code block -
         // fenced and indented alike - using the shared spec-compliant flag.
         let skip_code_blocks = !self.config.code_blocks;
 
@@ -341,12 +341,12 @@ mod tests {
     }
 
     #[test]
-    fn test_code_blocks_always_ignored() {
+    fn test_fenced_code_block_tabs_skipped_by_default() {
         let rule = MD010NoHardTabs::default();
         let content = "Normal\tline\n```\nCode\twith\ttab\n```\nAnother\tline";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Should only flag tabs outside code blocks - code has its own formatting rules
+        // By default (code_blocks=false) tabs inside code blocks are skipped
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[1].line, 5);
@@ -356,12 +356,12 @@ mod tests {
     }
 
     #[test]
-    fn test_code_blocks_never_checked() {
+    fn test_fenced_only_content_skipped_by_default() {
         let rule = MD010NoHardTabs::default();
         let content = "```\nCode\twith\ttab\n```";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // Should never flag tabs in code blocks - code has its own formatting rules
+        // By default (code_blocks=false) tabs in fenced code blocks are skipped
         // (e.g., Makefiles require tabs, Go uses tabs by convention)
         assert_eq!(result.len(), 0);
     }
@@ -558,14 +558,14 @@ mod tests {
     }
 
     #[test]
-    fn test_code_blocks_always_preserved_in_fix() {
+    fn test_fenced_code_block_tabs_preserved_in_fix_by_default() {
         let rule = MD010NoHardTabs::default();
 
         let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore\ttabs";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Tabs in code blocks are preserved - code has its own formatting rules
+        // By default (code_blocks=false) tabs in fenced code blocks are preserved
         // (e.g., Makefiles require tabs, Go uses tabs by convention)
         let expected = "Text    with    tab\n```makefile\ntarget:\n\tcommand\n\tanother\n```\nMore    tabs";
         assert_eq!(fixed, expected);
