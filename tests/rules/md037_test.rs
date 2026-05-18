@@ -747,6 +747,24 @@ fn test_md037_flags_emphasis_after_inline_display_math_on_same_line() {
     assert_eq!(result[0].line, 1);
 }
 
+/// Test: a multi-line block whose closing `$$` is followed by prose on the
+/// same line. The prose after the closing fence must still be linted.
+#[test]
+fn test_md037_flags_emphasis_after_closing_fence_on_same_line() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let content = "$$\nx = y\n$$ and then * bad emphasis * here.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "prose after a same-line closing fence must be linted, got: {result:?}"
+    );
+    assert_eq!(result[0].line, 3);
+}
+
 /// Test: Display math ($$...$$) with content spanning patterns
 #[test]
 fn test_md037_display_math_protection() {

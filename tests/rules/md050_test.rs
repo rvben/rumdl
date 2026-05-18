@@ -448,3 +448,18 @@ fn test_md050_flags_strong_after_inline_display_math_on_same_line() {
         "strong after a self-contained single-line $$...$$ must be flagged, got: {result:?}"
     );
 }
+
+#[test]
+fn test_md050_flags_strong_after_closing_fence_on_same_line() {
+    // A multi-line display block whose closing `$$` carries trailing prose on
+    // the same line: the prose after the fence is not math.
+    let content = "# T\n\n**real bold**\n\n$$\nx = y\n$$ and __wrong strong__ after.\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let rule = MD050StrongStyle::new(StrongStyle::Asterisk);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "strong after a same-line closing fence must be flagged, got: {result:?}"
+    );
+}

@@ -164,45 +164,63 @@ pub(crate) fn count_double_dollar(s: &str) -> usize {
     count
 }
 
-/// Check if a byte position is within a math block ($$...$$)
+/// Paired `$$ ... $$` display-math byte ranges, half-open `[start, end)`.
 ///
-/// A display-math block only *opens* on a line whose trimmed text starts with
-/// `$$` (a stray `$$` mid-prose is not a block). Once open, the block *closes*
-/// on the first line containing `$$`, even when that `$$` shares the line with
-/// LaTeX content such as `\end{cases}$$`. A line that both opens and closes
-/// (even number of `$$`, e.g. `$$ a $$`) is self-contained display math.
-pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
-    let mut in_block = false;
-    let mut current_pos = 0;
-
-    for line in content.lines() {
-        let line_start = current_pos;
-        let line_end = current_pos + line.len();
-        let on_this_line = byte_pos >= line_start && byte_pos <= line_end;
-
-        if in_block {
-            // Every line inside the block is math, including the closing fence.
-            if on_this_line {
-                return true;
+/// A block only *opens* on a `$$` that begins its line, ignoring leading
+/// whitespace and blockquote markers (`>`); a stray `$$` mid-prose is a
+/// literal, not a block opener. This keeps the byte-level result consistent
+/// with the line-level [`compute_math_block_line_map`] guard. Once open, the
+/// block *closes* on the next `$$` anywhere - even when that closing `$$`
+/// shares its line with LaTeX content (`\end{cases}$$`) or trailing Markdown
+/// prose. An opener with no matching closer is dropped, not treated as an
+/// unterminated block that swallows the rest of the document.
+pub(crate) fn math_block_ranges(content: &str) -> Vec<(usize, usize)> {
+    let bytes = content.as_bytes();
+    let mut ranges = Vec::new();
+    let mut open: Option<usize> = None;
+    let mut line_start = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                line_start = i + 1;
+                i += 1;
             }
-            if line.contains("$$") {
-                in_block = false;
+            b'$' if i + 1 < bytes.len() && bytes[i + 1] == b'$' => {
+                match open {
+                    None => {
+                        // Open only when this `$$` is the first non-blank,
+                        // non-blockquote content on its line.
+                        let starts_line = bytes[line_start..i]
+                            .iter()
+                            .all(|&b| b == b' ' || b == b'\t' || b == b'>');
+                        if starts_line {
+                            open = Some(i);
+                        }
+                    }
+                    Some(start) => {
+                        ranges.push((start, i + 2));
+                        open = None;
+                    }
+                }
+                i += 2;
             }
-        } else if line.trim_start().starts_with("$$") && count_double_dollar(line) % 2 == 1 {
-            // Odd `$$` count: this line opens a multi-line block, so the whole
-            // fence line is math. A self-contained single-line `$$...$$` (even
-            // count) is left to inline-math detection so trailing prose on the
-            // same line stays lintable.
-            in_block = true;
-            if on_this_line {
-                return true;
-            }
+            _ => i += 1,
         }
-
-        current_pos = line_end + 1; // +1 for newline
     }
+    ranges
+}
 
-    false
+/// Check if a byte position is within a `$$ ... $$` display-math block.
+///
+/// A block opens only on a `$$` that begins its line (see [`math_block_ranges`])
+/// and closes on the next `$$` anywhere, so the closing fence ends the block
+/// even when it shares its line with LaTeX content (e.g. `\end{cases}$$`) or
+/// trailing Markdown prose; bytes after the closing `$$` are not math.
+pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
+    math_block_ranges(content)
+        .iter()
+        .any(|&(start, end)| byte_pos >= start && byte_pos < end)
 }
 
 /// Check if a byte position is within inline math ($...$)
@@ -410,6 +428,38 @@ mod tests {
         assert!(is_in_math_block(content, 15)); // Inside math block
         assert!(!is_in_math_block(content, 0)); // Before math block
         assert!(!is_in_math_block(content, 30)); // After math block
+    }
+
+    #[test]
+    fn test_stray_double_dollar_in_prose_is_not_math() {
+        // Two `$$` tokens inside a prose line must NOT pair into a math block:
+        // a multi-line block only opens on a `$$` that begins its line. This
+        // keeps the byte-level result consistent with the line-level map.
+        let content = "Note: $$ is used for display math and $$ closes it";
+        let between = content.find("is used").unwrap();
+        assert!(
+            !is_in_math_block(content, between),
+            "stray paired `$$` in prose must not be treated as a math block"
+        );
+        assert!(math_block_ranges(content).is_empty());
+    }
+
+    #[test]
+    fn test_blockquoted_double_dollar_opens_block() {
+        // A `$$` opener is still recognized behind a blockquote prefix.
+        let content = "> $$\n> x = y\n> $$\n";
+        let inside = content.find("x = y").unwrap();
+        assert!(is_in_math_block(content, inside), "blockquoted math interior");
+    }
+
+    #[test]
+    fn test_self_contained_single_line_block_leaves_trailing_prose() {
+        // `$$ a $$` at line start is math; prose after the closing `$$` is not.
+        let content = "$$ a $$ and __not math__\n";
+        let in_math = content.find('a').unwrap();
+        assert!(is_in_math_block(content, in_math), "single-line math interior");
+        let after = content.find("not math").unwrap();
+        assert!(!is_in_math_block(content, after), "trailing prose is lintable");
     }
 
     #[test]

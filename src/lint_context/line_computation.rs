@@ -305,8 +305,15 @@ pub(super) fn compute_code_block_line_map(
     in_code_block
 }
 
-/// Pre-compute which lines are inside math blocks ($$ ... $$) - O(n) single pass
-/// Returns a Vec<bool> where index i indicates if line i is in a math block
+/// Pre-compute which lines are entirely inside `$$ ... $$` math blocks.
+///
+/// This is a coarse, blockquote-aware optimization: a line is flagged only
+/// when it contains no Markdown that should be linted (interior lines and
+/// bare/LaTeX-only fence lines). Lines that mix a fence with trailing prose
+/// (`$$ and __x__`) are left unflagged so the byte-level math filter can
+/// distinguish the math span from the prose. A multi-line block opens only
+/// on a line whose (blockquote-stripped) content starts with `$$` and has an
+/// odd `$$` count; it closes on the first subsequent line containing `$$`.
 pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
@@ -320,25 +327,30 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
 
         let trimmed = line.trim();
         // Strip blockquote prefix so that `> $$` is recognized as a math delimiter
-        let content_after_blockquote =
-            crate::utils::blockquote::parse_blockquote_prefix(trimmed).map_or(trimmed, |p| p.content.trim());
+        let ic = crate::utils::blockquote::parse_blockquote_prefix(trimmed).map_or(trimmed, |p| p.content.trim());
 
         if inside_math {
-            // Every line inside the block is math, including a closing fence
-            // that shares its line with content (e.g. `\end{cases}$$`).
             in_math_block[i] = true;
-            if content_after_blockquote.contains("$$") {
-                inside_math = false;
+            if let Some(close) = ic.find("$$") {
+                let after = ic[close + 2..].trim();
+                // A non-empty remainder after the closing `$$` is Markdown
+                // prose; defer to the byte-level filter rather than skipping
+                // the whole line.
+                if !after.is_empty() {
+                    in_math_block[i] = false;
+                }
+                inside_math = crate::utils::skip_context::count_double_dollar(after) % 2 == 1;
             }
-        } else if content_after_blockquote.starts_with("$$")
-            && crate::utils::skip_context::count_double_dollar(content_after_blockquote) % 2 == 1
-        {
-            // Odd `$$` count opens a multi-line block, so this fence line is
-            // math. A self-contained single-line `$$...$$` (even count) is not
-            // line-flagged so trailing prose on the same line stays lintable;
-            // byte-level inline-math detection still protects the span itself.
-            in_math_block[i] = true;
-            inside_math = true;
+            // No `$$` on this line: still interior, stay inside.
+        } else if ic.starts_with("$$") {
+            // Odd `$$` count opens a multi-line block (the rest of the line is
+            // display content). An even count is self-contained `$$...$$`; it
+            // is left to byte/inline math detection so any trailing prose on
+            // the line stays lintable.
+            if crate::utils::skip_context::count_double_dollar(ic) % 2 == 1 {
+                in_math_block[i] = true;
+                inside_math = true;
+            }
         }
     }
 
