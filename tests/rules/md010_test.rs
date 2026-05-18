@@ -1,6 +1,7 @@
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::MD010NoHardTabs;
+use rumdl_lib::rules::{MD010Config, MD010NoHardTabs};
+use rumdl_lib::types::PositiveUsize;
 
 #[test]
 fn test_no_hard_tabs() {
@@ -24,15 +25,35 @@ fn test_content_with_no_tabs_various_contexts() {
 
 #[test]
 fn test_leading_hard_tabs() {
-    let rule = MD010NoHardTabs::default();
+    // Both lines start with a tab at column 0 -> indented code block.
+    // Default code_blocks=false skips tabs in indented code blocks.
     let content = "\tIndented line\n\t\tDouble indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2); // One warning per line (grouped consecutive tabs)
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[0].message, "Found leading tab, use 4 spaces instead");
-    assert_eq!(result[1].line, 2);
-    assert_eq!(result[1].message, "Found 2 leading tabs, use 8 spaces instead");
+
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert!(
+        result_off.is_empty(),
+        "indented code block skipped by default, got {result_off:?}"
+    );
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "\tIndented line\n\t\tDouble indented",
+        "content preserved unchanged"
+    );
+
+    // code_blocks=true: tabs in indented code blocks are flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 2, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 1);
+    assert_eq!(result_on[0].message, "Found leading tab, use 4 spaces instead");
+    assert_eq!(result_on[1].line, 2);
+    assert_eq!(result_on[1].message, "Found 2 leading tabs, use 8 spaces instead");
+    assert_eq!(rule_on.fix(&ctx).unwrap(), "    Indented line\n        Double indented");
 }
 
 #[test]
@@ -48,16 +69,31 @@ fn test_alignment_tabs() {
 
 #[test]
 fn test_empty_line_tabs() {
-    let rule = MD010NoHardTabs::default();
+    // Line 2 "\t\t" is an empty line with tabs -> always flagged (not an indented code block).
+    // Line 3 "\tMore text" starts with tab at column 0 -> indented code block, skipped by default.
     let content = "Normal line\n\t\t\n\tMore text";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    // Tab-indented content is flagged (might be accidental)
-    assert_eq!(result.len(), 2); // Empty line with tabs + tab on line 3
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[0].message, "Empty line contains 2 tabs");
-    assert_eq!(result[1].line, 3);
-    assert_eq!(result[1].message, "Found leading tab, use 4 spaces instead");
+
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(result_off.len(), 1, "only empty-line tabs flagged, got {result_off:?}");
+    assert_eq!(result_off[0].line, 2);
+    assert_eq!(result_off[0].message, "Empty line contains 2 tabs");
+    // Empty-line tabs replaced; indented code block line preserved.
+    assert_eq!(rule_off.fix(&ctx).unwrap(), "Normal line\n        \n\tMore text");
+
+    // code_blocks=true: line 3 indented code block tab also flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 2, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 2);
+    assert_eq!(result_on[0].message, "Empty line contains 2 tabs");
+    assert_eq!(result_on[1].line, 3);
+    assert_eq!(result_on[1].message, "Found leading tab, use 4 spaces instead");
+    assert_eq!(rule_on.fix(&ctx).unwrap(), "Normal line\n        \n    More text");
 }
 
 #[test]
@@ -82,31 +118,93 @@ fn test_code_blocks_not_allowed() {
 
 #[test]
 fn test_fix_with_code_blocks() {
-    let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, preserve code blocks
+    // Default code_blocks=false: lines 1 and 5 are indented code blocks (tab at column 0);
+    // line 3 is inside a fenced code block. All tabs skipped -> content preserved as-is.
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
+
+    let rule_off = MD010NoHardTabs::new(2);
+    assert!(
+        rule_off.check(&ctx).unwrap().is_empty(),
+        "all tabs in code blocks skipped"
+    );
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented",
+        "content preserved unchanged"
+    );
+}
+
+#[test]
+fn test_fix_with_code_blocks_true_variant() {
+    // code_blocks=true: tabs in both fenced and indented code blocks are replaced.
+    let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(2),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 3, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 1);
+    assert_eq!(result_on[1].line, 3);
+    assert_eq!(result_on[2].line, 5);
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
+        "  Indented line\n```\n  Code\n```\n    Double indented"
+    );
 }
 
 #[test]
 fn test_fix_without_code_blocks() {
-    let rule = MD010NoHardTabs::new(2); // 2 spaces per tab, code blocks always preserved
+    // Same content as test_fix_with_code_blocks; default behavior (code_blocks=false)
+    // preserves all tab-starting lines as code block content.
     let content = "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
-    assert_eq!(fixed, "  Indented line\n```\n\tCode\n```\n    Double indented");
+
+    let rule_off = MD010NoHardTabs::new(2);
+    assert!(
+        rule_off.check(&ctx).unwrap().is_empty(),
+        "all tabs in code blocks skipped"
+    );
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "\tIndented line\n```\n\tCode\n```\n\t\tDouble indented",
+        "content preserved unchanged"
+    );
 }
 
 #[test]
 fn test_mixed_indentation() {
-    let rule = MD010NoHardTabs::default();
+    // "    Spaces" is space-indented (not a tab). "\tTab" and "  \tMixed" start with
+    // tab/space-tab and are classified as indented code blocks.
+    // Default code_blocks=false skips indented code blocks.
     let content = "    Spaces\n\tTab\n  \tMixed";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2);
-    assert_eq!(result[0].line, 2);
-    assert_eq!(result[1].line, 3);
+
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert!(
+        result_off.is_empty(),
+        "indented code block lines skipped, got {result_off:?}"
+    );
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "    Spaces\n\tTab\n  \tMixed",
+        "content preserved unchanged"
+    );
+
+    // code_blocks=true: tabs on lines 2 and 3 are flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 2, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 2);
+    assert_eq!(result_on[1].line, 3);
+    assert_eq!(rule_on.fix(&ctx).unwrap(), "    Spaces\n    Tab\n      Mixed");
 }
 
 #[test]
@@ -164,22 +262,45 @@ fn test_md010_tabs_in_nested_code_blocks() {
 
 #[test]
 fn test_md010_tabs_in_indented_code() {
-    let rule = MD010NoHardTabs::new(4);
-
-    // Tab-indented content is flagged as it might be accidental
-    // (even if it looks like an indented code block)
+    // Lines 3-4 start with double-tabs -> indented code block.
+    // Default code_blocks=false skips indented code blocks; line 6 alignment tabs fixed.
     let content = "Text\n\n\t\tCode with tabs\n\t\tMore code\n\nText\twith\ttab";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
 
-    // Tab-indented content is converted to spaces (8 spaces = 2 tabs * 4 spaces)
+    let rule_off = MD010NoHardTabs::new(4);
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(result_off.len(), 2, "got {result_off:?}");
+    assert_eq!(result_off[0].line, 6);
+    assert_eq!(result_off[1].line, 6);
+    let fixed_off = rule_off.fix(&ctx).unwrap();
     assert!(
-        fixed.contains("        Code with tabs"),
-        "Tabs in tab-indented content should be replaced"
+        fixed_off.contains("\t\tCode with tabs"),
+        "indented code block preserved, got: {fixed_off:?}"
     );
     assert!(
-        fixed.contains("Text    with    tab"),
-        "Tabs outside code should be replaced"
+        fixed_off.contains("Text    with    tab"),
+        "alignment tabs fixed, got: {fixed_off:?}"
+    );
+
+    // code_blocks=true: indented code block tabs also flagged and replaced.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 4, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 3);
+    assert_eq!(result_on[1].line, 4);
+    assert_eq!(result_on[2].line, 6);
+    assert_eq!(result_on[3].line, 6);
+    let fixed_on = rule_on.fix(&ctx).unwrap();
+    assert!(
+        fixed_on.contains("        Code with tabs"),
+        "indented code tabs replaced (2 tabs * 4 spaces), got: {fixed_on:?}"
+    );
+    assert!(
+        fixed_on.contains("Text    with    tab"),
+        "alignment tabs fixed, got: {fixed_on:?}"
     );
 }
 
@@ -249,38 +370,73 @@ fn test_multiple_tabs_on_same_line() {
 
 #[test]
 fn test_tab_character_in_different_positions() {
-    let rule = MD010NoHardTabs::default();
-
-    // Test tabs at start, middle, and end
+    // Line 1 "\tStart tab" starts with a tab at column 0 -> indented code block, skipped by default.
+    // Lines 2-5 have non-leading or leading tabs on non-code-block lines.
     let content = "\tStart tab\nMiddle\ttab\nEnd tab\t\n\t\tDouble start\nMixed \t \t spaces";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 6, "Should detect all tabs");
-    assert_eq!(result[0].message, "Found leading tab, use 4 spaces instead");
-    assert_eq!(result[1].message, "Found tab for alignment, use spaces instead");
-    assert_eq!(result[2].message, "Found tab for alignment, use spaces instead");
-    assert_eq!(result[3].message, "Found 2 leading tabs, use 8 spaces instead");
-    assert_eq!(result[4].message, "Found tab for alignment, use spaces instead");
-    assert_eq!(result[5].message, "Found tab for alignment, use spaces instead");
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(result_off.len(), 5, "got {result_off:?}");
+    assert_eq!(result_off[0].line, 2);
+    assert_eq!(result_off[0].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[1].line, 3);
+    assert_eq!(result_off[1].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[2].line, 4);
+    assert_eq!(result_off[2].message, "Found 2 leading tabs, use 8 spaces instead");
+    assert_eq!(result_off[3].line, 5);
+    assert_eq!(result_off[3].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[4].line, 5);
+    assert_eq!(result_off[4].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "\tStart tab\nMiddle    tab\nEnd tab    \n        Double start\nMixed           spaces"
+    );
+
+    // code_blocks=true: line 1 is also flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 6, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 1);
+    assert_eq!(result_on[0].message, "Found leading tab, use 4 spaces instead");
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
+        "    Start tab\nMiddle    tab\nEnd tab    \n        Double start\nMixed           spaces"
+    );
 }
 
 #[test]
 fn test_mixed_tabs_and_spaces_detailed() {
-    let rule = MD010NoHardTabs::default();
-
-    // Various mixed indentation patterns
+    // All four lines have tabs mixed with leading spaces -> all classified as indented code blocks.
+    // Default code_blocks=false skips all of them.
     let content =
         "  \tTwo spaces then tab\n\t  Tab then two spaces\n \t \t Space tab space tab\n\t\t  Two tabs then spaces";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 5, "Should detect all tabs");
-
-    // Fix test
-    let fixed = rule.fix(&ctx).unwrap();
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert!(
+        result_off.is_empty(),
+        "all lines are indented code blocks, got {result_off:?}"
+    );
     assert_eq!(
-        fixed,
+        rule_off.fix(&ctx).unwrap(),
+        "  \tTwo spaces then tab\n\t  Tab then two spaces\n \t \t Space tab space tab\n\t\t  Two tabs then spaces",
+        "content preserved unchanged"
+    );
+
+    // code_blocks=true: 5 tab groups flagged and fixed across all lines.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 5, "got {result_on:?}");
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
         "      Two spaces then tab\n      Tab then two spaces\n           Space tab space tab\n          Two tabs then spaces"
     );
 }
@@ -308,20 +464,40 @@ fn test_empty_lines_with_only_tabs_variations() {
 
 #[test]
 fn test_configuration_spaces_per_tab() {
-    // Test different spaces_per_tab configurations
+    // All lines start with tabs at column 0 -> indented code block.
+    // Default code_blocks=false skips them regardless of spaces_per_tab.
     let content = "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs";
-
-    // Test with 2 spaces per tab
-    let rule2 = MD010NoHardTabs::new(2);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed2 = rule2.fix(&ctx).unwrap();
-    assert_eq!(fixed2, "  One tab\n    Two tabs\n      Three tabs");
 
-    // Test with 8 spaces per tab
-    let rule8 = MD010NoHardTabs::new(8);
-    let fixed8 = rule8.fix(&ctx).unwrap();
+    let rule2_off = MD010NoHardTabs::new(2);
+    assert!(rule2_off.check(&ctx).unwrap().is_empty(), "indented code block skipped");
     assert_eq!(
-        fixed8,
+        rule2_off.fix(&ctx).unwrap(),
+        "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs",
+        "content preserved with spaces_per_tab=2"
+    );
+
+    let rule8_off = MD010NoHardTabs::new(8);
+    assert!(rule8_off.check(&ctx).unwrap().is_empty(), "indented code block skipped");
+    assert_eq!(
+        rule8_off.fix(&ctx).unwrap(),
+        "\tOne tab\n\t\tTwo tabs\n\t\t\tThree tabs",
+        "content preserved with spaces_per_tab=8"
+    );
+
+    // code_blocks=true: spaces_per_tab controls substitution width.
+    let rule2_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(2),
+        code_blocks: true,
+    });
+    assert_eq!(rule2_on.fix(&ctx).unwrap(), "  One tab\n    Two tabs\n      Three tabs");
+
+    let rule8_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(8),
+        code_blocks: true,
+    });
+    assert_eq!(
+        rule8_on.fix(&ctx).unwrap(),
         "        One tab\n                Two tabs\n                        Three tabs"
     );
 }
@@ -329,63 +505,122 @@ fn test_configuration_spaces_per_tab() {
 #[test]
 fn test_configuration_code_blocks_parameter() {
     let content = "Normal\ttab\n\n```javascript\nfunction\tfoo() {\n\treturn\ttrue;\n}\n```\n\nAnother\ttab";
-
-    // Code blocks are always skipped now
-    let rule = MD010NoHardTabs::new(4);
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "Should always skip tabs in code blocks");
-    assert_eq!(result[0].line, 1);
-    assert_eq!(result[1].line, 9);
 
-    // Verify fix behavior
-    let fixed = rule.fix(&ctx).unwrap();
-    assert!(fixed.contains("function\tfoo()"), "Should preserve tabs in code blocks");
-    assert!(fixed.contains("Normal    tab"), "Should fix tabs outside code blocks");
+    // Default code_blocks=false: only tabs outside the fenced block are flagged.
+    let rule_off = MD010NoHardTabs::new(4);
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(result_off.len(), 2, "only prose tabs flagged, got {result_off:?}");
+    assert_eq!(result_off[0].line, 1);
+    assert_eq!(result_off[1].line, 9);
+    let fixed_off = rule_off.fix(&ctx).unwrap();
+    assert!(fixed_off.contains("function\tfoo()"), "fenced code block preserved");
+    assert!(fixed_off.contains("Normal    tab"), "prose tab fixed");
+    assert_eq!(
+        fixed_off,
+        "Normal    tab\n\n```javascript\nfunction\tfoo() {\n\treturn\ttrue;\n}\n```\n\nAnother    tab"
+    );
+
+    // code_blocks=true: tabs inside the fenced block are also flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 5, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 1);
+    assert_eq!(result_on[1].line, 4);
+    assert_eq!(result_on[2].line, 5);
+    assert_eq!(result_on[3].line, 5);
+    assert_eq!(result_on[4].line, 9);
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
+        "Normal    tab\n\n```javascript\nfunction    foo() {\n    return    true;\n}\n```\n\nAnother    tab"
+    );
 }
 
 #[test]
 fn test_consecutive_vs_separate_tabs() {
-    let rule = MD010NoHardTabs::default();
-
-    // Test grouping of consecutive tabs
+    // Line 1 "\t\t\tThree consecutive" starts with 3 tabs at column 0 -> indented code block.
+    // Default code_blocks=false skips it; line 2 alignment tabs are flagged (3 separate groups).
     let content = "\t\t\tThree consecutive\nOne\tthen\tanother\t";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let result = rule.check(&ctx).unwrap();
 
-    assert_eq!(result.len(), 4, "Should have 1 group for consecutive, 3 separate");
-    assert_eq!(result[0].message, "Found 3 leading tabs, use 12 spaces instead");
-    assert_eq!(result[1].message, "Found tab for alignment, use spaces instead");
-    assert_eq!(result[2].message, "Found tab for alignment, use spaces instead");
-    assert_eq!(result[3].message, "Found tab for alignment, use spaces instead");
+    let rule_off = MD010NoHardTabs::default();
+    let result_off = rule_off.check(&ctx).unwrap();
+    assert_eq!(
+        result_off.len(),
+        3,
+        "3 separate alignment tab groups on line 2, got {result_off:?}"
+    );
+    assert_eq!(result_off[0].line, 2);
+    assert_eq!(result_off[0].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[1].line, 2);
+    assert_eq!(result_off[1].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(result_off[2].line, 2);
+    assert_eq!(result_off[2].message, "Found tab for alignment, use spaces instead");
+    assert_eq!(
+        rule_off.fix(&ctx).unwrap(),
+        "\t\t\tThree consecutive\nOne    then    another    "
+    );
+
+    // code_blocks=true: line 1 consecutive-tab group is also flagged.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let result_on = rule_on.check(&ctx).unwrap();
+    assert_eq!(result_on.len(), 4, "got {result_on:?}");
+    assert_eq!(result_on[0].line, 1);
+    assert_eq!(result_on[0].message, "Found 3 leading tabs, use 12 spaces instead");
+    assert_eq!(
+        rule_on.fix(&ctx).unwrap(),
+        "            Three consecutive\nOne    then    another    "
+    );
 }
 
 #[test]
 fn test_fix_preserves_content_structure() {
-    let rule = MD010NoHardTabs::default();
-
-    // Complex content with various elements
     let content = "# Header\n\n\tIndented paragraph\n\n- List\n\t- Nested\n\t\t- Double nested\n\n```\n\tCode block\n```\n\n> Quote\n> \tWith tab\n\n| Col1\t| Col2\t|\n|---\t|---\t|\n| Data\t| Data\t|";
-
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let fixed = rule.fix(&ctx).unwrap();
 
-    // Verify structure is preserved
-    assert!(fixed.contains("# Header"), "Headers preserved");
-    // Tab-indented content is converted to spaces (might be accidental)
+    // Default code_blocks=false: indented paragraph (line 3) and code block content (line 10)
+    // are preserved; list item tabs and table/quote tabs outside code blocks are fixed.
+    let rule_off = MD010NoHardTabs::default();
+    let fixed_off = rule_off.fix(&ctx).unwrap();
+    assert!(fixed_off.contains("# Header"), "headers preserved");
     assert!(
-        fixed.contains("    Indented paragraph"),
-        "Tab-indented content converted"
+        fixed_off.contains("\tIndented paragraph"),
+        "indented code block preserved, got: {fixed_off:?}"
     );
-    assert!(fixed.contains("    - Nested"), "List indentation converted");
+    assert!(fixed_off.contains("    - Nested"), "list indentation converted");
     assert!(
-        fixed.contains("        - Double nested"),
-        "Double indentation converted"
+        fixed_off.contains("        - Double nested"),
+        "double list indentation converted"
     );
-    // Fenced code blocks are preserved
-    assert!(fixed.contains("\tCode block"), "Code block tabs preserved");
-    assert!(fixed.contains(">     With tab"), "Quote tab converted");
-    assert!(fixed.contains("| Col1    | Col2    |"), "Table tabs converted");
+    assert!(fixed_off.contains("\tCode block"), "fenced code block tab preserved");
+    assert!(fixed_off.contains(">     With tab"), "quote tab converted");
+    assert!(fixed_off.contains("| Col1    | Col2    |"), "table tabs converted");
+    assert_eq!(
+        fixed_off,
+        "# Header\n\n\tIndented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n\tCode block\n```\n\n> Quote\n>     With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
+    );
+
+    // code_blocks=true: indented paragraph and fenced code block tabs are also fixed.
+    let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+        spaces_per_tab: PositiveUsize::from_const(4),
+        code_blocks: true,
+    });
+    let fixed_on = rule_on.fix(&ctx).unwrap();
+    assert!(
+        fixed_on.contains("    Indented paragraph"),
+        "indented paragraph converted with code_blocks=true, got: {fixed_on:?}"
+    );
+    assert!(fixed_on.contains("    Code block"), "fenced code block tab converted");
+    assert_eq!(
+        fixed_on,
+        "# Header\n\n    Indented paragraph\n\n- List\n    - Nested\n        - Double nested\n\n```\n    Code block\n```\n\n> Quote\n>     With tab\n\n| Col1    | Col2    |\n|---    |---    |\n| Data    | Data    |"
+    );
 }
 
 #[test]

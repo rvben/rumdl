@@ -252,34 +252,92 @@ mod tests {
     }
 
     #[test]
-    fn test_leading_tabs() {
-        let rule = MD010NoHardTabs::default();
+    fn test_leading_tabs_skipped_in_indented_code_by_default() {
+        // Both lines start with a tab at column 0: parsed as an indented code block.
+        // Default code_blocks=false skips tabs in indented code blocks.
         let content = "\tIndented line\n\t\tDouble indented";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].line, 1);
-        assert_eq!(result[0].message, "Found leading tab, use 4 spaces instead");
-        assert_eq!(result[1].line, 2);
-        assert_eq!(result[1].message, "Found 2 leading tabs, use 8 spaces instead");
+
+        let rule_off = MD010NoHardTabs::default();
+        let result_off = rule_off.check(&ctx).unwrap();
+        assert!(
+            result_off.is_empty(),
+            "indented code block skipped by default, got {result_off:?}"
+        );
+        assert_eq!(
+            rule_off.fix(&ctx).unwrap(),
+            "\tIndented line\n\t\tDouble indented",
+            "fix must preserve indented code block content"
+        );
+
+        // code_blocks=true: tabs inside indented code blocks are flagged.
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let result_on = rule_on.check(&ctx).unwrap();
+        assert_eq!(result_on.len(), 2, "got {result_on:?}");
+        assert_eq!(result_on[0].line, 1);
+        assert_eq!(result_on[0].message, "Found leading tab, use 4 spaces instead");
+        assert_eq!(result_on[1].line, 2);
+        assert_eq!(result_on[1].message, "Found 2 leading tabs, use 8 spaces instead");
+        assert_eq!(rule_on.fix(&ctx).unwrap(), "    Indented line\n        Double indented");
     }
 
     #[test]
     fn test_fix_tabs() {
-        let rule = MD010NoHardTabs::default();
+        // Line 1 starts with a tab at column 0 -> indented code block, skipped by default.
+        // Line 2 has a mid-line tab (alignment) -> flagged and fixed.
         let content = "\tIndented\nNormal\tline\nNo tabs";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "    Indented\nNormal    line\nNo tabs");
+
+        let rule_off = MD010NoHardTabs::default();
+        let warnings_off = rule_off.check(&ctx).unwrap();
+        assert_eq!(warnings_off.len(), 1, "got {warnings_off:?}");
+        assert_eq!(warnings_off[0].line, 2);
+        assert_eq!(warnings_off[0].message, "Found tab for alignment, use spaces instead");
+        assert_eq!(
+            rule_off.fix(&ctx).unwrap(),
+            "\tIndented\nNormal    line\nNo tabs",
+            "indented code block line preserved; alignment tab fixed"
+        );
+
+        // code_blocks=true: line 1 is also flagged.
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let warnings_on = rule_on.check(&ctx).unwrap();
+        assert_eq!(warnings_on.len(), 2, "got {warnings_on:?}");
+        assert_eq!(warnings_on[0].line, 1);
+        assert_eq!(warnings_on[1].line, 2);
+        assert_eq!(rule_on.fix(&ctx).unwrap(), "    Indented\nNormal    line\nNo tabs");
     }
 
     #[test]
     fn test_custom_spaces_per_tab() {
-        let rule = MD010NoHardTabs::new(4);
+        // Single tab at column 0 -> indented code block, skipped by default.
         let content = "\tIndented";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "    Indented");
+
+        let rule_off = MD010NoHardTabs::new(4);
+        assert!(
+            rule_off.check(&ctx).unwrap().is_empty(),
+            "indented code block skipped by default"
+        );
+        assert_eq!(
+            rule_off.fix(&ctx).unwrap(),
+            "\tIndented",
+            "indented code block preserved by default"
+        );
+
+        // code_blocks=true: tab is flagged and fixed.
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        assert_eq!(rule_on.check(&ctx).unwrap().len(), 1);
+        assert_eq!(rule_on.fix(&ctx).unwrap(), "    Indented");
     }
 
     #[test]
@@ -344,11 +402,32 @@ mod tests {
 
     #[test]
     fn test_mixed_tabs_and_spaces() {
-        let rule = MD010NoHardTabs::default();
+        // " \t..." (space then tab) and "\t ..." (tab then space): both parsed as
+        // indented code blocks by the shared spec-compliant flag.
+        // Default code_blocks=false skips them.
         let content = " \tMixed indentation\n\t Mixed again";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        assert_eq!(result.len(), 2);
+
+        let rule_off = MD010NoHardTabs::default();
+        let result_off = rule_off.check(&ctx).unwrap();
+        assert!(
+            result_off.is_empty(),
+            "indented code block lines skipped, got {result_off:?}"
+        );
+        assert_eq!(
+            rule_off.fix(&ctx).unwrap(),
+            " \tMixed indentation\n\t Mixed again",
+            "content preserved unchanged"
+        );
+
+        // code_blocks=true: both lines flagged.
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let result_on = rule_on.check(&ctx).unwrap();
+        assert_eq!(result_on.len(), 2, "got {result_on:?}");
+        assert_eq!(rule_on.fix(&ctx).unwrap(), "     Mixed indentation\n     Mixed again");
     }
 
     #[test]
@@ -401,20 +480,42 @@ mod tests {
 
     #[test]
     fn test_from_config() {
-        // Test that custom config values are properly loaded
-        let custom_spaces = 8;
-        let rule = MD010NoHardTabs::new(custom_spaces);
-        let content = "\tTab";
-        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        assert_eq!(fixed, "        Tab");
+        // "\tTab" at column 0 -> indented code block, skipped by default (code_blocks=false).
+        let content_plain = "\tTab";
+        let ctx_plain = LintContext::new(content_plain, crate::config::MarkdownFlavor::Standard, None);
+        let rule_8_off = MD010NoHardTabs::new(8); // spaces_per_tab=8, code_blocks=false
+        assert!(
+            rule_8_off.check(&ctx_plain).unwrap().is_empty(),
+            "indented code block skipped"
+        );
+        assert_eq!(
+            rule_8_off.fix(&ctx_plain).unwrap(),
+            "\tTab",
+            "content preserved unchanged"
+        );
 
-        // Code blocks are always ignored
-        let content_with_code = "```\n\tTab in code\n```";
-        let ctx = LintContext::new(content_with_code, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
-        // Tabs in code blocks are never flagged
-        assert!(result.is_empty());
+        // code_blocks=true: the tab is flagged and replaced with 8 spaces.
+        let rule_8_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(8),
+            code_blocks: true,
+        });
+        assert_eq!(rule_8_on.check(&ctx_plain).unwrap().len(), 1);
+        assert_eq!(rule_8_on.fix(&ctx_plain).unwrap(), "        Tab");
+
+        // Fenced code block: tab skipped by default.
+        let content_fenced = "```\n\tTab in code\n```";
+        let ctx_fenced = LintContext::new(content_fenced, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule_8_off.check(&ctx_fenced).unwrap().is_empty(),
+            "fenced code block skipped"
+        );
+        assert_eq!(rule_8_off.fix(&ctx_fenced).unwrap(), "```\n\tTab in code\n```");
+
+        // code_blocks=true: tab inside fence is flagged.
+        let result_on = rule_8_on.check(&ctx_fenced).unwrap();
+        assert_eq!(result_on.len(), 1, "got {result_on:?}");
+        assert_eq!(result_on[0].line, 2);
+        assert_eq!(rule_8_on.fix(&ctx_fenced).unwrap(), "```\n        Tab in code\n```");
     }
 
     #[test]
@@ -508,23 +609,40 @@ mod tests {
     }
 
     #[test]
-    fn test_indented_code_block_tabs_flagged() {
-        let rule = MD010NoHardTabs::default();
-        // Tabs in indented code blocks are flagged because the tab IS the problem
-        // (unlike fenced code blocks where tabs are part of the code formatting)
+    fn test_indented_code_block_tabs_skipped_by_default() {
+        // "    code\twith\ttab" is indented with 4 spaces -> indented code block.
+        // Default code_blocks=false skips it; only the tab on the normal line is flagged.
         let content = "    code\twith\ttab\n\nNormal\ttext";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let result = rule.check(&ctx).unwrap();
+
+        let rule_off = MD010NoHardTabs::default();
+        let result_off = rule_off.check(&ctx).unwrap();
         assert_eq!(
-            result.len(),
-            3,
-            "Expected 3 warnings but got {}: {:?}",
-            result.len(),
-            result
+            result_off.len(),
+            1,
+            "expected 1 warning (only normal-text tab), got {}: {:?}",
+            result_off.len(),
+            result_off
         );
-        assert_eq!(result[0].line, 1);
-        assert_eq!(result[1].line, 1);
-        assert_eq!(result[2].line, 3);
+        assert_eq!(result_off[0].line, 3);
+        assert_eq!(result_off[0].message, "Found tab for alignment, use spaces instead");
+
+        // code_blocks=true: all 3 tabs flagged (2 on line 1, 1 on line 3).
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let result_on = rule_on.check(&ctx).unwrap();
+        assert_eq!(
+            result_on.len(),
+            3,
+            "expected 3 warnings with code_blocks=true, got {}: {:?}",
+            result_on.len(),
+            result_on
+        );
+        assert_eq!(result_on[0].line, 1);
+        assert_eq!(result_on[1].line, 1);
+        assert_eq!(result_on[2].line, 3);
     }
 
     #[test]
@@ -555,12 +673,27 @@ mod tests {
 
     #[test]
     fn test_fix_indented_code_block_tabs_replaced() {
-        let rule = MD010NoHardTabs::default();
+        // Default code_blocks=false: indented code block tabs preserved, normal-text tab fixed.
         let content = "    code\twith\ttab\n\nNormal\ttext";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
-        let fixed = rule.fix(&ctx).unwrap();
-        // All tabs replaced, including those in indented code blocks
-        assert_eq!(fixed, "    code    with    tab\n\nNormal    text");
+
+        let rule_off = MD010NoHardTabs::default();
+        assert_eq!(
+            rule_off.fix(&ctx).unwrap(),
+            "    code\twith\ttab\n\nNormal    text",
+            "indented code block preserved; only normal-text tab fixed"
+        );
+
+        // code_blocks=true: all tabs replaced including those in the indented code block.
+        let rule_on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        assert_eq!(
+            rule_on.fix(&ctx).unwrap(),
+            "    code    with    tab\n\nNormal    text",
+            "all tabs replaced with code_blocks=true"
+        );
     }
 
     #[test]
