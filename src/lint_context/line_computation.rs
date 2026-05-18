@@ -314,10 +314,13 @@ pub(super) fn compute_code_block_line_map(
 /// distinguish the math span from the prose. A line is flagged only when its
 /// single line-start `$$...$$` span covers the whole line (nothing but
 /// whitespace after the first closing `$$`). A multi-line block opens only on
-/// a line whose (blockquote-stripped) content starts with `$$` and has no
-/// close on the same line; it closes on the first subsequent line containing
-/// `$$`. This mirrors the byte-level `math_block_ranges` model - only a
-/// line-start `$$` opens a span - so line- and byte-level rules agree.
+/// a line whose (blockquote-stripped) content starts with `$$`, has no close
+/// on the same line, and has a closing `$$` on some later line; it closes on
+/// the first subsequent line containing `$$`. An opener with no closer
+/// anywhere is dropped, not allowed to swallow the rest of the document. This
+/// mirrors the byte-level `math_block_ranges` model - only a line-start `$$`
+/// opens a span, and an unmatched opener is a literal - so line- and
+/// byte-level rules agree.
 pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
@@ -355,8 +358,11 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
             // `$$` that begins the line opens a span, and it closes at the
             // very next `$$`. Any later `$$` is mid-line and opens nothing.
             //
-            // - No closing `$$` on the line: the line-start delimiter has no
-            //   match here, so it opens a multi-line block.
+            // - No closing `$$` on the line: the line-start delimiter opens a
+            //   multi-line block ONLY if a closing `$$` appears on a later
+            //   line. An opener with no closer anywhere is a literal and is
+            //   dropped, exactly as `math_block_ranges` drops an unmatched
+            //   opener instead of swallowing the rest of the document.
             // - A closing `$$` with only whitespace after it: the whole line
             //   is that one display span and has nothing lintable, so flag it
             //   as a cheap whole-line skip.
@@ -368,8 +374,21 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
             //   still exempted while the trailing prose is checked.
             match after_open.find("$$") {
                 None => {
-                    in_math_block[i] = true;
-                    inside_math = true;
+                    // Look ahead for a closer using the same blockquote and
+                    // code-block treatment the close loop above applies, so
+                    // "would this block ever close" is decided identically.
+                    let has_closer = content_lines.iter().enumerate().skip(i + 1).any(|(j, l)| {
+                        if code_block_map.get(j).copied().unwrap_or(false) {
+                            return false;
+                        }
+                        let t = l.trim();
+                        let icj = crate::utils::blockquote::parse_blockquote_prefix(t).map_or(t, |p| p.content.trim());
+                        icj.contains("$$")
+                    });
+                    if has_closer {
+                        in_math_block[i] = true;
+                        inside_math = true;
+                    }
                 }
                 Some(close_rel) => {
                     if after_open[close_rel + 2..].trim().is_empty() {

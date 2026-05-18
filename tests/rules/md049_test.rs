@@ -372,3 +372,40 @@ fn test_odd_double_dollar_line_does_not_swallow_following_prose() {
     );
     assert_eq!(result[0].line, 4);
 }
+
+#[test]
+fn test_unmatched_dollar_opener_does_not_swallow_rest_of_document() {
+    // A line-start `$$` with no closing `$$` anywhere is a literal, exactly
+    // as `math_block_ranges` drops an unmatched opener. It must NOT mark the
+    // rest of the document as math, or emphasis after it is silently missed.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "lead *a* *b*.\n\n$$ unclosed display math\n\nThen _bad_ here\nand _more_ too\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+    assert_eq!(
+        result.len(),
+        2,
+        "emphasis after an unmatched `$$` opener must still be linted: {result:?}"
+    );
+    assert!(
+        lines.contains(&5) && lines.contains(&6),
+        "lines 5 and 6 flagged: {lines:?}"
+    );
+}
+
+#[test]
+fn test_genuine_multiline_block_still_suppresses_interior() {
+    // The unmatched-opener guard must not regress real blocks: a `$$`...`$$`
+    // pair still suppresses its interior while prose after it stays lintable.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "lead *a* *b*.\n\n$$\n_interior_ = x\n$$\n\nAfter _bad_ here\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "interior `_interior_` is math; only the trailing `_bad_` is linted: {result:?}"
+    );
+    assert_eq!(result[0].line, 7);
+}
