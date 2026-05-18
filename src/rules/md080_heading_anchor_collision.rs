@@ -165,12 +165,14 @@ impl Rule for MD080HeadingAnchorCollision {
                 continue;
             }
 
-            // Inside an HTML block or comment the heading parser is skipped,
-            // so `line_info.heading` is None, but `line_info.blockquote` is
-            // still populated. A `> ## Intro` there is literal HTML text, not
-            // a Markdown heading, and emits no fragment target - recording it
-            // would invent a phantom anchor and flag false collisions.
-            if line_info.in_html_block || line_info.in_html_comment {
+            // Inside a plain HTML block or an HTML comment the heading parser
+            // is skipped, so `line_info.heading` is None, but
+            // `line_info.blockquote` is still populated. A `> ## Intro` there
+            // is literal text, not a Markdown heading, and emits no fragment
+            // target - recording it would invent a phantom anchor and flag
+            // false collisions. A markdown-enabled block (`<div markdown>`)
+            // still parses its contents as Markdown, so let those through.
+            if line_info.in_html_comment || (line_info.in_html_block && !line_info.in_mkdocs_html_markdown) {
                 continue;
             }
 
@@ -412,6 +414,28 @@ mod tests {
             w.is_empty(),
             "blockquote heading inside an HTML block emits no anchor: {w:?}"
         );
+    }
+
+    #[test]
+    fn markdown_enabled_html_block_blockquote_heading_still_collides() {
+        // `<div markdown>` opts its contents into Markdown parsing, so the
+        // blockquoted `> ## Intro` inside it does emit a fragment anchor and
+        // collides with the later top-level `## Intro`.
+        let cfg = MD080Config::default();
+        let ctx = LintContext::new(
+            "<div markdown>\n> ## Intro\n</div>\n\n## Intro\n",
+            MarkdownFlavor::MkDocs,
+            None,
+        );
+        let w = MD080HeadingAnchorCollision::from_config_struct(cfg)
+            .check(&ctx)
+            .unwrap();
+        assert_eq!(
+            w.len(),
+            1,
+            "markdown-enabled HTML blockquote heading must still produce an anchor: {w:?}"
+        );
+        assert_eq!(w[0].line, 5);
     }
 
     #[test]
