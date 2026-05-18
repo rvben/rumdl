@@ -358,14 +358,14 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
             // - No closing `$$` on the line: the line-start delimiter has no
             //   match here, so it opens a multi-line block.
             // - A closing `$$` with only whitespace after it: the whole line
-            //   is that one display span and has nothing lintable, so flag
-            //   it. (Line-level rules like MD049 consult only this map, not
-            //   byte ranges, so an unflagged `$$ _x_ $$` would be mis-linted
-            //   as emphasis.)
+            //   is that one display span and has nothing lintable, so flag it
+            //   as a cheap whole-line skip.
             // - Anything else after the closing `$$` (prose, or further
             //   non-opening `$$` spans like `$$x$$ $$ _y_ $$`): leave the
-            //   line unflagged so that content stays lintable, matching the
-            //   byte model which treats only the first span as math.
+            //   line unflagged so trailing prose stays lintable. Rules that
+            //   need per-span precision on such mixed lines (MD049) also
+            //   apply the byte-level math filter, so the leading span is
+            //   still exempted while the trailing prose is checked.
             match after_open.find("$$") {
                 None => {
                     in_math_block[i] = true;

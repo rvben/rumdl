@@ -246,7 +246,11 @@ should also be ignored
 fn test_md011_skips_math_contexts() {
     let rule = MD011NoReversedLinks;
 
-    // Test that patterns in math blocks that might look like reversed links are not flagged
+    // A line-start `$$ ... $$` block and single-`$` inline math are math, so
+    // reversed-link-looking patterns inside them are skipped. A mid-line
+    // `$$...$$` is a literal under the shared math model (math-ness of `$$`
+    // is decided solely by line-start position, matching `math_block_ranges`),
+    // so its `(y)[j]` is flagged like any other reversed link.
     let content = r#"# Test MD011 with Math
 
 Regular (https://example.com)[reversed link] that should be flagged.
@@ -258,19 +262,27 @@ $$
 
 Inline math $f(x)[i]$ should not be flagged.
 
-Double dollar inline $$g(y)[j]$$ should not be flagged.
+Double dollar inline $$g(y)[j]$$ is a mid-line literal and IS flagged.
 
 But this (https://test.com)[reversed] outside math should be flagged."#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag exactly 2 reversed links (outside math contexts)
-    assert_eq!(result.len(), 2, "Expected 2 warnings for reversed links outside math");
+    // Line-start block (5-8) and inline `$...$` (10) are math; the mid-line
+    // `$$g(y)[j]$$` (12) is not, so three reversed links are flagged.
+    assert_eq!(
+        result.len(),
+        3,
+        "Expected 3 warnings: lines 3, 12, 14 (mid-line $$...$$ is not math): {result:?}"
+    );
 
-    // Verify the warnings are for the correct lines
     let lines_with_issues: Vec<usize> = result.iter().map(|w| w.line).collect();
     assert!(lines_with_issues.contains(&3), "Should flag line 3");
+    assert!(
+        lines_with_issues.contains(&12),
+        "Should flag the mid-line $$...$$ literal on line 12"
+    );
     assert!(lines_with_issues.contains(&14), "Should flag line 14");
 }
 

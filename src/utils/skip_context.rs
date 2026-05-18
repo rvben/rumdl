@@ -131,16 +131,19 @@ pub fn is_in_html_tag(ctx: &LintContext, byte_pos: usize) -> bool {
     false
 }
 
-/// Check if a byte position is within a math context (block or inline)
+/// Check if a byte position is within a math context.
+///
+/// `$$...$$` display math is recognized only when it begins its line, via
+/// [`math_block_ranges`]; a mid-line or stray-prose `$$...$$` is a literal,
+/// not math. Single-`$` inline spans are recognized anywhere. This keeps
+/// every math-aware rule agreeing on what is math.
 pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
     let content = ctx.content;
 
-    // Check if we're in a math block
     if is_in_math_block(content, byte_pos) {
         return true;
     }
 
-    // Check if we're in inline math
     if is_in_inline_math(content, byte_pos) {
         return true;
     }
@@ -207,10 +210,19 @@ pub fn is_in_math_block(content: &str, byte_pos: usize) -> bool {
         .any(|&(start, end)| byte_pos >= start && byte_pos < end)
 }
 
-/// Check if a byte position is within inline math ($...$)
+/// Check if a byte position is within inline math (`$...$`).
+///
+/// Only single-`$` spans count here. A `$$...$$` token is display-math
+/// syntax, and whether it is actually math depends solely on whether it
+/// begins its line - that decision belongs to [`math_block_ranges`]. The
+/// regex still consumes `$$...$$` tokens so a single-`$` span cannot straddle
+/// them, but a mid-line `$$...$$` is a literal here, not inline math, keeping
+/// this function consistent with the line-start-gated block model.
 pub fn is_in_inline_math(content: &str, byte_pos: usize) -> bool {
-    // Find all inline math spans
     for m in INLINE_MATH_REGEX.find_iter(content) {
+        if content[m.start()..m.end()].starts_with("$$") {
+            continue;
+        }
         if m.start() <= byte_pos && byte_pos < m.end() {
             return true;
         }
@@ -466,10 +478,17 @@ mod tests {
     #[test]
     fn test_inline_math_detection() {
         let content = "Text $x + y$ and $$a^2 + b^2$$ here";
-        assert!(is_in_inline_math(content, 7)); // Inside first math
-        assert!(is_in_inline_math(content, 20)); // Inside second math
-        assert!(!is_in_inline_math(content, 0)); // Before math
-        assert!(!is_in_inline_math(content, 35)); // After math
+        assert!(is_in_inline_math(content, 7), "inside the single-`$` inline span");
+        // The mid-line `$$a^2 + b^2$$` is display syntax, not a line-start
+        // block, so it is a literal under the shared math model - neither the
+        // inline path nor `math_block_ranges` treats it as math.
+        assert!(!is_in_inline_math(content, 20), "mid-line $$...$$ is not inline math");
+        assert!(
+            !is_in_math_block(content, 20),
+            "mid-line $$...$$ is not a line-start display block"
+        );
+        assert!(!is_in_inline_math(content, 0), "before any math");
+        assert!(!is_in_inline_math(content, 35), "after the spans");
     }
 
     #[test]
