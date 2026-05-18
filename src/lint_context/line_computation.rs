@@ -311,12 +311,13 @@ pub(super) fn compute_code_block_line_map(
 /// when it contains no Markdown that should be linted (interior lines and
 /// bare/LaTeX-only fence lines). Lines that mix a fence with trailing prose
 /// (`$$ and __x__`) are left unflagged so the byte-level math filter can
-/// distinguish the math span from the prose. A self-contained line whose
-/// only non-whitespace content is `$$...$$` span(s) is flagged. A multi-line
-/// block opens only on a line whose (blockquote-stripped) content is exactly
-/// one line-start `$$` with no close on the same line; it closes on the first
-/// subsequent line containing `$$`. This mirrors the byte-level
-/// `math_block_ranges` model so line- and byte-level rules agree.
+/// distinguish the math span from the prose. A line is flagged only when its
+/// single line-start `$$...$$` span covers the whole line (nothing but
+/// whitespace after the first closing `$$`). A multi-line block opens only on
+/// a line whose (blockquote-stripped) content starts with `$$` and has no
+/// close on the same line; it closes on the first subsequent line containing
+/// `$$`. This mirrors the byte-level `math_block_ranges` model - only a
+/// line-start `$$` opens a span - so line- and byte-level rules agree.
 pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
@@ -349,29 +350,31 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
                 inside_math = false;
             }
             // No `$$` on this line: still interior, stay inside.
-        } else if ic.starts_with("$$") {
-            // Match the byte-level `math_block_ranges` model exactly:
+        } else if let Some(after_open) = ic.strip_prefix("$$") {
+            // Mirror the byte-level `math_block_ranges` model exactly: only a
+            // `$$` that begins the line opens a span, and it closes at the
+            // very next `$$`. Any later `$$` is mid-line and opens nothing.
             //
-            // - Exactly one `$$` (count == 1): the line-start delimiter has no
-            //   close on this line, so it opens a multi-line block.
-            // - Even count with only whitespace outside the `$$...$$` spans:
-            //   the line is wholly display math with nothing lintable, so flag
+            // - No closing `$$` on the line: the line-start delimiter has no
+            //   match here, so it opens a multi-line block.
+            // - A closing `$$` with only whitespace after it: the whole line
+            //   is that one display span and has nothing lintable, so flag
             //   it. (Line-level rules like MD049 consult only this map, not
             //   byte ranges, so an unflagged `$$ _x_ $$` would be mis-linted
             //   as emphasis.)
-            // - Even count with prose outside the spans (`$$x$$ and _y_`):
-            //   leave unflagged so the prose stays lintable.
-            // - Odd count >= 3 (`$$a$$ b $$`): the first `$$` is closed by the
-            //   second; the trailing `$$` is mid-line, so per the byte model it
-            //   opens nothing. Leave unflagged and do not enter a block.
-            let count = crate::utils::skip_context::count_double_dollar(ic);
-            if count == 1 {
-                in_math_block[i] = true;
-                inside_math = true;
-            } else if count.is_multiple_of(2) {
-                let outside_spans_blank = ic.split("$$").step_by(2).all(|s| s.trim().is_empty());
-                if outside_spans_blank {
+            // - Anything else after the closing `$$` (prose, or further
+            //   non-opening `$$` spans like `$$x$$ $$ _y_ $$`): leave the
+            //   line unflagged so that content stays lintable, matching the
+            //   byte model which treats only the first span as math.
+            match after_open.find("$$") {
+                None => {
                     in_math_block[i] = true;
+                    inside_math = true;
+                }
+                Some(close_rel) => {
+                    if after_open[close_rel + 2..].trim().is_empty() {
+                        in_math_block[i] = true;
+                    }
                 }
             }
         }

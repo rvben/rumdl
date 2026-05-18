@@ -340,6 +340,23 @@ fn test_display_math_span_with_trailing_prose_still_lints_prose() {
 }
 
 #[test]
+fn test_second_inline_dollar_span_stays_lintable() {
+    // `$$x$$ $$ _y_ $$`: per the byte model only a line-start `$$` opens a
+    // span, so the first `$$x$$` is math but the second `$$ _y_ $$` is
+    // mid-line and NOT math. The line must stay lintable so `_y_` is caught.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "stars: *a* *b*.\n\n$$x$$ $$ _y_ $$\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "`_y_` in a non-line-start `$$` span must still be linted: {result:?}"
+    );
+    assert_eq!(result[0].line, 3);
+}
+
+#[test]
 fn test_odd_double_dollar_line_does_not_swallow_following_prose() {
     // `$$x$$ costs $$` has three `$$`: the first opens and the second closes
     // a span; the trailing `$$` is mid-line and per the byte model opens no

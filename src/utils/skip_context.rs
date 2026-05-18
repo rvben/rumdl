@@ -148,22 +148,6 @@ pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
     false
 }
 
-/// Count non-overlapping `$$` tokens in a string.
-pub(crate) fn count_double_dollar(s: &str) -> usize {
-    let bytes = s.as_bytes();
-    let mut count = 0;
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'$' && bytes[i + 1] == b'$' {
-            count += 1;
-            i += 2;
-        } else {
-            i += 1;
-        }
-    }
-    count
-}
-
 /// Paired `$$ ... $$` display-math byte ranges, half-open `[start, end)`.
 ///
 /// A block only *opens* on a `$$` that begins its line, ignoring leading

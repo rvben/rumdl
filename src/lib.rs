@@ -128,9 +128,11 @@ impl ContentCharacteristics {
             // Headings: ATX (#) or Setext (underlines). A blockquoted ATX
             // heading (`> ## Title`) still emits a fragment anchor, so rules
             // like MD051/MD080 must run for blockquote-only documents too.
-            // Stripping `>`/space is a coarse, deliberately over-inclusive
-            // prefilter check (it must never skip a rule that has work).
-            if !has_atx_heading && (trimmed.starts_with('#') || trimmed.trim_start_matches(['>', ' ']).starts_with('#'))
+            // Stripping `>`/space/tab is a coarse, deliberately
+            // over-inclusive prefilter check (it must never skip a rule that
+            // has work; `parse_blockquote_prefix` also accepts a tab marker).
+            if !has_atx_heading
+                && (trimmed.starts_with('#') || trimmed.trim_start_matches(['>', ' ', '\t']).starts_with('#'))
             {
                 has_atx_heading = true;
             }
@@ -605,6 +607,13 @@ mod tests {
         assert!(
             chars.has_headings,
             "nested-blockquote ATX heading must set has_headings"
+        );
+        // A tab after the blockquote marker is also a valid heading
+        // (`parse_blockquote_prefix` accepts it).
+        let chars = ContentCharacteristics::analyze(">\t## Tabbed");
+        assert!(
+            chars.has_headings,
+            "tab-separated blockquote ATX heading must set has_headings"
         );
 
         // Test lists
