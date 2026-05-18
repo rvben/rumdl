@@ -165,17 +165,6 @@ impl Rule for MD080HeadingAnchorCollision {
                 continue;
             }
 
-            // Inside a plain HTML block or an HTML comment the heading parser
-            // is skipped, so `line_info.heading` is None, but
-            // `line_info.blockquote` is still populated. A `> ## Intro` there
-            // is literal text, not a Markdown heading, and emits no fragment
-            // target - recording it would invent a phantom anchor and flag
-            // false collisions. A markdown-enabled block (`<div markdown>`)
-            // still parses its contents as Markdown, so let those through.
-            if line_info.in_html_comment || (line_info.in_html_block && !line_info.in_mkdocs_html_markdown) {
-                continue;
-            }
-
             // Blockquote headings (`> ## Intro`) are not seen by the line
             // scanner but still emit fragment anchors - mirror MD051 so the
             // two rules agree on what targets exist.
@@ -405,36 +394,16 @@ mod tests {
     }
 
     #[test]
-    fn blockquote_heading_inside_html_block_is_not_an_anchor() {
-        // Inside an HTML block, `> ## Intro` is literal text, not a Markdown
-        // heading, so it emits no fragment target and must not collide with
-        // the real `## Intro` that follows.
+    fn blockquote_in_html_block_mirrors_md051_anchor_model() {
+        // MD080 deliberately mirrors MD051's view of which fragment targets
+        // exist. MD051 records the anchor for a blockquoted `> ## Intro` even
+        // inside a plain `<div>` block (its anchor-extraction loop only skips
+        // front matter and code blocks), so `[x](#intro)` resolves there.
+        // MD080 must therefore agree that a later real `## Intro` collides on
+        // `#intro` - diverging would make the two rules contradict each other
+        // about whether the target exists.
         let w = check("<div>\n> ## Intro\n</div>\n\n## Intro\n");
-        assert!(
-            w.is_empty(),
-            "blockquote heading inside an HTML block emits no anchor: {w:?}"
-        );
-    }
-
-    #[test]
-    fn markdown_enabled_html_block_blockquote_heading_still_collides() {
-        // `<div markdown>` opts its contents into Markdown parsing, so the
-        // blockquoted `> ## Intro` inside it does emit a fragment anchor and
-        // collides with the later top-level `## Intro`.
-        let cfg = MD080Config::default();
-        let ctx = LintContext::new(
-            "<div markdown>\n> ## Intro\n</div>\n\n## Intro\n",
-            MarkdownFlavor::MkDocs,
-            None,
-        );
-        let w = MD080HeadingAnchorCollision::from_config_struct(cfg)
-            .check(&ctx)
-            .unwrap();
-        assert_eq!(
-            w.len(),
-            1,
-            "markdown-enabled HTML blockquote heading must still produce an anchor: {w:?}"
-        );
+        assert_eq!(w.len(), 1, "must agree with MD051's anchor model: {w:?}");
         assert_eq!(w[0].line, 5);
     }
 
