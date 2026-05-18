@@ -28,52 +28,6 @@ impl MD010NoHardTabs {
         Self { config }
     }
 
-    /// Detect which lines are inside fenced code blocks (``` or ~~~).
-    /// Only fenced code blocks are skipped — indented code blocks (4+ spaces / tab)
-    /// are NOT skipped because the tabs themselves are what MD010 should flag.
-    fn find_fenced_code_block_lines(lines: &[&str]) -> Vec<bool> {
-        let mut in_fenced_block = false;
-        let mut fence_char: Option<char> = None;
-        let mut fence_len: usize = 0;
-        let mut result = vec![false; lines.len()];
-
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim_start();
-
-            if !in_fenced_block {
-                // Check for opening fence (3+ backticks or tildes)
-                let first_char = trimmed.chars().next();
-                if matches!(first_char, Some('`') | Some('~')) {
-                    let fc = first_char.unwrap();
-                    let count = trimmed.chars().take_while(|&c| c == fc).count();
-                    if count >= 3 {
-                        in_fenced_block = true;
-                        fence_char = Some(fc);
-                        fence_len = count;
-                        result[i] = true;
-                    }
-                }
-            } else {
-                result[i] = true;
-                // Check for closing fence (must match opening fence char and be >= opening length)
-                if let Some(fc) = fence_char {
-                    let first = trimmed.chars().next();
-                    if first == Some(fc) {
-                        let count = trimmed.chars().take_while(|&c| c == fc).count();
-                        // Closing fence must be at least as long as opening, with nothing else on the line
-                        if count >= fence_len && trimmed[count..].trim().is_empty() {
-                            in_fenced_block = false;
-                            fence_char = None;
-                            fence_len = 0;
-                        }
-                    }
-                }
-            }
-        }
-
-        result
-    }
-
     fn count_leading_tabs(line: &str) -> usize {
         let mut count = 0;
         for c in line.chars() {
@@ -136,13 +90,12 @@ impl Rule for MD010NoHardTabs {
         let mut warnings = Vec::new();
         let lines = ctx.raw_lines();
 
-        // Track fenced code blocks separately — we skip FENCED blocks but NOT
-        // indented code blocks (since tab indentation IS what MD010 should flag)
-        let fenced_lines = Self::find_fenced_code_block_lines(lines);
+        // When code_blocks is disabled, skip tabs inside ANY code block -
+        // fenced and indented alike - using the shared spec-compliant flag.
+        let skip_code_blocks = !self.config.code_blocks;
 
         for (line_num, &line) in lines.iter().enumerate() {
-            // Skip fenced code blocks (code has its own formatting rules)
-            if fenced_lines[line_num] {
+            if skip_code_blocks && ctx.line_info(line_num + 1).is_some_and(|info| info.in_code_block) {
                 continue;
             }
 
@@ -608,5 +561,32 @@ mod tests {
         let fixed = rule.fix(&ctx).unwrap();
         // All tabs replaced, including those in indented code blocks
         assert_eq!(fixed, "    code    with    tab\n\nNormal    text");
+    }
+
+    #[test]
+    fn test_issue_630_default_skips_both_code_blocks() {
+        // Default code_blocks = false: tabs skipped in BOTH block types.
+        let rule = MD010NoHardTabs::default();
+        let content = "Foo bar\n\n    for range 100 {\n    \tfoo()\n    }\n\nThis is a fenced\n\n```\nfor range 100 {\n\tfoo()\n}\n```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "both code blocks skipped, got {result:?}");
+    }
+
+    #[test]
+    fn test_issue_630_code_blocks_true_flags_both() {
+        // code_blocks = true: tabs flagged in BOTH block types.
+        let rule = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let content = "Foo bar\n\n    for range 100 {\n    \tfoo()\n    }\n\nThis is a fenced\n\n```\nfor range 100 {\n\tfoo()\n}\n```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Line 4 "    \tfoo()": one alignment tab group inside the indented block.
+        // Line 11 "\tfoo()": one leading tab group inside the fenced block.
+        assert_eq!(result.len(), 2, "got {result:?}");
+        assert_eq!(result[0].line, 4);
+        assert_eq!(result[1].line, 11);
     }
 }
