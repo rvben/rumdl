@@ -138,17 +138,9 @@ pub fn is_in_html_tag(ctx: &LintContext, byte_pos: usize) -> bool {
 /// not math. Single-`$` inline spans are recognized anywhere. This keeps
 /// every math-aware rule agreeing on what is math.
 pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
-    let content = ctx.content;
-
-    if is_in_math_block(content, byte_pos) {
-        return true;
-    }
-
-    if is_in_inline_math(content, byte_pos) {
-        return true;
-    }
-
-    false
+    math_byte_ranges(ctx.content)
+        .iter()
+        .any(|&(start, end)| byte_pos >= start && byte_pos < end)
 }
 
 /// Paired `$$ ... $$` display-math byte ranges, half-open `[start, end)`.
@@ -228,6 +220,24 @@ pub fn is_in_inline_math(content: &str, byte_pos: usize) -> bool {
         }
     }
     false
+}
+
+/// All math byte ranges in `content`: line-start `$$...$$` display blocks
+/// plus single-`$` inline spans. Ranges are half-open `[start, end)` and may
+/// be unordered relative to each other; membership is by `any`-containment.
+///
+/// Precompute this once when classifying many positions in one document
+/// (e.g. every emphasis span). [`is_in_math_context`] is the single-shot
+/// equivalent and is defined in terms of the same two sources.
+pub fn math_byte_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut ranges = math_block_ranges(content);
+    for m in INLINE_MATH_REGEX.find_iter(content) {
+        if content[m.start()..m.end()].starts_with("$$") {
+            continue;
+        }
+        ranges.push((m.start(), m.end()));
+    }
+    ranges
 }
 
 /// Check if a position is within a table cell

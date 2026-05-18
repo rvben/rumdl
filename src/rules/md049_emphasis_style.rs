@@ -2,7 +2,7 @@ use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::emphasis_style::EmphasisStyle;
 use crate::utils::emphasis_utils::{find_emphasis_markers, find_single_emphasis_spans, replace_inline_code};
-use crate::utils::skip_context::{is_in_math_context, is_in_mkdocs_markup};
+use crate::utils::skip_context::is_in_mkdocs_markup;
 
 mod md049_config;
 use md049_config::MD049Config;
@@ -123,14 +123,19 @@ impl Rule for MD049EmphasisStyle {
 
         // Filter out emphasis markers that are inside links or MkDocs markup
         let lines = ctx.raw_lines();
+        // Math byte ranges, computed once for the whole document. The
+        // line-level `skip_math_blocks` filter drops whole math-only lines,
+        // but a line that mixes a display span with lintable prose (e.g.
+        // `$$ _x_ $$ $$ _y_ $$`) stays lintable so trailing prose is checked;
+        // this byte-level guard then exempts only the underscores that fall
+        // inside the line-start `$$...$$` span, matching MD037/MD050.
+        let math_ranges = crate::utils::skip_context::math_byte_ranges(ctx.content);
         emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
-            // Skip emphasis inside math. The line-level `skip_math_blocks`
-            // filter drops whole math-only lines, but a line that mixes a
-            // display span with lintable prose (e.g. `$$ _x_ $$ $$ _y_ $$`)
-            // stays lintable so trailing prose is checked; this byte-level
-            // guard then exempts only the underscores that fall inside the
-            // line-start `$$...$$` span, matching MD037/MD050.
-            if is_in_math_context(ctx, *abs_pos) {
+            // Skip emphasis inside math.
+            if math_ranges
+                .iter()
+                .any(|&(start, end)| *abs_pos >= start && *abs_pos < end)
+            {
                 return false;
             }
             // Skip emphasis inside Obsidian comments
