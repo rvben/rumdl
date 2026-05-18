@@ -190,6 +190,46 @@ pub fn extract_standalone_attr_list_id(line: &str) -> Option<String> {
     None
 }
 
+/// Parse an ATX heading written inside a blockquote's inner text.
+///
+/// Blockquote headings (`> ## Heading`) are not detected by the main
+/// line-based heading parser, but they still produce valid fragment anchors.
+/// Strips the leading `#` marker, an optional CommonMark closing hash
+/// sequence, and any trailing `{#custom-id}`. Returns `(clean_text,
+/// custom_id)` or `None` when the blockquote content is not an ATX heading.
+pub fn parse_blockquote_atx_heading(bq_content: &str) -> Option<(String, Option<String>)> {
+    static BQ_ATX_HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.*)$").unwrap());
+
+    let trimmed = bq_content.trim();
+    let caps = BQ_ATX_HEADING_RE.captures(trimmed)?;
+    let mut rest = caps.get(2).map_or("", |m| m.as_str()).to_string();
+
+    // Strip optional closing hash sequence (CommonMark: trailing `#`s preceded by a space)
+    let rest_trimmed = rest.trim_end();
+    if let Some(last_hash_pos) = rest_trimmed.rfind('#') {
+        let after_hashes = &rest_trimmed[last_hash_pos..];
+        if after_hashes.chars().all(|c| c == '#') {
+            // Find where the consecutive trailing hashes start
+            let mut hash_start = last_hash_pos;
+            while hash_start > 0 && rest_trimmed.as_bytes()[hash_start - 1] == b'#' {
+                hash_start -= 1;
+            }
+            // Must be preceded by whitespace (or be the entire content)
+            if hash_start == 0
+                || rest_trimmed
+                    .as_bytes()
+                    .get(hash_start - 1)
+                    .is_some_and(u8::is_ascii_whitespace)
+            {
+                rest = rest_trimmed[..hash_start].trim_end().to_string();
+            }
+        }
+    }
+
+    let (clean_text, custom_id) = extract_header_id(&rest);
+    Some((clean_text, custom_id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

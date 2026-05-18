@@ -71,12 +71,59 @@ impl MD080HeadingAnchorCollision {
         Self { config }
     }
 
-    /// The anchor a heading actually resolves to: an explicit `{#custom-id}`
-    /// wins over the generated slug (it is what platforms emit).
-    fn effective_anchor(&self, heading: &crate::lint_context::HeadingInfo) -> String {
-        match &heading.custom_id {
-            Some(id) => id.to_lowercase(),
-            None => self.config.anchor_style.generate_fragment(&heading.text),
+    /// The anchor a heading actually resolves to. An explicit `{#custom-id}`
+    /// wins over the generated slug (it is what platforms emit) and is
+    /// compared in its emitted case: HTML `id` matching is case-sensitive, so
+    /// `{#API}` and `{#api}` are distinct anchors. Generated slugs are already
+    /// case-normalized by the anchor style.
+    fn effective_anchor(&self, text: &str, custom_id: Option<&str>) -> String {
+        match custom_id {
+            Some(id) => id.to_string(),
+            None => self.config.anchor_style.generate_fragment(text),
+        }
+    }
+
+    /// Resolve a heading's anchor and either record it as the first occurrence
+    /// or, if some earlier heading already produced the same anchor, emit a
+    /// collision warning pointing back at that first heading.
+    #[allow(clippy::too_many_arguments)]
+    fn record(
+        &self,
+        text: &str,
+        custom_id: Option<&str>,
+        level: u8,
+        line_num: usize,
+        content: &str,
+        seen: &mut HashMap<String, usize>,
+        warnings: &mut Vec<LintWarning>,
+    ) {
+        if !self.config.levels.contains(&level) {
+            return;
+        }
+
+        let anchor = self.effective_anchor(text, custom_id);
+        if anchor.is_empty() {
+            return;
+        }
+
+        if let Some(&first_line) = seen.get(&anchor) {
+            let (start_line, start_col, end_line, end_col) =
+                calculate_match_range(line_num, content, content.find(text).unwrap_or(0), text.len());
+            warnings.push(LintWarning {
+                rule_name: Some(self.name().to_string()),
+                severity: Severity::Warning,
+                line: start_line,
+                column: start_col,
+                end_line,
+                end_column: end_col,
+                message: format!(
+                    "Heading anchor '{anchor}' collides with the heading at line {first_line}; \
+                     fragment links and any derived page identifier resolve only to the first occurrence"
+                ),
+                fix: None,
+            });
+        } else {
+            seen.insert(anchor, line_num);
         }
     }
 }
@@ -90,10 +137,6 @@ impl Rule for MD080HeadingAnchorCollision {
         "Heading anchors must be unique"
     }
 
-    fn should_skip(&self, ctx: &LintContext) -> bool {
-        !ctx.has_char('#')
-    }
-
     fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
         // anchor -> 1-based line of the first heading that produced it.
@@ -103,45 +146,49 @@ impl Rule for MD080HeadingAnchorCollision {
             if line_info.in_front_matter || line_info.in_code_block {
                 continue;
             }
-            let Some(heading) = &line_info.heading else {
-                continue;
-            };
-            if !heading.is_valid || heading.text.is_empty() {
-                continue;
-            }
-            if !self.config.levels.contains(&heading.level) {
-                continue;
-            }
-
-            let anchor = self.effective_anchor(heading);
-            // An empty anchor (e.g. a CJK-only heading under an ASCII style)
-            // is not a usable fragment target; "colliding" empties are a
-            // different defect and would only add noise here.
-            if anchor.is_empty() {
-                continue;
-            }
-
             let line_num = idx + 1;
-            if let Some(&first_line) = seen.get(&anchor) {
-                let content = line_info.content(ctx.content);
-                let text_start = content.find(heading.text.as_str()).unwrap_or(0);
-                let (start_line, start_col, end_line, end_col) =
-                    calculate_match_range(line_num, content, text_start, heading.text.len());
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    message: format!(
-                        "Heading anchor '{anchor}' collides with the heading at line {first_line}; \
-                         fragment links and any derived page identifier resolve only to the first occurrence"
-                    ),
-                    line: start_line,
-                    column: start_col,
-                    end_line,
-                    end_column: end_col,
-                    severity: Severity::Warning,
-                    fix: None,
-                });
-            } else {
-                seen.insert(anchor, line_num);
+            let content = line_info.content(ctx.content);
+
+            // Regular ATX/Setext headings parsed by the line scanner.
+            if let Some(heading) = &line_info.heading {
+                if heading.is_valid && !heading.text.is_empty() {
+                    self.record(
+                        &heading.text,
+                        heading.custom_id.as_deref(),
+                        heading.level,
+                        line_num,
+                        content,
+                        &mut seen,
+                        &mut warnings,
+                    );
+                }
+                continue;
+            }
+
+            // Blockquote headings (`> ## Intro`) are not seen by the line
+            // scanner but still emit fragment anchors - mirror MD051 so the
+            // two rules agree on what targets exist.
+            if let Some(bq) = &line_info.blockquote
+                && let Some((clean_text, custom_id)) =
+                    crate::utils::header_id_utils::parse_blockquote_atx_heading(&bq.content)
+                && !clean_text.is_empty()
+            {
+                let level = bq
+                    .content
+                    .trim_start()
+                    .bytes()
+                    .take_while(|&b| b == b'#')
+                    .count()
+                    .clamp(1, 6) as u8;
+                self.record(
+                    &clean_text,
+                    custom_id.as_deref(),
+                    level,
+                    line_num,
+                    content,
+                    &mut seen,
+                    &mut warnings,
+                );
             }
         }
 
@@ -318,6 +365,32 @@ mod tests {
             1,
             "Kramdown removes `_`, so both headings slug to `ab`"
         );
+    }
+
+    #[test]
+    fn flags_setext_heading_collision() {
+        // Setext headings produce fragment anchors too; a Setext H1 and an
+        // ATX H2 with the same slug collide just like two ATX headings.
+        let w = check("Intro\n=====\n\nbody\n\n## Intro\n");
+        assert_eq!(w.len(), 1, "setext + atx slug collision must flag: {w:?}");
+        assert_eq!(w[0].line, 6);
+    }
+
+    #[test]
+    fn custom_id_case_is_significant() {
+        // HTML id matching is case-sensitive: {#API} and {#api} are distinct
+        // anchors, so they must NOT be reported as a collision.
+        let w = check("# Alpha {#API}\n\n## Beta {#api}\n");
+        assert!(w.is_empty(), "custom ids differing only in case are distinct: {w:?}");
+    }
+
+    #[test]
+    fn flags_blockquote_heading_collision() {
+        // A blockquoted ATX heading still emits a fragment anchor (mirrors
+        // MD051), so it collides with a same-slug top-level heading.
+        let w = check("> ## Intro\n\n## Intro\n");
+        assert_eq!(w.len(), 1, "blockquote heading slug collision must flag: {w:?}");
+        assert_eq!(w[0].line, 3);
     }
 
     #[test]
