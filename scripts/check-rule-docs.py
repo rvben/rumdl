@@ -62,7 +62,7 @@ RULES_TABLE_ROW = re.compile(r"\|\s*\[(MD\d{3})\]\(")
 ANY_SENTINEL = re.compile(r"<!-- (RULE_\w+) -->[^\n<]*<!-- /\1 -->")
 
 # A bare "N rules" / "N lint(ing) rules" claim, e.g. "68 linting rules".
-RULE_COUNT_PHRASE = re.compile(r"\b(\d+)\s+(?:lint|linting\s+)?rules?\b")
+RULE_COUNT_PHRASE = re.compile(r"\b(\d+)\s+(?:(?:lint|linting)\s+)?rules?\b")
 
 
 def registry_rule_ids() -> list[str]:
