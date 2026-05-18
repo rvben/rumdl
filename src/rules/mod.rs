@@ -69,6 +69,7 @@ mod md076_list_item_spacing;
 mod md077_list_continuation_indent;
 mod md078_missing_chunk_labels;
 mod md079_chunk_label_spaces;
+mod md080_heading_anchor_collision;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
@@ -140,6 +141,7 @@ pub use md076_list_item_spacing::{ListItemSpacingStyle, MD076ListItemSpacing};
 pub use md077_list_continuation_indent::MD077ListContinuationIndent;
 pub use md078_missing_chunk_labels::MD078MissingChunkLabels;
 pub use md079_chunk_label_spaces::MD079ChunkLabelSpaces;
+pub use md080_heading_anchor_collision::MD080HeadingAnchorCollision;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -549,6 +551,11 @@ const RULES: &[RuleEntry] = &[
         name: "MD079",
         ctor: MD079ChunkLabelSpaces::from_config,
         opt_in: false,
+    },
+    RuleEntry {
+        name: "MD080",
+        ctor: MD080HeadingAnchorCollision::from_config,
+        opt_in: true,
     },
 ];
 

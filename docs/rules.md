@@ -30,14 +30,15 @@ For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Re
 
 The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
 
-| Rule              | Description            | Why opt-in                                                    |
-| ----------------- | ---------------------- | ------------------------------------------------------------- |
-| [MD060](md060.md) | Table formatting       | Makes significant formatting changes to existing tables       |
-| [MD063](md063.md) | Heading capitalization | Style varies by guide (AP, Chicago, APA)                      |
-| [MD070](md070.md) | Nested code fence      | Auto-fix modifies document structure, false positives on docs |
-| [MD072](md072.md) | Frontmatter key sort   | Many projects prefer semantic ordering over alphabetical      |
-| [MD073](md073.md) | TOC validation         | Requires specific TOC markers in document                     |
-| [MD074](md074.md) | MkDocs nav validation  | Requires `flavor = "mkdocs"` to activate                      |
+| Rule              | Description              | Why opt-in                                                    |
+| ----------------- | ------------------------ | ------------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting         | Makes significant formatting changes to existing tables       |
+| [MD063](md063.md) | Heading capitalization   | Style varies by guide (AP, Chicago, APA)                      |
+| [MD070](md070.md) | Nested code fence        | Auto-fix modifies document structure, false positives on docs |
+| [MD072](md072.md) | Frontmatter key sort     | Many projects prefer semantic ordering over alphabetical      |
+| [MD073](md073.md) | TOC validation           | Requires specific TOC markers in document                     |
+| [MD074](md074.md) | MkDocs nav validation    | Requires `flavor = "mkdocs"` to activate                      |
+| [MD080](md080.md) | Heading anchor collision | Collisions are functional under platform auto-suffixing       |
 
 ### Enabling Opt-in Rules
 
@@ -165,6 +166,7 @@ Severity affects:
 | [MD041](md041.md) | First line h1             | First line in a file should be a top-level heading        |
 | [MD043](md043.md) | Required headings         | Required heading structure                                |
 | [MD063](md063.md) | Heading capitalization    | Heading text capitalization style                         |
+| [MD080](md080.md) | Heading anchor collision  | Heading anchors (slugs) must be unique                    |
 
 ## List Rules
 
