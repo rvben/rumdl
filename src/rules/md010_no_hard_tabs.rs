@@ -589,4 +589,49 @@ mod tests {
         assert_eq!(result[0].line, 4);
         assert_eq!(result[1].line, 11);
     }
+
+    #[test]
+    fn test_code_blocks_toggle_fenced() {
+        let content = "Normal\tline\n```\nCode\twith\ttab\n```\nAnother\tline";
+
+        // Default false: only the two tab groups outside the fence.
+        let off = MD010NoHardTabs::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let r_off = off.check(&ctx).unwrap();
+        assert_eq!(r_off.len(), 2, "got {r_off:?}");
+        assert_eq!(r_off[0].line, 1);
+        assert_eq!(r_off[1].line, 5);
+        assert_eq!(
+            off.fix(&ctx).unwrap(),
+            "Normal    line\n```\nCode\twith\ttab\n```\nAnother    line"
+        );
+
+        // true: also the two groups on the fenced content line.
+        let on = MD010NoHardTabs::from_config_struct(MD010Config {
+            spaces_per_tab: crate::types::PositiveUsize::from_const(4),
+            code_blocks: true,
+        });
+        let r_on = on.check(&ctx).unwrap();
+        assert_eq!(r_on.len(), 4, "got {r_on:?}");
+        assert_eq!(r_on[0].line, 1);
+        assert_eq!(r_on[1].line, 3);
+        assert_eq!(r_on[2].line, 3);
+        assert_eq!(r_on[3].line, 5);
+        assert_eq!(
+            on.fix(&ctx).unwrap(),
+            "Normal    line\n```\nCode    with    tab\n```\nAnother    line"
+        );
+    }
+
+    #[test]
+    fn test_code_blocks_toggle_makefile_fence_preserved_by_default() {
+        let content = "Text\twith\ttab\n```makefile\ntarget:\n\tcommand\n```\nMore\ttabs";
+        let off = MD010NoHardTabs::default();
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // Default preserves the Makefile recipe tab; only prose tabs fixed.
+        assert_eq!(
+            off.fix(&ctx).unwrap(),
+            "Text    with    tab\n```makefile\ntarget:\n\tcommand\n```\nMore    tabs"
+        );
+    }
 }
