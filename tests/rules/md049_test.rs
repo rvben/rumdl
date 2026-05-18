@@ -311,3 +311,47 @@ fn test_nested_code_and_emphasis() {
     );
     assert!(fixed.contains("And *more* text"), "Second emphasis should be fixed");
 }
+
+#[test]
+fn test_self_contained_display_math_line_is_not_emphasis() {
+    // A line whose only non-whitespace content is a `$$...$$` display-math
+    // span carries LaTeX, not Markdown emphasis. MD049 consults the
+    // line-level math map (skip_math_blocks), so this whole line must be
+    // flagged as math and its `_x_`/`_y_` must not be mis-linted.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "All emphasis uses asterisks: *a* *b* *c*.\n\n$$ _x_ + _y_ $$\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "underscores inside a self-contained $$...$$ line are LaTeX, not emphasis: {result:?}"
+    );
+}
+
+#[test]
+fn test_display_math_span_with_trailing_prose_still_lints_prose() {
+    // When real prose follows the span on the same line the line stays
+    // lintable, so emphasis in that prose is still flagged.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "use stars: *a* *b*. $$x$$ then _y_ here\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "trailing-prose `_y_` must still be linted: {result:?}");
+}
+
+#[test]
+fn test_odd_double_dollar_line_does_not_swallow_following_prose() {
+    // `$$x$$ costs $$` has three `$$`: the first opens and the second closes
+    // a span; the trailing `$$` is mid-line and per the byte model opens no
+    // multi-line block. The following `_next_` line must stay lintable.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "lead *a* *b*.\n\n$$x$$ costs $$\n_next_ prose\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "`_next_` after an odd-`$$` line must still be linted: {result:?}"
+    );
+    assert_eq!(result[0].line, 4);
+}

@@ -311,9 +311,12 @@ pub(super) fn compute_code_block_line_map(
 /// when it contains no Markdown that should be linted (interior lines and
 /// bare/LaTeX-only fence lines). Lines that mix a fence with trailing prose
 /// (`$$ and __x__`) are left unflagged so the byte-level math filter can
-/// distinguish the math span from the prose. A multi-line block opens only
-/// on a line whose (blockquote-stripped) content starts with `$$` and has an
-/// odd `$$` count; it closes on the first subsequent line containing `$$`.
+/// distinguish the math span from the prose. A self-contained line whose
+/// only non-whitespace content is `$$...$$` span(s) is flagged. A multi-line
+/// block opens only on a line whose (blockquote-stripped) content is exactly
+/// one line-start `$$` with no close on the same line; it closes on the first
+/// subsequent line containing `$$`. This mirrors the byte-level
+/// `math_block_ranges` model so line- and byte-level rules agree.
 pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map: &[bool]) -> Vec<bool> {
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
@@ -347,13 +350,29 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
             }
             // No `$$` on this line: still interior, stay inside.
         } else if ic.starts_with("$$") {
-            // Odd `$$` count opens a multi-line block (the rest of the line is
-            // display content). An even count is self-contained `$$...$$`; it
-            // is left to byte/inline math detection so any trailing prose on
-            // the line stays lintable.
-            if crate::utils::skip_context::count_double_dollar(ic) % 2 == 1 {
+            // Match the byte-level `math_block_ranges` model exactly:
+            //
+            // - Exactly one `$$` (count == 1): the line-start delimiter has no
+            //   close on this line, so it opens a multi-line block.
+            // - Even count with only whitespace outside the `$$...$$` spans:
+            //   the line is wholly display math with nothing lintable, so flag
+            //   it. (Line-level rules like MD049 consult only this map, not
+            //   byte ranges, so an unflagged `$$ _x_ $$` would be mis-linted
+            //   as emphasis.)
+            // - Even count with prose outside the spans (`$$x$$ and _y_`):
+            //   leave unflagged so the prose stays lintable.
+            // - Odd count >= 3 (`$$a$$ b $$`): the first `$$` is closed by the
+            //   second; the trailing `$$` is mid-line, so per the byte model it
+            //   opens nothing. Leave unflagged and do not enter a block.
+            let count = crate::utils::skip_context::count_double_dollar(ic);
+            if count == 1 {
                 in_math_block[i] = true;
                 inside_math = true;
+            } else if count.is_multiple_of(2) {
+                let outside_spans_blank = ic.split("$$").step_by(2).all(|s| s.trim().is_empty());
+                if outside_spans_blank {
+                    in_math_block[i] = true;
+                }
             }
         }
     }

@@ -125,8 +125,13 @@ impl ContentCharacteristics {
         for line in content.lines() {
             let trimmed = line.trim();
 
-            // Headings: ATX (#) or Setext (underlines)
-            if !has_atx_heading && trimmed.starts_with('#') {
+            // Headings: ATX (#) or Setext (underlines). A blockquoted ATX
+            // heading (`> ## Title`) still emits a fragment anchor, so rules
+            // like MD051/MD080 must run for blockquote-only documents too.
+            // Stripping `>`/space is a coarse, deliberately over-inclusive
+            // prefilter check (it must never skip a rule that has work).
+            if !has_atx_heading && (trimmed.starts_with('#') || trimmed.trim_start_matches(['>', ' ']).starts_with('#'))
+            {
                 has_atx_heading = true;
             }
             if !has_setext_heading && (trimmed.chars().all(|c| c == '=' || c == '-') && trimmed.len() > 1) {
@@ -591,6 +596,16 @@ mod tests {
         // Test setext headings
         let chars = ContentCharacteristics::analyze("Heading\n=======");
         assert!(chars.has_headings);
+
+        // Blockquoted ATX headings emit fragment anchors, so Heading-category
+        // rules (MD051/MD080) must run for blockquote-only documents.
+        let chars = ContentCharacteristics::analyze("> ## Alpha\n>\n> ## Alpha");
+        assert!(chars.has_headings, "blockquoted ATX heading must set has_headings");
+        let chars = ContentCharacteristics::analyze(">> # Nested");
+        assert!(
+            chars.has_headings,
+            "nested-blockquote ATX heading must set has_headings"
+        );
 
         // Test lists
         let chars = ContentCharacteristics::analyze("* Item\n- Item 2\n+ Item 3");
