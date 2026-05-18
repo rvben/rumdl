@@ -142,5 +142,5 @@ Each line shows:
 ## Next Steps
 
 - [CLI Commands](../usage/cli.md) - Full command reference
-- [Rules Reference](../rules.md) - Explore all 66 rules
+- [Rules Reference](../rules.md) - Explore all <!-- RULE_COUNT -->74<!-- /RULE_COUNT --> rules
 - [Configuration](../global-settings.md) - Advanced configuration options

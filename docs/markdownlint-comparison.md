@@ -10,14 +10,14 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: 18 additional rules (MD057, MD061-MD077), built-in LSP server, VS Code extension, 6 Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->21<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD080<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **71 rules total**: all 53 markdownlint rules plus 18 unique rules.
+rumdl implements **<!-- RULE_COUNT -->74<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->21<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 
@@ -25,7 +25,7 @@ rumdl implements **71 rules total**: all 53 markdownlint rules plus 18 unique ru
 
 ### Rules Unique to rumdl
 
-rumdl implements 18 additional rules not found in markdownlint:
+rumdl implements <!-- RULE_COUNT_ADDITIONAL -->21<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |
@@ -47,6 +47,9 @@ rumdl implements 18 additional rules not found in markdownlint:
 | MD075  | Orphaned table rows            | Detects headerless pipe tables and orphaned table rows     |
 | MD076  | List item spacing              | Enforces consistent blank lines between list items         |
 | MD077  | List continuation indent       | Enforces indentation for list continuation content         |
+| MD078  | Missing chunk labels           | Executable Quarto chunks should have a label               |
+| MD079  | Chunk label spaces             | Quarto chunk labels must not contain whitespace            |
+| MD080  | Heading anchor collision       | Heading anchors (slugs) must be unique                     |
 
 **Opt-in rules:** MD060, MD063, MD070, MD072, MD073, and MD074 are disabled by default. Enable them explicitly in your configuration.
 

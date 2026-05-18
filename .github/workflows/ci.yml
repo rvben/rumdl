@@ -50,6 +50,9 @@ jobs:
       - name: Check version references in sync with Cargo.toml
         run: make check-versions
 
+      - name: Check rule-count docs in sync with registry
+        run: make check-rule-docs
+
       - name: Run linting
         run: make lint
 

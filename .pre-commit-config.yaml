@@ -145,3 +145,11 @@ repos:
         types: [rust]
         pass_filenames: false
         stages: [pre-push]
+
+      - id: rule-docs-check
+        name: check rule-count docs in sync with registry
+        entry: mise exec -- make check-rule-docs
+        language: system
+        files: \.(rs|md)$
+        pass_filenames: false
+        stages: [pre-push]

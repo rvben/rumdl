@@ -11,16 +11,16 @@ For detailed comparisons with specific tools, see:
 
 ## Overview
 
-| Tool                  | Type          | Language | Rules             | Auto-fix | Flavors | Config format           | Plugins      | LSP |
-| --------------------- | ------------- | -------- | ----------------- | -------- | ------- | ----------------------- | ------------ | --- |
-| **rumdl**             | Lint + Format | Rust     | 71                | Yes      | 6       | TOML, JSON, YAML        | No           | Yes |
-| **markdownlint-cli**  | Lint          | Node.js  | 53                | Yes      | No      | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
-| **markdownlint-cli2** | Lint          | Node.js  | 53                | Yes      | No      | JSONC, YAML, JS         | Yes (JS)     | No  |
-| **remark-lint**       | Lint          | Node.js  | ~80 (via presets) | No       | No      | JS, JSON, YAML          | Yes (JS)     | No  |
-| **pymarkdown**        | Lint          | Python   | 46                | Yes      | No      | JSON, YAML, TOML        | Yes (Python) | No  |
-| **mdformat**          | Format        | Python   | N/A               | N/A      | No      | TOML                    | Yes (Python) | No  |
-| **mado**              | Lint          | Rust     | 38                | No       | No      | TOML                    | No           | No  |
-| **Prettier**          | Format        | Node.js  | N/A               | N/A      | No      | JSON, YAML, JS          | Yes (JS)     | No  |
+| Tool                  | Type          | Language | Rules                                     | Auto-fix | Flavors | Config format           | Plugins      | LSP |
+| --------------------- | ------------- | -------- | ----------------------------------------- | -------- | ------- | ----------------------- | ------------ | --- |
+| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->74<!-- /RULE_COUNT --> | Yes      | 6       | TOML, JSON, YAML        | No           | Yes |
+| **markdownlint-cli**  | Lint          | Node.js  | 53                                        | Yes      | No      | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
+| **markdownlint-cli2** | Lint          | Node.js  | 53                                        | Yes      | No      | JSONC, YAML, JS         | Yes (JS)     | No  |
+| **remark-lint**       | Lint          | Node.js  | ~80 (via presets)                         | No       | No      | JS, JSON, YAML          | Yes (JS)     | No  |
+| **pymarkdown**        | Lint          | Python   | 46                                        | Yes      | No      | JSON, YAML, TOML        | Yes (Python) | No  |
+| **mdformat**          | Format        | Python   | N/A                                       | N/A      | No      | TOML                    | Yes (Python) | No  |
+| **mado**              | Lint          | Rust     | 38                                        | No       | No      | TOML                    | No           | No  |
+| **Prettier**          | Format        | Node.js  | N/A                                       | N/A      | No      | JSON, YAML, JS          | Yes (JS)     | No  |
 
 ## Linting Capability
 
@@ -33,8 +33,9 @@ cover common cases. No built-in auto-fix for lint violations (remark itself can 
 
 **mado** is a Rust-based linter with 38 rules (33 stable, 5 unstable). It has no auto-fix and no plugin system.
 
-**rumdl** implements all 53 markdownlint rules plus 18 additional rules (71 total). It supports auto-fix for most rules and includes rules not found in other tools, such as relative link validation
-(MD057), footnote checks (MD066-MD068), nested code fence detection (MD070), and TOC validation (MD073).
+**rumdl** implements all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->21<!-- /RULE_COUNT_ADDITIONAL --> additional rules (<!-- RULE_COUNT -->74<!-- /RULE_COUNT --> total). It supports
+auto-fix for most rules and includes rules not found in other tools, such as relative link validation (MD057), footnote checks (MD066-MD068), nested code fence detection (MD070), and TOC validation
+(MD073).
 
 ## Formatting Capability
 
@@ -124,7 +125,7 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 **Notes:**
 
-- **mado** is faster in cold-start benchmarks because it does less work per file: fewer rules (38 vs 71), no fix generation, and no flavor detection.
+- **mado** is faster in cold-start benchmarks because it does less work per file: fewer rules (38 vs <!-- RULE_COUNT -->74<!-- /RULE_COUNT -->), no fix generation, and no flavor detection.
   The gap reflects feature surface area, not implementation quality.
 - **rumdl** supports result caching (`rumdl check` without `--no-cache`), which skips unchanged files on subsequent runs — typically under 50 ms, faster than mado's cold start.
 - **pymarkdown** performs well for a Python tool due to its efficient scanner architecture.
@@ -135,5 +136,5 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 - [Comparison with markdownlint](markdownlint-comparison.md) — detailed rule-by-rule comparison and migration guide
 - [Comparison with mdformat](mdformat-comparison.md) — formatting feature comparison and migration guide
-- [Rules Reference](rules.md) — complete list of rumdl's 71 rules
+- [Rules Reference](rules.md) — complete list of rumdl's <!-- RULE_COUNT -->74<!-- /RULE_COUNT --> rules
 - [Markdown Flavors](flavors.md) — flavor configuration and per-rule adjustments
