@@ -129,13 +129,29 @@ impl Rule for MD049EmphasisStyle {
         // `$$ _x_ $$ $$ _y_ $$`) stays lintable so trailing prose is checked;
         // this byte-level guard then exempts only the underscores that fall
         // inside the line-start `$$...$$` span, matching MD037/MD050.
-        let math_ranges = crate::utils::skip_context::math_byte_ranges(ctx.content);
+        // Sort and merge so membership is a binary search rather than a
+        // per-span linear scan: a math-heavy document (many `$x$` spans
+        // alternating with emphasis) would otherwise be O(spans x ranges).
+        // Ranges may overlap (e.g. a `$b$` inside a `$$...$$` block), so the
+        // merge collapses them into disjoint, ascending intervals.
+        let math_ranges: Vec<(usize, usize)> = {
+            let mut r = crate::utils::skip_context::math_byte_ranges(ctx.content);
+            r.sort_unstable_by_key(|&(start, _)| start);
+            let mut merged: Vec<(usize, usize)> = Vec::with_capacity(r.len());
+            for (start, end) in r {
+                match merged.last_mut() {
+                    Some(last) if start <= last.1 => last.1 = last.1.max(end),
+                    _ => merged.push((start, end)),
+                }
+            }
+            merged
+        };
         emphasis_info.retain(|(line_num, col, abs_pos, _, _)| {
-            // Skip emphasis inside math.
-            if math_ranges
-                .iter()
-                .any(|&(start, end)| *abs_pos >= start && *abs_pos < end)
-            {
+            // Skip emphasis inside math. `math_ranges` is disjoint and sorted
+            // by start, so the only interval that can contain `abs_pos` is
+            // the last one whose start is <= `abs_pos`.
+            let idx = math_ranges.partition_point(|&(start, _)| start <= *abs_pos);
+            if idx > 0 && *abs_pos < math_ranges[idx - 1].1 {
                 return false;
             }
             // Skip emphasis inside Obsidian comments
