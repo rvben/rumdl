@@ -141,20 +141,32 @@ impl Rule for MD049EmphasisStyle {
         // Ranges may overlap (e.g. a `$b$` inside a `$$...$$` block), so the
         // merge collapses them into disjoint, ascending intervals.
         let math_ranges: Vec<(usize, usize)> = {
-            let math_source: std::borrow::Cow<'_, str> = if ctx.code_blocks.is_empty() {
+            // A `$` inside fenced code or an inline code span is never a math
+            // delimiter, but `math_byte_ranges` does not know that. Neutralize
+            // those `$` first so the byte model agrees with the code-block-
+            // aware line-level math map and inline code cannot synthesize a
+            // span around real emphasis.
+            let code_spans = ctx.code_spans();
+            let math_source: std::borrow::Cow<'_, str> = if ctx.code_blocks.is_empty() && code_spans.is_empty() {
                 std::borrow::Cow::Borrowed(ctx.content)
             } else {
                 let mut bytes = ctx.content.as_bytes().to_vec();
                 let len = bytes.len();
-                for &(start, end) in &ctx.code_blocks {
+                let mut mask = |start: usize, end: usize| {
                     for b in &mut bytes[start.min(len)..end.min(len)] {
                         if *b == b'$' {
                             *b = b' ';
                         }
                     }
+                };
+                for &(start, end) in &ctx.code_blocks {
+                    mask(start, end);
                 }
-                // Only ASCII `$` was replaced with ASCII space, so the buffer
-                // is still valid UTF-8 and the same length.
+                for span in code_spans.iter() {
+                    mask(span.byte_offset, span.byte_end);
+                }
+                // Only ASCII `$` was replaced with ASCII space, so the
+                // buffer is still valid UTF-8 and the same length.
                 std::borrow::Cow::Owned(String::from_utf8(bytes).expect("ASCII-only substitution"))
             };
             let mut r = crate::utils::skip_context::math_byte_ranges(&math_source);

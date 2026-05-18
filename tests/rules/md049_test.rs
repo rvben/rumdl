@@ -426,3 +426,20 @@ fn test_fenced_code_dollars_do_not_mask_emphasis() {
     );
     assert_eq!(result[0].line, 7);
 }
+
+#[test]
+fn test_inline_code_dollars_do_not_synthesize_math_span() {
+    // Dollar signs inside inline code spans are literals, not math
+    // delimiters. They must not pair into a `$...$` span that swallows the
+    // real emphasis between them.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "set style *a* *b*.\n\nUse `$` and _bad_ then `$` here\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "`_bad_` between two inline-code `$` must still be linted: {result:?}"
+    );
+    assert_eq!(result[0].line, 3);
+}
