@@ -99,10 +99,10 @@ def sentinel_pattern(name: str) -> re.Pattern[str]:
     )
 
 
-def check_sentinels(values: dict[str, str]) -> list[str]:
+def check_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     drift: list[str] = []
     for rel in DOC_FILES:
-        path = ROOT / rel
+        path = root / rel
         content = path.read_text()
         for name, expected in values.items():
             for m in sentinel_pattern(name).finditer(content):
@@ -115,10 +115,10 @@ def check_sentinels(values: dict[str, str]) -> list[str]:
     return drift
 
 
-def write_sentinels(values: dict[str, str]) -> list[str]:
+def write_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     changed: list[str] = []
     for rel in DOC_FILES:
-        path = ROOT / rel
+        path = root / rel
         original = path.read_text()
         content = original
         for name, expected in values.items():
@@ -132,7 +132,7 @@ def write_sentinels(values: dict[str, str]) -> list[str]:
     return changed
 
 
-def check_rules_table(ids: list[str]) -> list[str]:
+def check_rules_table(ids: list[str], root: Path = ROOT) -> list[str]:
     """Every registry id must appear in docs/rules.md; no nonexistent rows.
 
     A rule may legitimately appear more than once: opt-in rules are listed
@@ -140,7 +140,7 @@ def check_rules_table(ids: list[str]) -> list[str]:
     Repetition is therefore allowed; only absence and nonexistent rows are
     drift.
     """
-    content = (ROOT / RULES_REFERENCE).read_text()
+    content = (root / RULES_REFERENCE).read_text()
     seen = set(RULES_TABLE_ROW.findall(content))
     registry = set(ids)
 
@@ -158,7 +158,7 @@ def check_rules_table(ids: list[str]) -> list[str]:
     return problems
 
 
-def check_no_unwrapped_counts() -> list[str]:
+def check_no_unwrapped_counts(root: Path = ROOT) -> list[str]:
     """Fail on any rule-count claim that is not wrapped in a sentinel.
 
     The sentinel checks only validate counts that already have markers, so a
@@ -170,7 +170,7 @@ def check_no_unwrapped_counts() -> list[str]:
     """
     problems: list[str] = []
     for rel in DOC_FILES:
-        content = (ROOT / rel).read_text()
+        content = (root / rel).read_text()
         # Replace each sentinel span with same-length spaces so byte offsets
         # (and thus line numbers) are preserved.
         masked = ANY_SENTINEL.sub(lambda m: " " * len(m.group(0)), content)

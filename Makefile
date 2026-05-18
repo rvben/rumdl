@@ -184,7 +184,10 @@ sync-rule-docs:
 
 # Verify rule-count claims in docs match the registry and docs/rules.md
 # lists every rule. Guards against doc drift when rules are added/removed.
+# Runs the guard's own regression suite first: the guard is the thing that
+# prevents drift, so its logic must be verified wherever it runs.
 check-rule-docs:
+	python3 scripts/test_check_rule_docs.py
 	python3 scripts/check-rule-docs.py
 
 doc:
