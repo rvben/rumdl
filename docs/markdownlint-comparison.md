@@ -189,6 +189,24 @@ flavor = "mkdocs"
 
 markdownlint does not have built-in flavor support; users must configure individual rules manually.
 
+### 7. Rule-Specific Default Differences
+
+A few rules ship safer defaults than markdownlint. These are opt-out, not removed - set the documented option to recover markdownlint-exact behavior.
+
+**MD010 (Hard tabs) - `code_blocks`:**
+
+- **markdownlint**: defaults `code_blocks: true`, flagging and rewriting tabs inside fenced *and* indented code blocks.
+- **rumdl**: defaults `code-blocks = false`, skipping tabs inside both fenced and indented code blocks.
+- **Rationale**: tabs are syntactically required in Makefiles and conventional in `gofmt`-formatted Go. markdownlint's default silently corrupts such snippets on auto-fix. Skipping code blocks by default is strictly safer.
+- **markdownlint parity**: set `code-blocks = true` to flag tabs everywhere, including code blocks.
+
+```toml
+[MD010]
+code-blocks = true  # markdownlint-exact behavior
+```
+
+**Reference:** [rumdl Issue #630](https://github.com/rvben/rumdl/issues/630) - inconsistent tab handling between fenced and indented code blocks.
+
 ## Configuration Compatibility
 
 ### Markdownlint Config Auto-Detection
