@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.95](https://github.com/rvben/rumdl/compare/v0.1.94...v0.1.95) - 2026-05-19
+
+### Added
+
+- **md010**: add code_blocks config option, consistent code-block handling (#630) ([b98ca52](https://github.com/rvben/rumdl/commit/b98ca52b73cecd923c03ce98f505a5afefe20435))
+- **md010**: add code_blocks config option (default false) ([2c95e17](https://github.com/rvben/rumdl/commit/2c95e1786a1aaf63af8c767f57b469c146982ae7))
+
+### Fixed
+
+- **md010**: treat fenced and indented code blocks consistently (#630) ([435df34](https://github.com/rvben/rumdl/commit/435df34db542402a2e2f07db12308391bf41a032))
+
 ## [0.1.94](https://github.com/rvben/rumdl/compare/v0.1.93...v0.1.94) - 2026-05-18
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-darwin-arm64",
-  "version": "0.1.94",
+  "version": "0.1.95",
   "description": "rumdl binary for macOS ARM64 (Apple Silicon)",
   "license": "MIT",
   "repository": {
