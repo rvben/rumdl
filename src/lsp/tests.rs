@@ -138,8 +138,10 @@ async fn test_get_code_actions_outside_range() {
     let server = create_test_server();
 
     let uri = Url::parse("file:///test.md").unwrap();
-    // Line 2 and 3 have hard tabs (MD010, fixable), range only covers line 0
-    let text = "# Test\n\n\tThis is a test\n\tWith tabs\n";
+    // Lines 2 and 3 (0-indexed LSP line) have hard tabs (MD010, fixable), range only covers line 0.
+    // Tabs are placed mid-line in paragraph text (not at column 0 after a blank line,
+    // which would be an indented code block skipped by default with code_blocks=false).
+    let text = "# Test\n\nThis is\ta test\nWith\ttabs\n";
 
     // Range that doesn't cover the violations (line 0 only)
     let range = Range {
@@ -4446,10 +4448,12 @@ async fn test_fix_all_action_available_regardless_of_range() {
     let server = create_test_server();
 
     let uri = Url::parse("file:///test.md").unwrap();
-    // Line 0: "# Title"       -- no fixable issues here
-    // Line 1: ""              -- blank line
-    // Line 2: "\tTabbed text" -- hard tab (MD010, fixable)
-    let text = "# Title\n\n\tTabbed text\n";
+    // Line 0: "# Title"             -- no fixable issues here
+    // Line 1: ""                    -- blank line
+    // Line 2: "Tabbed\ttext"        -- hard tab (MD010, fixable), mid-line in paragraph
+    // Tab placed mid-line to keep it out of an indented code block position
+    // (column-0 tab after blank line would be skipped with code_blocks=false).
+    let text = "# Title\n\nTabbed\ttext\n";
 
     // Narrow range: only line 0 (where Zed cursor might be)
     let narrow_range = Range {
@@ -4496,10 +4500,12 @@ async fn test_fix_all_applies_all_document_fixes_regardless_of_range() {
     let server = create_test_server();
 
     let uri = Url::parse("file:///test.md").unwrap();
-    // Two fixable issues on different lines (hard tabs → MD010):
-    // Line 2: "\tFirst issue"
-    // Line 4: "\tSecond issue"
-    let text = "# Title\n\n\tFirst issue\n\n\tSecond issue\n";
+    // Two fixable issues on different lines (hard tabs -> MD010).
+    // Tabs placed mid-line in paragraph text to avoid being treated as
+    // indented code blocks (column-0 tab after blank line is skipped with code_blocks=false).
+    // Line 2 (0-indexed LSP line): "First\tissue"
+    // Line 3 (0-indexed LSP line): "Second\tissue"
+    let text = "# Title\n\nFirst\tissue\nSecond\tissue\n";
 
     // Range covering only line 2 (first issue)
     let partial_range = Range {
