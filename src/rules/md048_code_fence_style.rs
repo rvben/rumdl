@@ -109,7 +109,10 @@ impl MD048CodeFenceStyle {
             };
 
             // Skip MyST backtick directives (info string starts with {name})
-            if ctx.flavor.supports_myst_directives() && marker.fence_char == '`' && marker.rest.trim_start().starts_with('{') {
+            if ctx.flavor.supports_myst_directives()
+                && marker.fence_char == '`'
+                && marker.rest.trim_start().starts_with('{')
+            {
                 continue;
             }
 
@@ -237,7 +240,11 @@ impl Rule for MD048CodeFenceStyle {
             };
 
             // Skip MyST backtick directives (info string starts with {name})
-            if ctx.flavor.supports_myst_directives() && !in_code_block && marker.fence_char == '`' && marker.rest.trim_start().starts_with('{') {
+            if ctx.flavor.supports_myst_directives()
+                && !in_code_block
+                && marker.fence_char == '`'
+                && marker.rest.trim_start().starts_with('{')
+            {
                 continue;
             }
             let fence_char = marker.fence_char;

@@ -107,8 +107,8 @@ pub struct LintContext<'a> {
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
     lazy_cont_lines_cache: OnceLock<Arc<Vec<LazyContLine>>>, // Lazy-loaded lazy continuation lines
     myst_directive_ranges: Vec<(usize, usize)>, // Pre-computed MyST colon directive byte ranges (:::{name} ... :::)
-    myst_comment_ranges: Vec<(usize, usize)>,   // Pre-computed MyST comment byte ranges (% comment)
-    myst_role_ranges: Vec<(usize, usize)>,      // Pre-computed MyST role byte ranges ({role}`content`)
+    myst_comment_ranges: Vec<(usize, usize)>, // Pre-computed MyST comment byte ranges (% comment)
+    myst_role_ranges: Vec<(usize, usize)>, // Pre-computed MyST role byte ranges ({role}`content`)
 }
 
 impl<'a> LintContext<'a> {
@@ -395,7 +395,11 @@ impl<'a> LintContext<'a> {
             "MyST backtick directives",
             profile,
             flavor_detection::detect_myst_backtick_directives(
-                content, &mut lines, flavor, &code_block_details, &line_offsets
+                content,
+                &mut lines,
+                flavor,
+                &code_block_details,
+                &line_offsets
             )
         );
 

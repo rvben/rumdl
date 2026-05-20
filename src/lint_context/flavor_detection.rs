@@ -1032,11 +1032,7 @@ fn myst_colon_directive_opener(line: &str) -> Option<usize> {
     }
     let after_colons = &rest[colon_count..];
     if after_colons.starts_with('{') && after_colons.contains('}') {
-        let name = after_colons
-            .trim_start_matches('{')
-            .split('}')
-            .next()
-            .unwrap_or("");
+        let name = after_colons.trim_start_matches('{').split('}').next().unwrap_or("");
         if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
             return Some(colon_count);
         }
@@ -1145,14 +1141,47 @@ pub(super) fn detect_myst_comments(
 
 /// Known MyST content-bearing directives whose body should be linted as markdown.
 const MYST_CONTENT_DIRECTIVES: &[&str] = &[
-    "note", "warning", "tip", "hint", "important", "caution", "danger",
-    "admonition", "attention", "error", "seealso", "topic", "sidebar",
-    "margin", "exercise", "solution", "dropdown", "tab-item", "grid",
-    "card", "tab-set", "toggle", "proof", "prf:proof", "prf:theorem",
-    "prf:lemma", "prf:definition", "prf:criterion", "prf:remark",
-    "prf:conjecture", "prf:corollary", "prf:algorithm", "prf:example",
-    "prf:property", "prf:observation", "prf:proposition", "prf:assumption",
-    "figure", "table", "list-table", "csv-table",
+    "note",
+    "warning",
+    "tip",
+    "hint",
+    "important",
+    "caution",
+    "danger",
+    "admonition",
+    "attention",
+    "error",
+    "seealso",
+    "topic",
+    "sidebar",
+    "margin",
+    "exercise",
+    "solution",
+    "dropdown",
+    "tab-item",
+    "grid",
+    "card",
+    "tab-set",
+    "toggle",
+    "proof",
+    "prf:proof",
+    "prf:theorem",
+    "prf:lemma",
+    "prf:definition",
+    "prf:criterion",
+    "prf:remark",
+    "prf:conjecture",
+    "prf:corollary",
+    "prf:algorithm",
+    "prf:example",
+    "prf:property",
+    "prf:observation",
+    "prf:proposition",
+    "prf:assumption",
+    "figure",
+    "table",
+    "list-table",
+    "csv-table",
 ];
 
 /// Check if a MyST directive name is content-bearing (body is markdown, not code).
@@ -1218,8 +1247,8 @@ pub(super) fn detect_myst_backtick_directives(
                 let trimmed = line_content.trim();
 
                 // Check if this is the closing fence line
-                let is_closer = trimmed.starts_with("```")
-                    && trimmed.chars().skip(3).all(|c| c == '`' || c.is_whitespace());
+                let is_closer =
+                    trimmed.starts_with("```") && trimmed.chars().skip(3).all(|c| c == '`' || c.is_whitespace());
                 if is_closer {
                     lines[i].in_myst_directive = true;
                     lines[i].in_code_block = false;
@@ -1250,11 +1279,10 @@ pub(super) fn detect_myst_backtick_directives(
             }
         } else {
             // Code-bearing directive: mark opener/closer as directive but keep in_code_block
-            if end_line_idx > 0 {
-                if let Some(closer_line) = lines.get_mut(end_line_idx - 1) {
+            if end_line_idx > 0
+                && let Some(closer_line) = lines.get_mut(end_line_idx - 1) {
                     closer_line.in_myst_directive = true;
                 }
-            }
         }
     }
 }
@@ -1413,7 +1441,10 @@ mod myst_tests {
         let ctx = myst_ctx(content);
         assert!(ctx.lines[0].in_myst_directive);
         assert!(ctx.lines[1].in_myst_directive);
-        assert!(!ctx.lines[1].in_code_block, "content directive body should not be in_code_block");
+        assert!(
+            !ctx.lines[1].in_code_block,
+            "content directive body should not be in_code_block"
+        );
     }
 
     #[test]
@@ -1421,7 +1452,10 @@ mod myst_tests {
         let content = "```{code-cell} python\nprint('hello')\n```\n";
         let ctx = myst_ctx(content);
         assert!(ctx.lines[0].in_myst_directive);
-        assert!(ctx.lines[1].in_code_block, "code directive body should remain in_code_block");
+        assert!(
+            ctx.lines[1].in_code_block,
+            "code directive body should remain in_code_block"
+        );
     }
 
     #[test]

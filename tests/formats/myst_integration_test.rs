@@ -22,7 +22,10 @@ fn test_md040_myst_backtick_directive_no_warning() {
     let ctx = myst_ctx(content);
     let rule = MD040FencedCodeLanguage::default();
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "MyST directive should not trigger MD040: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST directive should not trigger MD040: {warnings:?}"
+    );
 }
 
 #[test]
@@ -31,7 +34,10 @@ fn test_md040_myst_directive_with_argument() {
     let ctx = myst_ctx(content);
     let rule = MD040FencedCodeLanguage::default();
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "MyST directive with argument should not trigger MD040: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST directive with argument should not trigger MD040: {warnings:?}"
+    );
 }
 
 #[test]
@@ -49,7 +55,10 @@ fn test_md040_standard_flavor_flags_myst_directive() {
     let ctx = standard_ctx(content);
     let rule = MD040FencedCodeLanguage::default();
     let warnings = rule.check(&ctx).unwrap();
-    assert!(!warnings.is_empty(), "Standard flavor should flag {{note}} as missing language");
+    assert!(
+        !warnings.is_empty(),
+        "Standard flavor should flag {{note}} as missing language"
+    );
 }
 
 // ==================== MD048: Code Fence Style ====================
@@ -61,7 +70,10 @@ fn test_md048_myst_colon_directive_not_counted() {
     let ctx = myst_ctx(content);
     let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "MyST colon directive should not trigger MD048: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST colon directive should not trigger MD048: {warnings:?}"
+    );
 }
 
 #[test]
@@ -72,7 +84,10 @@ fn test_md048_myst_backtick_directive_not_counted() {
     let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
     let warnings = rule.check(&ctx).unwrap();
     // Only the tilde fence should be counted; the backtick directive is skipped
-    assert!(warnings.is_empty(), "MyST backtick directive should not trigger MD048: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST backtick directive should not trigger MD048: {warnings:?}"
+    );
 }
 
 // ==================== MD031: Blanks Around Fences ====================
@@ -83,7 +98,11 @@ fn test_md031_myst_colon_directive_needs_blanks() {
     let ctx = myst_ctx(content);
     let rule = MD031BlanksAroundFences::new(true);
     let warnings = rule.check(&ctx).unwrap();
-    assert_eq!(warnings.len(), 2, "Should warn about missing blanks before and after: {warnings:?}");
+    assert_eq!(
+        warnings.len(),
+        2,
+        "Should warn about missing blanks before and after: {warnings:?}"
+    );
 }
 
 #[test]
@@ -92,7 +111,10 @@ fn test_md031_myst_colon_directive_with_blanks_ok() {
     let ctx = myst_ctx(content);
     let rule = MD031BlanksAroundFences::new(true);
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "Properly spaced MyST directive should not warn: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "Properly spaced MyST directive should not warn: {warnings:?}"
+    );
 }
 
 #[test]
@@ -113,7 +135,10 @@ fn test_md046_myst_colon_directive_not_counted_as_code_block() {
     let ctx = myst_ctx(content);
     let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "MyST directive should not affect code block style: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST directive should not affect code block style: {warnings:?}"
+    );
 }
 
 // ==================== MD038: No Space in Code ====================
@@ -137,7 +162,10 @@ fn test_md013_myst_comment_not_flagged() {
     let ctx = myst_ctx(content);
     let rule = MD013LineLength::default();
     let warnings = rule.check(&ctx).unwrap();
-    assert!(warnings.is_empty(), "MyST comment should not trigger MD013: {warnings:?}");
+    assert!(
+        warnings.is_empty(),
+        "MyST comment should not trigger MD013: {warnings:?}"
+    );
 }
 
 #[test]
@@ -157,8 +185,14 @@ fn test_myst_content_directive_body_not_in_code_block() {
     let content = "```{note}\nThis is **markdown** content with a [link](url).\n```\n";
     let ctx = myst_ctx(content);
     // Line 1 (body) should NOT be in_code_block
-    assert!(!ctx.lines[1].in_code_block, "Content directive body should not be in_code_block");
-    assert!(ctx.lines[1].in_myst_directive, "Content directive body should be in_myst_directive");
+    assert!(
+        !ctx.lines[1].in_code_block,
+        "Content directive body should not be in_code_block"
+    );
+    assert!(
+        ctx.lines[1].in_myst_directive,
+        "Content directive body should be in_myst_directive"
+    );
 }
 
 #[test]
@@ -166,7 +200,10 @@ fn test_myst_code_directive_body_stays_in_code_block() {
     let content = "```{code-cell} python\nprint('hello')\n```\n";
     let ctx = myst_ctx(content);
     // Line 1 (body) SHOULD be in_code_block
-    assert!(ctx.lines[1].in_code_block, "Code directive body should remain in_code_block");
+    assert!(
+        ctx.lines[1].in_code_block,
+        "Code directive body should remain in_code_block"
+    );
 }
 
 // ==================== Nested directives ====================
