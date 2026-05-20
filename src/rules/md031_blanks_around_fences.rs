@@ -195,6 +195,22 @@ impl MD031BlanksAroundFences {
             })
             .collect()
     }
+
+    /// Convert MyST directive byte ranges from LintContext into (opener_line, closer_line) pairs.
+    fn myst_directive_line_ranges(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
+        ctx.myst_directive_ranges()
+            .iter()
+            .map(|&(start, end)| {
+                let start_line = ctx.line_offsets.partition_point(|&off| off <= start).saturating_sub(1);
+                let end_byte = if end > 0 { end - 1 } else { 0 };
+                let end_line = ctx
+                    .line_offsets
+                    .partition_point(|&off| off <= end_byte)
+                    .saturating_sub(1);
+                (start_line, end_line)
+            })
+            .collect()
+    }
 }
 
 impl Rule for MD031BlanksAroundFences {
@@ -346,6 +362,59 @@ impl Rule for MD031BlanksAroundFences {
             }
         }
 
+        // Enforce blank lines around MyST colon directives (:::{name} ... :::)
+        if ctx.flavor.supports_myst_directives() {
+            let myst_blocks = Self::myst_directive_line_ranges(ctx);
+            for (opening_line, closing_line) in &myst_blocks {
+                // Check for blank line before opener
+                if *opening_line > 0
+                    && !Self::is_effectively_empty_line(*opening_line - 1, lines, ctx)
+                    && !Self::is_right_after_frontmatter(*opening_line, ctx)
+                    && self.should_require_blank_line(*opening_line, lines)
+                {
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(*opening_line + 1, lines[*opening_line]);
+                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(*opening_line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "No blank line before MyST directive".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix::new(
+                            line_index.line_col_to_byte_range_with_length(*opening_line + 1, 1, 0),
+                            format!("{bq_prefix}\n"),
+                        )),
+                    });
+                }
+
+                // Check for blank line after closer
+                if *closing_line + 1 < lines.len()
+                    && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
+                    && self.should_require_blank_line(*closing_line, lines)
+                {
+                    let (start_line, start_col, end_line, end_col) =
+                        calculate_line_range(*closing_line + 1, lines[*closing_line]);
+                    let bq_prefix = ctx.blockquote_prefix_for_blank_line(*closing_line);
+                    warnings.push(LintWarning {
+                        rule_name: Some(self.name().to_string()),
+                        line: start_line,
+                        column: start_col,
+                        end_line,
+                        end_column: end_col,
+                        message: "No blank line after MyST directive".to_string(),
+                        severity: Severity::Warning,
+                        fix: Some(Fix::new(
+                            line_index.line_col_to_byte_range_with_length(*closing_line + 2, 1, 0),
+                            format!("{bq_prefix}\n"),
+                        )),
+                    });
+                }
+            }
+        }
+
         // Handle MkDocs admonitions separately
         if is_mkdocs {
             let mut in_admonition = false;
@@ -469,7 +538,8 @@ impl Rule for MD031BlanksAroundFences {
         let has_fences = ctx.likely_has_code() || ctx.has_char('~');
         let has_mkdocs_admonitions = ctx.flavor == crate::config::MarkdownFlavor::MkDocs && ctx.content.contains("!!!");
         let has_colon_fences = ctx.flavor.supports_colon_code_fences() && ctx.content.contains(":::");
-        !has_fences && !has_mkdocs_admonitions && !has_colon_fences
+        let has_myst_directives = ctx.flavor.supports_myst_directives() && ctx.content.contains(":::");
+        !has_fences && !has_mkdocs_admonitions && !has_colon_fences && !has_myst_directives
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

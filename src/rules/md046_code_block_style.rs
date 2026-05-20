@@ -749,6 +749,12 @@ impl MD046CodeBlockStyle {
                 continue;
             }
 
+            // Lines inside MyST colon directives are structural containers, not code blocks.
+            if ctx.flavor.supports_myst_directives() && ctx.lines.get(i).is_some_and(|l| l.in_myst_directive) {
+                prev_was_indented = false;
+                continue;
+            }
+
             if self.is_fenced_code_block_start(line) {
                 if in_container {
                     // Fence marker inside a container — not a real fence,

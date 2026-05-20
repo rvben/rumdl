@@ -1009,3 +1009,433 @@ mod colon_fence_tests {
         );
     }
 }
+
+// ============================================================================
+// MyST Markdown Detection
+// ============================================================================
+
+/// Check if a line is a MyST colon directive opener.
+/// Pattern: 0-3 leading spaces, 3+ colons, immediately followed by `{name}`.
+/// Returns the colon count if it's an opener, None otherwise.
+fn myst_colon_directive_opener(line: &str) -> Option<usize> {
+    let spaces = count_leading_spaces(line);
+    if spaces > 3 {
+        return None;
+    }
+    let rest = &line[spaces..];
+    if rest.starts_with('\t') {
+        return None;
+    }
+    let colon_count = rest.bytes().take_while(|&b| b == b':').count();
+    if colon_count < 3 {
+        return None;
+    }
+    let after_colons = &rest[colon_count..];
+    if after_colons.starts_with('{') && after_colons.contains('}') {
+        let name = after_colons
+            .trim_start_matches('{')
+            .split('}')
+            .next()
+            .unwrap_or("");
+        if !name.is_empty() && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+            return Some(colon_count);
+        }
+    }
+    None
+}
+
+/// Detect MyST colon fence directives (`:::{name} ... :::`) and mark their
+/// lines as `in_myst_directive`. Returns byte ranges for each detected directive.
+///
+/// Supports nesting: outer directives use more colons than inner ones.
+pub(super) fn detect_myst_colon_directives(
+    content: &str,
+    lines: &mut [LineInfo],
+    flavor: MarkdownFlavor,
+) -> Vec<(usize, usize)> {
+    if !flavor.supports_myst_directives() {
+        return Vec::new();
+    }
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    // Stack of (colon_count, byte_start) for nested directives
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+
+    for line in lines.iter_mut() {
+        if line.in_front_matter || line.in_html_comment || line.in_code_block {
+            continue;
+        }
+
+        let line_content = line.content(content);
+
+        if let Some(colon_count) = myst_colon_directive_opener(line_content) {
+            stack.push((colon_count, line.byte_offset));
+            line.in_myst_directive = true;
+        } else if !stack.is_empty() {
+            // Check if this is a closer for any level in the stack
+            // Closers match the innermost directive with <= colon count
+            let spaces = count_leading_spaces(line_content);
+            let rest = if spaces <= 3 { &line_content[spaces..] } else { "" };
+            let colon_count = rest.bytes().take_while(|&b| b == b':').count();
+            let is_bare_colons = colon_count >= 3 && rest[colon_count..].trim().is_empty();
+
+            if is_bare_colons {
+                // Find the innermost directive this closer matches
+                // A closer with N colons closes the innermost directive with <= N colons
+                if let Some(pos) = stack.iter().rposition(|&(c, _)| c <= colon_count) {
+                    let (_, start) = stack.remove(pos);
+                    // Also remove any inner directives that were opened after this one
+                    stack.truncate(pos);
+                    let end = (line.byte_offset + line.byte_len + 1).min(content.len());
+                    ranges.push((start, end));
+                    line.in_myst_directive = true;
+                } else {
+                    // Not a valid closer, mark as directive content if inside one
+                    line.in_myst_directive = true;
+                }
+            } else {
+                // Regular content inside a directive
+                line.in_myst_directive = true;
+            }
+        }
+    }
+
+    // Unclosed directives extend to end of document
+    for (_, start) in stack {
+        ranges.push((start, content.len()));
+    }
+
+    ranges.sort_by_key(|&(s, _)| s);
+    ranges
+}
+
+/// Detect MyST `%` comments and mark their lines.
+/// Pattern: 0-3 leading spaces followed by `%` then space or end of line.
+pub(super) fn detect_myst_comments(
+    content: &str,
+    lines: &mut [LineInfo],
+    flavor: MarkdownFlavor,
+) -> Vec<(usize, usize)> {
+    if !flavor.supports_myst_comments() {
+        return Vec::new();
+    }
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+
+    for line in lines.iter_mut() {
+        if line.in_code_block || line.in_front_matter || line.in_html_comment || line.in_myst_directive {
+            continue;
+        }
+
+        let line_content = line.content(content);
+        let spaces = count_leading_spaces(line_content);
+        if spaces > 3 {
+            continue;
+        }
+        let rest = &line_content[spaces..];
+        if rest.starts_with('%') && (rest.len() == 1 || rest.as_bytes().get(1) == Some(&b' ')) {
+            line.is_myst_comment = true;
+            let end = (line.byte_offset + line.byte_len + 1).min(content.len());
+            ranges.push((line.byte_offset, end));
+        }
+    }
+
+    ranges
+}
+
+/// Known MyST content-bearing directives whose body should be linted as markdown.
+const MYST_CONTENT_DIRECTIVES: &[&str] = &[
+    "note", "warning", "tip", "hint", "important", "caution", "danger",
+    "admonition", "attention", "error", "seealso", "topic", "sidebar",
+    "margin", "exercise", "solution", "dropdown", "tab-item", "grid",
+    "card", "tab-set", "toggle", "proof", "prf:proof", "prf:theorem",
+    "prf:lemma", "prf:definition", "prf:criterion", "prf:remark",
+    "prf:conjecture", "prf:corollary", "prf:algorithm", "prf:example",
+    "prf:property", "prf:observation", "prf:proposition", "prf:assumption",
+    "figure", "table", "list-table", "csv-table",
+];
+
+/// Check if a MyST directive name is content-bearing (body is markdown, not code).
+fn is_myst_content_directive(name: &str) -> bool {
+    MYST_CONTENT_DIRECTIVES.contains(&name)
+}
+
+/// Detect MyST backtick directives (` ```{name} `) and clear `in_code_block` for
+/// content-bearing directives so their body is linted as markdown.
+///
+/// Code-bearing directives ({code-cell}, {code-block}, {raw}, etc.) keep `in_code_block = true`.
+pub(super) fn detect_myst_backtick_directives(
+    content: &str,
+    lines: &mut [LineInfo],
+    flavor: MarkdownFlavor,
+    code_block_details: &[crate::utils::code_block_utils::CodeBlockDetail],
+    line_offsets: &[usize],
+) {
+    if !flavor.supports_myst_directives() {
+        return;
+    }
+
+    for block in code_block_details {
+        if !block.is_fenced {
+            continue;
+        }
+
+        // Check if info string matches MyST directive pattern: {name} or {name} args
+        let info = block.info_string.trim();
+        if !info.starts_with('{') || !info.contains('}') {
+            continue;
+        }
+
+        let name = info.trim_start_matches('{').split('}').next().unwrap_or("");
+        if name.is_empty() || !name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+            continue;
+        }
+
+        // Find the line index for this block's start byte offset
+        let start_line_idx = line_offsets
+            .partition_point(|&offset| offset <= block.start)
+            .saturating_sub(1);
+        let end_line_idx = line_offsets
+            .partition_point(|&offset| offset < block.end)
+            .min(lines.len());
+
+        // Mark the opener line as a directive
+        if let Some(line) = lines.get_mut(start_line_idx) {
+            line.in_myst_directive = true;
+        }
+
+        // For content-bearing directives, clear in_code_block for body lines
+        if is_myst_content_directive(name) {
+            let mut past_options = false;
+            let mut fence_tracker = FencedCodeTracker::new();
+
+            for i in (start_line_idx + 1)..end_line_idx {
+                if i >= lines.len() {
+                    break;
+                }
+
+                let line_content = lines[i].content(content);
+                let trimmed = line_content.trim();
+
+                // Check if this is the closing fence line
+                let is_closer = trimmed.starts_with("```")
+                    && trimmed.chars().skip(3).all(|c| c == '`' || c.is_whitespace());
+                if is_closer {
+                    lines[i].in_myst_directive = true;
+                    lines[i].in_code_block = false;
+                    break;
+                }
+
+                // Detect option lines (:key: value) at the start of the body
+                if !past_options {
+                    if trimmed.starts_with(':') && trimmed.len() > 1 && trimmed[1..].contains(':') {
+                        lines[i].in_myst_directive = true;
+                        lines[i].in_code_block = false;
+                        continue;
+                    } else if trimmed.starts_with("---") {
+                        // YAML options block delimiter
+                        lines[i].in_myst_directive = true;
+                        lines[i].in_code_block = false;
+                        continue;
+                    }
+                    past_options = true;
+                }
+
+                // Track nested fenced code blocks within the directive body
+                let in_nested_fence = fence_tracker.process_line(trimmed);
+                lines[i].in_myst_directive = true;
+                if !in_nested_fence {
+                    lines[i].in_code_block = false;
+                }
+            }
+        } else {
+            // Code-bearing directive: mark opener/closer as directive but keep in_code_block
+            if end_line_idx > 0 {
+                if let Some(closer_line) = lines.get_mut(end_line_idx - 1) {
+                    closer_line.in_myst_directive = true;
+                }
+            }
+        }
+    }
+}
+
+/// Detect MyST role syntax (`{rolename}`content``) and return byte ranges.
+/// Roles look like `{name}`content`` where name is alphanumeric with hyphens/underscores.
+pub(super) fn detect_myst_role_ranges(
+    content: &str,
+    lines: &[LineInfo],
+    flavor: MarkdownFlavor,
+    code_blocks: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
+    if !flavor.supports_myst_roles() {
+        return Vec::new();
+    }
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let bytes = content.as_bytes();
+
+    for line in lines {
+        if line.in_code_block || line.in_front_matter || line.in_html_comment {
+            continue;
+        }
+
+        let line_start = line.byte_offset;
+        let line_end = line.byte_offset + line.byte_len;
+        let line_bytes = &bytes[line_start..line_end];
+
+        let mut i = 0;
+        while i < line_bytes.len() {
+            // Look for `{` that starts a role
+            if line_bytes[i] != b'{' {
+                i += 1;
+                continue;
+            }
+
+            let role_start = line_start + i;
+
+            // Check if inside a code block (byte-range check)
+            if code_blocks.iter().any(|&(s, e)| role_start >= s && role_start < e) {
+                i += 1;
+                continue;
+            }
+
+            // Parse role name: {name}
+            let mut j = i + 1;
+            if j >= line_bytes.len() || !(line_bytes[j].is_ascii_alphabetic() || line_bytes[j] == b'_') {
+                i += 1;
+                continue;
+            }
+            while j < line_bytes.len()
+                && (line_bytes[j].is_ascii_alphanumeric()
+                    || line_bytes[j] == b'-'
+                    || line_bytes[j] == b'_'
+                    || line_bytes[j] == b':'
+                    || line_bytes[j] == b'.')
+            {
+                j += 1;
+            }
+            if j >= line_bytes.len() || line_bytes[j] != b'}' {
+                i += 1;
+                continue;
+            }
+            j += 1; // past '}'
+
+            // Must be immediately followed by backtick(s)
+            if j >= line_bytes.len() || line_bytes[j] != b'`' {
+                i += 1;
+                continue;
+            }
+
+            // Count opening backticks
+            let backtick_start = j;
+            while j < line_bytes.len() && line_bytes[j] == b'`' {
+                j += 1;
+            }
+            let backtick_count = j - backtick_start;
+
+            // Find matching closing backticks
+            let mut found_close = false;
+            while j + backtick_count <= line_bytes.len() {
+                if line_bytes[j] == b'`' {
+                    let close_count = line_bytes[j..].iter().take_while(|&&b| b == b'`').count();
+                    if close_count == backtick_count {
+                        j += close_count;
+                        found_close = true;
+                        break;
+                    }
+                    j += close_count;
+                } else {
+                    j += 1;
+                }
+            }
+
+            if found_close {
+                let role_end = line_start + j;
+                ranges.push((role_start, role_end));
+                i = j;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    ranges.sort_by_key(|&(s, _)| s);
+    ranges
+}
+
+#[cfg(test)]
+mod myst_tests {
+    use crate::config::MarkdownFlavor;
+    use crate::lint_context::LintContext;
+
+    fn myst_ctx(content: &str) -> LintContext<'_> {
+        LintContext::new(content, MarkdownFlavor::MyST, None)
+    }
+
+    #[test]
+    fn test_myst_colon_directive_basic() {
+        let content = ":::{note}\nThis is a note.\n:::\n";
+        let ctx = myst_ctx(content);
+        assert!(ctx.lines[0].in_myst_directive);
+        assert!(ctx.lines[1].in_myst_directive);
+        assert!(ctx.lines[2].in_myst_directive);
+        assert!(!ctx.lines[0].in_code_block);
+        assert!(!ctx.lines[1].in_code_block);
+    }
+
+    #[test]
+    fn test_myst_colon_directive_nested() {
+        let content = "::::{note}\n:::{warning}\nInner content\n:::\nOuter content\n::::\n";
+        let ctx = myst_ctx(content);
+        for i in 0..6 {
+            assert!(ctx.lines[i].in_myst_directive, "line {i} should be in_myst_directive");
+        }
+    }
+
+    #[test]
+    fn test_myst_comment() {
+        let content = "% This is a comment\nRegular text\n";
+        let ctx = myst_ctx(content);
+        assert!(ctx.lines[0].is_myst_comment);
+        assert!(!ctx.lines[1].is_myst_comment);
+    }
+
+    #[test]
+    fn test_myst_comment_not_in_standard_flavor() {
+        let content = "% This is a comment\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(!ctx.lines[0].is_myst_comment);
+    }
+
+    #[test]
+    fn test_myst_backtick_content_directive() {
+        let content = "```{note}\nThis is **markdown** content.\n```\n";
+        let ctx = myst_ctx(content);
+        assert!(ctx.lines[0].in_myst_directive);
+        assert!(ctx.lines[1].in_myst_directive);
+        assert!(!ctx.lines[1].in_code_block, "content directive body should not be in_code_block");
+    }
+
+    #[test]
+    fn test_myst_backtick_code_directive() {
+        let content = "```{code-cell} python\nprint('hello')\n```\n";
+        let ctx = myst_ctx(content);
+        assert!(ctx.lines[0].in_myst_directive);
+        assert!(ctx.lines[1].in_code_block, "code directive body should remain in_code_block");
+    }
+
+    #[test]
+    fn test_myst_role_detection() {
+        let content = "See {ref}`my-label` for details.\n";
+        let ctx = myst_ctx(content);
+        // The role should be detected
+        assert!(ctx.is_in_myst_role(4)); // byte position of `{ref}`
+    }
+
+    #[test]
+    fn test_myst_role_not_in_standard_flavor() {
+        let content = "See {ref}`my-label` for details.\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert!(!ctx.is_in_myst_role(4));
+    }
+}

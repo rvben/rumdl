@@ -380,6 +380,11 @@ impl Rule for MD013LineLength {
                 continue;
             }
 
+            // Skip MyST comments (% comment) — structural lines, not prose
+            if ctx.lines[line_idx].is_myst_comment {
+                continue;
+            }
+
             // Link reference definitions are always exempt, even in strict mode.
             // There's no way to shorten them without breaking the URL.
             // Also check after stripping list markers, since list items may

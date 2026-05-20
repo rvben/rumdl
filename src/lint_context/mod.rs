@@ -106,6 +106,9 @@ pub struct LintContext<'a> {
     inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
     lazy_cont_lines_cache: OnceLock<Arc<Vec<LazyContLine>>>, // Lazy-loaded lazy continuation lines
+    myst_directive_ranges: Vec<(usize, usize)>, // Pre-computed MyST colon directive byte ranges (:::{name} ... :::)
+    myst_comment_ranges: Vec<(usize, usize)>,   // Pre-computed MyST comment byte ranges (% comment)
+    myst_role_ranges: Vec<(usize, usize)>,      // Pre-computed MyST role byte ranges ({role}`content`)
 }
 
 impl<'a> LintContext<'a> {
@@ -153,7 +156,7 @@ impl<'a> LintContext<'a> {
         // Detected for all flavors except AzureDevOps, where `:::` denotes code fences
         // rather than autodoc directives.
         let autodoc_ranges = profile_section!("Autodoc block ranges", profile, {
-            if flavor.supports_colon_code_fences() {
+            if flavor.supports_colon_code_fences() || flavor.supports_myst_directives() {
                 Vec::new()
             } else {
                 crate::utils::mkdocstrings_refs::detect_autodoc_block_ranges(content)
@@ -371,6 +374,63 @@ impl<'a> LintContext<'a> {
             code_blocks.sort_by_key(|&(start, _)| start);
         }
 
+        // Detect MyST colon directives (:::{name} ... :::) — these are structural
+        // containers, NOT code blocks. Content inside is linted as markdown.
+        let myst_directive_ranges = profile_section!(
+            "MyST colon directives",
+            profile,
+            flavor_detection::detect_myst_colon_directives(content, &mut lines, flavor)
+        );
+
+        // Detect MyST % comments
+        let myst_comment_ranges = profile_section!(
+            "MyST comments",
+            profile,
+            flavor_detection::detect_myst_comments(content, &mut lines, flavor)
+        );
+
+        // Detect MyST backtick directives (```{name}) and clear in_code_block for
+        // content-bearing directives so their body is linted as markdown.
+        profile_section!(
+            "MyST backtick directives",
+            profile,
+            flavor_detection::detect_myst_backtick_directives(
+                content, &mut lines, flavor, &code_block_details, &line_offsets
+            )
+        );
+
+        // Filter code_blocks to remove false positives from MyST content-bearing directives.
+        // Same pattern as MkDocs admonition filtering.
+        if flavor.supports_myst_directives() {
+            let mut new_code_blocks = Vec::with_capacity(code_blocks.len());
+            for &(start, end) in &code_blocks {
+                let start_line = line_offsets
+                    .partition_point(|&offset| offset <= start)
+                    .saturating_sub(1);
+                let end_line = line_offsets.partition_point(|&offset| offset < end).min(lines.len());
+
+                let mut sub_start: Option<usize> = None;
+                for (i, &offset) in line_offsets[start_line..end_line]
+                    .iter()
+                    .enumerate()
+                    .map(|(j, o)| (j + start_line, o))
+                {
+                    let is_real_code = lines.get(i).is_some_and(|info| info.in_code_block);
+                    if is_real_code && sub_start.is_none() {
+                        let byte_start = if i == start_line { start } else { offset };
+                        sub_start = Some(byte_start);
+                    } else if !is_real_code && sub_start.is_some() {
+                        new_code_blocks.push((sub_start.unwrap(), offset));
+                        sub_start = None;
+                    }
+                }
+                if let Some(s) = sub_start {
+                    new_code_blocks.push((s, end));
+                }
+            }
+            code_blocks = new_code_blocks;
+        }
+
         // Detect kramdown constructs (extension blocks, IALs, ALDs) in kramdown flavor
         profile_section!(
             "Kramdown constructs",
@@ -396,6 +456,13 @@ impl<'a> LintContext<'a> {
             "Obsidian comments",
             profile,
             flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges)
+        );
+
+        // Detect MyST role syntax ({role}`content`)
+        let myst_role_ranges = profile_section!(
+            "MyST roles",
+            profile,
+            flavor_detection::detect_myst_role_ranges(content, &lines, flavor, &code_blocks)
         );
 
         // Run pulldown-cmark parse for links, images, and link byte ranges in a single pass.
@@ -788,6 +855,9 @@ impl<'a> LintContext<'a> {
             inline_config,
             obsidian_comment_ranges,
             lazy_cont_lines_cache: OnceLock::new(),
+            myst_directive_ranges,
+            myst_comment_ranges,
+            myst_role_ranges,
         }
     }
 
@@ -893,6 +963,21 @@ impl<'a> LintContext<'a> {
         // Convert line/column (1-indexed, char-based) to byte position
         let byte_pos = self.line_index.line_col_to_byte_range(line_num, col).start;
         self.is_in_obsidian_comment(byte_pos)
+    }
+
+    /// Get byte ranges of MyST colon directive blocks
+    pub fn myst_directive_ranges(&self) -> &[(usize, usize)] {
+        &self.myst_directive_ranges
+    }
+
+    /// Check if a byte position is inside a MyST role (`{role}`content``)
+    pub fn is_in_myst_role(&self, byte_pos: usize) -> bool {
+        Self::binary_search_ranges(&self.myst_role_ranges, byte_pos)
+    }
+
+    /// Check if a byte position is inside a MyST comment (`% comment`)
+    pub fn is_in_myst_comment(&self, byte_pos: usize) -> bool {
+        Self::binary_search_ranges(&self.myst_comment_ranges, byte_pos)
     }
 
     /// Get HTML tags - computed lazily on first access
