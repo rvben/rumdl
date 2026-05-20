@@ -15,6 +15,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [quarto](flavors/quarto.md)             | Quarto / RMarkdown                   | MD022, MD029, MD031, MD032, MD034, MD037, MD038, MD040, MD042, MD049, MD050, MD051, MD052 |
 | [kramdown](flavors/kramdown.md)         | Jekyll / kramdown                    | MD022, MD041, MD051                                                                       |
 | [azure_devops](flavors/azure_devops.md) | Azure DevOps wikis                   | MD013, MD031, MD034, MD046, MD048                                                         |
+| [myst](flavors/myst.md)                 | MyST / Jupyter Book / Sphinx         | MD013, MD031, MD038, MD040, MD046, MD048                                                  |
 
 ## Configuration
 
@@ -66,6 +67,7 @@ The `standard` flavor includes CommonMark plus widely-adopted GFM extensions (ta
 - **[Quarto](flavors/quarto.md)** - Citations, shortcodes, div blocks, math blocks, executable code
 - **[Kramdown](flavors/kramdown.md)** - IALs, ALDs, extension blocks, kramdown anchor generation
 - **[Azure DevOps](flavors/azure_devops.md)** - Colon code fences (`:::mermaid … :::`) treated as opaque code blocks
+- **[MyST](flavors/myst.md)** - Directives (`:::{name}`, `` ```{name} ``), roles (`{role}`content``), `%` comments
 
 ## Adding Flavor Support
 

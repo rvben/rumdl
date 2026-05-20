@@ -56,7 +56,7 @@ It offers:
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
-- 🎯 **Multiple Markdown flavors** - [GFM, MkDocs, MDX, Quarto](docs/flavors.md) support with auto-detection
+- 🎯 **Multiple Markdown flavors** - [GFM, MkDocs, MDX, Quarto, MyST](docs/flavors.md) support with auto-detection
 - 🌐 **Multiple installation options** - Rust, Python, standalone binaries
 - 🐍 **Installable via pip** for Python users
 - 📏 **Modern CLI** with detailed error reporting
@@ -519,6 +519,7 @@ rumdl supports multiple Markdown flavors to accommodate different documentation 
 | [obsidian](docs/flavors/obsidian.md)         | Obsidian                     | Tag syntax (#tagname treated as tags, not headings) |
 | [kramdown](docs/flavors/kramdown.md)         | Jekyll / kramdown            | IALs, ALDs, extension blocks                        |
 | [azure_devops](docs/flavors/azure_devops.md) | Azure DevOps Wiki            | Colon code fences (:::lang ... :::)                 |
+| [myst](docs/flavors/myst.md)                 | MyST / Jupyter Book / Sphinx | Directives, roles, `%` comments                     |
 
 ### Configuring Flavors
 
