@@ -265,6 +265,14 @@ impl Rule for MD040FencedCodeLanguage {
             let has_mkdocs_attrs_only =
                 ctx.flavor == crate::config::MarkdownFlavor::MkDocs && is_superfences_attribute(after_fence);
 
+            // MyST directives use {name} as the info string (e.g., {note}, {code-cell} python).
+            // These are valid MyST syntax and should not trigger missing-language warnings.
+            let is_myst_directive =
+                ctx.flavor.supports_myst_directives() && after_fence.starts_with('{') && after_fence.contains('}') && {
+                    let name = after_fence.trim_start_matches('{').split('}').next().unwrap_or("");
+                    !name.is_empty() && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                };
+
             // Pandoc/Quarto brace-syntax code chunks fall into three forms:
             //   1. `{=html}` raw blocks — accepted under any Pandoc-compatible flavor.
             //      Validated by `is_pandoc_raw_block_lang` (non-empty ASCII format name).
@@ -285,10 +293,13 @@ impl Rule for MD040FencedCodeLanguage {
                 && !is_pandoc_raw
                 && !is_pandoc_class_attr;
             let has_pandoc_or_quarto_syntax = is_pandoc_raw || is_pandoc_class_attr || is_quarto_exec;
-            let is_unrecognized_brace_syntax =
-                after_fence.starts_with('{') && after_fence.ends_with('}') && !has_pandoc_or_quarto_syntax;
+            let is_unrecognized_brace_syntax = after_fence.starts_with('{')
+                && after_fence.ends_with('}')
+                && !has_pandoc_or_quarto_syntax
+                && !is_myst_directive;
 
             let needs_language = !has_mkdocs_attrs_only
+                && !is_myst_directive
                 && (block.language.is_empty()
                     || is_superfences_attribute(&block.language)
                     || is_unrecognized_brace_syntax);

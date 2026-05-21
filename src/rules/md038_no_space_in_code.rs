@@ -341,6 +341,12 @@ impl Rule for MD038NoSpaceInCode {
                     continue;
                 }
 
+                // Skip MyST role syntax: {role}`content` — the backtick content is part
+                // of the role's semantics, not a regular code span.
+                if ctx.flavor.supports_myst_roles() && ctx.is_in_myst_role(code_span.byte_offset) {
+                    continue;
+                }
+
                 // Check if this is part of Hugo template syntax (e.g., {{raw `...`}})
                 // Hugo uses backticks as part of template delimiters, not markdown code spans
                 if self.is_hugo_template_syntax(ctx, code_span) {

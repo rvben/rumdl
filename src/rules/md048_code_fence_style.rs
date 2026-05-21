@@ -98,9 +98,23 @@ impl MD048CodeFenceStyle {
                 continue;
             }
 
+            // Skip lines inside MyST colon directives — they are structural
+            // containers, not code fences.
+            if ctx.flavor.supports_myst_directives() && ctx.lines.get(i).is_some_and(|li| li.in_myst_directive) {
+                continue;
+            }
+
             let Some(marker) = parse_fence_marker(line) else {
                 continue;
             };
+
+            // Skip MyST backtick directives (info string starts with {name})
+            if ctx.flavor.supports_myst_directives()
+                && marker.fence_char == '`'
+                && marker.rest.trim_start().starts_with('{')
+            {
+                continue;
+            }
 
             if !in_code_block {
                 // Opening fence - count it
@@ -216,9 +230,23 @@ impl Rule for MD048CodeFenceStyle {
                 continue;
             }
 
+            // Skip lines inside MyST colon directives.
+            if ctx.flavor.supports_myst_directives() && ctx.lines.get(line_num).is_some_and(|li| li.in_myst_directive) {
+                continue;
+            }
+
             let Some(marker) = parse_fence_marker(line) else {
                 continue;
             };
+
+            // Skip MyST backtick directives (info string starts with {name})
+            if ctx.flavor.supports_myst_directives()
+                && !in_code_block
+                && marker.fence_char == '`'
+                && marker.rest.trim_start().starts_with('{')
+            {
+                continue;
+            }
             let fence_char = marker.fence_char;
             let fence_len = marker.fence_len;
 

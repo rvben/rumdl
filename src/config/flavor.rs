@@ -46,14 +46,17 @@ pub enum MarkdownFlavor {
     /// Azure DevOps flavor — treats `:::lang` blocks as opaque code fences
     #[serde(rename = "azure_devops", alias = "azure", alias = "ado")]
     AzureDevOps,
+    /// MyST (Markedly Structured Text) flavor — directives, roles, dollar math, % comments
+    #[serde(rename = "myst", alias = "mystmd")]
+    MyST,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd"]
     })
 }
 
@@ -78,6 +81,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::Obsidian => write!(f, "obsidian"),
             MarkdownFlavor::Kramdown => write!(f, "kramdown"),
             MarkdownFlavor::AzureDevOps => write!(f, "azure_devops"),
+            MarkdownFlavor::MyST => write!(f, "myst"),
         }
     }
 }
@@ -95,6 +99,7 @@ impl FromStr for MarkdownFlavor {
             "obsidian" => Ok(MarkdownFlavor::Obsidian),
             "kramdown" | "jekyll" => Ok(MarkdownFlavor::Kramdown),
             "azure_devops" | "azure" | "ado" => Ok(MarkdownFlavor::AzureDevOps),
+            "myst" | "mystmd" => Ok(MarkdownFlavor::MyST),
             // GFM and CommonMark are aliases for Standard since the base parser
             // (pulldown-cmark) already supports GFM extensions (tables, task lists,
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
@@ -174,12 +179,28 @@ impl MarkdownFlavor {
             Self::Obsidian => "Obsidian",
             Self::Kramdown => "Kramdown",
             Self::AzureDevOps => "AzureDevOps",
+            Self::MyST => "MyST",
         }
     }
 
     /// True only for Azure DevOps flavor, which uses `:::lang` as a code fence.
     pub fn supports_colon_code_fences(self) -> bool {
         matches!(self, Self::AzureDevOps)
+    }
+
+    /// True for MyST flavor — supports directive syntax (backtick and colon fences with `{name}`)
+    pub fn supports_myst_directives(self) -> bool {
+        matches!(self, Self::MyST)
+    }
+
+    /// True for MyST flavor — supports role syntax (`{role}`content``)
+    pub fn supports_myst_roles(self) -> bool {
+        matches!(self, Self::MyST)
+    }
+
+    /// True for MyST flavor — supports `%` line comments
+    pub fn supports_myst_comments(self) -> bool {
+        matches!(self, Self::MyST)
     }
 }
 
@@ -222,6 +243,7 @@ mod tests {
             (MarkdownFlavor::Obsidian, "obsidian"),
             (MarkdownFlavor::Kramdown, "kramdown"),
             (MarkdownFlavor::AzureDevOps, "azure_devops"),
+            (MarkdownFlavor::MyST, "myst"),
         ];
         for (variant, expected) in cases {
             let displayed = variant.to_string();
@@ -250,6 +272,7 @@ mod tests {
             MarkdownFlavor::Obsidian,
             MarkdownFlavor::Kramdown,
             MarkdownFlavor::AzureDevOps,
+            MarkdownFlavor::MyST,
         ];
         for variant in variants {
             let displayed = variant.to_string();
@@ -325,6 +348,7 @@ mod tests {
         assert!(!MarkdownFlavor::Quarto.supports_colon_code_fences());
         assert!(!MarkdownFlavor::Obsidian.supports_colon_code_fences());
         assert!(!MarkdownFlavor::Kramdown.supports_colon_code_fences());
+        assert!(!MarkdownFlavor::MyST.supports_colon_code_fences());
     }
 
     #[test]
@@ -336,5 +360,38 @@ mod tests {
     fn test_display_all_variants_covers_azure_devops() {
         let displayed = MarkdownFlavor::AzureDevOps.to_string();
         assert!(displayed.chars().all(|c| !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn test_myst_from_str() {
+        assert_eq!("myst".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::MyST);
+        assert_eq!("MYST".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::MyST);
+        assert_eq!("mystmd".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::MyST);
+    }
+
+    #[test]
+    fn test_myst_display_and_round_trip() {
+        assert_eq!(MarkdownFlavor::MyST.to_string(), "myst");
+        let parsed: MarkdownFlavor = "myst".parse().unwrap();
+        assert_eq!(parsed, MarkdownFlavor::MyST);
+    }
+
+    #[test]
+    fn test_myst_capabilities() {
+        assert!(MarkdownFlavor::MyST.supports_myst_directives());
+        assert!(MarkdownFlavor::MyST.supports_myst_roles());
+        assert!(MarkdownFlavor::MyST.supports_myst_comments());
+        assert!(!MarkdownFlavor::MyST.is_pandoc_compatible());
+        assert!(!MarkdownFlavor::MyST.supports_colon_code_fences());
+        assert!(!MarkdownFlavor::MyST.supports_jsx());
+
+        assert!(!MarkdownFlavor::Standard.supports_myst_directives());
+        assert!(!MarkdownFlavor::Standard.supports_myst_roles());
+        assert!(!MarkdownFlavor::Standard.supports_myst_comments());
+    }
+
+    #[test]
+    fn test_myst_name() {
+        assert_eq!(MarkdownFlavor::MyST.name(), "MyST");
     }
 }

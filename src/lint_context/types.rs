@@ -73,6 +73,10 @@ pub struct LineInfo {
     pub in_jsx_block: bool,
     /// Whether this line is inside a footnote definition body (continuation lines)
     pub in_footnote_definition: bool,
+    /// Whether this line is inside a MyST directive block (colon or backtick fence with `{name}`)
+    pub in_myst_directive: bool,
+    /// Whether this line is a MyST comment (`% comment`)
+    pub is_myst_comment: bool,
 }
 
 impl LineInfo {
@@ -111,6 +115,7 @@ impl LineInfo {
             && !self.in_pymdown_block
             && !self.in_kramdown_extension_block
             && !self.is_kramdown_block_ial
+            && !self.is_myst_comment
             && self.heading.is_none()
     }
 }
