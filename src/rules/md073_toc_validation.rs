@@ -80,111 +80,119 @@ enum TocMismatch {
     },
 }
 
-/// Regex patterns for stripping markdown formatting from heading text
+/// Regex patterns used by `strip_links_and_images`.
 static MARKDOWN_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap());
 static MARKDOWN_REF_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[[^\]]*\]").unwrap());
 static MARKDOWN_IMAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap());
-/// Strip code spans from text, handling multi-backtick spans per CommonMark spec.
-/// E.g., `` `code` ``, ``` ``code with ` backtick`` ```, etc.
-fn strip_code_spans(text: &str) -> String {
+
+/// Extract code-span byte ranges from `text` using the CommonMark rule:
+/// a run of N backticks opens a span closed by exactly N backticks.
+/// Returns a sorted list of `(start, end)` byte offsets that are inside code spans
+/// (including the backtick delimiters themselves).
+fn code_span_ranges(text: &str) -> Vec<(usize, usize)> {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
-    let mut result = String::with_capacity(text.len());
+    let mut ranges = Vec::new();
     let mut i = 0;
 
     while i < len {
         if chars[i] == '`' {
-            // Count opening backticks
-            let open_start = i;
+            let span_start = i;
             while i < len && chars[i] == '`' {
                 i += 1;
             }
-            let backtick_count = i - open_start;
+            let n = i - span_start;
 
-            // Find matching closing backticks (same count)
-            let content_start = i;
-            let mut found_close = false;
-            while i < len {
-                if chars[i] == '`' {
-                    let close_start = i;
-                    while i < len && chars[i] == '`' {
-                        i += 1;
+            // Search for the matching closing sequence of exactly n backticks
+            let mut j = i;
+            let mut found = false;
+            while j < len {
+                if chars[j] == '`' {
+                    let close_start = j;
+                    while j < len && chars[j] == '`' {
+                        j += 1;
                     }
-                    if i - close_start == backtick_count {
-                        // Found matching close - extract content
-                        let content: String = chars[content_start..close_start].iter().collect();
-                        // CommonMark: strip one leading and one trailing space if both exist
-                        let stripped = if content.starts_with(' ') && content.ends_with(' ') && content.len() > 1 {
-                            &content[1..content.len() - 1]
-                        } else {
-                            &content
-                        };
-                        result.push_str(stripped);
-                        found_close = true;
+                    if j - close_start == n {
+                        // Convert char indices to byte offsets
+                        let byte_start: usize = text.char_indices().nth(span_start).map_or(0, |(b, _)| b);
+                        let byte_end: usize = text.char_indices().nth(j).map_or(text.len(), |(b, _)| b);
+                        ranges.push((byte_start, byte_end));
+                        i = j;
+                        found = true;
                         break;
                     }
                 } else {
-                    i += 1;
+                    j += 1;
                 }
             }
-            if !found_close {
-                // No matching close found - emit backticks literally
-                for _ in 0..backtick_count {
-                    result.push('`');
-                }
-                let remaining: String = chars[content_start..].iter().collect();
-                result.push_str(&remaining);
-                break;
+            if !found {
+                // No matching close; skip past the opening backticks
+                i = span_start + n;
             }
         } else {
-            result.push(chars[i]);
             i += 1;
         }
     }
 
-    result
+    ranges
 }
-static MARKDOWN_BOLD_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*([^*]+)\*\*").unwrap());
-static MARKDOWN_BOLD_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__([^_]+)__").unwrap());
-static MARKDOWN_ITALIC_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+)\*").unwrap());
-// Match underscore italic at word boundaries (space or start/end)
-// Handles: "_text_", " _text_ ", "start _text_", "_text_ end"
-static MARKDOWN_ITALIC_UNDERSCORE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(^|[^a-zA-Z0-9])_([^_]+)_([^a-zA-Z0-9]|$)").unwrap());
 
-/// Strip markdown formatting from text, preserving plain text content.
-/// Used for TOC entry display text.
+/// Strip only links and images from `text`, preserving all other inline
+/// formatting (code spans, bold, italic, etc.).
+///
+/// Links and images cannot appear inside a Markdown link label `[...]`, so they
+/// must be removed when building TOC display text. Code spans and emphasis are
+/// valid inside link labels and should be kept so the TOC entry faithfully
+/// reflects the heading's visual appearance.
+///
+/// Code-span contents are protected: link-like syntax such as `[foo](bar)` that
+/// appears inside backticks is left untouched.
 ///
 /// Examples:
-/// - `[terminal](url)` → `terminal`
-/// - `**bold**` → `bold`
-/// - `` `code` `` → `code`
+/// - `` `my header` `` → `` `my header` `` (code ticks preserved)
+/// - `[terminal](url)` → `terminal` (link stripped)
+/// - `![alt](img.png)` → `alt` (image stripped)
+/// - `**bold**` → `**bold**` (emphasis preserved)
+/// - `` `[foo](bar)` `` → `` `[foo](bar)` `` (link inside code span preserved)
 /// - `Tool: [terminal](url)` → `Tool: terminal`
-fn strip_markdown_formatting(text: &str) -> String {
-    let mut result = text.to_string();
+fn strip_links_and_images(text: &str) -> String {
+    // Collect code-span byte ranges so we can protect their contents from
+    // the link/image regex substitutions.
+    let protected = code_span_ranges(text);
 
-    // Strip images first (before links, since images use similar syntax)
-    result = MARKDOWN_IMAGE.replace_all(&result, "$1").to_string();
+    // If there are no code spans the fast path avoids all the extra work.
+    if protected.is_empty() {
+        let mut result = text.to_string();
+        result = MARKDOWN_IMAGE.replace_all(&result, "$1").to_string();
+        result = MARKDOWN_LINK.replace_all(&result, "$1").to_string();
+        result = MARKDOWN_REF_LINK.replace_all(&result, "$1").to_string();
+        return result;
+    }
 
-    // Strip links: [text](url) → text
-    result = MARKDOWN_LINK.replace_all(&result, "$1").to_string();
+    // Replace each code span with a unique placeholder that cannot be matched
+    // by the link/image regexes, apply the regexes, then restore the originals.
+    let mut placeholders: Vec<(&str, String)> = Vec::with_capacity(protected.len());
+    let mut masked = text.to_string();
+    // Process spans in reverse order so byte offsets remain valid after each replacement.
+    for (i, &(start, end)) in protected.iter().enumerate().rev() {
+        // Placeholder: a string containing no `[`, `]`, `(`, `)`, `!` characters.
+        let placeholder = format!("\x00CODESPAN{i}\x00");
+        let original = &text[start..end];
+        placeholders.push((original, placeholder.clone()));
+        masked.replace_range(start..end, &placeholder);
+    }
 
-    // Strip reference links: [text][ref] → text
-    result = MARKDOWN_REF_LINK.replace_all(&result, "$1").to_string();
+    // Apply link/image stripping to the masked string
+    masked = MARKDOWN_IMAGE.replace_all(&masked, "$1").to_string();
+    masked = MARKDOWN_LINK.replace_all(&masked, "$1").to_string();
+    masked = MARKDOWN_REF_LINK.replace_all(&masked, "$1").to_string();
 
-    // Strip code spans (handles multi-backtick spans like ``code with ` backtick``)
-    result = strip_code_spans(&result);
+    // Restore the original code-span text
+    for (original, placeholder) in &placeholders {
+        masked = masked.replace(placeholder.as_str(), original);
+    }
 
-    // Strip bold (do double before single to handle nested)
-    result = MARKDOWN_BOLD_ASTERISK.replace_all(&result, "$1").to_string();
-    result = MARKDOWN_BOLD_UNDERSCORE.replace_all(&result, "$1").to_string();
-
-    // Strip italic
-    result = MARKDOWN_ITALIC_ASTERISK.replace_all(&result, "$1").to_string();
-    // Underscore italic: preserve boundary chars, extract content
-    result = MARKDOWN_ITALIC_UNDERSCORE.replace_all(&result, "$1$2$3").to_string();
-
-    result
+    masked
 }
 
 /// MD073: Table of Contents Validation
@@ -439,13 +447,15 @@ impl MD073TocValidation {
             }
         }
 
-        // Check for text mismatches (compare stripped versions)
+        // Check for text mismatches. Compare with the same normalization used in
+        // generate_toc: strip only links and images, preserve code spans and emphasis.
+        // This ensures a correct user-written TOC entry like `` [`my header`](#anchor) ``
+        // is not flagged against a heading `` `my header` ``.
         for entry in actual {
             if let Some(exp) = expected_anchors.get(entry.anchor.as_str()) {
-                // Compare stripped text (removes markdown formatting like links, emphasis)
-                let actual_stripped = strip_markdown_formatting(entry.text.trim());
-                let expected_stripped = strip_markdown_formatting(exp.text.trim());
-                if actual_stripped != expected_stripped {
+                let actual_normalized = strip_links_and_images(entry.text.trim());
+                let expected_normalized = strip_links_and_images(exp.text.trim());
+                if actual_normalized != expected_normalized {
                     mismatches.push(TocMismatch::TextMismatch {
                         entry: entry.clone(),
                         expected: (*exp).clone(),
@@ -538,8 +548,10 @@ impl MD073TocValidation {
             let level_diff = entry.level.saturating_sub(base_level) as usize;
             let indent = indent_str.repeat(level_diff);
 
-            // Strip markdown formatting from heading text for clean TOC entries
-            let display_text = strip_markdown_formatting(&entry.text);
+            // Build display text: strip only links and images (which would create invalid
+            // nested-link syntax inside `[...]`), but preserve code spans and emphasis so
+            // the TOC entry reflects the heading's visual appearance.
+            let display_text = strip_links_and_images(&entry.text);
             result.push_str(&format!("{indent}- [{display_text}](#{})\n", entry.anchor));
         }
 
@@ -747,6 +759,86 @@ indent = 2
 mod tests {
     use super::*;
     use crate::config::MarkdownFlavor;
+    use regex::Regex;
+    use std::sync::LazyLock;
+
+    // ---- Test-only helpers for stripping all inline formatting ----
+    // These are not used in production code; they exist only to test
+    // the individual stripping primitives in isolation.
+
+    /// Strip code spans from text, handling multi-backtick spans per CommonMark spec.
+    fn strip_code_spans(text: &str) -> String {
+        let chars: Vec<char> = text.chars().collect();
+        let len = chars.len();
+        let mut result = String::with_capacity(text.len());
+        let mut i = 0;
+
+        while i < len {
+            if chars[i] == '`' {
+                let open_start = i;
+                while i < len && chars[i] == '`' {
+                    i += 1;
+                }
+                let backtick_count = i - open_start;
+
+                let content_start = i;
+                let mut found_close = false;
+                while i < len {
+                    if chars[i] == '`' {
+                        let close_start = i;
+                        while i < len && chars[i] == '`' {
+                            i += 1;
+                        }
+                        if i - close_start == backtick_count {
+                            let content: String = chars[content_start..close_start].iter().collect();
+                            let stripped = if content.starts_with(' ') && content.ends_with(' ') && content.len() > 1 {
+                                content[1..content.len() - 1].to_string()
+                            } else {
+                                content
+                            };
+                            result.push_str(&stripped);
+                            found_close = true;
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+                if !found_close {
+                    for _ in 0..backtick_count {
+                        result.push('`');
+                    }
+                    let remaining: String = chars[content_start..].iter().collect();
+                    result.push_str(&remaining);
+                    break;
+                }
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        result
+    }
+
+    static TEST_BOLD_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*([^*]+)\*\*").unwrap());
+    static TEST_BOLD_UNDERSCORE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__([^_]+)__").unwrap());
+    static TEST_ITALIC_ASTERISK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*([^*]+)\*").unwrap());
+    static TEST_ITALIC_UNDERSCORE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(^|[^a-zA-Z0-9])_([^_]+)_([^a-zA-Z0-9]|$)").unwrap());
+
+    /// Strip all inline markdown formatting from text, reducing it to plain text.
+    /// Builds on `strip_links_and_images` and additionally removes code spans,
+    /// bold, and italic markers. Used in tests only.
+    fn strip_markdown_formatting(text: &str) -> String {
+        let mut result = strip_links_and_images(text);
+        result = strip_code_spans(&result);
+        result = TEST_BOLD_ASTERISK.replace_all(&result, "$1").to_string();
+        result = TEST_BOLD_UNDERSCORE.replace_all(&result, "$1").to_string();
+        result = TEST_ITALIC_ASTERISK.replace_all(&result, "$1").to_string();
+        result = TEST_ITALIC_UNDERSCORE.replace_all(&result, "$1$2$3").to_string();
+        result
+    }
 
     fn create_ctx(content: &str) -> LintContext<'_> {
         LintContext::new(content, MarkdownFlavor::Standard, None)
@@ -1753,8 +1845,8 @@ Content.
         let ctx = create_ctx(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Generated TOC should have stripped text (bold markers removed)
-        assert!(fixed.contains("- [Important Section](#important-section)"));
+        // Generated TOC preserves bold markers in display text; anchor strips them.
+        assert!(fixed.contains("- [**Important** Section](#important-section)"));
     }
 
     #[test]
@@ -1773,8 +1865,8 @@ Content.
         let ctx = create_ctx(content);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // Generated TOC should have stripped text (backticks removed)
-        assert!(fixed.contains("- [Using async Functions](#using-async-functions)"));
+        // Generated TOC preserves code ticks in display text; anchor strips them.
+        assert!(fixed.contains("- [Using `async` Functions](#using-async-functions)"));
     }
 
     // ========== Custom Anchor Tests ==========
@@ -2008,11 +2100,11 @@ Second.
     #[test]
     fn test_toc_with_double_backtick_heading() {
         let rule = create_enabled_rule();
+        // Use fix() to generate the correct TOC (including anchor), then check()
+        // should produce no warnings on the fixed output.
         let content = r#"# Title
 
 <!-- toc -->
-
-- [Using code with backtick](#using-code-with-backtick)
 
 <!-- tocstop -->
 
@@ -2022,14 +2114,25 @@ Content here.
 "#;
         let ctx = create_ctx(content);
         // The heading uses double-backtick code span: ``code with ` backtick``
-        // After stripping, heading text = "Using code with ` backtick"
-        // The fix should produce a TOC entry with the stripped text
+        // TOC display text preserves the code span; anchor is derived from raw text.
         let fixed = rule.fix(&ctx).unwrap();
-        // The generated TOC should have the stripped heading text
+
+        // Verify that the generated TOC entry preserves the double-backtick code span
+        // in the display text.
+        let toc_start = fixed.find("<!-- toc -->").unwrap();
+        let toc_end = fixed.find("<!-- tocstop -->").unwrap();
+        let toc_content = &fixed[toc_start..toc_end];
         assert!(
-            fixed.contains("code with ` backtick") || fixed.contains("code with backtick"),
-            "Fix should strip double-backtick code span from heading. Got TOC: {}",
-            &fixed[fixed.find("<!-- toc -->").unwrap()..fixed.find("<!-- tocstop -->").unwrap()]
+            toc_content.contains("``code with ` backtick``"),
+            "Fix should preserve double-backtick code span in TOC display text. Got: {toc_content}"
+        );
+
+        // After fix, check() must produce no warnings (idempotency check)
+        let ctx2 = create_ctx(&fixed);
+        let result = rule.check(&ctx2).unwrap();
+        assert!(
+            result.is_empty(),
+            "check() should not warn on fixed output. Warnings: {result:?}"
         );
     }
 
@@ -2119,5 +2222,206 @@ Content here.
 
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, content, "TOC in a disabled region should be preserved exactly");
+    }
+
+    // ========== Inline Formatting Preservation Tests (#634) ==========
+
+    /// Backticks in a heading must be preserved in the TOC display text.
+    /// The anchor is generated from the raw heading text (which includes backticks)
+    /// and must still use the stripped form.
+    #[test]
+    fn test_fix_code_ticks_preserved_in_toc_display_text() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+### `my header`
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains("- [`my header`](#my-header)"),
+            "Code ticks must be preserved in TOC display text. Got: {fixed}"
+        );
+    }
+
+    /// A correct user-written TOC entry with code ticks must not be re-flagged.
+    #[test]
+    fn test_validate_toc_with_code_ticks_is_valid() {
+        let rule = create_enabled_rule();
+        let content = r#"# Title
+
+<!-- toc -->
+
+- [`my header`](#my-header)
+
+<!-- tocstop -->
+
+## `my header`
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "A TOC entry with preserved code ticks should be accepted as valid: {result:?}"
+        );
+    }
+
+    /// A heading with bold/italic preserves emphasis markers in the TOC display text;
+    /// the anchor is generated from the raw (formatted) heading text and still uses
+    /// the stripped form.
+    #[test]
+    fn test_fix_emphasis_preserved_in_toc_display_text() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## **bold** and *italic*
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains("- [**bold** and *italic*](#bold-and-italic)"),
+            "Emphasis markers must be preserved in TOC display text. Got: {fixed}"
+        );
+    }
+
+    /// A heading containing a link must have the link stripped from the TOC display
+    /// text (nested links are invalid in Markdown).
+    #[test]
+    fn test_fix_link_in_heading_is_stripped() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## See [docs](http://example.com) for details
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains("- [See docs for details](#see-docs-for-details)"),
+            "Link must be stripped from TOC display text. Got: {fixed}"
+        );
+        // Ensure no URL leaks into TOC entry
+        let toc_start = fixed.find("<!-- toc -->").unwrap();
+        let toc_end = fixed.find("<!-- tocstop -->").unwrap();
+        let toc_content = &fixed[toc_start..toc_end];
+        assert!(
+            !toc_content.contains("http://example.com"),
+            "TOC should not contain link URL: {toc_content}"
+        );
+    }
+
+    /// An image in a heading must still be stripped from the TOC display text.
+    #[test]
+    fn test_fix_image_in_heading_is_stripped() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Section ![icon](icon.png) Title
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert!(
+            fixed.contains("- [Section icon Title](#section-icon-title)"),
+            "Image must be stripped from TOC display text. Got: {fixed}"
+        );
+    }
+
+    /// Running fix() twice on a document with inline-formatted headings must
+    /// produce stable output (idempotency).
+    #[test]
+    fn test_fix_idempotent_with_inline_formatting() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## `code` heading
+
+### **bold** heading
+
+## See [link](http://x.com)
+
+"#;
+        let ctx = create_ctx(content);
+        let fixed1 = rule.fix(&ctx).unwrap();
+        let ctx2 = create_ctx(&fixed1);
+        let fixed2 = rule.fix(&ctx2).unwrap();
+
+        assert_eq!(fixed1, fixed2, "fix() must be idempotent for inline-formatted headings");
+
+        // After fix, check() must produce no warnings
+        let warnings = rule.check(&ctx2).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "check() must not warn after fix() for inline-formatted headings: {warnings:?}"
+        );
+    }
+
+    /// Link-like syntax inside a code span must not be stripped, because it is
+    /// literal content of the code span and not a real Markdown link.
+    #[test]
+    fn test_link_inside_code_span_preserved_in_toc() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Use `[foo](bar)` syntax
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The code span `[foo](bar)` must survive intact in the TOC display text.
+        // The anchor is generated from the raw heading text by the GitHub algorithm,
+        // which strips backtick, bracket, and paren characters. Verify only the
+        // display-text preservation, not the exact anchor (which depends on the anchor
+        // generation algorithm's treatment of non-alphanumeric chars in code spans).
+        let toc_start = fixed.find("<!-- toc -->").unwrap();
+        let toc_end = fixed.find("<!-- tocstop -->").unwrap();
+        let toc_content = &fixed[toc_start..toc_end];
+        assert!(
+            toc_content.contains("Use `[foo](bar)` syntax"),
+            "Link-like text inside code span must be preserved in TOC display text. Got: {toc_content}"
+        );
+        // Also ensure the real link stripping (outside code spans) still works
+        assert!(
+            !toc_content.contains("http://"),
+            "Real links (outside code spans) should be stripped: {toc_content}"
+        );
     }
 }

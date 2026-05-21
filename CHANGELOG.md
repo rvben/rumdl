@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.1.96](https://github.com/rvben/rumdl/compare/v0.1.95...v0.1.96) - 2026-05-21
+
+### Fixed
+
+- **md073**: protect code-span contents from link/image stripping ([530e41d](https://github.com/rvben/rumdl/commit/530e41d61c5d34dcb517fa677816c69e5c2ea884))
+- **md073**: preserve inline code spans and emphasis in generated TOC entries (#634) ([897c76a](https://github.com/rvben/rumdl/commit/897c76a8fb48395dabde8030fffc02cc22b0d0e7))
+- **md057**: handle trailing-slash directory links that include a fragment or query ([539a6d0](https://github.com/rvben/rumdl/commit/539a6d087b332e097abc85cce56ea478840184cc))
+- **md057**: eliminate duplicate warnings for broken relative links and accept existing directory targets (#631, #632) ([6a37ada](https://github.com/rvben/rumdl/commit/6a37ada04337079f08e656087c6d681a78181d46))
+
 ## [0.1.95](https://github.com/rvben/rumdl/compare/v0.1.94...v0.1.95) - 2026-05-19
 
 ### Added
