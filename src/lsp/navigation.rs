@@ -55,6 +55,17 @@ fn is_external_url(target: &str) -> bool {
     PROTOCOL_DOMAIN_REGEX.is_match(target)
 }
 
+/// Whether a root-relative link resolves to `target` under any content root.
+///
+/// `link_target` is the link path with its leading `/` already stripped (as
+/// stored in `FileIndex::root_relative_links`), so it can be joined directly to
+/// each content root.
+fn root_relative_link_resolves(content_roots: &[PathBuf], link_target: &str, target: &Path) -> bool {
+    content_roots
+        .iter()
+        .any(|root| normalize_path(&root.join(link_target)) == *target)
+}
+
 /// Find the position of the closing `)` that balances with the opening `(`.
 ///
 /// CommonMark allows balanced parentheses in link destinations, e.g.
@@ -444,13 +455,7 @@ impl RumdlLanguageServer {
         }
 
         let current_file = uri.to_file_path().ok()?;
-        let current_dir = current_file.parent()?.to_path_buf();
-
-        let target_path = if link.file_path.is_empty() {
-            current_file.clone()
-        } else {
-            normalize_path(&current_dir.join(&link.file_path))
-        };
+        let target_path = self.resolve_link_path(&current_file, &link.file_path).await?;
 
         // Read target file content
         let target_uri = Url::from_file_path(&target_path).ok()?;
@@ -597,12 +602,7 @@ impl RumdlLanguageServer {
                 return None;
             }
 
-            let current_dir = current_file.parent()?.to_path_buf();
-            let target_path = if link.file_path.is_empty() {
-                current_file.clone()
-            } else {
-                normalize_path(&current_dir.join(&link.file_path))
-            };
+            let target_path = self.resolve_link_path(&current_file, &link.file_path).await?;
 
             return self.find_references_to_target(&target_path, &link.anchor).await;
         }
@@ -620,6 +620,7 @@ impl RumdlLanguageServer {
     /// heading or a link: it returns every cross-file link whose resolved path
     /// matches `target_file`.
     async fn find_all_references_to_file(&self, target_file: &Path) -> Option<Vec<Location>> {
+        let content_roots = self.resolve_content_roots().await;
         let index = self.workspace_index.read().await;
         let mut locations = Vec::new();
 
@@ -629,10 +630,13 @@ impl RumdlLanguageServer {
             let matching_links: Vec<_> = file_index
                 .cross_file_links
                 .iter()
-                .filter(|link| {
-                    let resolved_target = normalize_path(&source_dir.join(&link.target_path));
-                    resolved_target == *target_file
-                })
+                .filter(|link| normalize_path(&source_dir.join(&link.target_path)) == *target_file)
+                .chain(
+                    file_index
+                        .root_relative_links
+                        .iter()
+                        .filter(|link| root_relative_link_resolves(&content_roots, &link.target_path, target_file)),
+                )
                 .collect();
 
             if matching_links.is_empty() {
@@ -679,13 +683,7 @@ impl RumdlLanguageServer {
     /// duplicating the path resolution and heading lookup logic.
     async fn resolve_link_target(&self, uri: &Url, link: &FullLinkTarget) -> Option<GotoDefinitionResponse> {
         let current_file = uri.to_file_path().ok()?;
-        let current_dir = current_file.parent()?.to_path_buf();
-
-        let target_path = if link.file_path.is_empty() {
-            current_file.clone()
-        } else {
-            normalize_path(&current_dir.join(&link.file_path))
-        };
+        let target_path = self.resolve_link_path(&current_file, &link.file_path).await?;
 
         let target_uri = Url::from_file_path(&target_path).ok()?;
 
@@ -708,12 +706,30 @@ impl RumdlLanguageServer {
     }
 
     /// Look up a heading's line number (0-indexed for LSP) in the workspace index.
+    ///
+    /// Targets outside the indexed workspace (e.g. a content root configured via
+    /// `linkCompletionContentRoots` that lives elsewhere) are parsed from disk so
+    /// anchor navigation lands on the heading rather than the top of the file,
+    /// matching the on-disk anchor completion that suggested the link.
     async fn resolve_heading_line(&self, file_path: &Path, anchor: &str) -> Option<u32> {
-        let index = self.workspace_index.read().await;
-        let file_index = index.get_file(file_path)?;
-        let heading = file_index.get_heading_by_anchor(anchor)?;
+        let indexed_line = {
+            let index = self.workspace_index.read().await;
+            index
+                .get_file(file_path)
+                .and_then(|file_index| file_index.get_heading_by_anchor(anchor).map(|h| h.line))
+        };
+
+        let line = match indexed_line {
+            Some(line) => line,
+            None => {
+                let content = tokio::fs::read_to_string(file_path).await.ok()?;
+                let file_index = crate::lsp::index_worker::IndexWorker::build_file_index(&content);
+                file_index.get_heading_by_anchor(anchor)?.line
+            }
+        };
+
         // HeadingIndex.line is 1-indexed; LSP is 0-indexed
-        Some((heading.line.saturating_sub(1)) as u32)
+        Some((line.saturating_sub(1)) as u32)
     }
 
     /// Find all links across the workspace that point to `target_path` with
@@ -721,20 +737,29 @@ impl RumdlLanguageServer {
     ///
     /// An empty fragment matches links that target the file without an anchor.
     async fn find_references_to_target(&self, target_path: &Path, fragment: &str) -> Option<Vec<Location>> {
+        // Resolved before the index lock so root-relative links can be matched
+        // against content roots without re-acquiring the workspace index lock.
+        let content_roots = self.resolve_content_roots().await;
         let index = self.workspace_index.read().await;
         let mut locations = Vec::new();
 
         for (source_path, file_index) in index.files() {
             let source_dir = source_path.parent().unwrap_or(Path::new(""));
 
-            // Collect matching links for this file before loading content
+            // Collect matching links for this file before loading content. Both
+            // directory-relative and root-relative links are considered so a link
+            // resolves to references the same way it resolves to a definition.
             let matching_links: Vec<_> = file_index
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    let resolved_target = normalize_path(&source_dir.join(&link.target_path));
-                    resolved_target == *target_path && link.fragment.eq_ignore_ascii_case(fragment)
+                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                        && link.fragment.eq_ignore_ascii_case(fragment)
                 })
+                .chain(file_index.root_relative_links.iter().filter(|link| {
+                    link.fragment.eq_ignore_ascii_case(fragment)
+                        && root_relative_link_resolves(&content_roots, &link.target_path, target_path)
+                }))
                 .collect();
 
             if matching_links.is_empty() {
@@ -1002,6 +1027,7 @@ impl RumdlLanguageServer {
         target_path: &Path,
         old_anchor: &str,
     ) -> Vec<(PathBuf, Vec<crate::workspace_index::CrossFileLinkIndex>)> {
+        let content_roots = self.resolve_content_roots().await;
         let index = self.workspace_index.read().await;
         let mut result = Vec::new();
 
@@ -1012,9 +1038,13 @@ impl RumdlLanguageServer {
                 .cross_file_links
                 .iter()
                 .filter(|link| {
-                    let resolved = normalize_path(&source_dir.join(&link.target_path));
-                    resolved == *target_path && link.fragment.eq_ignore_ascii_case(old_anchor)
+                    normalize_path(&source_dir.join(&link.target_path)) == *target_path
+                        && link.fragment.eq_ignore_ascii_case(old_anchor)
                 })
+                .chain(file_index.root_relative_links.iter().filter(|link| {
+                    link.fragment.eq_ignore_ascii_case(old_anchor)
+                        && root_relative_link_resolves(&content_roots, &link.target_path, target_path)
+                }))
                 .cloned()
                 .collect();
 

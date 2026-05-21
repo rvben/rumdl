@@ -2414,7 +2414,8 @@ async fn test_get_file_completions_returns_workspace_files() {
     // Get all file completions (empty prefix)
     let items = server
         .get_file_completions(&uri, "", 10, Position { line: 0, character: 10 })
-        .await;
+        .await
+        .items;
 
     // Should have 2 completions (other.md and docs/guide.md), NOT current.md
     assert_eq!(items.len(), 2, "Should return 2 files (excluding current)");
@@ -2456,10 +2457,250 @@ async fn test_get_file_completions_filters_by_prefix() {
     // Filter by "docs/g" prefix
     let items = server
         .get_file_completions(&uri, "docs/g", 10, Position { line: 0, character: 16 })
-        .await;
+        .await
+        .items;
 
     assert_eq!(items.len(), 1, "Should return only docs/guide.md");
     assert_eq!(items[0].label, "docs/guide.md");
+}
+
+#[tokio::test]
+async fn test_get_file_completions_ranks_nearer_files_first() {
+    use crate::workspace_index::{FileIndex, WorkspaceIndex};
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    // current file is deep in the tree; a sibling is distance 0, a file at the
+    // root is distance 2 (../../). The nearer file must come first.
+    let current = temp_dir.path().join("a/b/current.md");
+    let sibling = temp_dir.path().join("a/b/sibling.md");
+    let faraway = temp_dir.path().join("faraway.md");
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+        index.insert_file(sibling.clone(), FileIndex::default());
+        index.insert_file(faraway.clone(), FileIndex::default());
+    }
+
+    let items = server
+        .get_file_completions(&uri, "", 10, Position { line: 0, character: 10 })
+        .await
+        .items;
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].label, "sibling.md", "nearest file ranks first");
+    assert_eq!(items[1].label, "../../faraway.md", "distant file ranks last");
+
+    // Sort keys must also encode the distance so the editor preserves the order.
+    let sibling_sort = items[0].sort_text.as_deref().unwrap();
+    let faraway_sort = items[1].sort_text.as_deref().unwrap();
+    assert!(
+        sibling_sort < faraway_sort,
+        "nearer file must sort before farther file ({sibling_sort:?} vs {faraway_sort:?})"
+    );
+    assert!(
+        sibling_sort.starts_with("0000"),
+        "distance-0 file sort key: {sibling_sort:?}"
+    );
+    assert!(
+        faraway_sort.starts_with("0002"),
+        "distance-2 file sort key: {faraway_sort:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_get_file_completions_marks_incomplete_when_capped() {
+    use crate::workspace_index::{FileIndex, WorkspaceIndex};
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("current.md");
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+        // 60 candidate files exceeds the 50-item cap.
+        for i in 0..60 {
+            index.insert_file(temp_dir.path().join(format!("file{i:03}.md")), FileIndex::default());
+        }
+    }
+
+    let list = server
+        .get_file_completions(&uri, "", 10, Position { line: 0, character: 10 })
+        .await;
+
+    assert_eq!(list.items.len(), 50, "result set is capped at 50");
+    assert!(
+        list.is_incomplete,
+        "capped result must be marked incomplete so the editor re-queries as the prefix narrows"
+    );
+}
+
+#[tokio::test]
+async fn test_get_file_completions_complete_when_not_capped() {
+    use crate::workspace_index::{FileIndex, WorkspaceIndex};
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("current.md");
+
+    let server = create_test_server();
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+        index.insert_file(temp_dir.path().join("other.md"), FileIndex::default());
+    }
+
+    let list = server
+        .get_file_completions(&uri, "", 10, Position { line: 0, character: 10 })
+        .await;
+
+    assert_eq!(list.items.len(), 1);
+    assert!(!list.is_incomplete, "small result set is complete");
+}
+
+#[tokio::test]
+async fn test_get_file_completions_absolute_lists_content_root() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let img_dir = temp_dir.path().join("img");
+    fs::create_dir(&img_dir).unwrap();
+    fs::write(img_dir.join("01.webp"), "").unwrap();
+    fs::write(img_dir.join("02.png"), "").unwrap();
+    fs::create_dir(img_dir.join("icons")).unwrap();
+    let current = temp_dir.path().join("doc.md");
+    fs::write(&current, "").unwrap();
+
+    let server = create_test_server();
+    // No explicit content roots: the workspace root is used.
+    *server.workspace_roots.write().await = vec![temp_dir.path().to_path_buf()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // `/img/` lists immediate children of the content root's img directory,
+    // including non-markdown files and subdirectories.
+    let list = server
+        .get_file_completions(&uri, "/img/", 10, Position { line: 0, character: 15 })
+        .await;
+
+    assert!(
+        list.is_incomplete,
+        "absolute completion is always incomplete (drill-in)"
+    );
+    let labels: Vec<&str> = list.items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"01.webp"), "non-markdown asset offered: {labels:?}");
+    assert!(labels.contains(&"02.png"), "non-markdown asset offered: {labels:?}");
+    assert!(
+        labels.contains(&"icons/"),
+        "subdirectory offered with trailing slash: {labels:?}"
+    );
+
+    // The inserted text is the full absolute path from the leading slash.
+    let webp = list.items.iter().find(|i| i.label == "01.webp").unwrap();
+    let new_text = match webp.text_edit.as_ref().unwrap() {
+        tower_lsp::lsp_types::CompletionTextEdit::Edit(e) => &e.new_text,
+        _ => panic!("expected a plain text edit"),
+    };
+    assert_eq!(new_text, "/img/01.webp");
+    // filterText must be the full replacement text so clients that filter against
+    // the replaced range (`/img/01...`) keep the item visible.
+    assert_eq!(
+        webp.filter_text.as_deref(),
+        Some("/img/01.webp"),
+        "filterText should be the full path, not just the child name"
+    );
+}
+
+#[tokio::test]
+async fn test_get_file_completions_absolute_filters_by_prefix() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let img_dir = temp_dir.path().join("img");
+    fs::create_dir(&img_dir).unwrap();
+    fs::write(img_dir.join("01.webp"), "").unwrap();
+    fs::write(img_dir.join("readme.md"), "").unwrap();
+    let current = temp_dir.path().join("doc.md");
+    fs::write(&current, "").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![temp_dir.path().to_path_buf()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    let list = server
+        .get_file_completions(&uri, "/img/0", 10, Position { line: 0, character: 16 })
+        .await;
+
+    let labels: Vec<&str> = list.items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        vec!["01.webp"],
+        "only entries matching the prefix '0': {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_get_file_completions_absolute_without_content_root_is_empty() {
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("doc.md");
+
+    let server = create_test_server();
+    // No workspace roots and no configured content roots.
+    let uri = Url::from_file_path(&current).unwrap();
+
+    let list = server
+        .get_file_completions(&uri, "/img/", 10, Position { line: 0, character: 15 })
+        .await;
+
+    assert!(list.items.is_empty(), "no content root means no absolute completions");
+}
+
+#[tokio::test]
+async fn test_get_file_completions_absolute_rejects_parent_traversal() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    // A secret directory that sits next to the content root but outside it.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().join("site");
+    fs::create_dir(&root).unwrap();
+    let secret = temp_dir.path().join("secret");
+    fs::create_dir(&secret).unwrap();
+    fs::write(secret.join("private.txt"), "").unwrap();
+    let current = root.join("doc.md");
+    fs::write(&current, "").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // `..` would escape the content root; completion must refuse rather than
+    // list files from the parent directory.
+    let list = server
+        .get_file_completions(&uri, "/../secret/", 10, Position { line: 0, character: 20 })
+        .await;
+
+    assert!(
+        list.items.is_empty(),
+        "parent traversal must not surface files outside the content root: {:?}",
+        list.items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -2521,6 +2762,143 @@ async fn test_get_anchor_completions_returns_headings() {
     assert_eq!(items[0].insert_text.as_deref(), Some("installation"));
     assert_eq!(items[1].insert_text.as_deref(), Some("configuration"));
     assert_eq!(items[2].insert_text.as_deref(), Some("troubleshooting"));
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_resolves_absolute_path_against_content_root() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let current = temp_dir.path().join("index.md");
+    let target = temp_dir.path().join("guide.md");
+
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "# Installation").unwrap();
+
+    let server = create_test_server();
+    // The content root is the workspace root, so `/guide.md` maps to it.
+    *server.workspace_roots.write().await = vec![temp_dir.path().to_path_buf()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        }];
+        index.insert_file(target.clone(), fi);
+    }
+
+    // An absolute-style link `](/guide.md#` must resolve against the content
+    // root, not the OS filesystem root.
+    let items = server
+        .get_anchor_completions(&uri, "/guide.md", "", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert_eq!(
+        items.iter().map(|i| i.insert_text.as_deref()).collect::<Vec<_>>(),
+        vec![Some("installation")],
+        "absolute anchor target should resolve under the content root"
+    );
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_absolute_falls_back_to_disk_outside_workspace() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    // The content root lives outside the indexed workspace, so its files are
+    // never added to the workspace index. Anchor completion must still work by
+    // reading the target from disk, matching the file-path completion behavior.
+    let temp_dir = tempdir().unwrap();
+    let workspace = temp_dir.path().join("workspace");
+    let content_root = temp_dir.path().join("site");
+    fs::create_dir(&workspace).unwrap();
+    fs::create_dir(&content_root).unwrap();
+
+    let current = workspace.join("index.md");
+    let target = content_root.join("guide.md");
+    fs::write(&current, "").unwrap();
+    fs::write(&target, "# Installation\n\n## Configuration\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![workspace.clone()];
+    server.config.write().await.link_completion_content_roots = vec![content_root.to_string_lossy().into_owned()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    // Only the current file is indexed; the content root is not.
+    {
+        use crate::workspace_index::{FileIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+    }
+
+    let items = server
+        .get_anchor_completions(&uri, "/guide.md", "", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert_eq!(
+        items.iter().map(|i| i.insert_text.as_deref()).collect::<Vec<_>>(),
+        vec![Some("installation"), Some("configuration")],
+        "absolute anchor target outside the workspace should resolve via on-disk fallback"
+    );
+}
+
+#[tokio::test]
+async fn test_get_anchor_completions_absolute_rejects_parent_traversal() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().join("site");
+    fs::create_dir(&root).unwrap();
+    let current = root.join("index.md");
+    // A secret file outside the content root but inside the indexed workspace.
+    let secret = temp_dir.path().join("secret.md");
+    fs::write(&current, "").unwrap();
+    fs::write(&secret, "# Secret").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    let uri = Url::from_file_path(&current).unwrap();
+
+    {
+        use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(current.clone(), FileIndex::default());
+
+        let mut fi = FileIndex::default();
+        fi.headings = vec![HeadingIndex {
+            text: "Secret".to_string(),
+            auto_anchor: "secret".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        }];
+        index.insert_file(secret.clone(), fi);
+    }
+
+    // `/../secret.md#` would escape the content root; anchors must not leak.
+    let items = server
+        .get_anchor_completions(&uri, "/../secret.md", "", 27, Position { line: 0, character: 27 })
+        .await;
+
+    assert!(
+        items.is_empty(),
+        "parent traversal must not expose anchors outside the content root: {:?}",
+        items.iter().map(|i| &i.label).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -2902,6 +3280,43 @@ async fn test_link_navigation_disabled_via_did_change_configuration() {
     assert!(
         result.is_none(),
         "Hover should be suppressed after live config disables link navigation"
+    );
+}
+
+#[tokio::test]
+async fn test_content_roots_applied_via_did_change_configuration() {
+    let server = create_test_server();
+
+    // Default state: no configured content roots.
+    assert!(server.config.read().await.link_completion_content_roots.is_empty());
+
+    // A settings payload that only sets linkCompletionContentRoots must still be
+    // recognized as a full config and applied (not dropped as an unknown key).
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({
+                "linkCompletionContentRoots": ["/site", "docs"]
+            }),
+        })
+        .await;
+
+    assert_eq!(
+        server.config.read().await.link_completion_content_roots,
+        vec!["/site".to_string(), "docs".to_string()],
+        "did_change_configuration must apply linkCompletionContentRoots on its own"
+    );
+
+    // Clearing the list back to [] must also apply, resetting to the
+    // workspace-root default rather than leaving the previous roots active.
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "linkCompletionContentRoots": [] }),
+        })
+        .await;
+
+    assert!(
+        server.config.read().await.link_completion_content_roots.is_empty(),
+        "did_change_configuration must apply an empty linkCompletionContentRoots"
     );
 }
 
@@ -3529,6 +3944,152 @@ async fn test_goto_definition_file_path_only() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_root_relative_anchor_resolves_line_from_disk() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    // A root-relative anchor link `](/guide.md#configuration)` into a content
+    // root outside the workspace must land on the heading line, not line 0. The
+    // target is never indexed, so the line is parsed from disk.
+    let temp_dir = tempdir().unwrap();
+    let workspace = temp_dir.path().join("workspace");
+    let content_root = temp_dir.path().join("site");
+    fs::create_dir(&workspace).unwrap();
+    fs::create_dir(&content_root).unwrap();
+
+    let current_file = workspace.join("index.md");
+    let target_file = content_root.join("guide.md");
+    fs::write(&current_file, "").unwrap();
+    fs::write(&target_file, "# Guide\n\n## Configuration\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![workspace.clone()];
+    server.config.write().await.link_completion_content_roots = vec![content_root.to_string_lossy().into_owned()];
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let content = "See [config](/guide.md#configuration).\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on the link target.
+    let position = Position { line: 0, character: 20 };
+    let result = server.handle_goto_definition(&current_uri, position).await;
+
+    match result {
+        Some(GotoDefinitionResponse::Scalar(location)) => {
+            assert_eq!(
+                location.uri,
+                Url::from_file_path(&target_file).unwrap(),
+                "should resolve under the content root"
+            );
+            assert_eq!(
+                location.range.start.line, 2,
+                "anchor must land on the '## Configuration' heading parsed from disk"
+            );
+        }
+        other => panic!("expected a scalar definition, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_root_relative_resolves_against_content_root() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    // A root-relative link `](/guide.md)` accepted from the absolute completion
+    // must navigate to the content root, not the OS filesystem root. The content
+    // root here lives outside the workspace, so resolution is on-disk only.
+    let temp_dir = tempdir().unwrap();
+    let workspace = temp_dir.path().join("workspace");
+    let content_root = temp_dir.path().join("site");
+    fs::create_dir(&workspace).unwrap();
+    fs::create_dir(&content_root).unwrap();
+
+    let current_file = workspace.join("index.md");
+    let target_file = content_root.join("guide.md");
+    fs::write(&current_file, "").unwrap();
+    fs::write(&target_file, "# Guide\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![workspace.clone()];
+    server.config.write().await.link_completion_content_roots = vec![content_root.to_string_lossy().into_owned()];
+
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let content = "See [the guide](/guide.md) for details.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on `/guide.md` inside the link target.
+    let position = Position { line: 0, character: 20 };
+    let result = server.handle_goto_definition(&current_uri, position).await;
+
+    match result {
+        Some(GotoDefinitionResponse::Scalar(location)) => assert_eq!(
+            location.uri,
+            Url::from_file_path(&target_file).unwrap(),
+            "root-relative link should resolve under the content root"
+        ),
+        other => panic!("expected a definition under the content root, got: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_watched_file_eviction_when_newly_ignored() {
+    use crate::workspace_index::{FileIndex, WorkspaceIndex};
+    use std::fs;
+    use tempfile::tempdir;
+    use tower_lsp::LanguageServer;
+
+    // A file indexed before an ignore rule began matching it must be evicted
+    // when a later filesystem-watch event arrives, so completions and navigation
+    // stop surfacing it without waiting for a full rescan.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    let draft = root.join("draft.md");
+    fs::write(&draft, "# Draft\n").unwrap();
+    fs::write(root.join(".gitignore"), "draft.md\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        index.insert_file(draft.clone(), FileIndex::default());
+    }
+
+    let params = DidChangeWatchedFilesParams {
+        changes: vec![FileEvent {
+            uri: Url::from_file_path(&draft).unwrap(),
+            typ: FileChangeType::CHANGED,
+        }],
+    };
+    server.did_change_watched_files(params).await;
+
+    // The async index worker applies the eviction; poll until it lands.
+    let mut evicted = false;
+    for _ in 0..50 {
+        if server.workspace_index.read().await.get_file(&draft).is_none() {
+            evicted = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(evicted, "a newly-ignored file must be evicted from the workspace index");
+}
+
+#[tokio::test]
 async fn test_goto_definition_file_with_anchor() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
@@ -3771,6 +4332,72 @@ async fn test_find_references_heading_with_incoming_links() {
     assert_eq!(
         a_loc.range.start.character, 9,
         "Column 10 (1-indexed) should become 9 (0-indexed)"
+    );
+}
+
+#[tokio::test]
+async fn test_find_references_finds_root_relative_links() {
+    use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
+    use std::fs;
+    use tempfile::tempdir;
+
+    // find-references on a heading must discover root-relative links (`/guide.md`)
+    // that point to it, resolving them against the content roots the same way
+    // go-to-definition does.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path().to_path_buf();
+    let target_file = root.join("guide.md");
+    let source_file = root.join("index.md");
+    fs::write(&target_file, "# Installation\n\nHow to install.\n").unwrap();
+    fs::write(&source_file, "See [install](/guide.md#installation).\n").unwrap();
+
+    let server = create_test_server();
+    *server.workspace_roots.write().await = vec![root.clone()];
+
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: "# Installation\n\nHow to install.\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    {
+        let mut index = server.workspace_index.write().await;
+
+        let mut target_fi = FileIndex::default();
+        target_fi.add_heading(HeadingIndex {
+            text: "Installation".to_string(),
+            auto_anchor: "installation".to_string(),
+            custom_anchor: None,
+            line: 1,
+            is_setext: false,
+        });
+        index.insert_file(target_file.clone(), target_fi);
+
+        // The source file links via a root-relative path, stored leading-`/`-stripped.
+        let mut source_fi = FileIndex::default();
+        source_fi.add_root_relative_link(CrossFileLinkIndex {
+            target_path: "guide.md".to_string(),
+            fragment: "installation".to_string(),
+            line: 1,
+            column: 15,
+        });
+        index.insert_file(source_file.clone(), source_fi);
+    }
+
+    // Cursor on the "# Installation" heading.
+    let position = Position { line: 0, character: 5 };
+    let result = server.handle_references(&target_uri, position).await;
+
+    let locations = result.expect("should find the root-relative reference");
+    assert_eq!(locations.len(), 1, "exactly one root-relative reference");
+    assert_eq!(
+        locations[0].uri,
+        Url::from_file_path(&source_file).unwrap(),
+        "reference should point to the linking file"
     );
 }
 

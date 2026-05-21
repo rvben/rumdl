@@ -1223,8 +1223,14 @@ impl Rule for MD057ExistingRelativeLinks {
     fn contribute_to_index(&self, ctx: &crate::lint_context::LintContext, index: &mut FileIndex) {
         // Use the shared utility for cross-file link extraction
         // This ensures consistent position tracking between CLI and LSP
-        for link in extract_cross_file_links(ctx) {
+        let links = extract_cross_file_links(ctx);
+        for link in links.relative {
             index.add_cross_file_link(link);
+        }
+        // Root-relative links are not linted, but indexing them keeps the cached
+        // index complete so the LSP can resolve them for find-references.
+        for link in links.root_relative {
+            index.add_root_relative_link(link);
         }
     }
 

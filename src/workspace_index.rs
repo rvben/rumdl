@@ -131,22 +131,38 @@ fn strip_query_and_fragment(url: &str) -> &str {
     }
 }
 
+/// Markdown file links extracted from a document, split by how they resolve.
+///
+/// Linting rules only understand `relative` links (resolved against the source
+/// file's directory). `root_relative` links (leading `/`) are an LSP concept
+/// resolved against the configured content roots, so they are kept separate to
+/// avoid changing linting behavior.
+#[derive(Debug, Default)]
+pub struct ExtractedCrossFileLinks {
+    /// Links resolved relative to the source file's directory.
+    pub relative: Vec<CrossFileLinkIndex>,
+    /// Root-relative links. `target_path` has the leading `/` stripped so it can
+    /// be joined directly to a content root. Parent-traversal and
+    /// protocol-relative (`//host`) links are excluded.
+    pub root_relative: Vec<CrossFileLinkIndex>,
+}
+
 /// Extract cross-file links from content using correct regex-based position tracking.
 ///
 /// This is the canonical implementation used by both MD057 and LSP to ensure
 /// consistent and correct column positions for diagnostic reporting.
 ///
-/// Returns a vector of `CrossFileLinkIndex` entries, one for each markdown file
-/// link found in the content.
-pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
+/// Returns one `CrossFileLinkIndex` per markdown file link, split into directory
+/// relative links and root-relative links (see `ExtractedCrossFileLinks`).
+pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
     let content = ctx.content;
 
     // Early returns for performance
     if content.is_empty() || !content.contains("](") {
-        return Vec::new();
+        return ExtractedCrossFileLinks::default();
     }
 
-    let mut links = Vec::new();
+    let mut links = ExtractedCrossFileLinks::default();
     let lines: Vec<&str> = content.lines().collect();
     let line_index = &ctx.line_index;
 
@@ -195,15 +211,38 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
             {
                 let file_path = url_group.as_str().trim();
 
-                // Skip empty, external, template variables, absolute URL paths,
-                // framework aliases, fragment-only URLs, or rustdoc intra-doc links
+                // Root-relative links (leading `/`) resolve against content roots
+                // in the LSP, not the source directory, so they are captured in a
+                // separate bucket. Protocol-relative (`//host`) and parent-traversal
+                // links are excluded so they cannot escape a content root.
+                if let Some(rel) = file_path.strip_prefix('/') {
+                    if !rel.starts_with('/')
+                        && !Path::new(rel)
+                            .components()
+                            .any(|c| matches!(c, std::path::Component::ParentDir))
+                    {
+                        let stripped = strip_query_and_fragment(rel);
+                        if is_markdown_file(stripped) {
+                            let fragment = caps.get(2).map_or("", |m| m.as_str().trim_start_matches('#'));
+                            links.root_relative.push(CrossFileLinkIndex {
+                                target_path: stripped.to_string(),
+                                fragment: fragment.to_string(),
+                                line: link.line,
+                                column: url_group.start() + 1,
+                            });
+                        }
+                    }
+                    continue;
+                }
+
+                // Skip empty, external, template variables, framework aliases,
+                // fragment-only URLs, or rustdoc intra-doc links
                 if file_path.is_empty()
                     || PROTOCOL_DOMAIN_REGEX.is_match(file_path)
                     || file_path.starts_with("www.")
                     || file_path.starts_with('#')
                     || file_path.starts_with("{{")
                     || file_path.starts_with("{%")
-                    || file_path.starts_with('/')
                     || file_path.starts_with('~')
                     || file_path.starts_with('@')
                     || (file_path.starts_with('`') && file_path.ends_with('`'))
@@ -219,7 +258,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
 
                 // Only index markdown file links for cross-file validation
                 if is_markdown_file(file_path) {
-                    links.push(CrossFileLinkIndex {
+                    links.relative.push(CrossFileLinkIndex {
                         target_path: file_path.to_string(),
                         fragment: fragment.to_string(),
                         line: link.line,
@@ -239,11 +278,11 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
 /// or when the meaning of persisted fields changes such that older caches are
-/// no longer correct. Version 7 forces a rebuild because earlier fast-path
-/// (`build_file_index_only`) entries omitted inline-disable data, so reused
-/// entries bypassed `<!-- rumdl-disable -->` blocks for cross-file rules.
+/// no longer correct. Version 8 forces a rebuild so the new `root_relative_links`
+/// field is populated; earlier caches lack it, leaving find-references unable to
+/// discover root-relative (`/path`) links until a rescan.
 #[cfg(feature = "native")]
-const CACHE_FORMAT_VERSION: u32 = 7;
+const CACHE_FORMAT_VERSION: u32 = 8;
 
 /// Cache file name within the version directory
 #[cfg(feature = "native")]
@@ -273,6 +312,12 @@ pub struct FileIndex {
     pub reference_links: Vec<ReferenceLinkIndex>,
     /// Cross-file links in this file (for MD051 cross-file validation)
     pub cross_file_links: Vec<CrossFileLinkIndex>,
+    /// Root-relative links (leading `/`) in this file. Resolved against the
+    /// configured content roots by the LSP for go-to-definition, hover, and
+    /// find-references. `target_path` has the leading `/` stripped. Linting does
+    /// not use these, so they never affect diagnostics.
+    #[serde(default)]
+    pub root_relative_links: Vec<CrossFileLinkIndex>,
     /// Defined reference IDs (e.g., from `[ref]: url` definitions)
     /// Used to filter out reference links that have explicit definitions
     pub defined_references: HashSet<String>,
@@ -861,6 +906,16 @@ impl FileIndex {
         });
         if !is_duplicate {
             self.cross_file_links.push(link);
+        }
+    }
+
+    /// Add a root-relative link to the index (deduplicates by target_path, fragment, line)
+    pub fn add_root_relative_link(&mut self, link: CrossFileLinkIndex) {
+        let is_duplicate = self.root_relative_links.iter().any(|existing| {
+            existing.target_path == link.target_path && existing.fragment == link.fragment && existing.line == link.line
+        });
+        if !is_duplicate {
+            self.root_relative_links.push(link);
         }
     }
 
@@ -1509,7 +1564,7 @@ mod tests {
 
         let content = "# Test\n\nSee [link](./other.md) for info.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].target_path, "./other.md");
@@ -1525,7 +1580,7 @@ mod tests {
 
         let content = "Check [guide](./guide.md#install) here.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].target_path, "./guide.md");
@@ -1541,7 +1596,7 @@ mod tests {
 
         let content = "See [a](a.md) and [b](b.md) here.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 2);
 
@@ -1562,7 +1617,7 @@ mod tests {
 
         let content = "See [link](<path/with (parens).md>) here.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].target_path, "path/with (parens).md");
@@ -1583,11 +1638,37 @@ mod tests {
 [absolute](/docs/page.md)
 "#;
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let extracted = extract_cross_file_links(&ctx);
 
-        // Only the local markdown link should be extracted
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].target_path, "./local.md");
+        // Only the local markdown link is a directory-relative link.
+        assert_eq!(extracted.relative.len(), 1);
+        assert_eq!(extracted.relative[0].target_path, "./local.md");
+        // The root-relative link is captured separately, leading `/` stripped.
+        assert_eq!(extracted.root_relative.len(), 1);
+        assert_eq!(extracted.root_relative[0].target_path, "docs/page.md");
+    }
+
+    #[test]
+    fn test_extract_cross_file_links_root_relative() {
+        use crate::config::MarkdownFlavor;
+
+        // Root-relative markdown links land in the root_relative bucket with the
+        // leading `/` stripped; parent traversal and protocol-relative links are
+        // excluded so they cannot escape a content root.
+        let content = "[a](/guide.md#install)\n[b](/../escape.md)\n[c](//host/x.md)\n[d](/img/pic.png)\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+        let extracted = extract_cross_file_links(&ctx);
+
+        assert!(extracted.relative.is_empty(), "no directory-relative links here");
+        assert_eq!(
+            extracted
+                .root_relative
+                .iter()
+                .map(|l| (l.target_path.as_str(), l.fragment.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("guide.md", "install")],
+            "only the safe root-relative markdown link is captured"
+        );
     }
 
     #[test]
@@ -1600,7 +1681,7 @@ mod tests {
 [pdf](./document.pdf)
 "#;
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         // Only markdown files are indexed for cross-file validation
         assert_eq!(links.len(), 1);
@@ -1613,7 +1694,7 @@ mod tests {
 
         let content = "Normal [link](./file.md) and `[code](./ignored.md)` here.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         // Only the link outside code span should be extracted
         assert_eq!(links.len(), 1);
@@ -1626,7 +1707,7 @@ mod tests {
 
         let content = "See [doc](./file.md?raw=true) here.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 1);
         // Query params should be stripped
@@ -1639,7 +1720,7 @@ mod tests {
 
         let content = "";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert!(links.is_empty());
     }
@@ -1650,7 +1731,7 @@ mod tests {
 
         let content = "# Just a heading\n\nSome text without links.\n";
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert!(links.is_empty());
     }
@@ -1668,7 +1749,7 @@ Here is a [broken link](nonexistent-file.md) that should trigger MD057.
 And another [link](also-missing.md) on this line.
 "#;
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
-        let links = extract_cross_file_links(&ctx);
+        let links = extract_cross_file_links(&ctx).relative;
 
         assert_eq!(links.len(), 2);
 

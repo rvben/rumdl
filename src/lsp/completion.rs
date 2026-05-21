@@ -320,29 +320,46 @@ impl RumdlLanguageServer {
         }
     }
 
-    /// Get relative file path completion items for a markdown link target
+    /// Get file path completion items for a markdown link target.
     ///
-    /// Enumerates all markdown files in the workspace index, computes their path
-    /// relative to the current document's directory, and returns those whose
-    /// prefix matches `partial_path`.
+    /// Two modes:
+    ///
+    /// - **Absolute** (`partial_path` starts with `/`): walks the filesystem one
+    ///   directory level at a time under the configured content roots, offering
+    ///   both directories and files of any type (so `/img/01.webp` completes).
+    /// - **Relative** (otherwise): enumerates the markdown files in the workspace
+    ///   index, computes each path relative to the current document's directory,
+    ///   ranks nearer files (fewer `../` hops) first, and caps the result set.
+    ///
+    /// Returns a [`CompletionList`] whose `is_incomplete` flag tells the editor to
+    /// re-query as the user types, so a capped relative result set still surfaces
+    /// nearby files once the prefix narrows.
     pub(super) async fn get_file_completions(
         &self,
         uri: &Url,
         partial_path: &str,
         start_col: u32,
         position: Position,
-    ) -> Vec<CompletionItem> {
+    ) -> CompletionList {
+        // Absolute-style links resolve against content roots, not the current file.
+        if partial_path.starts_with('/') {
+            return self
+                .get_absolute_path_completions(partial_path, start_col, position)
+                .await;
+        }
+
         let Ok(current_file) = uri.to_file_path() else {
-            return Vec::new();
+            return CompletionList::default();
         };
         let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
-            return Vec::new();
+            return CompletionList::default();
         };
 
         let index = self.workspace_index.read().await;
-        let mut items = Vec::new();
         let partial_lower = partial_path.to_lowercase();
 
+        // Collect (distance, relative path) pairs so we can rank before truncating.
+        let mut matches: Vec<(usize, String)> = Vec::new();
         for (file_path, _) in index.files() {
             // Exclude the document being edited
             if file_path == current_file.as_path() {
@@ -357,11 +374,25 @@ impl RumdlLanguageServer {
                 continue;
             }
 
-            let item = CompletionItem {
+            matches.push((path_distance(&rel), rel_str));
+        }
+
+        // Nearest files first (fewest `../` hops), then alphabetical within a distance.
+        matches.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+        const MAX_ITEMS: usize = 50;
+        let is_incomplete = matches.len() > MAX_ITEMS;
+        matches.truncate(MAX_ITEMS);
+
+        let items = matches
+            .into_iter()
+            .map(|(distance, rel_str)| CompletionItem {
                 label: rel_str.clone(),
                 kind: Some(CompletionItemKind::FILE),
                 detail: Some("Markdown file".to_string()),
-                sort_text: Some(rel_str.clone()),
+                // Encode distance in the sort key so the editor keeps nearer files
+                // on top even when its own ordering would otherwise be lexical.
+                sort_text: Some(format!("{distance:04}{rel_str}")),
                 filter_text: Some(rel_str.clone()),
                 insert_text: Some(rel_str.clone()),
                 text_edit: Some(CompletionTextEdit::Edit(TextEdit {
@@ -375,13 +406,191 @@ impl RumdlLanguageServer {
                     new_text: rel_str.clone(),
                 })),
                 ..Default::default()
-            };
-            items.push(item);
+            })
+            .collect();
+
+        CompletionList { is_incomplete, items }
+    }
+
+    /// Complete absolute-style link targets (e.g. `/img/01.webp`) one directory
+    /// level at a time, resolved against the configured content roots.
+    ///
+    /// Directories and files of any type are offered (not just markdown), and
+    /// `.gitignore`d entries are skipped. Accepting a directory re-triggers
+    /// completion so the user can drill in.
+    async fn get_absolute_path_completions(
+        &self,
+        partial_path: &str,
+        start_col: u32,
+        position: Position,
+    ) -> CompletionList {
+        let content_roots = self.resolve_content_roots().await;
+        if content_roots.is_empty() {
+            return CompletionList::default();
         }
 
-        items.sort_by(|a, b| a.label.cmp(&b.label));
-        items.truncate(50);
-        items
+        // Split into the committed directory portion (kept) and the filename
+        // prefix being typed. `/img/ic` -> dir "/img/", prefix "ic".
+        let last_slash = partial_path.rfind('/').unwrap_or(0);
+        let dir_part = &partial_path[..=last_slash];
+        let file_prefix = &partial_path[last_slash + 1..];
+        let rel_dir = dir_part.trim_start_matches('/');
+        let prefix_lower = file_prefix.to_lowercase();
+
+        // Absolute links resolve against the content roots; `..` segments could
+        // escape those roots and surface unrelated files, so refuse to complete.
+        if Path::new(rel_dir)
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return CompletionList::default();
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        let mut items = Vec::new();
+
+        for root in &content_roots {
+            let base = if rel_dir.is_empty() {
+                root.clone()
+            } else {
+                normalize_path(&root.join(rel_dir))
+            };
+
+            // List only the immediate children of `base`, honoring .gitignore.
+            let walker = ignore::WalkBuilder::new(&base)
+                .max_depth(Some(1))
+                .hidden(true)
+                .git_ignore(true)
+                .git_global(true)
+                .git_exclude(true)
+                .parents(true)
+                .require_git(false)
+                .build();
+
+            for entry in walker.flatten() {
+                if entry.depth() == 0 {
+                    continue; // the base directory itself
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !file_prefix.is_empty() && !name.to_lowercase().starts_with(&prefix_lower) {
+                    continue;
+                }
+
+                let is_dir = entry.file_type().is_some_and(|t| t.is_dir());
+                let new_text = if is_dir {
+                    format!("{dir_part}{name}/")
+                } else {
+                    format!("{dir_part}{name}")
+                };
+                if !seen.insert(new_text.clone()) {
+                    continue; // same path from another content root
+                }
+
+                let label = if is_dir { format!("{name}/") } else { name.clone() };
+                items.push(CompletionItem {
+                    label: label.clone(),
+                    kind: Some(if is_dir {
+                        CompletionItemKind::FOLDER
+                    } else {
+                        CompletionItemKind::FILE
+                    }),
+                    detail: Some(if is_dir { "Directory" } else { "File" }.to_string()),
+                    // Directories first, then alphabetical.
+                    sort_text: Some(format!("{}{}", if is_dir { '0' } else { '1' }, label)),
+                    // Filter against the full replacement text (e.g. `/img/icons/`)
+                    // since the edit replaces the whole typed path, not just the
+                    // child name; otherwise clients filter out valid items.
+                    filter_text: Some(new_text.clone()),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: Range {
+                            start: Position {
+                                line: position.line,
+                                character: start_col,
+                            },
+                            end: position,
+                        },
+                        new_text,
+                    })),
+                    // Re-open completion after a directory so the user keeps drilling.
+                    command: is_dir.then(|| Command {
+                        title: "Trigger Suggest".to_string(),
+                        command: "editor.action.triggerSuggest".to_string(),
+                        arguments: None,
+                    }),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // Always incomplete: each new path segment needs a fresh directory listing.
+        CompletionList {
+            is_incomplete: true,
+            items,
+        }
+    }
+
+    /// Resolve the content roots used for absolute-style link completion.
+    ///
+    /// Uses the explicitly configured `link_completion_content_roots` when set
+    /// (absolute paths as-is, relative paths joined to each workspace root),
+    /// otherwise falls back to the workspace root folders.
+    pub(super) async fn resolve_content_roots(&self) -> Vec<PathBuf> {
+        let configured = self.config.read().await.link_completion_content_roots.clone();
+        let roots = self.workspace_roots.read().await;
+
+        if configured.is_empty() {
+            return roots.clone();
+        }
+
+        let mut out = Vec::new();
+        for entry in &configured {
+            let path = PathBuf::from(entry);
+            if path.is_absolute() {
+                out.push(path);
+            } else {
+                for root in roots.iter() {
+                    out.push(normalize_path(&root.join(&path)));
+                }
+            }
+        }
+        out
+    }
+
+    /// Resolve a markdown link's `file_path` to a target path on disk.
+    ///
+    /// Empty `file_path` refers to `current_file` itself. Root-relative paths
+    /// (leading `/`) resolve against the content roots, mirroring the absolute
+    /// link completion: an already-indexed candidate wins, otherwise the first
+    /// candidate that exists on disk. `..` segments are refused so a link cannot
+    /// escape a content root. Other paths resolve against the current document's
+    /// directory. Shared by completion and navigation so an accepted completion
+    /// always resolves the same way hover and go-to-definition resolve it.
+    pub(super) async fn resolve_link_path(&self, current_file: &Path, file_path: &str) -> Option<PathBuf> {
+        if file_path.is_empty() {
+            return Some(current_file.to_path_buf());
+        }
+
+        if let Some(rel) = file_path.strip_prefix('/') {
+            if Path::new(rel)
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                return None;
+            }
+            let content_roots = self.resolve_content_roots().await;
+            let candidates: Vec<PathBuf> = content_roots
+                .iter()
+                .map(|root| normalize_path(&root.join(rel)))
+                .collect();
+            let indexed = {
+                let index = self.workspace_index.read().await;
+                candidates.iter().find(|c| index.get_file(c).is_some()).cloned()
+            };
+            return indexed.or_else(|| candidates.into_iter().find(|c| c.is_file()));
+        }
+
+        let current_dir = current_file.parent()?;
+        Some(normalize_path(&current_dir.join(file_path)))
     }
 
     /// Get heading anchor completion items for a markdown link target
@@ -401,25 +610,35 @@ impl RumdlLanguageServer {
             return Vec::new();
         };
 
-        // Resolve the target file: empty path means the current file itself
-        let target = if file_path.is_empty() {
-            current_file.clone()
-        } else {
-            let Some(current_dir) = current_file.parent().map(std::path::Path::to_path_buf) else {
-                return Vec::new();
-            };
-            normalize_path(&current_dir.join(file_path))
-        };
-
-        let index = self.workspace_index.read().await;
-        let Some(file_index) = index.get_file(&target) else {
+        // Resolve the target the same way navigation does, so anchors are offered
+        // for exactly the files an accepted completion would later navigate to.
+        let Some(target) = self.resolve_link_path(&current_file, file_path).await else {
             return Vec::new();
+        };
+        // Absolute targets may live outside the indexed workspace, so allow their
+        // headings to be parsed from disk; in-workspace targets must be indexed.
+        let allow_disk_fallback = file_path.starts_with('/');
+
+        // Headings come from the index when the target is indexed; otherwise an
+        // absolute target is parsed from disk so anchor completion stays coherent
+        // with the file-path completion that suggested it.
+        let indexed_headings = {
+            let index = self.workspace_index.read().await;
+            index.get_file(&target).map(|fi| fi.headings.clone())
+        };
+        let headings = match indexed_headings {
+            Some(headings) => headings,
+            None if allow_disk_fallback => match tokio::fs::read_to_string(&target).await {
+                Ok(content) => crate::lsp::index_worker::IndexWorker::build_file_index(&content).headings,
+                Err(_) => return Vec::new(),
+            },
+            None => return Vec::new(),
         };
 
         let partial_lower = partial_anchor.to_lowercase();
         let mut items = Vec::new();
 
-        for heading in &file_index.headings {
+        for heading in &headings {
             let anchor = heading.custom_anchor.as_deref().unwrap_or(&heading.auto_anchor);
 
             if !partial_anchor.is_empty() && !anchor.to_lowercase().starts_with(&partial_lower) {
@@ -480,6 +699,15 @@ fn make_relative_path(from_dir: &Path, to_file: &Path) -> PathBuf {
         rel.push(comp);
     }
     rel
+}
+
+/// Distance of a relative path from its base directory, measured as the number
+/// of leading `..` components. Files in the same directory or a subdirectory
+/// have distance 0; each `../` hop up the tree adds one.
+fn path_distance(rel: &Path) -> usize {
+    rel.components()
+        .take_while(|c| matches!(c, std::path::Component::ParentDir))
+        .count()
 }
 
 /// Resolve `..` and `.` components in a path without touching the filesystem.

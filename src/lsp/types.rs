@@ -110,6 +110,10 @@ pub struct RumdlLspConfig {
     /// When false, rumdl will not respond to these requests, avoiding conflicts with other LSPs
     /// that provide the same features (e.g., PKM-focused LSPs)
     pub enable_link_navigation: bool,
+    /// Content roots for absolute-style link completion (e.g. `/img/01.webp`).
+    /// Each entry is an absolute path, or a path relative to the workspace root.
+    /// When empty, the workspace root folders are used.
+    pub link_completion_content_roots: Vec<String>,
 }
 
 impl Default for RumdlLspConfig {
@@ -124,6 +128,7 @@ impl Default for RumdlLspConfig {
             settings: None,
             enable_link_completions: true,
             enable_link_navigation: true,
+            link_completion_content_roots: Vec::new(),
         }
     }
 }
@@ -556,6 +561,7 @@ mod tests {
             settings: None,
             enable_link_completions: true,
             enable_link_navigation: true,
+            link_completion_content_roots: Vec::new(),
         };
 
         // Test serialization (uses camelCase)

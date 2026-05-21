@@ -163,7 +163,7 @@ impl IndexWorker {
     }
 
     /// Build a FileIndex from content
-    fn build_file_index(content: &str) -> FileIndex {
+    pub(super) fn build_file_index(content: &str) -> FileIndex {
         let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
         let mut file_index = FileIndex::new();
 
@@ -189,8 +189,12 @@ impl IndexWorker {
 
         // Extract cross-file links using the shared utility
         // This ensures consistent position tracking with MD057
-        for link in extract_cross_file_links(&ctx) {
+        let links = extract_cross_file_links(&ctx);
+        for link in links.relative {
             file_index.add_cross_file_link(link);
+        }
+        for link in links.root_relative {
+            file_index.add_root_relative_link(link);
         }
 
         file_index
@@ -336,41 +340,119 @@ impl IndexWorker {
 }
 
 /// Scan workspace roots for markdown files
+///
+/// Honors `.gitignore`, `.ignore`, git global excludes, and skips hidden
+/// entries so generated/ignored files don't pollute the index. Runs the
+/// (synchronous) filesystem walk on a blocking thread.
 async fn scan_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let roots = roots.to_vec();
+    tokio::task::spawn_blocking(move || collect_markdown_files(&roots))
+        .await
+        .unwrap_or_else(|e| {
+            log::warn!("Workspace scan task failed: {e}");
+            Vec::new()
+        })
+}
+
+/// Build a [`WalkBuilder`](ignore::WalkBuilder) rooted at `root` with the ignore
+/// options used for workspace indexing.
+///
+/// Centralizing the configuration keeps the full scan ([`collect_markdown_files`])
+/// and the single-path check ([`path_is_ignored_for_index`]) in exact agreement
+/// about which files belong in the index: same hidden/gitignore/global/exclude
+/// handling, same `node_modules`/`target` exclusion.
+fn index_walk_builder(root: &Path) -> ignore::WalkBuilder {
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        // Honor .gitignore / .ignore even outside a git repository.
+        .require_git(false)
+        // Always skip dependency/build output directories even when not gitignored.
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_str().unwrap_or("");
+            name != "node_modules" && name != "target"
+        });
+    builder
+}
+
+/// Collect markdown files from the given roots, respecting ignore files.
+fn collect_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
     for root in roots {
-        if let Err(e) = collect_markdown_files_recursive(root, &mut files).await {
-            log::warn!("Error scanning {}: {}", root.display(), e);
+        for result in index_walk_builder(root).build() {
+            match result {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if entry.file_type().is_some_and(|t| t.is_file())
+                        && let Some(ext) = path.extension()
+                        && is_markdown_extension(ext)
+                    {
+                        files.push(path.to_path_buf());
+                    }
+                }
+                Err(e) => log::warn!("Error scanning {}: {}", root.display(), e),
+            }
         }
     }
 
     files
 }
 
-/// Recursively collect markdown files from a directory
-async fn collect_markdown_files_recursive(dir: &PathBuf, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    let mut entries = tokio::fs::read_dir(dir).await?;
+/// Whether `path` should be excluded from the workspace index based on the same
+/// ignore rules used by the full scan ([`collect_markdown_files`]).
+///
+/// Used to keep filesystem-watch events (`did_change_watched_files`) from
+/// reintroducing generated/ignored files that the full scan skips. Files the
+/// user explicitly opens or edits bypass this check, since the active document
+/// must stay indexed for in-file anchor completion.
+///
+/// Determines ignore status by walking from the containing workspace root down
+/// the chain of directories leading to `path`, using the shared
+/// [`index_walk_builder`] configuration. Descent is pruned to that single chain,
+/// so the walk applies the same ignore rules the full scan would (including an
+/// ignored ancestor directory or a hidden entry) without traversing the tree. If
+/// the walk does not yield `path`, the file must not enter the index.
+///
+/// `node_modules`/`target` are also checked directly so the predicate works even
+/// for paths that do not exist on disk. The file must exist for the walk to
+/// observe it, which holds for the create/change watch events that use this.
+pub(super) fn path_is_ignored_for_index(roots: &[PathBuf], path: &Path) -> bool {
+    // Use the deepest workspace root that contains the file so nested roots
+    // resolve their own ignore files. Paths outside every root aren't filtered.
+    let Some(root) = roots
+        .iter()
+        .filter(|r| path.starts_with(r))
+        .max_by_key(|r| r.components().count())
+    else {
+        return false;
+    };
 
-    while let Some(entry) = entries.next_entry().await? {
-        let path = entry.path();
-        let file_type = entry.file_type().await?;
-
-        if file_type.is_dir() {
-            // Skip hidden directories and common non-source directories
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') && name != "node_modules" && name != "target" {
-                Box::pin(collect_markdown_files_recursive(&path, files)).await?;
-            }
-        } else if file_type.is_file()
-            && let Some(ext) = path.extension()
-            && is_markdown_extension(ext)
-        {
-            files.push(path);
-        }
+    // Check `node_modules`/`target` only below the workspace root, so a workspace
+    // located under a directory of that name is not wholly excluded.
+    if let Ok(rel) = path.strip_prefix(root)
+        && rel
+            .components()
+            .any(|c| matches!(c, std::path::Component::Normal(name) if name == "node_modules" || name == "target"))
+    {
+        return true;
     }
 
-    Ok(())
+    let target = path.to_path_buf();
+    let mut builder = index_walk_builder(root);
+    // Only descend into directories that lead to `target`; everything else is
+    // pruned. `target.starts_with(entry)` holds for `target` and its ancestors.
+    builder.filter_entry(move |entry| target.starts_with(entry.path()));
+    for entry in builder.build().flatten() {
+        if entry.path() == path {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -434,5 +516,135 @@ More text with [link](./other.md#section).
         assert_eq!(index.cross_file_links[1].target_path, "./b.md");
         assert_eq!(index.cross_file_links[1].fragment, "section");
         assert_eq!(index.cross_file_links[1].column, 27);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_respects_gitignore() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // A tracked markdown file and a build-output one that .gitignore excludes.
+        fs::write(root.join("README.md"), "# Readme\n").unwrap();
+        fs::write(root.join(".gitignore"), "build/\nignored.md\n").unwrap();
+        fs::write(root.join("ignored.md"), "# Ignored\n").unwrap();
+        fs::create_dir(root.join("build")).unwrap();
+        fs::write(root.join("build").join("generated.md"), "# Generated\n").unwrap();
+
+        // Dependency/output dirs are skipped even when not gitignored.
+        fs::create_dir(root.join("node_modules")).unwrap();
+        fs::write(root.join("node_modules").join("dep.md"), "# Dep\n").unwrap();
+
+        let mut files = collect_markdown_files(&[root.to_path_buf()]);
+        files.sort();
+
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        assert_eq!(names, vec!["README.md".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_finds_nested_markdown() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("top.md"), "# Top\n").unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join("docs").join("guide.markdown"), "# Guide\n").unwrap();
+        fs::write(root.join("docs").join("notes.txt"), "not markdown\n").unwrap();
+
+        let mut names: Vec<String> = collect_markdown_files(&[root.to_path_buf()])
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["guide.markdown".to_string(), "top.md".to_string()]);
+    }
+
+    #[test]
+    fn test_path_is_ignored_for_index() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::write(root.join(".gitignore"), "build/\ndraft.md\n").unwrap();
+
+        // The check walks the file's directory, so the files must exist (as they
+        // do for create/change watch events).
+        fs::write(root.join("README.md"), "").unwrap();
+        fs::write(root.join("draft.md"), "").unwrap();
+        fs::write(root.join(".hidden.md"), "").unwrap();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join("docs").join("guide.md"), "").unwrap();
+        fs::create_dir(root.join("build")).unwrap();
+        fs::write(root.join("build").join("out.md"), "").unwrap();
+
+        let roots = vec![root.clone()];
+
+        // Tracked files are not ignored.
+        assert!(!path_is_ignored_for_index(&roots, &root.join("README.md")));
+        assert!(!path_is_ignored_for_index(&roots, &root.join("docs/guide.md")));
+
+        // Gitignored file and file inside a gitignored directory.
+        assert!(path_is_ignored_for_index(&roots, &root.join("draft.md")));
+        assert!(path_is_ignored_for_index(&roots, &root.join("build/out.md")));
+
+        // Hidden files are excluded, matching the full scan's hidden(true).
+        assert!(path_is_ignored_for_index(&roots, &root.join(".hidden.md")));
+
+        // Dependency/output dirs are always skipped, even without a gitignore rule
+        // and without the file existing.
+        assert!(path_is_ignored_for_index(&roots, &root.join("node_modules/dep.md")));
+        assert!(path_is_ignored_for_index(&roots, &root.join("target/doc.md")));
+
+        // Paths outside every workspace root are not filtered.
+        let outside = dir.path().parent().unwrap().join("elsewhere.md");
+        assert!(!path_is_ignored_for_index(&roots, &outside));
+    }
+
+    #[test]
+    fn test_path_is_ignored_for_index_honors_nested_gitignore() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::create_dir(root.join("docs")).unwrap();
+        fs::write(root.join("docs").join(".gitignore"), "generated.md\n").unwrap();
+        fs::write(root.join("docs").join("generated.md"), "").unwrap();
+        fs::write(root.join("docs").join("manual.md"), "").unwrap();
+
+        let roots = vec![root.clone()];
+
+        assert!(path_is_ignored_for_index(&roots, &root.join("docs/generated.md")));
+        assert!(!path_is_ignored_for_index(&roots, &root.join("docs/manual.md")));
+    }
+
+    #[test]
+    fn test_path_is_ignored_for_index_workspace_under_target_dir() {
+        use std::fs;
+
+        // A workspace whose own path contains a `target` component must not have
+        // all of its files treated as ignored.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("target").join("my-docs");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("README.md"), "").unwrap();
+        fs::create_dir(root.join("target")).unwrap();
+        fs::write(root.join("target").join("out.md"), "").unwrap();
+
+        let roots = vec![root.clone()];
+
+        // Files directly under the workspace are indexed despite the `target`
+        // ancestor in the absolute path.
+        assert!(!path_is_ignored_for_index(&roots, &root.join("README.md")));
+        // A `target` directory *inside* the workspace is still excluded.
+        assert!(path_is_ignored_for_index(&roots, &root.join("target/out.md")));
     }
 }

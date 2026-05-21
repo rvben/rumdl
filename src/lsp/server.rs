@@ -427,7 +427,7 @@ impl LanguageServer for RumdlLanguageServer {
             };
 
             if !skip_link_check && let Some(link_info) = Self::detect_link_target_position(&text, position) {
-                let items = if let Some((partial_anchor, anchor_start_col)) = link_info.anchor {
+                if let Some((partial_anchor, anchor_start_col)) = link_info.anchor {
                     log::debug!(
                         "Anchor completion triggered at {}:{}, file: '{}', partial: '{}'",
                         position.line,
@@ -435,8 +435,12 @@ impl LanguageServer for RumdlLanguageServer {
                         link_info.file_path,
                         partial_anchor
                     );
-                    self.get_anchor_completions(&uri, &link_info.file_path, &partial_anchor, anchor_start_col, position)
-                        .await
+                    let items = self
+                        .get_anchor_completions(&uri, &link_info.file_path, &partial_anchor, anchor_start_col, position)
+                        .await;
+                    if !items.is_empty() {
+                        return Ok(Some(CompletionResponse::Array(items)));
+                    }
                 } else {
                     log::debug!(
                         "File path completion triggered at {}:{}, partial: '{}'",
@@ -444,11 +448,12 @@ impl LanguageServer for RumdlLanguageServer {
                         position.character,
                         link_info.file_path
                     );
-                    self.get_file_completions(&uri, &link_info.file_path, link_info.path_start_col, position)
-                        .await
-                };
-                if !items.is_empty() {
-                    return Ok(Some(CompletionResponse::Array(items)));
+                    let list = self
+                        .get_file_completions(&uri, &link_info.file_path, link_info.path_start_col, position)
+                        .await;
+                    if !list.items.is_empty() {
+                        return Ok(Some(CompletionResponse::List(list)));
+                    }
                 }
             }
         }
@@ -506,6 +511,14 @@ impl LanguageServer for RumdlLanguageServer {
             settings_value
         };
 
+        // A settings payload that carries `linkCompletionContentRoots` is a full
+        // RumdlLspConfig even when the list is empty, so clearing it back to the
+        // workspace-root default applies instead of being treated as unknown.
+        let has_content_roots_key = matches!(
+            &rumdl_settings,
+            serde_json::Value::Object(obj) if obj.contains_key("linkCompletionContentRoots")
+        );
+
         // Track if we successfully applied any configuration
         let mut config_applied = false;
         let mut warnings: Vec<String> = Vec::new();
@@ -554,7 +567,8 @@ impl LanguageServer for RumdlLanguageServer {
                 || !full_config.enable_linting
                 || full_config.enable_auto_fix
                 || !full_config.enable_link_completions
-                || !full_config.enable_link_navigation)
+                || !full_config.enable_link_navigation
+                || has_content_roots_key)
         {
             // Validate rule names
             if let Some(ref rules) = full_config.enable_rules {
@@ -897,6 +911,22 @@ impl LanguageServer for RumdlLanguageServer {
                 {
                     match change.typ {
                         FileChangeType::CREATED | FileChangeType::CHANGED => {
+                            // Skip files the full scan would ignore (e.g. generated
+                            // output) so filesystem-watch events don't reintroduce
+                            // them. Explicitly opened/edited files bypass this via
+                            // the did_open/did_change handlers.
+                            let roots = self.workspace_roots.read().await.clone();
+                            if crate::lsp::index_worker::path_is_ignored_for_index(&roots, &path) {
+                                // A file that was indexed before an ignore rule began
+                                // matching it (e.g. just added to .gitignore) must be
+                                // evicted so completions and navigation stop surfacing
+                                // it. FileDeleted is a no-op when it was never indexed.
+                                let _ = self
+                                    .update_tx
+                                    .send(IndexUpdate::FileDeleted { path: path.clone() })
+                                    .await;
+                                continue;
+                            }
                             // Read file content and update index
                             if let Ok(content) = tokio::fs::read_to_string(&path).await {
                                 let _ = self
