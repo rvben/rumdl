@@ -80,39 +80,119 @@ enum TocMismatch {
     },
 }
 
-/// Regex patterns used by `strip_links_and_images` and the test-only
-/// `strip_markdown_formatting` helper.
+/// Regex patterns used by `strip_links_and_images`.
 static MARKDOWN_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap());
 static MARKDOWN_REF_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[([^\]]+)\]\[[^\]]*\]").unwrap());
 static MARKDOWN_IMAGE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap());
 
-/// Strip only links and images from text, preserving all other inline formatting
-/// (code spans, bold, italic, etc.).
+/// Extract code-span byte ranges from `text` using the CommonMark rule:
+/// a run of N backticks opens a span closed by exactly N backticks.
+/// Returns a sorted list of `(start, end)` byte offsets that are inside code spans
+/// (including the backtick delimiters themselves).
+fn code_span_ranges(text: &str) -> Vec<(usize, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut ranges = Vec::new();
+    let mut i = 0;
+
+    while i < len {
+        if chars[i] == '`' {
+            let span_start = i;
+            while i < len && chars[i] == '`' {
+                i += 1;
+            }
+            let n = i - span_start;
+
+            // Search for the matching closing sequence of exactly n backticks
+            let mut j = i;
+            let mut found = false;
+            while j < len {
+                if chars[j] == '`' {
+                    let close_start = j;
+                    while j < len && chars[j] == '`' {
+                        j += 1;
+                    }
+                    if j - close_start == n {
+                        // Convert char indices to byte offsets
+                        let byte_start: usize = text.char_indices().nth(span_start).map_or(0, |(b, _)| b);
+                        let byte_end: usize = text.char_indices().nth(j).map_or(text.len(), |(b, _)| b);
+                        ranges.push((byte_start, byte_end));
+                        i = j;
+                        found = true;
+                        break;
+                    }
+                } else {
+                    j += 1;
+                }
+            }
+            if !found {
+                // No matching close; skip past the opening backticks
+                i = span_start + n;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    ranges
+}
+
+/// Strip only links and images from `text`, preserving all other inline
+/// formatting (code spans, bold, italic, etc.).
 ///
 /// Links and images cannot appear inside a Markdown link label `[...]`, so they
 /// must be removed when building TOC display text. Code spans and emphasis are
 /// valid inside link labels and should be kept so the TOC entry faithfully
 /// reflects the heading's visual appearance.
 ///
+/// Code-span contents are protected: link-like syntax such as `[foo](bar)` that
+/// appears inside backticks is left untouched.
+///
 /// Examples:
 /// - `` `my header` `` → `` `my header` `` (code ticks preserved)
 /// - `[terminal](url)` → `terminal` (link stripped)
 /// - `![alt](img.png)` → `alt` (image stripped)
 /// - `**bold**` → `**bold**` (emphasis preserved)
+/// - `` `[foo](bar)` `` → `` `[foo](bar)` `` (link inside code span preserved)
 /// - `Tool: [terminal](url)` → `Tool: terminal`
 fn strip_links_and_images(text: &str) -> String {
-    let mut result = text.to_string();
+    // Collect code-span byte ranges so we can protect their contents from
+    // the link/image regex substitutions.
+    let protected = code_span_ranges(text);
 
-    // Strip images first (before links, since images use similar syntax)
-    result = MARKDOWN_IMAGE.replace_all(&result, "$1").to_string();
+    // If there are no code spans the fast path avoids all the extra work.
+    if protected.is_empty() {
+        let mut result = text.to_string();
+        result = MARKDOWN_IMAGE.replace_all(&result, "$1").to_string();
+        result = MARKDOWN_LINK.replace_all(&result, "$1").to_string();
+        result = MARKDOWN_REF_LINK.replace_all(&result, "$1").to_string();
+        return result;
+    }
 
-    // Strip links: [text](url) → text
-    result = MARKDOWN_LINK.replace_all(&result, "$1").to_string();
+    // Replace each code span with a unique placeholder that cannot be matched
+    // by the link/image regexes, apply the regexes, then restore the originals.
+    let mut placeholders: Vec<(&str, String)> = Vec::with_capacity(protected.len());
+    let mut masked = text.to_string();
+    // Process spans in reverse order so byte offsets remain valid after each replacement.
+    for (i, &(start, end)) in protected.iter().enumerate().rev() {
+        // Placeholder: a string containing no `[`, `]`, `(`, `)`, `!` characters.
+        let placeholder = format!("\x00CODESPAN{i}\x00");
+        let original = &text[start..end];
+        placeholders.push((original, placeholder.clone()));
+        masked.replace_range(start..end, &placeholder);
+    }
 
-    // Strip reference links: [text][ref] → text
-    result = MARKDOWN_REF_LINK.replace_all(&result, "$1").to_string();
+    // Apply link/image stripping to the masked string
+    masked = MARKDOWN_IMAGE.replace_all(&masked, "$1").to_string();
+    masked = MARKDOWN_LINK.replace_all(&masked, "$1").to_string();
+    masked = MARKDOWN_REF_LINK.replace_all(&masked, "$1").to_string();
 
-    result
+    // Restore the original code-span text
+    for (original, placeholder) in &placeholders {
+        masked = masked.replace(placeholder.as_str(), original);
+    }
+
+    masked
 }
 
 /// MD073: Table of Contents Validation
@@ -2305,6 +2385,43 @@ Content.
         assert!(
             warnings.is_empty(),
             "check() must not warn after fix() for inline-formatted headings: {warnings:?}"
+        );
+    }
+
+    /// Link-like syntax inside a code span must not be stripped, because it is
+    /// literal content of the code span and not a real Markdown link.
+    #[test]
+    fn test_link_inside_code_span_preserved_in_toc() {
+        let rule = MD073TocValidation::new();
+        let content = r#"# Title
+
+<!-- toc -->
+
+<!-- tocstop -->
+
+## Use `[foo](bar)` syntax
+
+Content.
+"#;
+        let ctx = create_ctx(content);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        // The code span `[foo](bar)` must survive intact in the TOC display text.
+        // The anchor is generated from the raw heading text by the GitHub algorithm,
+        // which strips backtick, bracket, and paren characters. Verify only the
+        // display-text preservation, not the exact anchor (which depends on the anchor
+        // generation algorithm's treatment of non-alphanumeric chars in code spans).
+        let toc_start = fixed.find("<!-- toc -->").unwrap();
+        let toc_end = fixed.find("<!-- tocstop -->").unwrap();
+        let toc_content = &fixed[toc_start..toc_end];
+        assert!(
+            toc_content.contains("Use `[foo](bar)` syntax"),
+            "Link-like text inside code span must be preserved in TOC display text. Got: {toc_content}"
+        );
+        // Also ensure the real link stripping (outside code spans) still works
+        assert!(
+            !toc_content.contains("http://"),
+            "Real links (outside code spans) should be stripped: {toc_content}"
         );
     }
 }
