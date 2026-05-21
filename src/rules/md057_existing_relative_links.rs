@@ -506,7 +506,11 @@ impl MD057ExistingRelativeLinks {
 
         // Filesystem mode (roots): an existing directory without a trailing slash
         // is valid — mirrors how relative links accept directories via `path.exists()`.
-        if !require_index_for_dirs && !is_directory_link && is_dir {
+        // Exclude decoded paths that end with `/`: a URL like `/guide/#intro` strips
+        // the fragment to `guide/`, so `decoded` carries the trailing slash even though
+        // `is_directory_link` is false (the raw URL ends with `#intro`, not `/`).
+        let decoded_has_trailing_slash = decoded.ends_with('/');
+        if !require_index_for_dirs && !is_directory_link && !decoded_has_trailing_slash && is_dir {
             return Resolution::Found;
         }
 
@@ -3724,6 +3728,40 @@ See the [docs][ref].
             result[0].message.contains("index.md") || result[0].message.contains("section"),
             "Message should mention the directory or missing index.md: {}",
             result[0].message
+        );
+    }
+
+    /// Regression test for the edge case where a trailing-slash directory URL has a
+    /// fragment suffix (e.g. `/guide/#intro`). After stripping the fragment, the
+    /// decoded path is `guide/` (ends with `/`), but `is_directory_link` was computed
+    /// from `url.ends_with('/')` which is false when the URL ends with `#intro`.
+    /// The fix must still treat such links as directory links and require index.md.
+    #[test]
+    fn test_trailing_slash_with_fragment_treated_as_directory_link() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Create directory `guide` WITHOUT index.md
+        let guide_dir = root.join("guide");
+        std::fs::create_dir_all(&guide_dir).unwrap();
+        std::fs::write(guide_dir.join("page.md"), "# Page\n").unwrap();
+
+        // /guide/#intro has a trailing slash before the fragment — must require index.md
+        let content = "[guide with fragment](/guide/#intro)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Trailing-slash link with fragment and no index.md must be flagged. Got: {result:?}"
         );
     }
 }
