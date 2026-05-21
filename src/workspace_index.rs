@@ -238,8 +238,12 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> Vec<CrossFileLinkIndex> {
 const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
+/// or when the meaning of persisted fields changes such that older caches are
+/// no longer correct. Version 7 forces a rebuild because earlier fast-path
+/// (`build_file_index_only`) entries omitted inline-disable data, so reused
+/// entries bypassed `<!-- rumdl-disable -->` blocks for cross-file rules.
 #[cfg(feature = "native")]
-const CACHE_FORMAT_VERSION: u32 = 6;
+const CACHE_FORMAT_VERSION: u32 = 7;
 
 /// Cache file name within the version directory
 #[cfg(feature = "native")]

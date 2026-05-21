@@ -284,6 +284,14 @@ pub fn build_file_index_only(
         crate::lint_context::LintContext::new(content, flavor, source_file)
     );
 
+    // Export inline disable data to the FileIndex so cross-file checks honor
+    // `<!-- rumdl-disable -->` blocks on the lint-cache fast path, exactly as
+    // lint_and_index does on the normal path.
+    let (file_disabled, persistent_transitions, line_disabled) = lint_ctx.inline_config().export_for_file_index();
+    file_index.file_disabled_rules = file_disabled;
+    file_index.persistent_transitions = persistent_transitions;
+    file_index.line_disabled_rules = line_disabled;
+
     // Only call contribute_to_index for cross-file rules (no rule checking!)
     time_section!("index: contribute cross-file data", {
         for rule in rules {
@@ -519,9 +527,23 @@ pub fn run_cross_file_checks(
 
     let mut warnings = Vec::new();
 
+    // Honor `per-file-ignores` for cross-file rules. Cross-file warnings are
+    // attributed to `file_path` (the file holding the link), so a rule ignored
+    // for that file must not emit them. This applies on every path; single-file
+    // rule filtering does not cover cross-file checks because they run over the
+    // config group's full rule set, and cross-file rules share link data.
+    let ignored_rules_for_file = config.map(|cfg| cfg.get_ignored_rules_for_file(file_path));
+
     // Only check rules that need cross-file analysis
     for rule in rules {
         if rule.cross_file_scope() != CrossFileScope::Workspace {
+            continue;
+        }
+
+        if ignored_rules_for_file
+            .as_ref()
+            .is_some_and(|ignored| ignored.contains(rule.name()))
+        {
             continue;
         }
 

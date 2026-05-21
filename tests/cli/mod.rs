@@ -1,5 +1,6 @@
 mod check_runner_tests;
 mod cli_alias_test;
+mod cli_cache_cross_file_test;
 mod cli_config_override_test;
 mod cli_config_test;
 mod cli_duplication_test;
