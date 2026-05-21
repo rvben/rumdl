@@ -167,19 +167,6 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Project root used for absolute-link resolution and `search-paths` anchoring.
-    ///
-    /// Returns the explicit base path when set via `with_path()` (used by tests
-    /// to isolate filesystem state to a temp dir); otherwise returns the
-    /// process-wide discovered project root.
-    fn project_root(&self) -> PathBuf {
-        self.base_path
-            .lock()
-            .ok()
-            .and_then(|g| g.clone())
-            .unwrap_or_else(|| PROJECT_ROOT.clone())
-    }
-
     /// Resolve a config-supplied path string (from `roots` or `search-paths`)
     /// against the project root: absolute strings are taken verbatim, relative
     /// strings are joined onto `project_root`.
@@ -407,7 +394,9 @@ impl MD057ExistingRelativeLinks {
 
         let (decoded, is_directory_link) = Self::prepare_absolute_url(url);
 
-        match Self::resolve_under_root(&docs_dir, &decoded, is_directory_link) {
+        // MkDocs mode: an extensionless directory link must have index.md.
+        // `require_index_for_dirs = true` enforces this for all directory hits.
+        match Self::resolve_under_root_with_opts(&docs_dir, &decoded, is_directory_link, true) {
             Resolution::Found => None,
             Resolution::DirectoryWithoutIndex { resolved } => Some(format!(
                 "Absolute link '{url}' resolves to directory '{}' which has no index.md",
@@ -433,8 +422,10 @@ impl MD057ExistingRelativeLinks {
 
         for root in roots {
             let root_path = Self::resolve_against_project_root(root, project_root);
+            // Filesystem mode: an existing directory without trailing slash is valid.
+            // `require_index_for_dirs = false` aligns with relative-link behavior. (#632)
             if matches!(
-                Self::resolve_under_root(&root_path, &decoded, is_directory_link),
+                Self::resolve_under_root_with_opts(&root_path, &decoded, is_directory_link, false),
                 Resolution::Found
             ) {
                 return None;
@@ -442,7 +433,8 @@ impl MD057ExistingRelativeLinks {
         }
 
         if matches!(
-            Self::resolve_under_root(project_root, &decoded, is_directory_link),
+            // Filesystem mode: see above.
+            Self::resolve_under_root_with_opts(project_root, &decoded, is_directory_link, false),
             Resolution::Found
         ) {
             return None;
@@ -469,18 +461,40 @@ impl MD057ExistingRelativeLinks {
 
     /// Try to resolve a decoded absolute-link path under a single root directory.
     ///
-    /// Applies four resolution strategies in order:
-    /// 1. Directory-style links: look for `<resolved>/index.md`.
-    /// 2. Direct existence (with markdown-extension fallback for extensionless links).
-    /// 3. `.html`/`.htm` links: look for a markdown source with the same stem in the same directory.
-    fn resolve_under_root(root_path: &Path, decoded: &str, is_directory_link: bool) -> Resolution {
+    /// `require_index_for_dirs` controls how extensionless links that resolve to a
+    /// directory are treated:
+    ///
+    /// - `true` (MkDocs / docs-dir mode): a directory must contain `index.md` to be
+    ///   considered valid, even when the link has no trailing slash. This matches
+    ///   MkDocs' URL routing convention where `/section` serves `section/index.md`.
+    ///
+    /// - `false` (roots / filesystem mode): an existing directory is accepted as a
+    ///   valid target for an extensionless link, matching the behavior of relative
+    ///   links (which use `path.exists()`). Only an explicit trailing-slash link
+    ///   (`is_directory_link == true`) still requires `index.md`.
+    ///
+    /// Applies resolution strategies in order:
+    /// 1. Directory-style links (explicit `/` suffix or `require_index_for_dirs`):
+    ///    look for `<resolved>/index.md`; report `DirectoryWithoutIndex` on failure.
+    /// 2. Filesystem-mode directory hit (`require_index_for_dirs == false` and
+    ///    `is_directory_link == false`): accept the existing directory as `Found`.
+    /// 3. Direct existence (with markdown-extension fallback for extensionless links).
+    /// 4. `.html`/`.htm` links: look for a markdown source with the same stem.
+    fn resolve_under_root_with_opts(
+        root_path: &Path,
+        decoded: &str,
+        is_directory_link: bool,
+        require_index_for_dirs: bool,
+    ) -> Resolution {
         let resolved = root_path.join(decoded);
 
-        // Directory-style links resolve via `index.md` inside the directory.
-        // Must be checked before `file_exists_or_markdown_extension` because
-        // `path.exists()` returns true for directories.
         let is_dir = resolved.is_dir();
-        if is_directory_link || is_dir {
+
+        // When the link explicitly ends with `/` or the caller requires index.md
+        // for all directory hits (MkDocs mode), apply the stricter check first.
+        // Must be checked before `file_exists_or_markdown_extension` because
+        // `path.exists()` returns `true` for directories.
+        if is_directory_link || (require_index_for_dirs && is_dir) {
             let index_path = resolved.join("index.md");
             if file_exists_with_cache(&index_path) {
                 return Resolution::Found;
@@ -488,6 +502,12 @@ impl MD057ExistingRelativeLinks {
             if is_dir {
                 return Resolution::DirectoryWithoutIndex { resolved };
             }
+        }
+
+        // Filesystem mode (roots): an existing directory without a trailing slash
+        // is valid — mirrors how relative links accept directories via `path.exists()`.
+        if !require_index_for_dirs && !is_directory_link && is_dir {
+            return Resolution::Found;
         }
 
         if file_exists_or_markdown_extension(&resolved) {
@@ -1206,81 +1226,20 @@ impl Rule for MD057ExistingRelativeLinks {
 
     fn cross_file_check(
         &self,
-        file_path: &Path,
-        file_index: &FileIndex,
-        workspace_index: &crate::workspace_index::WorkspaceIndex,
+        _file_path: &Path,
+        _file_index: &FileIndex,
+        _workspace_index: &crate::workspace_index::WorkspaceIndex,
     ) -> LintResult {
-        // Reset the file existence cache for a fresh run
-        reset_file_existence_cache();
-
-        let mut warnings = Vec::new();
-
-        // Get the directory containing this file for resolving relative links
-        let file_dir = file_path.parent();
-
-        // Compute additional search paths for fallback link resolution
-        let base_path = file_dir.map_or_else(|| CURRENT_DIR.clone(), std::path::Path::to_path_buf);
-        let project_root = self.project_root();
-        let extra_search_paths = self.compute_search_paths(self.flavor, Some(file_path), &base_path, &project_root);
-
-        for cross_link in &file_index.cross_file_links {
-            // URL-decode the path for filesystem operations
-            // The stored path is URL-encoded (e.g., "%F0%9F%91%A4" for emoji 👤)
-            let decoded_target = Self::url_decode(&cross_link.target_path);
-
-            // Skip absolute paths — they are already handled by check()
-            // which validates them according to the absolute_links config.
-            // Handling them here too would produce duplicate warnings.
-            if decoded_target.starts_with('/') {
-                continue;
-            }
-
-            // Resolve relative path
-            let target_path = if let Some(dir) = file_dir {
-                dir.join(&decoded_target)
-            } else {
-                Path::new(&decoded_target).to_path_buf()
-            };
-
-            // Normalize the path (handle .., ., etc.)
-            let target_path = normalize_path(&target_path);
-
-            // Check if the target file exists, also trying markdown extensions for extensionless links
-            let file_exists =
-                workspace_index.contains_file(&target_path) || file_exists_or_markdown_extension(&target_path);
-
-            if !file_exists {
-                // For .html/.htm links, check if a corresponding markdown source exists
-                // This handles doc sites (mdBook, etc.) where .md is compiled to .html
-                let has_md_source = if let Some(ext) = target_path.extension().and_then(|e| e.to_str())
-                    && (ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"))
-                    && let (Some(stem), Some(parent)) =
-                        (target_path.file_stem().and_then(|s| s.to_str()), target_path.parent())
-                {
-                    MARKDOWN_EXTENSIONS.iter().any(|md_ext| {
-                        let source_path = parent.join(format!("{stem}{md_ext}"));
-                        workspace_index.contains_file(&source_path) || source_path.exists()
-                    })
-                } else {
-                    false
-                };
-
-                if !has_md_source && !Self::exists_in_search_paths(&decoded_target, &extra_search_paths) {
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: cross_link.line,
-                        column: cross_link.column,
-                        end_line: cross_link.line,
-                        end_column: cross_link.column + cross_link.target_path.len(),
-                        message: format!("Relative link '{}' does not exist", cross_link.target_path),
-                        severity: Severity::Error,
-                        fix: None,
-                    });
-                }
-            }
-        }
-
-        Ok(warnings)
+        // All link targets are already validated by check() on each per-file pass.
+        // check() resolves relative links against the file's own directory, handles
+        // configured search paths, and applies the absolute_links config.
+        // Validating them here too would produce identical duplicate warnings for
+        // every broken link. (#631)
+        //
+        // The cross_file_scope / contribute_to_index / workspace-index infrastructure
+        // remains in place to support future cross-file analyses (e.g. heading-anchor
+        // validation across files).
+        Ok(Vec::new())
     }
 }
 
@@ -2105,14 +2064,13 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
     #[test]
     fn test_cross_file_check_missing_link() {
+        // cross_file_check delegates all validation to check() to avoid duplicates.
+        // It always returns empty — the per-file check() path is authoritative.
         use crate::workspace_index::WorkspaceIndex;
 
         let rule = MD057ExistingRelativeLinks::new();
-
-        // Create an empty workspace index
         let workspace_index = WorkspaceIndex::new();
 
-        // Create file index with a link to a missing file
         let mut file_index = FileIndex::new();
         file_index.add_cross_file_link(CrossFileLinkIndex {
             target_path: "missing.md".to_string(),
@@ -2121,15 +2079,15 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             column: 1,
         });
 
-        // Run cross-file check
         let warnings = rule
             .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
             .unwrap();
 
-        // Should have one warning for the missing file
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].message.contains("missing.md"));
-        assert!(warnings[0].message.contains("does not exist"));
+        // cross_file_check defers to check(); it produces no warnings of its own.
+        assert!(
+            warnings.is_empty(),
+            "cross_file_check must not duplicate check()'s per-file warnings. Got: {warnings:?}"
+        );
     }
 
     #[test]
@@ -2195,15 +2153,14 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
 
     #[test]
     fn test_cross_file_check_html_link_without_source() {
-        // Test that .html links without corresponding .md source ARE flagged
+        // cross_file_check delegates all validation to check() to avoid duplicates.
+        // Verifying that .html links without a matching .md source are caught is
+        // already covered by test_html_link_with_md_source (check() path).
         use crate::workspace_index::WorkspaceIndex;
 
         let rule = MD057ExistingRelativeLinks::new();
-
-        // Create an empty workspace index
         let workspace_index = WorkspaceIndex::new();
 
-        // Create file index with an .html link to a non-existent file
         let mut file_index = FileIndex::new();
         file_index.add_cross_file_link(CrossFileLinkIndex {
             target_path: "missing.html".to_string(),
@@ -2212,14 +2169,15 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
             column: 5,
         });
 
-        // Run cross-file check from docs/index.md
         let warnings = rule
             .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
             .unwrap();
 
-        // Should have one warning - no .md source exists
-        assert_eq!(warnings.len(), 1, "Expected 1 warning for .html link without source");
-        assert!(warnings[0].message.contains("missing.html"));
+        // cross_file_check defers to check(); it produces no warnings of its own.
+        assert!(
+            warnings.is_empty(),
+            "cross_file_check must not duplicate check()'s per-file warnings. Got: {warnings:?}"
+        );
     }
 
     #[test]
@@ -3547,81 +3505,225 @@ See the [docs][ref].
     }
 
     #[test]
-    fn test_cross_file_check_clears_stale_cache() {
-        // Verify that cross_file_check() resets the file existence cache so stale
-        // entries from a previous lint cycle do not affect results.
-        use crate::workspace_index::WorkspaceIndex;
+    fn test_check_clears_stale_cache() {
+        // Verify that check() resets the file existence cache so stale entries from
+        // a previous lint cycle do not suppress valid warnings.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
 
-        let rule = MD057ExistingRelativeLinks::new();
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        // Seed the cache with a stale entry: pretend "docs/phantom.md" exists on disk.
-        // In reality, neither the filesystem nor the workspace index has this file.
+        // Seed the cache with a stale "exists" entry for a file that is NOT on disk.
+        let phantom_path = base_path.join("phantom.md");
         {
             let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
-            cache.insert(PathBuf::from("docs/phantom.md"), true);
+            cache.insert(phantom_path.clone(), true);
         }
 
-        let workspace_index = WorkspaceIndex::new();
+        let content = "[phantom](phantom.md)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
 
-        let mut file_index = FileIndex::new();
-        file_index.add_cross_file_link(CrossFileLinkIndex {
-            target_path: "phantom.md".to_string(),
-            fragment: "".to_string(),
-            line: 1,
-            column: 1,
-        });
-
-        let warnings = rule
-            .cross_file_check(Path::new("docs/index.md"), &file_index, &workspace_index)
-            .unwrap();
-
-        // With cache reset, cross_file_check must detect that phantom.md does not exist
+        // check() must reset the cache; stale "exists=true" must not suppress the warning.
         assert_eq!(
             warnings.len(),
             1,
-            "cross_file_check should report missing file after clearing stale cache. Got: {warnings:?}"
+            "check() should report missing file after clearing stale cache. Got: {warnings:?}"
         );
         assert!(warnings[0].message.contains("phantom.md"));
     }
 
     #[test]
-    fn test_cross_file_check_does_not_carry_over_cache_between_runs() {
-        // Two consecutive cross_file_check() calls should each start with a fresh cache.
-        use crate::workspace_index::WorkspaceIndex;
+    fn test_check_does_not_carry_over_cache_between_runs() {
+        // Two consecutive check() calls should each start with a fresh cache.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
 
-        let rule = MD057ExistingRelativeLinks::new();
-        let workspace_index = WorkspaceIndex::new();
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
 
-        // First run: link to a file that doesn't exist
-        let mut file_index_1 = FileIndex::new();
-        file_index_1.add_cross_file_link(CrossFileLinkIndex {
-            target_path: "nonexistent.md".to_string(),
-            fragment: "".to_string(),
-            line: 1,
-            column: 1,
-        });
+        let content = "[missing](nonexistent.md)\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
 
-        let warnings_1 = rule
-            .cross_file_check(Path::new("docs/a.md"), &file_index_1, &workspace_index)
-            .unwrap();
+        // First run: file doesn't exist — warning expected.
+        let warnings_1 = rule.check(&ctx).unwrap();
         assert_eq!(warnings_1.len(), 1, "First run should detect missing file");
 
-        // Between runs, inject a stale "exists = true" entry for the same resolved path
+        // Inject a stale "exists = true" entry for the resolved path.
+        let nonexistent_path = base_path.join("nonexistent.md");
         {
             let mut cache = FILE_EXISTENCE_CACHE.lock().unwrap();
-            cache.insert(PathBuf::from("docs/nonexistent.md"), true);
+            cache.insert(nonexistent_path.clone(), true);
         }
 
-        // Second run: same link, but now cache says file exists (stale data)
-        let warnings_2 = rule
-            .cross_file_check(Path::new("docs/a.md"), &file_index_1, &workspace_index)
-            .unwrap();
-
-        // The second run must also detect the missing file because the cache should be reset
+        // Second run: cache says file exists, but check() should reset it first.
+        let warnings_2 = rule.check(&ctx).unwrap();
         assert_eq!(
             warnings_2.len(),
             1,
-            "Second run should still detect missing file after cache reset. Got: {warnings_2:?}"
+            "Second check() run should still detect missing file after cache reset. Got: {warnings_2:?}"
+        );
+    }
+
+    // --- Bug #631: duplicate warnings for broken relative links ---
+
+    /// Regression test: a single broken relative link must produce exactly one
+    /// warning across both check() and cross_file_check(). Previously, each
+    /// code path emitted an identical warning independently, causing duplicates.
+    #[test]
+    fn test_no_duplicate_warnings_for_broken_relative_link() {
+        use crate::workspace_index::WorkspaceIndex;
+
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // The broken link target does NOT exist on disk.
+        let source_file = base_path.join("index.md");
+        std::fs::write(&source_file, "[broken](does/not/exist.md)\n").unwrap();
+
+        let content = "[broken](does/not/exist.md)\n";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+
+        // Collect warnings from check() (per-file path)
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(source_file.clone()),
+        );
+        let check_warnings = rule.check(&ctx).unwrap();
+
+        // Collect warnings from cross_file_check() (workspace-index path)
+        let mut file_index = FileIndex::new();
+        rule.contribute_to_index(&ctx, &mut file_index);
+        let workspace_index = WorkspaceIndex::new();
+        let cross_warnings = rule
+            .cross_file_check(&source_file, &file_index, &workspace_index)
+            .unwrap();
+
+        let total = check_warnings.len() + cross_warnings.len();
+        assert_eq!(
+            total, 1,
+            "Expected exactly 1 warning total across check() and cross_file_check(), got {total}: \
+             check={check_warnings:?}, cross={cross_warnings:?}"
+        );
+    }
+
+    // --- Bug #632: absolute directory links incorrectly flagged ---
+
+    /// With absolute-links = "relative_to_roots", links to existing targets must
+    /// be accepted for all four cases: {relative, absolute} x {file, directory}.
+    #[test]
+    fn test_absolute_dir_link_accepted_relative_to_roots() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Create directory `d` with a file inside (but no index.md)
+        let dir_d = root.join("d");
+        std::fs::create_dir_all(&dir_d).unwrap();
+        std::fs::write(dir_d.join("foo.md"), "# Foo\n").unwrap();
+
+        // Content exercises all four matrix cells:
+        //   relative file, relative dir, absolute file, absolute dir
+        let content = "\
+[absolute dir](/d)\n\
+[relative dir](d)\n\
+[absolute file](/d/foo.md)\n\
+[relative file](d/foo.md)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "All four {{relative,absolute}} x {{file,dir}} links to existing targets must pass. Got: {result:?}"
+        );
+    }
+
+    /// A directory link with a trailing slash and no index.md should be reported
+    /// as invalid under relative_to_roots (docs-convention: trailing slash implies index.md).
+    #[test]
+    fn test_absolute_trailing_slash_dir_link_requires_index() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Create directory `d` WITHOUT index.md
+        let dir_d = root.join("d");
+        std::fs::create_dir_all(&dir_d).unwrap();
+        std::fs::write(dir_d.join("foo.md"), "# Foo\n").unwrap();
+
+        // Trailing slash signals "this is a directory index" — index.md must exist.
+        let content = "[dir with slash](/d/)\n";
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToRoots,
+            roots: vec![],
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(root);
+
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Trailing-slash directory link without index.md must be flagged. Got: {result:?}"
+        );
+    }
+
+    /// The docs_dir (MkDocs) variant must still flag a directory link when index.md
+    /// is absent. This is tested via the full check() path with RelativeToDocs config
+    /// and a real mkdocs.yml pointing at a docs dir that contains the directory target.
+    #[test]
+    fn test_docs_dir_variant_still_enforces_index_md() {
+        let temp_dir = tempdir().unwrap();
+        let root = temp_dir.path();
+
+        // Create a minimal mkdocs.yml pointing at a "docs" directory
+        std::fs::write(root.join("mkdocs.yml"), "site_name: Test\ndocs_dir: docs\n").unwrap();
+
+        // Create docs/section/ WITHOUT index.md
+        let docs_dir = root.join("docs");
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        let section_dir = docs_dir.join("section");
+        std::fs::create_dir_all(&section_dir).unwrap();
+        std::fs::write(section_dir.join("page.md"), "# Page\n").unwrap();
+
+        // Create the source markdown file inside docs/
+        let source_file = docs_dir.join("index.md");
+        std::fs::write(&source_file, "[sec](/section)\n").unwrap();
+
+        let config = MD057Config {
+            absolute_links: AbsoluteLinksOption::RelativeToDocs,
+            ..Default::default()
+        };
+        let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&docs_dir);
+
+        let content = "[sec](/section)\n";
+        let ctx = crate::lint_context::LintContext::new(
+            content,
+            crate::config::MarkdownFlavor::Standard,
+            Some(source_file.clone()),
+        );
+        let result = rule.check(&ctx).unwrap();
+
+        // MkDocs enforces index.md for directory links, so this should be flagged.
+        assert_eq!(
+            result.len(),
+            1,
+            "MkDocs docs_dir variant must flag directory link without index.md. Got: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("index.md") || result[0].message.contains("section"),
+            "Message should mention the directory or missing index.md: {}",
+            result[0].message
         );
     }
 }
