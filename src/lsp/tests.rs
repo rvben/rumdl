@@ -2612,7 +2612,7 @@ async fn test_get_file_completions_absolute_lists_content_root() {
     let webp = list.items.iter().find(|i| i.label == "01.webp").unwrap();
     let new_text = match webp.text_edit.as_ref().unwrap() {
         tower_lsp::lsp_types::CompletionTextEdit::Edit(e) => &e.new_text,
-        _ => panic!("expected a plain text edit"),
+        tower_lsp::lsp_types::CompletionTextEdit::InsertAndReplace(_) => panic!("expected a plain text edit"),
     };
     assert_eq!(new_text, "/img/01.webp");
     // filterText must be the full replacement text so clients that filter against
