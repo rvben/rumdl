@@ -7026,18 +7026,104 @@ fn test_mixed_content_list_item_preserved_html_over_limit() {
     );
 }
 
-/// (l) With `line-length = 0` (documented "no limit"), the normalize-mode list-item
-/// gate must never emit a length warning, even when reflow would restructure
-/// multi-line content.
+/// (l) With `line-length = 0` (documented "no limit"), normalize mode joins a
+/// hard-wrapped list item onto one line, exactly as it already does for
+/// paragraphs (issue #639: list items behave like paragraphs). Because no
+/// length limit applies, the warning is the structural "could be normalized"
+/// advisory, never a length violation.
 #[test]
-fn test_normalize_mode_list_item_line_length_zero_no_warning() {
+fn test_normalize_mode_list_item_line_length_zero_joins_like_paragraph() {
     let rule = make_normalize_rule(0);
-    let content = "- Short first line\n  continued here\n";
-    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    // List item: two physical lines that should collapse into one.
+    let list_content = "- Short first line\n  continued here\n";
+    let list_ctx = LintContext::new(list_content, MarkdownFlavor::Standard, None);
+    let list_result = rule.check(&list_ctx).unwrap();
+    assert_eq!(
+        list_result.len(),
+        1,
+        "line-length = 0 must join a hard-wrapped list item, like a paragraph; got: {list_result:?}"
+    );
+    let list_warning = &list_result[0];
+    assert!(
+        list_warning.message.contains("could be normalized") && !list_warning.message.contains("exceeds"),
+        "at line-length = 0 the warning is a structural join, not a length violation; got: {:?}",
+        list_warning.message
+    );
+    let list_fix = list_warning.fix.as_ref().expect("join warning must carry a fix");
+    assert_eq!(
+        list_fix.replacement, "- Short first line continued here\n",
+        "fix must join the list item onto one line; got: {:?}",
+        list_fix.replacement
+    );
+
+    // Paragraph with the same shape: confirm the list-item behavior mirrors it.
+    let para_content = "Short first line\ncontinued here\n";
+    let para_ctx = LintContext::new(para_content, MarkdownFlavor::Standard, None);
+    let para_result = rule.check(&para_ctx).unwrap();
+    assert_eq!(
+        para_result.len(),
+        1,
+        "paragraph baseline must also join at line-length = 0; got: {para_result:?}"
+    );
+}
+
+/// The normalize gate distinguishes a prose rewrap (issue #639: join hard-wrapped
+/// list items) from a pure continuation-indent change (issue #582: leave
+/// already-fitting items alone, owned by MD077). With the same rule and a
+/// generous limit, an item that only needs re-indenting must stay silent while a
+/// joinable item must warn.
+#[test]
+fn test_normalize_gate_warns_on_prose_join_but_not_indent_only() {
+    let rule = make_normalize_rule(80);
+
+    // Indent-only: the first line is 78 chars, so even the first continuation
+    // word ("and") cannot be pulled up (78 + 1 + 3 > 80). No word ever moves;
+    // the only possible change is re-indenting the 2-space continuation to the
+    // task-content column. Must not warn (MD077 owns continuation indentation).
+    let indent_only = format!("- [ ] {}\n  and more here\n", "a".repeat(72));
+    let indent_ctx = LintContext::new(&indent_only, MarkdownFlavor::Standard, None);
+    let indent_result = rule.check(&indent_ctx).unwrap();
+    assert!(
+        indent_result.is_empty(),
+        "a pure continuation-indent change must not warn (MD077 owns indentation); got: {indent_result:?}"
+    );
+
+    // Prose join: a plain bullet whose continuation is correctly aligned and
+    // whose joined text (64 chars) fits the limit, so the only change is joining
+    // the two lines into one.
+    let joinable = "- a hard-wrapped bullet that has been\n  split across two lines here\n";
+    let join_ctx = LintContext::new(joinable, MarkdownFlavor::Standard, None);
+    let join_result = rule.check(&join_ctx).unwrap();
+    assert_eq!(
+        join_result.len(),
+        1,
+        "a joinable list item must warn so normalize can rejoin it; got: {join_result:?}"
+    );
+    let fix = join_result[0].fix.as_ref().expect("join warning must carry a fix");
+    assert_eq!(
+        fix.replacement, "- a hard-wrapped bullet that has been split across two lines here\n",
+        "fix must join the bullet onto one line; got: {:?}",
+        fix.replacement
+    );
+}
+
+#[test]
+fn test_normalize_gate_ignores_trailing_whitespace_only_change() {
+    let rule = make_normalize_rule(80);
+
+    // The first line is 78 chars, so the first continuation word ("and") cannot be
+    // pulled up (78 + 1 + 3 > 80); no word ever moves. The continuation is already
+    // at the correct task-content column (6 spaces), so the only difference between
+    // the source and a reflow is the trailing space on the continuation line.
+    // Trailing whitespace is MD009's responsibility, not a prose change, so MD013
+    // must stay silent.
+    let trailing_ws = format!("- [ ] {}\n      and more here \n", "a".repeat(72));
+    let ctx = LintContext::new(&trailing_ws, MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
     assert!(
         result.is_empty(),
-        "line-length = 0 must suppress MD013 length warnings on list items even when reflow would restructure; got: {result:?}"
+        "a trailing-whitespace-only change must not warn (MD009 owns trailing whitespace); got: {result:?}"
     );
 }
 

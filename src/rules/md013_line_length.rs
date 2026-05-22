@@ -2522,22 +2522,33 @@ impl MD013LineLength {
                         .map(|idx| self.calculate_effective_length(lines[idx]))
                         .max()
                         .unwrap_or(0);
-                    // `line-length = 0` means "no limit" — never emit a length warning in
-                    // that configuration, even when the reflow would restructure content.
+                    // `line-length = 0` means "no limit", so no physical line can be
+                    // "over"; the message below then describes a structural join rather
+                    // than a length violation.
                     let any_paragraph_line_over =
                         !config.line_length.is_unlimited() && max_physical_length > config.line_length.get();
 
-                    // Only generate a warning if the replacement is different from the original.
-                    // For Normalize mode, additionally require that at least one physical
-                    // content line exceeds the limit — otherwise the reflow is a cosmetic
-                    // change (continuation-indent normalization or joining/splitting
-                    // already-fitting multi-line paragraphs) and should not be reported as
-                    // a length violation. SentencePerLine and SemanticLineBreaks modes warn
-                    // on sentence structure, not length, so they ignore this gate.
-                    let gate_ok = match config.reflow_mode {
-                        ReflowMode::Normalize => original_text != replacement && any_paragraph_line_over,
-                        _ => original_text != replacement,
+                    // Normalize mode reflows list-item prose just like paragraphs:
+                    // joining continuation lines and re-wrapping to `line-length`.
+                    // `prose_changed` is true only when the reflow alters the words or
+                    // line breaks, not when it would merely re-indent continuation
+                    // lines or trim trailing whitespace. Comparing the texts with each
+                    // line's leading and trailing whitespace removed isolates "did the
+                    // words/line breaks change" from "did the surrounding whitespace
+                    // change". Continuation indentation is MD077's responsibility and
+                    // trailing whitespace is MD009's; an MD013 warning for either would
+                    // both duplicate those rules and resurface a persistent advisory on
+                    // already-fitting items that users disable MD013 fixing to avoid.
+                    let prose_changed = {
+                        let stripped = |text: &str| text.lines().map(str::trim).collect::<Vec<_>>().join("\n");
+                        stripped(original_text) != stripped(&replacement)
                     };
+                    // Warn when the reflow rewraps prose (the normalize feature for
+                    // list items), or when a physical line genuinely exceeds the limit
+                    // and the reflow can change something (a true length violation,
+                    // even if all that changes is the continuation indent). A line that
+                    // is already optimal in both respects produces no warning.
+                    let gate_ok = prose_changed || (any_paragraph_line_over && original_text != replacement);
                     if gate_ok {
                         // Generate an appropriate message based on why reflow is needed
                         let message = match config.reflow_mode {
@@ -2559,13 +2570,22 @@ impl MD013LineLength {
                                 format!("Paragraph should use semantic line breaks ({num_sentences} sentences)")
                             }
                             ReflowMode::Normalize => {
-                                // Report the physical line length of the longest over-limit
-                                // content line. The gate above guarantees at least one.
-                                format!(
-                                    "Line length {} exceeds {} characters",
-                                    max_physical_length,
-                                    config.line_length.get()
-                                )
+                                // When a physical line genuinely exceeds the limit, report
+                                // it as a length violation. Otherwise the reflow is a
+                                // structural normalization (joining/re-wrapping multi-line
+                                // content that already fits), mirroring the paragraph path.
+                                if any_paragraph_line_over {
+                                    format!(
+                                        "Line length {} exceeds {} characters",
+                                        max_physical_length,
+                                        config.line_length.get()
+                                    )
+                                } else {
+                                    format!(
+                                        "List item could be normalized to use line length of {} characters",
+                                        config.line_length.get()
+                                    )
+                                }
                             }
                             ReflowMode::Default => {
                                 // Report the actual longest non-exempt line, not the combined content

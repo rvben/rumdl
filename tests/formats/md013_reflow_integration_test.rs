@@ -1087,6 +1087,69 @@ unfixable = ["MD013"]
     );
 }
 
+/// Issue #639 safety gate: normalize-mode reflow of a matrix of list shapes must
+/// converge to a fixed point with no oscillation. Re-wrapping a list item must
+/// not provoke a continuation-indent fight with MD077 (the historical #579
+/// cycle), so `rumdl fmt` is run repeatedly and the output must stabilize after
+/// the first pass and stay stable.
+#[test]
+fn md013_normalize_list_reflow_converges_without_cycle() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("matrix.md");
+    let config_path = dir.path().join(".rumdl.toml");
+
+    let content = "# Doc\n\n\
+- [ ] task item that is hard wrapped across\n  two lines for no good reason here\n\
+- regular bullet wrapped\n  onto a second line\n  - nested bullet that is also\n    wrapped here onto two lines\n\
+1. ordered item wrapped\n   onto a second line here\n\
+2. another ordered item\n   - mixed nested bullet wrapped\n     across two physical lines here\n\n\
+Some paragraph wrapped\nacross two lines.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config = r#"
+[MD013]
+line-length = 80
+reflow = true
+reflow-mode = "normalize"
+"#;
+    fs::write(&config_path, config).unwrap();
+
+    let run_fmt = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("check")
+            .arg("--fix")
+            .arg("--no-cache")
+            .arg(&file_path)
+            .arg("--config")
+            .arg(&config_path)
+            .output()
+            .expect("Failed to execute rumdl");
+    };
+
+    run_fmt();
+    let after_first = fs::read_to_string(&file_path).unwrap();
+
+    // Every subsequent pass must be a no-op: the output is a fixed point.
+    for pass in 2..=4 {
+        run_fmt();
+        let after = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(
+            after, after_first,
+            "normalize reflow must converge: pass {pass} changed an already-normalized document (MD013<->MD077 oscillation)"
+        );
+    }
+
+    // The converged document must have its hard-wrapped list items joined.
+    assert!(
+        after_first.contains("- [ ] task item that is hard wrapped across two lines for no good reason here"),
+        "task item should be joined onto one line; got:\n{after_first}"
+    );
+    assert!(
+        after_first.contains("  - nested bullet that is also wrapped here onto two lines"),
+        "nested bullet should be joined and keep its indentation; got:\n{after_first}"
+    );
+}
+
 #[test]
 fn test_md013_issue_590_table_inside_list_item_preserved() {
     // Tables nested inside a list item must not be reflowed as prose, even

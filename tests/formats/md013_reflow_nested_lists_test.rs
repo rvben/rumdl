@@ -1072,3 +1072,44 @@ reflow-mode = "normalize"
         "Should warn about actual violation, got: {stdout}"
     );
 }
+
+/// Issue #639: in normalize mode, hard-wrapped list items must be joined and
+/// re-wrapped just like paragraphs, even when every physical line already fits
+/// within `line-length`. Paragraphs are already normalized; list items were
+/// erroneously skipped by an extra "a physical line must exceed the limit" gate.
+#[test]
+fn test_issue_639_normalize_joins_short_wrapped_list_items() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+
+    // Two list items, each hard-wrapped across two physical lines that are both
+    // well under the (very large) line-length. They should each collapse to one
+    // line because the joined text still fits.
+    let content = "- A hard-wrapped list item that has been\n  split across lines for no reason at all here.\n- Second item also wrapped\n  onto a second line here.\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 10000
+reflow = true
+reflow-mode = "normalize"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg("--fix")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl");
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+    let expected = "- A hard-wrapped list item that has been split across lines for no reason at all here.\n- Second item also wrapped onto a second line here.\n";
+    assert_eq!(
+        fixed, expected,
+        "normalize mode must join hard-wrapped list items even when lines already fit"
+    );
+}
