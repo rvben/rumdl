@@ -1280,9 +1280,10 @@ pub(super) fn detect_myst_backtick_directives(
         } else {
             // Code-bearing directive: mark opener/closer as directive but keep in_code_block
             if end_line_idx > 0
-                && let Some(closer_line) = lines.get_mut(end_line_idx - 1) {
-                    closer_line.in_myst_directive = true;
-                }
+                && let Some(closer_line) = lines.get_mut(end_line_idx - 1)
+            {
+                closer_line.in_myst_directive = true;
+            }
         }
     }
 }
