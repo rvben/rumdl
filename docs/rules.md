@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->74<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -210,6 +210,7 @@ Severity affects:
 | [MD044](md044.md) | Proper names            | Proper names should have consistent capitalization |
 | [MD049](md049.md) | Emphasis style          | Emphasis style should be consistent                |
 | [MD050](md050.md) | Strong style            | Strong style should be consistent                  |
+| [MD081](md081.md) | No excessive emphasis   | Excessive bold/italic emphasis in prose            |
 
 ## Code Block Rules
 

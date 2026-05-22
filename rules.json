@@ -744,5 +744,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md080/"
+  },
+  {
+    "code": "MD081",
+    "name": "no-excessive-emphasis",
+    "aliases": [],
+    "summary": "Inline emphasis should not be excessive",
+    "category": "emphasis",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md081/"
   }
 ]

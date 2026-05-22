@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 74 rules as defined in the RULES array (MD001-MD080)
-    assert_eq!(rules.len(), 74);
+    // Should return all 75 rules as defined in the RULES array (MD001-MD081)
+    assert_eq!(rules.len(), 75);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -367,8 +367,8 @@ fn test_all_configurable_rules_expose_config_schema() {
     // Update this number when adding new configurable rules.
     assert_eq!(
         rules_with_config.len(),
-        48,
-        "Expected 48 rules with config sections. If you added config to a rule, \
+        49,
+        "Expected 49 rules with config sections. If you added config to a rule, \
          implement default_config_section(). Rules with config: {rules_with_config:?}"
     );
 }
