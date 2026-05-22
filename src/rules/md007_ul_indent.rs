@@ -61,11 +61,22 @@ impl MD007ULIndent {
     /// the absolute `visual_indent`. Comparing a blockquoted line's absolute indent
     /// (which counts the `>` markers) against a blockquote-relative content column
     /// would otherwise treat in-quote content as if it had dedented out of the item.
-    fn container_relative_indent(
+    /// Measure the line's indentation in the coordinate space of a blockquote at the
+    /// given nesting `depth`: strip exactly `depth` `>` markers (each with one optional
+    /// following space or tab) and return the leading whitespace of the remainder as
+    /// visual columns. At depth 0 this is the line's own visual indent.
+    ///
+    /// The remainder may itself begin with deeper `>` markers; the whitespace measured
+    /// is whatever precedes them, so an interrupting deeper quote reports the column at
+    /// which its `>` begins inside the shallower container. That lets a closed-item check
+    /// compare the line against an item using the item's own quote coordinate space,
+    /// avoiding any relative-vs-absolute mismatch.
+    fn indent_relative_to_depth(
         ctx: &crate::lint_context::LintContext,
         line_info: &crate::lint_context::LineInfo,
+        depth: usize,
     ) -> usize {
-        if line_info.blockquote.is_none() {
+        if depth == 0 {
             return line_info.visual_indent;
         }
         // The blockquote's pre-parsed `content` has its leading whitespace stripped,
@@ -75,7 +86,8 @@ impl MD007ULIndent {
         let line_content = line_info.content(ctx.content);
         let mut remaining = line_content;
         let mut content_start = 0;
-        loop {
+        let mut stripped_levels = 0;
+        while stripped_levels < depth {
             let trimmed = remaining.trim_start();
             if !trimmed.starts_with('>') {
                 break;
@@ -92,6 +104,7 @@ impl MD007ULIndent {
             } else {
                 remaining = after_gt;
             }
+            stripped_levels += 1;
         }
         let content_after_prefix = &line_content[content_start..];
         let ws_chars = content_after_prefix
@@ -102,24 +115,26 @@ impl MD007ULIndent {
     }
 
     fn terminate_closed_items(
+        ctx: &crate::lint_context::LintContext,
+        line_info: &crate::lint_context::LineInfo,
         list_stack: &mut Vec<(usize, usize, bool, usize, usize, bool)>,
         line_bq_depth: usize,
-        line_abs_indent: usize,
-        line_container_indent: usize,
     ) {
         while let Some(&(_, _, _, content_col, item_bq_depth, _)) = list_stack.last() {
             let closed = match item_bq_depth.cmp(&line_bq_depth) {
                 // The line has exited a deeper blockquote the item lived in.
                 std::cmp::Ordering::Greater => true,
-                // Same blockquote container: both indents are in that container's
-                // coordinate space, so compare directly.
-                std::cmp::Ordering::Equal => content_col > line_container_indent,
-                // The line is in a deeper blockquote than a top-level item: the item
-                // is closed only when that quote begins left of the item's content
-                // (an indented quote inside the item keeps it open). Items already
-                // inside a blockquote are treated as still open to avoid false
-                // positives in deeply nested quotes, which markdownlint also accepts.
-                std::cmp::Ordering::Less => item_bq_depth == 0 && content_col > line_abs_indent,
+                // The line is in the same or a deeper blockquote than the item.
+                // Measure the line's indent in the item's own quote coordinate space
+                // and close the item when the line begins left of the item's content.
+                // For a same-depth line this is the in-container indent; for a deeper
+                // interrupting quote it is the column where that quote's `>` begins
+                // inside the item's container, so a `> > quote` left of the item's
+                // content (e.g. interrupting `> 1. ordered`) closes it, while a quote
+                // indented into the item's content keeps it open.
+                std::cmp::Ordering::Equal | std::cmp::Ordering::Less => {
+                    content_col > Self::indent_relative_to_depth(ctx, line_info, item_bq_depth)
+                }
             };
             if closed {
                 list_stack.pop();
@@ -232,12 +247,7 @@ impl Rule for MD007ULIndent {
                 let region_start = line_idx == 0 || !is_skipped_region(&ctx.lines[line_idx - 1]);
                 if region_start && !line_info.is_blank {
                     let bq_depth = line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
-                    Self::terminate_closed_items(
-                        &mut list_stack,
-                        bq_depth,
-                        line_info.visual_indent,
-                        Self::container_relative_indent(ctx, line_info),
-                    );
+                    Self::terminate_closed_items(ctx, line_info, &mut list_stack, bq_depth);
                 }
                 continue;
             }
@@ -333,16 +343,21 @@ impl Rule for MD007ULIndent {
                 }
 
                 // The loop above only reconciles items at the same (or deeper)
-                // blockquote depth. A list item that enters a NEW, shallower-rooted
-                // blockquote (e.g. `> - item` after a top-level `1. ordered`) starts a
-                // separate container: the blockquote opens to the left of a top-level
-                // ancestor's content, so that ancestor is closed. Pop it here, otherwise
-                // the closed ordered ancestor would linger and wrongly extend its
-                // exemption to a later, separately indented unordered list. Same-depth
-                // nesting and items already inside a blockquote are left to the loop
-                // above and the exemption check below.
+                // blockquote depth. A list item that enters a deeper blockquote than an
+                // ancestor (e.g. `> > - item` after `> 1. ordered`, or `> - item` after
+                // a top-level `1. ordered`) starts a separate container when that quote
+                // begins left of the ancestor's content. Measured in the ancestor's own
+                // quote coordinate space, the deeper quote's marker is then to the left
+                // of the ancestor's content column, so the ancestor is closed. Pop it
+                // here, otherwise a closed ordered ancestor would linger and wrongly
+                // extend its exemption to a later, separately indented unordered list.
+                // A deeper quote indented into the ancestor's content is part of that
+                // item and keeps it open. Same-depth nesting and items already inside a
+                // blockquote are left to the loop above and the exemption check below.
                 while let Some(&(_, _, _, content_col, item_bq_depth, _)) = list_stack.last() {
-                    if item_bq_depth == 0 && bq_depth > 0 && content_col > line_info.visual_indent {
+                    if item_bq_depth < bq_depth
+                        && content_col > Self::indent_relative_to_depth(ctx, line_info, item_bq_depth)
+                    {
                         list_stack.pop();
                     } else {
                         break;
@@ -629,12 +644,7 @@ impl Rule for MD007ULIndent {
                     // Lazy continuation: the list stays open, leave the stack intact.
                     continue;
                 }
-                Self::terminate_closed_items(
-                    &mut list_stack,
-                    bq_depth,
-                    line_info.visual_indent,
-                    Self::container_relative_indent(ctx, line_info),
-                );
+                Self::terminate_closed_items(ctx, line_info, &mut list_stack, bq_depth);
             }
         }
         Ok(warnings)
@@ -2806,6 +2816,70 @@ items:
         assert!(
             result.iter().any(|w| w.line == 5),
             "a blockquoted list item terminates the ordered list, so the child must still be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_638_deeper_nested_quote_terminates_blockquoted_ordered_list() {
+        // A blockquoted ordered item (`> 1. ordered`) is interrupted by a deeper
+        // nested quote (`> > quote`). The inner `>` begins left of the ordered
+        // item's content column (in the item's own quote coordinate space), so it
+        // is a sibling block that closes the ordered list, not a continuation of
+        // it. The unordered list that follows inside the same depth-1 quote is
+        // therefore a fresh top-level list, not a sublist of the (closed) ordered
+        // item, so the ordered-ancestor exemption must NOT leak to it.
+        // markdownlint-cli2 (MD007 only) reports the parent (Expected: 0; Actual: 3)
+        // and the child (Expected: 2; Actual: 6).
+        let rule = MD007ULIndent::new(2);
+        let content = "> 1. ordered\n> > quote\n>\n>    - parent\n>       - child\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.iter().any(|w| w.line == 4),
+            "deeper nested quote closes the ordered list, so the misindented parent must be flagged, got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.line == 5),
+            "the child of the fresh unordered list must be flagged, not exempted, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_638_deeper_quote_list_item_terminates_blockquoted_ordered_list() {
+        // Same leak as the deeper-nested-quote case, but the interrupting deeper
+        // quote is itself a list item (`> > - quote list`). Its marker begins left
+        // of the ordered item's content column (in the item's coordinate space), so
+        // it closes the ordered list. The unordered list that follows in the depth-1
+        // quote is therefore a fresh top-level list and must not inherit the
+        // ordered-ancestor exemption. markdownlint-cli2 reports the parent
+        // (Expected: 0; Actual: 3) and the child (Expected: 2; Actual: 6).
+        let rule = MD007ULIndent::new(2);
+        let content = "> 1. ordered\n> > - quote list\n>\n>    - parent\n>       - child\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.iter().any(|w| w.line == 4),
+            "a deeper-quote list item closes the ordered list, so the parent must be flagged, got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.line == 5),
+            "the child of the fresh unordered list must be flagged, not exempted, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_issue_638_deeper_quote_indented_into_item_keeps_exemption() {
+        // When the deeper quote is indented to (or past) the ordered item's content
+        // column, the `> quote` is a child block of the item, so the ordered list
+        // stays open and its unordered sublist remains exempt. The termination must
+        // not over-fire. markdownlint-cli2 reports 0 MD007 errors here.
+        let rule = MD007ULIndent::new(2);
+        let content = "> 1. ordered\n>    > quote inside item\n>    - child\n>      - grandchild\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "a deeper quote indented into the item must keep the sublist exempt, got: {result:?}"
         );
     }
 
