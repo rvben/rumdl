@@ -475,6 +475,7 @@ pub(super) fn detect_list_items_and_emphasis_with_pulldown(
                             byte_offset: match_start,
                             byte_end: match_end,
                             marker,
+                            is_strong: marker_count == 2,
                             content: content_part.to_string(),
                         });
                     }

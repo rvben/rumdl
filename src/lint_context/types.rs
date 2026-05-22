@@ -471,6 +471,8 @@ pub struct EmphasisSpan {
     pub byte_end: usize,
     /// Type of emphasis ('*' or '_')
     pub marker: char,
+    /// Whether this span is strong emphasis (`**`/`__`) rather than ordinary emphasis (`*`/`_`)
+    pub is_strong: bool,
     /// Content inside the emphasis
     pub content: String,
 }

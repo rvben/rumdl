@@ -3,58 +3,7 @@ use crate::utils::range_utils::calculate_match_range;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rules::strong_style::StrongStyle;
 use crate::utils::code_block_utils::StrongSpanDetail;
-use crate::utils::skip_context::{is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup};
-
-/// Check if a byte position within a line is inside a backtick-delimited code span.
-/// This is a line-level fallback for cases where pulldown-cmark's code span detection
-/// misses spans due to table parsing interference (e.g., pipes inside code spans
-/// in table rows cause pulldown-cmark to misidentify cell boundaries).
-fn is_in_inline_code_on_line(line: &str, byte_pos: usize) -> bool {
-    let bytes = line.as_bytes();
-    let mut i = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == b'`' {
-            let open_start = i;
-            let mut backtick_count = 0;
-            while i < bytes.len() && bytes[i] == b'`' {
-                backtick_count += 1;
-                i += 1;
-            }
-
-            // Search for matching closing backticks
-            let mut j = i;
-            while j < bytes.len() {
-                if bytes[j] == b'`' {
-                    let mut close_count = 0;
-                    while j < bytes.len() && bytes[j] == b'`' {
-                        close_count += 1;
-                        j += 1;
-                    }
-                    if close_count == backtick_count {
-                        // Found matching pair: code span covers open_start..j
-                        if byte_pos >= open_start && byte_pos < j {
-                            return true;
-                        }
-                        i = j;
-                        break;
-                    }
-                } else {
-                    j += 1;
-                }
-            }
-
-            if j >= bytes.len() {
-                // No matching close found, remaining text is not a code span
-                break;
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    false
-}
+use crate::utils::skip_context::{compute_html_code_ranges, should_skip_emphasis_span};
 
 /// Convert a StrongSpanDetail to a StrongStyle
 fn span_style(span: &StrongSpanDetail) -> StrongStyle {
@@ -89,96 +38,10 @@ impl MD050StrongStyle {
         Self { config }
     }
 
-    /// Check if a byte position is within a link (inline links, reference links, or reference definitions).
-    /// Delegates to LintContext::is_in_link which uses O(log n) binary search.
-    fn is_in_link(ctx: &crate::lint_context::LintContext, byte_pos: usize) -> bool {
-        ctx.is_in_link(byte_pos)
-    }
-
-    /// Check if a byte position is within an HTML tag. O(log n) via binary search.
-    fn is_in_html_tag(html_tags: &[crate::lint_context::HtmlTag], byte_pos: usize) -> bool {
-        let idx = html_tags.partition_point(|tag| tag.byte_offset <= byte_pos);
-        idx > 0 && byte_pos < html_tags[idx - 1].byte_end
-    }
-
-    /// Check if a byte position is within HTML code tags (<code>...</code>).
-    /// Uses pre-computed code ranges for O(log n) lookup via binary search.
-    fn is_in_html_code_content(code_ranges: &[(usize, usize)], byte_pos: usize) -> bool {
-        let idx = code_ranges.partition_point(|&(start, _)| start <= byte_pos);
-        idx > 0 && byte_pos < code_ranges[idx - 1].1
-    }
-
-    /// Pre-compute ranges covered by <code>...</code> HTML tags.
-    /// Returns sorted Vec of (start, end) byte ranges.
-    fn compute_html_code_ranges(html_tags: &[crate::lint_context::HtmlTag]) -> Vec<(usize, usize)> {
-        let mut ranges = Vec::new();
-        let mut open_code_end: Option<usize> = None;
-
-        for tag in html_tags {
-            if tag.tag_name == "code" {
-                if tag.is_self_closing {
-                    continue;
-                } else if !tag.is_closing {
-                    open_code_end = Some(tag.byte_end);
-                } else if tag.is_closing {
-                    if let Some(start) = open_code_end {
-                        ranges.push((start, tag.byte_offset));
-                    }
-                    open_code_end = None;
-                }
-            }
-        }
-        // Handle unclosed <code> tag
-        if let Some(start) = open_code_end {
-            ranges.push((start, usize::MAX));
-        }
-        ranges
-    }
-
-    /// Check if a strong emphasis span should be skipped based on context
-    fn should_skip_span(
-        &self,
-        ctx: &crate::lint_context::LintContext,
-        html_tags: &[crate::lint_context::HtmlTag],
-        html_code_ranges: &[(usize, usize)],
-        span_start: usize,
-    ) -> bool {
-        let lines = ctx.raw_lines();
-        let (line_num, col) = ctx.offset_to_line_col(span_start);
-
-        // Skip matches in front matter or mkdocstrings blocks
-        if ctx
-            .line_info(line_num)
-            .is_some_and(|info| info.in_front_matter || info.in_mkdocstrings)
-        {
-            return true;
-        }
-
-        // Check MkDocs markup
-        let in_mkdocs_markup = lines
-            .get(line_num.saturating_sub(1))
-            .is_some_and(|line| is_in_mkdocs_markup(line, col.saturating_sub(1), ctx.flavor));
-
-        // Line-level inline code fallback for cases pulldown-cmark misses
-        let in_inline_code = lines
-            .get(line_num.saturating_sub(1))
-            .is_some_and(|line| is_in_inline_code_on_line(line, col.saturating_sub(1)));
-
-        ctx.is_in_code_block_or_span(span_start)
-            || in_inline_code
-            || Self::is_in_link(ctx, span_start)
-            || Self::is_in_html_tag(html_tags, span_start)
-            || Self::is_in_html_code_content(html_code_ranges, span_start)
-            || in_mkdocs_markup
-            || is_in_math_context(ctx, span_start)
-            || is_in_jsx_expression(ctx, span_start)
-            || is_in_mdx_comment(ctx, span_start)
-    }
-
     #[cfg(test)]
     fn detect_style(&self, ctx: &crate::lint_context::LintContext) -> Option<StrongStyle> {
         let html_tags = ctx.html_tags();
-        let html_code_ranges = Self::compute_html_code_ranges(&html_tags);
+        let html_code_ranges = compute_html_code_ranges(&html_tags);
         self.detect_style_from_spans(ctx, &html_tags, &html_code_ranges, &ctx.strong_spans)
     }
 
@@ -193,7 +56,7 @@ impl MD050StrongStyle {
         let mut underscore_count = 0;
 
         for span in spans {
-            if self.should_skip_span(ctx, html_tags, html_code_ranges, span.start) {
+            if should_skip_emphasis_span(ctx, html_tags, html_code_ranges, span.start) {
                 continue;
             }
 
@@ -242,7 +105,7 @@ impl Rule for MD050StrongStyle {
 
         let spans = &ctx.strong_spans;
         let html_tags = ctx.html_tags();
-        let html_code_ranges = Self::compute_html_code_ranges(&html_tags);
+        let html_code_ranges = compute_html_code_ranges(&html_tags);
 
         let target_style = match self.config.style {
             StrongStyle::Consistent => self
@@ -263,7 +126,7 @@ impl Rule for MD050StrongStyle {
             }
 
             // Only check skip context for wrong-style spans (the minority)
-            if self.should_skip_span(ctx, &html_tags, &html_code_ranges, span.start) {
+            if should_skip_emphasis_span(ctx, &html_tags, &html_code_ranges, span.start) {
                 continue;
             }
 
