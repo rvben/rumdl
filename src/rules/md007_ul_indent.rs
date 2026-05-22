@@ -468,9 +468,12 @@ impl Rule for MD007ULIndent {
                     false,
                 ));
 
-                // Skip first level check if start_indented is false
-                // BUT always check items with 1 space indent (insufficient for nesting)
-                if !self.config.start_indented && nesting_level == 0 && visual_marker_column != 1 {
+                // A top-level item (depth 0) is expected at column 0 when start_indented
+                // is false. Column 0 is already correct, so skip it; any other column
+                // (1, 2, or 3) is a misindented top-level list and must be flagged with
+                // "Expected 0". Four or more leading spaces form an indented code block,
+                // not a list, so such lines never reach here as list items.
+                if !self.config.start_indented && nesting_level == 0 && visual_marker_column == 0 {
                     continue;
                 }
 
@@ -1188,25 +1191,30 @@ tags:
     }
 
     #[test]
-    fn test_start_indented_false_allows_any_first_level() {
+    fn test_start_indented_false_flags_indented_first_level() {
         let rule = MD007ULIndent::default(); // start_indented is false by default
 
-        // When start_indented is false, first level items at any indentation are allowed
+        // When start_indented is false, a top-level item is expected at column 0. A
+        // top-level item indented 1-3 spaces is a misindented list and must be flagged
+        // with "Expected 0", matching markdownlint-cli2 (which reports Expected: 0;
+        // Actual: 3 here).
         let content = "   * Item 1"; // First level at 3 spaces
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
-            result.is_empty(),
-            "First level at any indentation should be allowed when start_indented is false"
+            result.iter().any(|w| w.line == 1 && w.message.contains("Expected 0")),
+            "a top-level item indented 3 spaces must be flagged with Expected 0, got: {result:?}"
         );
 
-        // Multiple first level items at different indentations should all be allowed
-        let content = "* Item 1\n  * Item 2\n    * Item 3"; // All at level 0 (different indents)
+        // A correctly nested list (0/2/4 spaces) produces no warnings: these are a
+        // top-level item and its properly indented descendants, not three first-level
+        // items.
+        let content = "* Item 1\n  * Item 2\n    * Item 3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "All first-level items should be allowed at any indentation"
+            "a correctly nested 0/2/4-space list should produce no warnings, got: {result:?}"
         );
     }
 
@@ -1371,10 +1379,13 @@ tags:
         let content = "> \t* List item\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        // First-level list item at any indentation is allowed when start_indented=false (default)
+        // Inside the blockquote the bullet is indented away from column 0, so it is a
+        // misindented top-level list and is flagged with "Expected 0", matching
+        // markdownlint-cli2 (which flags Expected: 0). The reported actual column
+        // reflects rumdl's CommonMark tab-stop expansion rather than a raw char count.
         assert!(
-            result.is_empty(),
-            "First-level list item at any indentation is allowed when start_indented=false, got: {result:?}"
+            result.iter().any(|w| w.line == 1 && w.message.contains("Expected 0")),
+            "an indented blockquoted top-level item must be flagged with Expected 0, got: {result:?}"
         );
     }
 
@@ -2461,28 +2472,29 @@ items:
     #[test]
     fn test_issue_638_exemption_not_applied_after_list_terminated_by_paragraph() {
         // A top-level paragraph terminates the ordered list. The later, separately
-        // indented unordered list is NOT a sublist of the (now-closed) ordered
-        // item, so the ordered-ancestor exemption must not apply: MD007 must still
-        // flag the misindented child. Verified against markdownlint-cli2, which
-        // reports MD007 on the child (Expected: 2; Actual: 6).
+        // indented unordered list is NOT a sublist of the (now-closed) ordered item, so
+        // the ordered-ancestor exemption must not apply: MD007 flags both the misindented
+        // top-level item and its child. Verified against markdownlint-cli2, which reports
+        // MD007 on the parent (Expected: 0; Actual: 3) and the child (Expected: 2;
+        // Actual: 6).
         let rule = MD007ULIndent::new(2);
         let content = "1. ordered\n\nparagraph\n\n   - parent\n      - child six\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            1,
-            "child of a list following a terminated ordered list must still be checked, got: {result:?}"
-        );
-        let w = &result[0];
-        assert_eq!(
-            w.line, 6,
-            "warning must target the misindented child line, got: {result:?}"
+            2,
+            "the new top-level list following a terminated ordered list is checked at both levels, got: {result:?}"
         );
         assert!(
-            w.message.contains("Expected 2") && w.message.contains("found 6"),
-            "expected the markdownlint-parity indent (2), got: {:?}",
-            w.message
+            result.iter().any(|w| w.line == 5 && w.message.contains("Expected 0")),
+            "the misindented top-level item must be flagged with Expected 0, got: {result:?}"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|w| w.line == 6 && w.message.contains("Expected 2") && w.message.contains("found 6")),
+            "the misindented child must be flagged with Expected 2, found 6, got: {result:?}"
         );
     }
 
@@ -2507,21 +2519,26 @@ items:
     fn test_issue_638_heading_interrupts_ordered_list_without_blank() {
         // Unlike a lazy paragraph continuation, an ATX heading interrupts the open
         // paragraph and therefore terminates the ordered list even without an
-        // intervening blank line. The following bullet is then a new list and the
-        // misindented child must still be flagged. markdownlint-cli2 reports MD007
-        // on the child (Expected: 2; Actual: 5).
+        // intervening blank line. The following bullets are then a new top-level list,
+        // so both the misindented top item and its child are flagged. markdownlint-cli2
+        // reports MD007 on the top item (Expected: 0; Actual: 3) and the child
+        // (Expected: 2; Actual: 5).
         let rule = MD007ULIndent::new(2);
         let content = "1. ordered\n# heading\n   - child\n     - grandchild\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(
             result.len(),
-            1,
-            "a heading terminates the ordered list, so the child must be checked, got: {result:?}"
+            2,
+            "a heading terminates the ordered list, so the new top-level list and its child are both checked, got: {result:?}"
         );
-        assert_eq!(
-            result[0].line, 4,
-            "warning must target the misindented grandchild line, got: {result:?}"
+        assert!(
+            result.iter().any(|w| w.line == 3 && w.message.contains("Expected 0")),
+            "the misindented top-level item must be flagged with Expected 0, got: {result:?}"
+        );
+        assert!(
+            result.iter().any(|w| w.line == 4 && w.message.contains("Expected 2")),
+            "the misindented child must be flagged with Expected 2, got: {result:?}"
         );
     }
 
@@ -2678,6 +2695,80 @@ items:
         assert!(
             result.is_empty(),
             "an overlong digit run is not a valid ordered marker, so the list stays open and the nested bullets are exempt; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_indented_top_level_list_item_is_flagged() {
+        // A top-level unordered list item indented 2 or 3 spaces is a misindented list
+        // (4+ spaces would be an indented code block, not a list). markdownlint-cli2
+        // flags the top item with "Expected: 0". rumdl must flag it too, not only its
+        // children. The default config has start_indented = false, so the expected
+        // indent for a depth-0 item is column 0.
+        let rule = MD007ULIndent::new(2);
+        for indent in 2..=3 {
+            let pad = " ".repeat(indent);
+            let content = format!("{pad}- parent\n{pad}  - child\n");
+            let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.iter().any(|w| w.line == 1),
+                "a top-level item indented {indent} spaces must be flagged (Expected 0); got: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_indented_code_block_bullet_is_not_a_list_item() {
+        // Four or more leading spaces at the top level form an indented code block, not a
+        // list, so MD007 must not fire. Both rumdl and markdownlint-cli2 stay silent.
+        let rule = MD007ULIndent::new(2);
+        let content = "    - not a list, this is code\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "a 4-space-indented bullet is an indented code block, not a misindented list; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_tab_indent_expands_to_four_column_tabstop() {
+        // CommonMark expands a leading tab to the next 4-column tab stop when it helps
+        // define block structure. A single-tab-indented sublist therefore sits at visual
+        // column 4, which is an over-indent for depth 1 (expected 2). rumdl must report
+        // the expanded column (found 4), NOT a raw character count of 1. (markdownlint
+        // counts the tab as a single character and reports "Actual 1"; that is incorrect
+        // per the CommonMark tab-stop rule, so rumdl deliberately diverges here.)
+        let rule = MD007ULIndent::new(2);
+        let content = "- a\n\t- b\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        let warning = result
+            .iter()
+            .find(|w| w.line == 2)
+            .expect("a tab-indented sublist at column 4 is over-indented for depth 1 and must be flagged");
+        assert!(
+            warning.message.contains("found 4"),
+            "the tab must expand to the 4-column tab stop (found 4), not be counted as one character; got: {}",
+            warning.message
+        );
+    }
+
+    #[test]
+    fn test_tab_completing_two_space_indent_to_tabstop_is_accepted() {
+        // Two spaces advance to column 2; a following tab then advances to the next
+        // 4-column tab stop, landing the sublist marker at column 4 - exactly the
+        // expected indent for depth 2. With correct tab-stop math the line is well
+        // indented and must produce no warning. (markdownlint miscounts `  \t` as three
+        // characters and false-positives with "Actual 3"; rumdl correctly stays silent.)
+        let rule = MD007ULIndent::new(2);
+        let content = "- a\n  - b\n  \t- c\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "`  \\t` expands to column 4, the correct depth-2 indent, so no MD007 warning is expected; got: {result:?}"
         );
     }
 
