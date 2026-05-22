@@ -775,22 +775,24 @@ mod excessive_indentation_bug_fix {
         // Line 1: 0 spaces, level 0 - list item (correct)
         // Line 2: 4 spaces, level 1 - nested list item (correct for indent=4)
         // Line 3: 5 spaces, level 2 - nested deeper (wrong: expected 8, got 5)
-        // Line 4: 6 spaces - NOT a list item per CommonMark (content of previous item)
-        // Line 5: 8 spaces, level 3 - nested even deeper (wrong: expected 12, got 8)
+        // Line 4: 6 spaces - NOT a list item per CommonMark (content of Item 2).
+        //         Indented less than the misindented Item 3 (content column 7), it
+        //         closes that item; indented to Item 2's content column (6) it
+        //         belongs to Item 2.
+        // Line 5: 8 spaces - a child of Item 2 (level 2), correctly indented for
+        //         indent=4, so no warning.
         //
-        // Note: Line 4 is not detected as a list item because CommonMark parsing
-        // doesn't treat it as such - it's continuation content. This matches markdownlint.
+        // markdownlint-cli2 (MD007 indent=4) reports a single MD007 warning here,
+        // on line 3 only. Line 5 is correctly nested once line 4 closes Item 3.
 
         assert_eq!(
             warnings.len(),
-            2,
-            "Should detect indentation issues on lines 3 and 5, got: {warnings:?}"
+            1,
+            "Should detect a single indentation issue, on line 3, got: {warnings:?}"
         );
 
         // Line 3 should have warning (5 spaces, expected 8 for depth 2)
         assert!(warnings.iter().any(|w| w.line == 3), "Line 3 should have warning");
-        // Line 5 should have warning (8 spaces, expected 12 for depth 3)
-        assert!(warnings.iter().any(|w| w.line == 5), "Line 5 should have warning");
     }
 
     #[test]
