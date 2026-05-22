@@ -206,7 +206,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.1.96
+mise use rumdl@0.2.0
 ```
 
 ### Using Nix (macOS/Linux)
@@ -405,7 +405,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.1.96
+    rev: v0.2.0
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format and fail if issues remain
@@ -427,7 +427,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.1.96
+    rev: v0.2.0
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns

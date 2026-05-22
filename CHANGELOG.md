@@ -39,6 +39,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.0](https://github.com/rvben/rumdl/compare/v0.1.96...v0.2.0) - 2026-05-22
+
+### Added
+
+- **lsp**: improve link completion ranking, ignores, and absolute paths ([0ac911e](https://github.com/rvben/rumdl/commit/0ac911ec4836803b57ddebf289f75d83fab31ac4))
+- **flavor**: add support for MyST (Markedly Structured Text) (#637) ([3455840](https://github.com/rvben/rumdl/commit/3455840e1424961128cbfaddcd929f43eb60fda7))
+
+### Fixed
+
+- **md007**: close ordered-ancestor exemption leak across deeper nested quotes ([0fa6180](https://github.com/rvben/rumdl/commit/0fa61809228b8f3b9d6708a9f86d3943415f7018))
+- **md007**: flag misindented top-level unordered list items ([f277892](https://github.com/rvben/rumdl/commit/f277892545500e5fddf839e41a0a2341cc18fd7d))
+- **md007**: apply ordered-ancestor exemption only to genuinely nested sublists (#638) ([4c96cf7](https://github.com/rvben/rumdl/commit/4c96cf701b183c3842753aad5646e500b45b44d3))
+- **md013**: reflow list-item prose in normalize mode without false length warnings (#639) ([0816967](https://github.com/rvben/rumdl/commit/08169672b6039a44bd57fab8f56bc1f9bd1c7a3c))
+- **cross-file**: honor inline-disable and per-file-ignores on lint-cache fast path ([05c77e4](https://github.com/rvben/rumdl/commit/05c77e4f4b4003c3e62aec0ef7d0ec354fa87acf))
+
 ## [0.1.96](https://github.com/rvben/rumdl/compare/v0.1.95...v0.1.96) - 2026-05-21
 
 ### Fixed
