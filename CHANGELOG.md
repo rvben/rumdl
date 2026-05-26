@@ -40,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.1](https://github.com/rvben/rumdl/compare/v0.2.0...v0.2.1) - 2026-05-26
+
+### Added
+
+- **md081**: add no-excessive-emphasis rule ([7e9ac64](https://github.com/rvben/rumdl/commit/7e9ac64cab270b59b4bdaf70595fa32a28ffac32))
+
 ## [0.2.0](https://github.com/rvben/rumdl/compare/v0.1.96...v0.2.0) - 2026-05-22
 
 ### Added
