@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.2](https://github.com/rvben/rumdl/compare/v0.2.1...v0.2.2) - 2026-05-26
+
+### Fixed
+
+- **md081**: treat unset and 0 as distinct emphasis thresholds ([ca992bd](https://github.com/rvben/rumdl/commit/ca992bd8fa0116024a9dd084b403df7f0edf4aa8))
+
 ## [0.2.1](https://github.com/rvben/rumdl/compare/v0.2.0...v0.2.1) - 2026-05-26
 
 ### Added
