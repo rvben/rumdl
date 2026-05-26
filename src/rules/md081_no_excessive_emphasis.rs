@@ -13,8 +13,9 @@
 //!
 //! Diagnostic only: stripping or down-converting emphasis is semantically lossy
 //! (`**critical**` may be deliberate), so there is no auto-fix. Both thresholds
-//! default to `0` (disabled), so the rule is silent until a project opts in by
-//! setting a limit.
+//! are unset by default, so the rule is silent until a project opts in by setting
+//! a limit. Setting a limit to `0` forbids the construct entirely (a paragraph or
+//! run may contain no emphasis at all).
 
 use crate::lint_context::LintContext;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -54,23 +55,24 @@ pub struct MD081Config {
     pub targets: EmphasisTarget,
 
     /// Maximum emphasis spans allowed in a single paragraph. A paragraph with
-    /// more than this many spans is flagged. `0` disables the check.
+    /// more than this many spans is flagged. Unset disables the check; `Some(0)`
+    /// forbids all emphasis in a paragraph.
     #[serde(default)]
-    pub max_per_paragraph: usize,
+    pub max_per_paragraph: Option<usize>,
 
     /// Maximum length of a run of adjacent emphasis spans separated only by
-    /// whitespace and punctuation. A longer run is flagged. `0` disables the
-    /// check.
+    /// whitespace and punctuation. A longer run is flagged. Unset disables the
+    /// check; `Some(0)` forbids any emphasis (every span is at least a run of one).
     #[serde(default)]
-    pub max_consecutive: usize,
+    pub max_consecutive: Option<usize>,
 }
 
 impl Default for MD081Config {
     fn default() -> Self {
         Self {
             targets: EmphasisTarget::Strong,
-            max_per_paragraph: 0,
-            max_consecutive: 0,
+            max_per_paragraph: None,
+            max_consecutive: None,
         }
     }
 }
@@ -225,19 +227,18 @@ impl MD081NoExcessiveEmphasis {
         ids
     }
 
-    /// Flag a run of adjacent emphasis spans if it exceeds `max_consecutive`,
-    /// pointing at the run's first span.
-    fn emit_run(&self, ctx: &LintContext, run: &[CountedSpan], warnings: &mut Vec<LintWarning>) {
-        if run.len() > self.config.max_consecutive
+    /// Flag a run of adjacent emphasis spans if it exceeds `limit`, pointing at
+    /// the run's first span.
+    fn emit_run(&self, ctx: &LintContext, run: &[CountedSpan], limit: usize, warnings: &mut Vec<LintWarning>) {
+        if run.len() > limit
             && let Some(first) = run.first()
         {
             warnings.push(self.warn_at(
                 ctx,
                 first,
                 format!(
-                    "{} consecutive emphasis spans (limit {}); consider rephrasing to reduce emphasis",
+                    "{} consecutive emphasis spans (limit {limit}); consider rephrasing to reduce emphasis",
                     run.len(),
-                    self.config.max_consecutive
                 ),
             ));
         }
@@ -276,7 +277,7 @@ impl Rule for MD081NoExcessiveEmphasis {
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
-        if self.config.max_per_paragraph == 0 && self.config.max_consecutive == 0 {
+        if self.config.max_per_paragraph.is_none() && self.config.max_consecutive.is_none() {
             return Ok(Vec::new());
         }
 
@@ -288,7 +289,7 @@ impl Rule for MD081NoExcessiveEmphasis {
         let para_ids = Self::paragraph_ids(ctx);
         let mut warnings = Vec::new();
 
-        if self.config.max_per_paragraph > 0 {
+        if let Some(limit) = self.config.max_per_paragraph {
             // Count spans per paragraph; flag the first span of any paragraph
             // whose count exceeds the limit. Spans are ordered by position, so
             // the first per paragraph is the earliest occurrence.
@@ -301,7 +302,7 @@ impl Rule for MD081NoExcessiveEmphasis {
             }
             let mut flagged: Vec<(usize, CountedSpan)> = counts
                 .into_iter()
-                .filter(|(_, (n, _))| *n > self.config.max_per_paragraph)
+                .filter(|(_, (n, _))| *n > limit)
                 .map(|(_, (n, first))| (n, first))
                 .collect();
             flagged.sort_by_key(|(_, first)| (first.line, first.start));
@@ -310,14 +311,13 @@ impl Rule for MD081NoExcessiveEmphasis {
                     ctx,
                     &first,
                     format!(
-                        "Paragraph contains {count} emphasis spans (limit {}); consider reducing emphasis to improve readability",
-                        self.config.max_per_paragraph
+                        "Paragraph contains {count} emphasis spans (limit {limit}); consider reducing emphasis to improve readability"
                     ),
                 ));
             }
         }
 
-        if self.config.max_consecutive > 0 {
+        if let Some(limit) = self.config.max_consecutive {
             // A run is a maximal sequence of spans in the same paragraph where
             // the text between neighbours is only whitespace and punctuation.
             // Anything else (including connector words like "and") breaks it.
@@ -340,14 +340,14 @@ impl Rule for MD081NoExcessiveEmphasis {
                 };
 
                 if breaks && i > run_start {
-                    self.emit_run(ctx, &spans[run_start..i], &mut warnings);
+                    self.emit_run(ctx, &spans[run_start..i], limit, &mut warnings);
                 }
                 if breaks {
                     run_start = i;
                 }
             }
             if !spans.is_empty() {
-                self.emit_run(ctx, &spans[run_start..], &mut warnings);
+                self.emit_run(ctx, &spans[run_start..], limit, &mut warnings);
             }
         }
 
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn flags_paragraph_over_max_per_paragraph() {
         let config = MD081Config {
-            max_per_paragraph: 3,
+            max_per_paragraph: Some(3),
             ..Default::default()
         };
         let content = "The **a** is **b** and **c** plus **d**.";
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn flags_consecutive_run_separated_only_by_punctuation() {
         let config = MD081Config {
-            max_consecutive: 2,
+            max_consecutive: Some(2),
             ..Default::default()
         };
         // Three bolds separated only by ", " - a run of 3 exceeds max-consecutive=2.
@@ -432,7 +432,7 @@ mod tests {
         // Em dashes are punctuation, not words, so a run separated by them must
         // still be treated as consecutive.
         let config = MD081Config {
-            max_consecutive: 2,
+            max_consecutive: Some(2),
             ..Default::default()
         };
         let content = "Tags: **one** \u{2014} **two** \u{2014} **three**.";
@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn connector_word_breaks_consecutive_run() {
         let config = MD081Config {
-            max_consecutive: 2,
+            max_consecutive: Some(2),
             ..Default::default()
         };
         // "and" between the second and third bold breaks the run into 2 + 1.
@@ -473,8 +473,8 @@ mod tests {
         // A setext heading's text line is a heading, not prose, so emphasis in
         // it must not be counted - same as ATX headings.
         let config = MD081Config {
-            max_per_paragraph: 2,
-            max_consecutive: 1,
+            max_per_paragraph: Some(2),
+            max_consecutive: Some(1),
             ..Default::default()
         };
         let content = "**A** **B** **C**\n=================\n";
@@ -491,7 +491,7 @@ mod tests {
         // heading (setext underlines inside list items must be indented). The
         // emphasis in the list item must still be counted.
         let config = MD081Config {
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         let content = "- **a** and **b**\n---\n";
@@ -537,7 +537,7 @@ mod tests {
         // `> **A** **B**\n> ===` is a setext heading inside a blockquote; its
         // text line must not be counted as prose.
         let config = MD081Config {
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         let content = "> **A** **B**\n> ===\n";
@@ -553,7 +553,7 @@ mod tests {
         // A top-level `---` after a blockquote is outside the quote, so the
         // quoted paragraph is not a setext heading and its emphasis still counts.
         let config = MD081Config {
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         let content = "> **a** and **b**\n---\n";
@@ -569,7 +569,7 @@ mod tests {
     fn does_not_flag_emphasis_in_table_rows() {
         // Table cells are not prose; emphasis inside a table must not be counted.
         let config = MD081Config {
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         let content = "| Col A | Col B |\n| ----- | ----- |\n| **a** | **b** |\n";
@@ -583,7 +583,7 @@ mod tests {
     #[test]
     fn does_not_flag_at_or_below_limit() {
         let config = MD081Config {
-            max_per_paragraph: 3,
+            max_per_paragraph: Some(3),
             ..Default::default()
         };
         let content = "The **a** is **b** and **c**.";
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn excludes_code_blocks_and_inline_code() {
         let config = MD081Config {
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         // Bold markers inside fences and inline code must not count.
@@ -608,7 +608,7 @@ mod tests {
     #[test]
     fn counts_paragraphs_independently() {
         let config = MD081Config {
-            max_per_paragraph: 2,
+            max_per_paragraph: Some(2),
             ..Default::default()
         };
         // Two paragraphs of 2 bolds each: neither exceeds the limit of 2.
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn counts_list_items_independently() {
         let config = MD081Config {
-            max_per_paragraph: 2,
+            max_per_paragraph: Some(2),
             ..Default::default()
         };
         // Each list item has 2 bolds; neither item alone exceeds the limit.
@@ -637,7 +637,7 @@ mod tests {
     fn targets_strong_ignores_italic() {
         let config = MD081Config {
             targets: EmphasisTarget::Strong,
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         // Many italics but only one bold: strong-only must not flag.
@@ -652,7 +652,7 @@ mod tests {
     fn targets_emphasis_counts_italic_only() {
         let config = MD081Config {
             targets: EmphasisTarget::Emphasis,
-            max_per_paragraph: 2,
+            max_per_paragraph: Some(2),
             ..Default::default()
         };
         let content = "Lots of *a* and *b* and *c* italics, plus **bold**.";
@@ -664,7 +664,7 @@ mod tests {
     fn targets_all_dedups_combined_bold_italic() {
         let config = MD081Config {
             targets: EmphasisTarget::All,
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         // A single ***bold italic*** region is reported by the parser as both a
@@ -680,11 +680,66 @@ mod tests {
     fn targets_all_counts_distinct_regions() {
         let config = MD081Config {
             targets: EmphasisTarget::All,
-            max_per_paragraph: 1,
+            max_per_paragraph: Some(1),
             ..Default::default()
         };
         let content = "Mix ***a*** and **b** here.";
         let warnings = check(content, config);
         assert_eq!(warnings.len(), 1, "two distinct emphasis regions exceed limit 1");
+    }
+
+    #[test]
+    fn max_per_paragraph_zero_forbids_all_emphasis() {
+        // `Some(0)` is distinct from unset: it forbids any emphasis, so a single
+        // bold span (count 1 > 0) must be flagged.
+        let config = MD081Config {
+            max_per_paragraph: Some(0),
+            ..Default::default()
+        };
+        let content = "A paragraph with one **bold** word.";
+        let warnings = check(content, config);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "max-per-paragraph=0 must flag even a single emphasis span. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn max_consecutive_zero_forbids_all_emphasis() {
+        // A lone span is a run of length 1; with limit 0 it exceeds the limit
+        // and must be flagged.
+        let config = MD081Config {
+            max_consecutive: Some(0),
+            ..Default::default()
+        };
+        let content = "A paragraph with one **bold** word.";
+        let warnings = check(content, config);
+        assert_eq!(
+            warnings.len(),
+            1,
+            "max-consecutive=0 must flag even a single emphasis span. Got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_zero_in_toml_parses_as_forbid_all() {
+        // A user-set `max-per-paragraph = 0` must deserialize to Some(0)
+        // (forbid all), not be confused with the unset/disabled state.
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("max-per-paragraph".to_string(), toml::Value::Integer(0));
+        config.rules.insert("MD081".to_string(), rule_config);
+
+        let rule = MD081NoExcessiveEmphasis::from_config(&config);
+        let ctx = LintContext::new("One **bold** here.", MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "explicit max-per-paragraph = 0 must forbid all emphasis. Got: {warnings:?}"
+        );
     }
 }
