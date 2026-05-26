@@ -148,6 +148,11 @@ rumdl includes definitions for common tools:
 
 **Note**: Tools must be installed separately. rumdl does not install them for you.
 
+**YAML linting**: The built-in `yamlfmt` tool only *formats* YAML; there is no
+built-in YAML linter. To lint YAML blocks, wire in a custom tool such as
+[ryl](https://github.com/owenlamont/ryl) (see
+[Linting YAML blocks with ryl](#linting-yaml-blocks-with-ryl)).
+
 ### Embedded Markdown Linting
 
 The special `rumdl` tool enables linting of markdown content inside fenced code blocks:
@@ -279,6 +284,26 @@ enabled = true
 [code-block-tools.languages]
 python = { lint = ["ruff:check"], format = ["ruff:format"] }
 ```
+
+### Linting YAML blocks with ryl
+
+rumdl has a built-in `yamlfmt` tool for formatting YAML, but no built-in YAML
+linter. To lint YAML code blocks, wire in [ryl](https://github.com/owenlamont/ryl)
+(a fast yamllint-compatible linter) as a custom tool:
+
+```toml
+[code-block-tools]
+enabled = true
+
+[code-block-tools.tools.ryl]
+command = ["ryl", "-"]
+
+[code-block-tools.languages.yaml]
+lint = ["ryl"]
+```
+
+ryl reads each block from stdin via `-`; rumdl parses its diagnostics and remaps
+the line numbers back to their real positions in the markdown file.
 
 ### Multi-language Project
 
