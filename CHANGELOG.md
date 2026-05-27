@@ -42,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.3](https://github.com/rvben/rumdl/compare/v0.2.2...v0.2.3) - 2026-05-27
+
+### Fixed
+
+- **code-block-tools**: pipe newline-terminated content to external tools ([497d892](https://github.com/rvben/rumdl/commit/497d89227f2307cf1f29095cf9024ed2dd878f3d))
+
 ## [0.2.2](https://github.com/rvben/rumdl/compare/v0.2.1...v0.2.2) - 2026-05-26
 
 ### Fixed
