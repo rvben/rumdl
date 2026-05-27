@@ -50,6 +50,22 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
+/// Ensure content handed to an external tool is newline-terminated.
+///
+/// Code block extraction strips the line ending before the closing fence, but
+/// per CommonMark that final newline is part of the block's content. External
+/// tools treat their stdin as a complete file, so a tool with an end-of-file
+/// newline rule (e.g. yamllint/ryl `new-line-at-end-of-file`, ruff `W292`)
+/// would otherwise emit a false positive. Genuinely empty content is left
+/// untouched so we never synthesize content where there is none.
+fn ensure_trailing_newline(content: &str) -> std::borrow::Cow<'_, str> {
+    if content.is_empty() || content.ends_with('\n') {
+        std::borrow::Cow::Borrowed(content)
+    } else {
+        std::borrow::Cow::Owned(format!("{content}\n"))
+    }
+}
+
 /// Information about a fenced code block for processing.
 #[derive(Debug, Clone)]
 pub struct FencedCodeBlockInfo {
@@ -721,7 +737,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 }
 
-                match self.executor.lint(tool_def, &code_content, Some(self.config.timeout)) {
+                let tool_input = ensure_trailing_newline(&code_content);
+                match self.executor.lint(tool_def, &tool_input, Some(self.config.timeout)) {
                     Ok(output) => {
                         // Parse tool output into diagnostics
                         let diagnostics = self.parse_tool_output(
@@ -880,7 +897,8 @@ impl<'a> CodeBlockToolProcessor<'a> {
                     }
                 }
 
-                match self.executor.format(tool_def, &formatted, Some(self.config.timeout)) {
+                let tool_input = ensure_trailing_newline(&formatted);
+                match self.executor.format(tool_def, &tool_input, Some(self.config.timeout)) {
                     Ok(output) => {
                         // Guard against formatters that produce empty output for non-empty input.
                         // This prevents data loss from misconfigured tools (e.g., a lint tool
@@ -2949,5 +2967,105 @@ console.log('hi');
         // 256-color and RGB sequences
         assert_eq!(strip_ansi_codes("\x1b[38;5;196mred\x1b[0m"), "red");
         assert_eq!(strip_ansi_codes("\x1b[38;2;255;0;0mred\x1b[0m"), "red");
+    }
+
+    /// A linter that enforces a trailing newline (like ryl/yamllint
+    /// `new-line-at-end-of-file`) must not fire on a fenced code block whose
+    /// final newline was stripped during extraction. The content piped to the
+    /// tool should be newline-terminated, matching how the tool sees a real file.
+    #[cfg(unix)]
+    #[test]
+    fn test_lint_yaml_block_no_false_new_line_at_eof() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.normalize_language = NormalizeLanguage::Exact;
+        config.languages.insert(
+            "yaml".to_string(),
+            LanguageToolConfig {
+                lint: vec!["eof-newline-linter".to_string()],
+                ..Default::default()
+            },
+        );
+        // Emits a diagnostic only when stdin's last byte is not a newline.
+        // `$(tail -c1)` strips trailing newlines, so it is empty iff the input
+        // already ends in a newline.
+        config.tools.insert(
+            "eof-newline-linter".to_string(),
+            ToolDefinition {
+                command: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "if [ -n \"$(tail -c1)\" ]; then echo '1:1: no newline at end of file'; fi".to_string(),
+                ],
+                ..Default::default()
+            },
+        );
+
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let content = "```yaml\nfoo: bar\n```\n";
+        let diagnostics = processor.lint(content).expect("lint should succeed");
+
+        assert!(
+            diagnostics.is_empty(),
+            "EOF-newline linter should not fire on an extracted code block, got: {diagnostics:?}"
+        );
+    }
+
+    /// Format mode should also feed tools newline-terminated input, so a
+    /// formatter that enforces an end-of-file newline sees the content as a
+    /// complete file rather than re-adding a newline rumdl would then have to
+    /// strip. The formatter here reports whether its stdin ended in a newline.
+    #[cfg(unix)]
+    #[test]
+    fn test_format_feeds_newline_terminated_input() {
+        use super::super::config::{LanguageToolConfig, ToolDefinition};
+
+        let mut config = default_config();
+        config.normalize_language = NormalizeLanguage::Exact;
+        config.languages.insert(
+            "yaml".to_string(),
+            LanguageToolConfig {
+                format: vec!["newline-probe".to_string()],
+                ..Default::default()
+            },
+        );
+        config.tools.insert(
+            "newline-probe".to_string(),
+            ToolDefinition {
+                command: vec![
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    "if [ -z \"$(tail -c1)\" ]; then echo HAD_NEWLINE; else echo NO_NEWLINE; fi".to_string(),
+                ],
+                ..Default::default()
+            },
+        );
+
+        let processor = CodeBlockToolProcessor::new(&config, MarkdownFlavor::default());
+
+        let content = "```yaml\nfoo: bar\n```\n";
+        let output = processor.format(content).expect("format should succeed");
+
+        assert!(
+            output.content.contains("HAD_NEWLINE"),
+            "Formatter should receive newline-terminated stdin, got: {:?}",
+            output.content
+        );
+    }
+
+    #[test]
+    fn test_ensure_trailing_newline() {
+        // Non-empty content without a trailing newline gets one appended.
+        assert_eq!(ensure_trailing_newline("foo: bar"), "foo: bar\n");
+        // Multi-line content gets a single newline appended to the last line.
+        assert_eq!(ensure_trailing_newline("a: 1\nb: 2"), "a: 1\nb: 2\n");
+        // Content already ending in a newline is returned unchanged.
+        assert_eq!(ensure_trailing_newline("foo: bar\n"), "foo: bar\n");
+        // A trailing blank line (already newline-terminated) is left alone.
+        assert_eq!(ensure_trailing_newline("foo: bar\n\n"), "foo: bar\n\n");
+        // Genuinely empty content is left empty — no newline synthesized.
+        assert_eq!(ensure_trailing_newline(""), "");
     }
 }
