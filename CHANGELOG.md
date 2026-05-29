@@ -43,6 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.4](https://github.com/rvben/rumdl/compare/v0.2.3...v0.2.4) - 2026-05-29
+
+### Fixed
+
+- **md060**: apply aligned-delimiter when a table auto-compacts past max-width ([663f4ba](https://github.com/rvben/rumdl/commit/663f4babbb24102bd80924c2d31c9bd7005c61e7))
+- **md034**: don't flag URL arguments of MyST colon directives ([d55ed20](https://github.com/rvben/rumdl/commit/d55ed20eab6a5b7d17f53976af53c019e4d3b0c1))
+- **embedded**: gate markdown code block formatting behind code-block-tools opt-in ([bd23ad1](https://github.com/rvben/rumdl/commit/bd23ad15e02499100f9d76ed24e9aae16b8750b6))
+- **md046**: treat MyST directive body as directive, not indented code block ([060bae2](https://github.com/rvben/rumdl/commit/060bae2292c7e25805abc1d86de709252c607641))
+
 ## [0.2.3](https://github.com/rvben/rumdl/compare/v0.2.2...v0.2.3) - 2026-05-27
 
 ### Fixed
