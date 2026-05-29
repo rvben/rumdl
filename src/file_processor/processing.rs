@@ -229,10 +229,15 @@ pub fn process_file_with_formatter(
             Some(Path::new(file_path)),
         );
 
-        // Format embedded markdown blocks (recursive formatting)
-        // Use filtered_rules to respect per-file-ignores for embedded content
-        let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
-        warnings_fixed += embedded_formatted;
+        // Format embedded markdown blocks (recursive formatting). This is opt-in
+        // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
+        // and gated identically to the check path, so `--fix` never rewrites the
+        // contents of a markdown code block that `check` did not report on.
+        // filtered_rules respects per-file-ignores for the embedded content.
+        if should_lint_embedded_markdown(&config.code_block_tools) {
+            let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
+            warnings_fixed += embedded_formatted;
+        }
 
         // Format doc comments in Rust files
         if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {
@@ -304,10 +309,15 @@ pub fn process_file_with_formatter(
             Some(Path::new(file_path)),
         );
 
-        // Format embedded markdown blocks (recursive formatting)
-        // Use filtered_rules to respect per-file-ignores for embedded content
-        let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
-        warnings_fixed += embedded_formatted;
+        // Format embedded markdown blocks (recursive formatting). This is opt-in
+        // via code-block-tools (`[code-block-tools.languages.markdown] lint = ["rumdl"]`)
+        // and gated identically to the check path, so `--fix` never rewrites the
+        // contents of a markdown code block that `check` did not report on.
+        // filtered_rules respects per-file-ignores for the embedded content.
+        if should_lint_embedded_markdown(&config.code_block_tools) {
+            let embedded_formatted = format_embedded_markdown_blocks(&mut content, &filtered_rules, config);
+            warnings_fixed += embedded_formatted;
+        }
 
         // Format doc comments in Rust files
         if Path::new(file_path).extension().is_some_and(|ext| ext == "rs") {

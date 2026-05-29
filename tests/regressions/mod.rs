@@ -1,5 +1,6 @@
 mod code_block_blockquote_edge_cases;
 mod consistency_regression_tests;
+mod embedded_markdown_fix_gate_issue_643_test;
 mod escaped_brackets_test;
 mod final_confidence_assessment;
 mod html_comments_test;
