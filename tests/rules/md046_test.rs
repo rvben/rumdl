@@ -920,3 +920,43 @@ fn test_fix_longer_fence_closing_detection() {
         "The inner ``` should be preserved as indented content, got:\n{fixed}"
     );
 }
+
+#[test]
+fn test_myst_eval_rst_directive_body_not_indented_block() {
+    // A fenced MyST directive (`{eval-rst}`) is parsed as a code block whose body
+    // is opaque reStructuredText. Its indented option lines (`:noindex:`,
+    // `:toctree:`) must NOT be counted as a standalone indented code block, so
+    // under the default consistent style MD046 reports nothing and leaves the
+    // directive untouched.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content =
+        "```{eval-rst}\n.. autofunction:: example.refraction.snell\n    :noindex:\n    :toctree: generated\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MyST, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD046 must not flag a MyST directive's indented body as an indented code block, got: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "MD046 must not rewrite a MyST directive body, got:\n{fixed}"
+    );
+}
+
+#[test]
+fn test_myst_directive_body_not_indented_block_with_preceding_heading() {
+    // Same as above but with content before the directive, guarding both the
+    // first-block and later-block code paths.
+    let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+    let content = "# Title\n\n```{eval-rst}\n.. autofunction:: example.refraction.snell\n    :noindex:\n    :toctree: generated\n```\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::MyST, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "MD046 must not flag a MyST directive body regardless of position, got: {warnings:?}"
+    );
+}

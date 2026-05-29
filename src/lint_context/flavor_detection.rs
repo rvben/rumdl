@@ -1278,11 +1278,15 @@ pub(super) fn detect_myst_backtick_directives(
                 }
             }
         } else {
-            // Code-bearing directive: mark opener/closer as directive but keep in_code_block
-            if end_line_idx > 0
-                && let Some(closer_line) = lines.get_mut(end_line_idx - 1)
-            {
-                closer_line.in_myst_directive = true;
+            // Code-bearing directive (e.g. `{eval-rst}`, `{code-block}`): the body is
+            // opaque code, so keep `in_code_block` set on the body lines. Mark every
+            // line of the directive (opener, body, closer) as `in_myst_directive` so
+            // rules that skip directive structure (MD046, MD048) treat the whole block
+            // as one directive. Marking only the fences left the indented body lines
+            // looking like a standalone indented code block to those rules.
+            let body_end = end_line_idx.min(lines.len());
+            for line in &mut lines[start_line_idx..body_end] {
+                line.in_myst_directive = true;
             }
         }
     }
