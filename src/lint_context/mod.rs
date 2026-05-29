@@ -984,6 +984,22 @@ impl<'a> LintContext<'a> {
         Self::binary_search_ranges(&self.myst_comment_ranges, byte_pos)
     }
 
+    /// Check if a line (1-indexed) is a MyST colon-fence directive opener (`:::{name} ...`).
+    ///
+    /// The text after `{name}` on an opener is the directive's argument (an opaque
+    /// path, URL, or label), not markdown prose. Rules that reformat prose should
+    /// skip these lines. Returns false for non-MyST flavors and for directive body
+    /// or closer lines.
+    pub fn is_myst_colon_directive_opener_line(&self, line_num: usize) -> bool {
+        if !self.flavor.supports_myst_directives() {
+            return false;
+        }
+        self.lines.get(line_num.wrapping_sub(1)).is_some_and(|info| {
+            info.in_myst_directive
+                && flavor_detection::myst_colon_directive_opener(info.content(self.content)).is_some()
+        })
+    }
+
     /// Get HTML tags - computed lazily on first access
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
         Arc::clone(self.html_tags_cache.get_or_init(|| {

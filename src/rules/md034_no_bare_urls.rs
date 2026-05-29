@@ -497,6 +497,15 @@ impl Rule for MD034NoBareUrls {
             .skip_mdx_comments()
             .skip_obsidian_comments()
         {
+            // Skip MyST colon-fence directive openers (`:::{name} <arg>`). The text
+            // after the directive name is an opaque argument (a URL, path, or label),
+            // not markdown prose, so a bare URL there must not be wrapped in angle
+            // brackets. Directive body lines are not openers, so they fall through to
+            // `check_line` and are linted as usual.
+            if ctx.is_myst_colon_directive_opener_line(line.line_num) {
+                continue;
+            }
+
             let mut line_warnings =
                 self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
 
@@ -730,6 +739,107 @@ Check `https://example.com/` here.
         assert!(
             result.is_empty(),
             "URL in backticks after a fenced code block inside MDX must not be flagged: {result:?}"
+        );
+    }
+
+    /// Issue #642: a URL given as the argument of a MyST colon-fence directive
+    /// (`:::{name} <url>`) is the directive's opaque argument, not markdown prose,
+    /// and must not be wrapped in angle brackets.
+    #[test]
+    fn test_myst_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{anywidget} https://cdn.jsdelivr.net/npm/repo-review-webapp@1.1.3/dist/repo-review-anywidget.mjs
+{
+  \"deps\": [\"repo-review~=1.1.0\"]
+}
+:::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on a MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// A nested MyST colon directive opener also carries an opaque argument.
+    #[test]
+    fn test_myst_nested_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+::::{grid}
+:::{card} https://example.com/card-target
+Some caption.
+:::
+::::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on a nested MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// A bare URL in the *body* of a content directive (e.g. `{note}`) is genuine
+    /// prose and must still be flagged. The opener exemption must not leak to the body.
+    #[test]
+    fn test_myst_directive_body_url_still_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{note}
+See https://example.com/docs for more details.
+:::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Bare URL in a MyST directive body must still be flagged: {result:?}"
+        );
+    }
+
+    /// An unclosed colon directive (no terminating `:::`) still has its opener
+    /// argument treated as opaque: the URL must not be flagged.
+    #[test]
+    fn test_myst_unclosed_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{anywidget} https://example.com/widget.mjs
+Some trailing content with no closing fence.
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on an unclosed MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// The colon-directive exemption is MyST-specific: under the Standard flavor a
+    /// `:::{...}` line is ordinary text and a bare URL on it must still be flagged.
+    #[test]
+    fn test_colon_directive_url_flagged_in_standard_flavor() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = ":::{anywidget} https://example.com/widget.mjs\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Under Standard flavor a bare URL on a `:::` line must still be flagged: {result:?}"
         );
     }
 }

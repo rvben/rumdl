@@ -1017,7 +1017,7 @@ mod colon_fence_tests {
 /// Check if a line is a MyST colon directive opener.
 /// Pattern: 0-3 leading spaces, 3+ colons, immediately followed by `{name}`.
 /// Returns the colon count if it's an opener, None otherwise.
-fn myst_colon_directive_opener(line: &str) -> Option<usize> {
+pub(super) fn myst_colon_directive_opener(line: &str) -> Option<usize> {
     let spaces = count_leading_spaces(line);
     if spaces > 3 {
         return None;
