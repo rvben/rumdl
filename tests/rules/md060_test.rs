@@ -3523,6 +3523,80 @@ fn test_md060_aligned_style_ignores_aligned_delimiter() {
     );
 }
 
+fn md060_aligned_config_with_max_width(aligned_delimiter: bool, max_width: usize) -> MD060Config {
+    MD060Config {
+        enabled: true,
+        style: "aligned".to_string(),
+        max_width: LineLength::from_const(max_width),
+        column_align: ColumnAlign::Auto,
+        column_align_header: None,
+        column_align_body: None,
+        loose_last_column: false,
+        aligned_delimiter,
+    }
+}
+
+#[test]
+fn test_md060_aligned_autocompact_honors_aligned_delimiter() {
+    // #646: when an `aligned` table exceeds max-width it auto-compacts. The effective output
+    // style is then `compact`, so `aligned-delimiter = true` must align the delimiter row's
+    // pipes to the header column widths, exactly as `style = "compact"` would.
+    let config = md060_aligned_config_with_max_width(true, 40);
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| ID | Description |\n| --- | --- |\n| 1 | A very long description that causes the table to exceed the configured maximum width |\n| 2 | Another long description that keeps the table in compact mode |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    // "ID" = 2 cols → 2 dashes; "Description" = 11 cols → 11 dashes. Body rows stay compact.
+    let expected = "| ID | Description |\n| -- | ----------- |\n| 1 | A very long description that causes the table to exceed the configured maximum width |\n| 2 | Another long description that keeps the table in compact mode |";
+    assert_eq!(
+        fixed, expected,
+        "auto-compacted aligned table must align the delimiter row to header widths when aligned-delimiter is set"
+    );
+}
+
+#[test]
+fn test_md060_aligned_autocompact_without_aligned_delimiter_keeps_minimal_dashes() {
+    // Default (aligned-delimiter = false): auto-compact keeps the minimal compact delimiter.
+    let config = md060_aligned_config_with_max_width(false, 40);
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| ID | Description |\n| --- | --- |\n| 1 | A very long description that causes the table to exceed the configured maximum width |\n| 2 | Another long description that keeps the table in compact mode |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let expected = "| ID | Description |\n| --- | --- |\n| 1 | A very long description that causes the table to exceed the configured maximum width |\n| 2 | Another long description that keeps the table in compact mode |";
+    assert_eq!(
+        fixed, expected,
+        "without aligned-delimiter the auto-compacted delimiter row keeps minimal dashes (no regression)"
+    );
+}
+
+#[test]
+fn test_md060_aligned_autocompact_aligned_delimiter_idempotent() {
+    // Running the fix twice on an auto-compacted + aligned-delimiter table must be stable.
+    let config = md060_aligned_config_with_max_width(true, 40);
+    let rule = MD060TableFormat::from_config_struct(config, default_md013_config(), false);
+
+    let content = "| ID | Description |\n| --- | --- |\n| 1 | A very long description that causes the table to exceed the configured maximum width |\n| 2 | Another long description that keeps the table in compact mode |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed_once = rule.fix(&ctx).unwrap();
+
+    let ctx2 = LintContext::new(&fixed_once, MarkdownFlavor::Standard, None);
+    let fixed_twice = rule.fix(&ctx2).unwrap();
+
+    assert_eq!(
+        fixed_once, fixed_twice,
+        "auto-compact + aligned-delimiter fix must be idempotent"
+    );
+    let warnings = rule.check(&ctx2).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "Already-correct auto-compacted aligned-delimiter table should produce no warnings, got: {warnings:?}"
+    );
+}
+
 #[test]
 fn test_md060_compact_accepts_mdformat_empty_cell() {
     // mdformat writes empty compact cells as `| |` (single space between pipes).
