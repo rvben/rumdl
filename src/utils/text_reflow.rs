@@ -694,16 +694,6 @@ impl std::fmt::Display for Element {
     }
 }
 
-impl Element {
-    /// Calculate the display width of this element using the given length mode.
-    /// This formats the element and computes its width, correctly handling
-    /// visual width for CJK characters and other wide glyphs.
-    fn display_width(&self, mode: ReflowLengthMode) -> usize {
-        let formatted = format!("{self}");
-        display_len(&formatted, mode)
-    }
-}
-
 /// An emphasis or formatting span parsed by pulldown-cmark
 #[derive(Debug, Clone)]
 struct EmphasisSpan {
@@ -2136,8 +2126,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let length_mode = options.length_mode;
 
     for (idx, element) in elements.iter().enumerate() {
-        // Derive the display width from the already-formatted string instead of
-        // calling element.display_width(), which would format the element again.
+        // Derive the display width from the already-formatted string rather than
+        // formatting the element a second time just to measure it.
         let element_str = format!("{element}");
         let element_len = display_len(&element_str, length_mode);
 
