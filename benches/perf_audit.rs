@@ -15,8 +15,9 @@ use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::md013_line_length::md013_config::ReflowMode;
 use rumdl_lib::rules::{
-    MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx, MD021NoMultipleSpaceClosedAtx,
-    MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml, MD057ExistingRelativeLinks,
+    AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
+    MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
+    MD057Config, MD057ExistingRelativeLinks,
 };
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
 use std::hint::black_box;
@@ -154,7 +155,9 @@ fn gen_blockquoted_lists(n: usize) -> String {
     s
 }
 
-/// Many reference definitions and reference-style links for MD057.
+/// Many absolute-path reference definitions for MD057. With absolute_links =
+/// Warn, each ref definition emits a diagnostic, exercising the per-warning
+/// line lookup over a large document (the defs sit at the end, high line idx).
 fn gen_refs(n: usize) -> String {
     let mut s = String::with_capacity(n * 40);
     for i in 0..n {
@@ -162,7 +165,7 @@ fn gen_refs(n: usize) -> String {
     }
     s.push('\n');
     for i in 0..n {
-        s.push_str(&format!("[ref{i}]: ./docs/topic{i}.md\n"));
+        s.push_str(&format!("[ref{i}]: /docs/topic{i}.md\n"));
     }
     s
 }
@@ -277,7 +280,11 @@ fn bench_md032(c: &mut Criterion) {
 fn bench_md057(c: &mut Criterion) {
     let content = gen_refs(600);
     let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
-    let rule = MD057ExistingRelativeLinks::default();
+    let config = MD057Config {
+        absolute_links: AbsoluteLinksOption::Warn,
+        ..Default::default()
+    };
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(".");
     c.bench_function("md057/many_refs_check", |b| b.iter(|| rule.check(black_box(&ctx))));
 }
 

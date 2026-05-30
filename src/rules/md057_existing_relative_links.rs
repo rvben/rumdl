@@ -1019,7 +1019,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 match self.config.absolute_links {
                     AbsoluteLinksOption::Warn => {
                         let line_idx = ref_def.line - 1;
-                        let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                        let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
                             line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
                         });
                         warnings.push(LintWarning {
@@ -1036,7 +1036,7 @@ impl Rule for MD057ExistingRelativeLinks {
                     AbsoluteLinksOption::RelativeToDocs => {
                         if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
                             let line_idx = ref_def.line - 1;
-                            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
                                 line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
                             });
                             warnings.push(LintWarning {
@@ -1056,7 +1056,7 @@ impl Rule for MD057ExistingRelativeLinks {
                             Self::validate_absolute_link_via_roots(url, &self.config.roots, &project_root)
                         {
                             let line_idx = ref_def.line - 1;
-                            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+                            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
                                 line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
                             });
                             warnings.push(LintWarning {
@@ -1079,7 +1079,7 @@ impl Rule for MD057ExistingRelativeLinks {
             // Check for unnecessary path traversal (compact-paths)
             if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
                 let ref_line_idx = ref_def.line - 1;
-                let col = content.lines().nth(ref_line_idx).map_or(1, |line_content| {
+                let col = ctx.raw_lines().get(ref_line_idx).copied().map_or(1, |line_content| {
                     line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
                 });
                 let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
@@ -1138,7 +1138,7 @@ impl Rule for MD057ExistingRelativeLinks {
             // File doesn't exist and no source file found
             // Calculate column position: find URL within the line
             let line_idx = ref_def.line - 1;
-            let column = content.lines().nth(line_idx).map_or(1, |line_content| {
+            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
                 // Find URL position in line (after ]: )
                 line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
             });
