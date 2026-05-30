@@ -386,26 +386,26 @@ fn is_horizontal_rule(line: &str) -> bool {
         return false;
     }
 
-    // Check if line consists only of -, _, or * characters (at least 3)
-    let chars: Vec<char> = line.chars().collect();
-    if chars.is_empty() {
+    // Line must consist only of a single marker char (-, _, or *) plus spaces,
+    // with at least 3 markers. Scan chars directly to avoid allocating a Vec.
+    let mut chars = line.chars();
+    let Some(first_char) = chars.next() else {
         return false;
-    }
-
-    let first_char = chars[0];
+    };
     if first_char != '-' && first_char != '_' && first_char != '*' {
         return false;
     }
 
-    // All characters should be the same (allowing spaces between)
-    for c in &chars {
-        if *c != first_char && *c != ' ' {
+    let mut non_space_count = 1usize; // first_char is a marker
+    for c in chars {
+        if c == ' ' {
+            continue;
+        }
+        if c != first_char {
             return false;
         }
+        non_space_count += 1;
     }
-
-    // Count non-space characters
-    let non_space_count = chars.iter().filter(|c| **c != ' ').count();
     non_space_count >= 3
 }
 
