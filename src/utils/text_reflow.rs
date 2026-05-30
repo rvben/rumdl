@@ -158,12 +158,11 @@ fn compute_inline_code_mask(text: &str) -> Vec<bool> {
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
 fn is_sentence_boundary(
     text: &str,
+    chars: &[char],
     pos: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> bool {
-    let chars: Vec<char> = text.chars().collect();
-
     if pos + 1 >= chars.len() {
         return false;
     }
@@ -338,6 +337,9 @@ fn split_into_sentences_with_set(
 ) -> Vec<String> {
     // Pre-compute which character positions are inside inline code spans
     let in_code = compute_inline_code_mask(text);
+    // Collect chars once and share the slice with is_sentence_boundary, which
+    // would otherwise re-collect the whole text on every position it checks.
+    let char_vec: Vec<char> = text.chars().collect();
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
@@ -347,7 +349,7 @@ fn split_into_sentences_with_set(
     while let Some(c) = chars.next() {
         current_sentence.push(c);
 
-        if !in_code[pos] && is_sentence_boundary(text, pos, abbreviations, require_sentence_capital) {
+        if !in_code[pos] && is_sentence_boundary(text, &char_vec, pos, abbreviations, require_sentence_capital) {
             // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
             while let Some(&next) = chars.peek() {
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
