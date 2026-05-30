@@ -681,11 +681,28 @@ impl WorkspaceIndex {
     /// This removes the file from being listed as a dependent in all target entries.
     /// Used when updating a file (we need to remove old outgoing links before adding new ones).
     fn clear_reverse_deps_as_source(&mut self, path: &Path) {
-        for deps in self.reverse_deps.values_mut() {
-            deps.remove(path);
+        // Remove `path` as a dependent only from the targets it actually links
+        // to, discovered from its current index, instead of scanning every
+        // entry in reverse_deps. Both callers (update_file, clear_reverse_deps_for)
+        // run this before the file's entry is replaced/removed, so self.files[path]
+        // still holds the links that produced these reverse-dep entries; resolving
+        // them the same way reverses exactly the prior insertions.
+        let targets: Vec<PathBuf> = match self.files.get(path) {
+            Some(index) => index
+                .cross_file_links
+                .iter()
+                .map(|link| self.resolve_target_path(path, &link.target_path))
+                .collect(),
+            None => return,
+        };
+        for target in targets {
+            if let Some(deps) = self.reverse_deps.get_mut(&target) {
+                deps.remove(path);
+                if deps.is_empty() {
+                    self.reverse_deps.remove(&target);
+                }
+            }
         }
-        // Clean up empty entries
-        self.reverse_deps.retain(|_, deps| !deps.is_empty());
     }
 
     /// Remove a file completely from reverse dependency tracking
