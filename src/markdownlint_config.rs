@@ -796,7 +796,7 @@ ul-style:
         // The unconvertible rule must be skipped entirely, not left behind as a
         // phantom empty RuleConfig entry.
         assert!(
-            fragment.rules.get("MD013").is_none(),
+            !fragment.rules.contains_key("MD013"),
             "unconvertible MD013 value should not create a rules entry, got {:?}",
             fragment.rules.get("MD013")
         );
