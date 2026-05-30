@@ -162,8 +162,12 @@ impl Rule for MD004UnorderedListStyle {
                         continue;
                     }
 
-                    // Get the marker character
-                    let marker = list_item.marker.chars().next().unwrap();
+                    // Get the marker character. The parser populates a non-empty
+                    // marker for unordered items, but guard defensively so a
+                    // future parse path producing an empty marker cannot panic.
+                    let Some(marker) = list_item.marker.chars().next() else {
+                        continue;
+                    };
 
                     // Calculate offset for the marker position
                     let offset = line_info.byte_offset + list_item.marker_column;
