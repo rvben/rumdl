@@ -50,11 +50,14 @@ pub(super) fn compute_basic_line_info(
     // from non-Markdown regions (like unclosed fences) can't leak into real Markdown.
     // The masked content preserves byte length and newline positions for offset stability.
     let pulldown_content;
-    let pulldown_input = if let Some(extension_line_map) = &extension_line_map {
-        pulldown_content = mask_kramdown_extension_lines(content, line_offsets, extension_line_map);
-        pulldown_content.as_str()
-    } else {
-        content
+    let pulldown_input = match extension_line_map.as_deref() {
+        // Only build the masked copy when there is actually an extension block
+        // to mask; otherwise the mask would clone the whole document for nothing.
+        Some(map) if map.iter().any(|&in_ext| in_ext) => {
+            pulldown_content = mask_kramdown_extension_lines(content, line_offsets, map);
+            pulldown_content.as_str()
+        }
+        _ => content,
     };
 
     // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
