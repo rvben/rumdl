@@ -92,8 +92,12 @@ impl MD004UnorderedListStyle {
                 if let Some(line_info) = ctx.line_info(item_line)
                     && let Some(list_item) = &line_info.list_item
                     && !list_item.is_ordered
+                    && let Some(marker) = list_item.marker.chars().next()
                 {
-                    match list_item.marker.chars().next()? {
+                    // Skip (rather than abort the whole count via `?`) on an
+                    // empty marker, mirroring the guard in check(); aborting
+                    // would return None and suppress all consistency warnings.
+                    match marker {
                         '*' => asterisk_count += 1,
                         '-' => dash_count += 1,
                         '+' => plus_count += 1,
