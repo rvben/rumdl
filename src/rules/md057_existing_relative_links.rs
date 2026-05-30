@@ -225,7 +225,10 @@ impl MD057ExistingRelativeLinks {
         // they'll be treated as relative paths by markdown renderers.
         // Flagging them helps users find missing protocols.
         // We only skip .com as a minimal safety net for the most common case.
-        if url.ends_with(".com") {
+        // Require the absence of a path separator so a relative file reference
+        // that merely ends in ".com" (e.g. "../../vendor.com") is still
+        // validated rather than assumed to be a bare domain.
+        if !url.contains('/') && url.ends_with(".com") {
             return true;
         }
 
@@ -1599,6 +1602,22 @@ mod tests {
         assert!(!rule.is_external_url("./relative/path.md"));
         assert!(!rule.is_external_url("relative/path.md"));
         assert!(!rule.is_external_url("../parent/path.md"));
+    }
+
+    #[test]
+    fn test_dot_com_only_skips_bare_domains() {
+        let rule = MD057ExistingRelativeLinks::new();
+
+        // Bare domains ending in .com are treated as external (skipped).
+        assert!(rule.is_external_url("example.com"));
+        assert!(rule.is_external_url("sub.example.com"));
+
+        // A relative path that merely ends in ".com" must NOT be skipped:
+        // it contains a path separator, so it is a relative file reference
+        // that should be validated, not assumed external.
+        assert!(!rule.is_external_url("../../vendor.com"));
+        assert!(!rule.is_external_url("./vendor.com"));
+        assert!(!rule.is_external_url("docs/vendor.com"));
     }
 
     #[test]
