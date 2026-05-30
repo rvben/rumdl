@@ -332,10 +332,12 @@ impl MarkdownlintConfig {
                         enabled_rules.push(norm_rule_key.clone());
                     }
                 } else {
+                    // The value could not be represented in rumdl's internal
+                    // config format. Skip this rule and keep processing the rest
+                    // rather than terminating the process.
                     log::error!(
                         "Could not convert value for rule key {key:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config."
                     );
-                    std::process::exit(1);
                 }
             }
         }
@@ -772,6 +774,25 @@ ul-style:
         // Check that loaded_files is tracked
         assert_eq!(sourced_config.loaded_files.len(), 1);
         assert_eq!(sourced_config.loaded_files[0], "test.json");
+    }
+
+    #[test]
+    fn test_map_to_sourced_rumdl_config_skips_unconvertible_value_without_exiting() {
+        let mut config_map = HashMap::new();
+        // A YAML null has no toml::Value representation, so it hits the
+        // conversion-failure branch. That branch must skip the rule, not
+        // terminate the process (which would kill the whole test run).
+        config_map.insert("MD013".to_string(), serde_yaml::Value::Null);
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let sourced = mdl_config.map_to_sourced_rumdl_config(None);
+
+        // Reaching this assertion at all proves no process::exit happened.
+        // The unconvertible rule carries no converted values.
+        assert!(
+            sourced.rules.get("MD013").is_none_or(|r| r.values.is_empty()),
+            "unconvertible MD013 value should be skipped, not stored"
+        );
     }
 
     #[test]
