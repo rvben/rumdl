@@ -237,6 +237,15 @@ pub fn validate_fix_range(content: &str, fix: &Fix) -> Result<(), String> {
         ));
     }
 
+    // Mirror apply_warning_fixes: a range that splits a UTF-8 codepoint is
+    // invalid and would panic if applied.
+    if !content.is_char_boundary(fix.range.start) || !content.is_char_boundary(fix.range.end) {
+        return Err(format!(
+            "Fix range {}..{} does not lie on UTF-8 char boundaries",
+            fix.range.start, fix.range.end
+        ));
+    }
+
     Ok(())
 }
 
@@ -244,6 +253,20 @@ pub fn validate_fix_range(content: &str, fix: &Fix) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::rule::{Fix, LintWarning, Severity};
+
+    #[test]
+    fn test_validate_fix_range_rejects_non_char_boundary() {
+        // "é" is 2 bytes (0xC3 0xA9); the range 1..2 splits it.
+        let content = "é world";
+        let fix = Fix::new(1..2, "x".to_string());
+        assert!(
+            validate_fix_range(content, &fix).is_err(),
+            "validate_fix_range must reject a range that splits a codepoint"
+        );
+        // A boundary-aligned range is still accepted.
+        let ok_fix = Fix::new(0..2, "x".to_string());
+        assert!(validate_fix_range(content, &ok_fix).is_ok());
+    }
 
     #[test]
     fn test_apply_single_fix() {
