@@ -84,10 +84,15 @@ impl MD046CodeBlockStyle {
 
     fn is_list_item(&self, line: &str) -> bool {
         let trimmed = line.trim_start();
-        (trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
-            || (trimmed.len() > 2
-                && trimmed.chars().next().unwrap().is_numeric()
-                && (trimmed.contains(". ") || trimmed.contains(") ")))
+        if trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ ") {
+            return true;
+        }
+        // Ordered list item: one or more leading digits immediately followed by
+        // ". " or ") ". Checking the delimiter right after the digit run avoids
+        // misclassifying prose like "2 results. More info." (which merely
+        // contains ". ") as a list item.
+        let after_digits = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
+        after_digits.len() < trimmed.len() && (after_digits.starts_with(". ") || after_digits.starts_with(") "))
     }
 
     /// Check if a line is a footnote definition according to CommonMark footnote extension spec
@@ -1071,11 +1076,16 @@ impl Rule for MD046CodeBlockStyle {
                     result.push_str(line);
                     result.push('\n');
                 } else if target_style == CodeBlockStyle::Indented {
-                    // Convert content inside fenced block to indented
-                    // IMPORTANT: Preserve the original line content (including internal indentation)
-                    // Don't use trimmed, as that would strip internal code indentation
-                    result.push_str("    ");
-                    result.push_str(line);
+                    // Convert content inside fenced block to indented.
+                    // IMPORTANT: Preserve the original line content (including internal indentation);
+                    // don't use trimmed, as that would strip internal code indentation.
+                    // Leave blank lines empty so we don't emit "    " (trailing
+                    // whitespace), which MD009 would flag and which would break
+                    // idempotency on a second fix pass.
+                    if !line.is_empty() {
+                        result.push_str("    ");
+                        result.push_str(line);
+                    }
                     result.push('\n');
                 } else {
                     // Keep fenced block content as is
@@ -1434,6 +1444,44 @@ mod tests {
 
         assert!(fixed.contains("    code line 1\n    code line 2"));
         assert!(!fixed.contains("```"));
+    }
+
+    #[test]
+    fn test_fix_fenced_to_indented_blank_lines_have_no_trailing_spaces() {
+        // A blank line inside a fenced block must become an empty line, not
+        // "    " (four trailing spaces), which would violate MD009 and break
+        // idempotency on the second fix pass.
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
+        let content = "Text\n\n```\ncode line 1\n\ncode line 2\n```\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        for line in fixed.lines() {
+            assert!(
+                line.is_empty() || !line.trim_end().is_empty() || line == line.trim_end(),
+                "no line may have trailing whitespace, got {line:?}"
+            );
+            assert_ne!(line, "    ", "blank line was indented to trailing spaces");
+        }
+        // The blank line between the two code lines is preserved as empty.
+        assert!(fixed.contains("    code line 1\n\n    code line 2"));
+    }
+
+    #[test]
+    fn test_is_list_item_requires_delimiter_after_digits() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Consistent);
+        // Real ordered list items.
+        assert!(rule.is_list_item("1. First"));
+        assert!(rule.is_list_item("42) Item"));
+        assert!(rule.is_list_item("  3. Indented item"));
+        // Bullet list items.
+        assert!(rule.is_list_item("- bullet"));
+        assert!(rule.is_list_item("* bullet"));
+        // Prose starting with a digit but containing ". " or ") " mid-sentence
+        // is NOT a list item.
+        assert!(!rule.is_list_item("2 results. More info."));
+        assert!(!rule.is_list_item("3 options (a, b) here"));
+        assert!(!rule.is_list_item("100 items in stock. Buy now"));
     }
 
     #[test]
