@@ -296,13 +296,22 @@ impl Rule for MD072FrontmatterKeySort {
                     )
                 };
 
+                // out_of_place has surrounding quotes stripped for sorting, so
+                // span the raw key (quotes included) as it appears on the line.
+                let end_column = frontmatter_lines
+                    .get(key_idx)
+                    .and_then(|line| line.split_once(':'))
+                    .map_or(out_of_place.chars().count() + 1, |(key, _)| {
+                        key.trim().chars().count() + 1
+                    });
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
                     line: key_line,
                     column: 1,
                     end_line: key_line,
-                    end_column: out_of_place.len() + 1,
+                    end_column,
                     severity: Severity::Warning,
                     fix,
                 });
@@ -820,6 +829,24 @@ mod tests {
 
         assert_eq!(result.len(), 1, "quoted key out of order must be flagged");
         assert!(result[0].message.contains("'apple' should come before 'zebra'"));
+    }
+
+    #[test]
+    fn test_yaml_quoted_key_warning_span_covers_quotes() {
+        let rule = create_enabled_rule();
+        // "apple" is out of order (should come before banana). Its quotes are
+        // stripped for sorting, but the diagnostic span must still cover the
+        // raw key as written, including the quotes.
+        let content = "---\nbanana: 1\n\"apple\": 2\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        let w = &result[0];
+        assert_eq!(w.line, 3);
+        assert_eq!(w.column, 1);
+        // Raw key `"apple"` is 7 chars, so end_column is 8 (not 6 for `apple`).
+        assert_eq!(w.end_column, 8, "diagnostic span must cover the quoted key");
     }
 
     #[test]
