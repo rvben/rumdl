@@ -492,6 +492,17 @@ impl WorkspaceIndex {
         self.files.iter().map(|(p, i)| (p.as_path(), i))
     }
 
+    /// All files in the index, ordered by path.
+    ///
+    /// `files()` iterates the backing `HashMap` in an unspecified order, so
+    /// consumers that emit output (cross-file diagnostics) must use this to
+    /// keep results stable across runs on identical input.
+    pub fn files_sorted(&self) -> Vec<(&Path, &FileIndex)> {
+        let mut entries: Vec<(&Path, &FileIndex)> = self.files.iter().map(|(p, i)| (p.as_path(), i)).collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries
+    }
+
     /// Clear the entire index
     pub fn clear(&mut self) {
         self.files.clear();
@@ -1086,6 +1097,26 @@ mod tests {
         // Removing non-existent file doesn't increment
         index.remove_file(Path::new("nonexistent.md"));
         assert_eq!(index.version(), 3);
+    }
+
+    #[test]
+    fn test_files_sorted_is_path_ordered() {
+        let mut index = WorkspaceIndex::new();
+        // Insert in a deliberately non-sorted order.
+        for name in ["docs/zebra.md", "docs/apple.md", "docs/mango.md"] {
+            index.update_file(Path::new(name), FileIndex::new());
+        }
+
+        let paths: Vec<&Path> = index.files_sorted().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(
+            paths,
+            vec![
+                Path::new("docs/apple.md"),
+                Path::new("docs/mango.md"),
+                Path::new("docs/zebra.md"),
+            ],
+            "files_sorted() must return entries ordered by path"
+        );
     }
 
     #[test]

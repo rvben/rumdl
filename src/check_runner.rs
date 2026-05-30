@@ -486,7 +486,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         // Run cross-file checks using per-file config group rules
         let formatter = output_format.create_formatter();
         rumdl_lib::time_section!("workspace: run cross-file checks", {
-            for (file_path, file_index) in workspace_index.files() {
+            // Iterate in path order so cross-file diagnostics are emitted in a
+            // stable order across runs (the workspace index is a HashMap).
+            for (file_path, file_index) in workspace_index.files_sorted() {
                 // Use the file's own config group for cross-file rules
                 let (cf_rules, cf_config) = match file_group_map.get(file_path) {
                     Some(&gi) => (&config_groups[gi].rules, &config_groups[gi].config),
