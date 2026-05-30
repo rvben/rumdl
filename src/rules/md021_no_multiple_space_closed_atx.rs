@@ -3,10 +3,13 @@
 /// See [docs/md021.md](../../docs/md021.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_line_range;
-use crate::utils::regex_cache::get_cached_regex;
+use regex::Regex;
+use std::sync::LazyLock;
 
 // Regex patterns
 const CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR: &str = r"^(\s*)(#+)(\s+)(.*?)(\s+)(#+)\s*$";
+static CLOSED_ATX_MULTIPLE_SPACE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR).unwrap());
 
 #[derive(Clone)]
 pub struct MD021NoMultipleSpaceClosedAtx;
@@ -23,10 +26,7 @@ impl MD021NoMultipleSpaceClosedAtx {
     }
 
     fn is_closed_atx_heading_with_multiple_spaces(&self, line: &str) -> bool {
-        if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
-            .ok()
-            .and_then(|re| re.captures(line))
-        {
+        if let Some(captures) = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line) {
             let start_spaces = captures.get(3).unwrap().as_str().len();
             let end_spaces = captures.get(5).unwrap().as_str().len();
             start_spaces > 1 || end_spaces > 1
@@ -36,10 +36,7 @@ impl MD021NoMultipleSpaceClosedAtx {
     }
 
     fn fix_closed_atx_heading(&self, line: &str) -> String {
-        if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
-            .ok()
-            .and_then(|re| re.captures(line))
-        {
+        if let Some(captures) = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line) {
             let indentation = &captures[1];
             let opening_hashes = &captures[2];
             let content = &captures[4];
@@ -57,10 +54,7 @@ impl MD021NoMultipleSpaceClosedAtx {
     }
 
     fn count_spaces(&self, line: &str) -> (usize, usize) {
-        if let Some(captures) = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
-            .ok()
-            .and_then(|re| re.captures(line))
-        {
+        if let Some(captures) = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line) {
             let start_spaces = captures.get(3).unwrap().as_str().len();
             let end_spaces = captures.get(5).unwrap().as_str().len();
             (start_spaces, end_spaces)
@@ -96,10 +90,7 @@ impl Rule for MD021NoMultipleSpaceClosedAtx {
 
                     // Check if line matches closed ATX pattern with multiple spaces
                     if self.is_closed_atx_heading_with_multiple_spaces(line) {
-                        let captures = get_cached_regex(CLOSED_ATX_MULTIPLE_SPACE_PATTERN_STR)
-                            .ok()
-                            .and_then(|re| re.captures(line))
-                            .unwrap();
+                        let captures = CLOSED_ATX_MULTIPLE_SPACE_PATTERN.captures(line).unwrap();
                         let _indentation = captures.get(1).unwrap();
                         let opening_hashes = captures.get(2).unwrap();
                         let (start_spaces, end_spaces) = self.count_spaces(line);

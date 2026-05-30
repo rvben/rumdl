@@ -4,11 +4,13 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_match_range;
-use crate::utils::regex_cache::get_cached_regex;
 use crate::utils::skip_context::is_in_math_context;
+use regex::Regex;
+use std::sync::LazyLock;
 
 // Reversed link detection pattern
 const REVERSED_LINK_REGEX_STR: &str = r"(^|[^\\])\(([^()]+)\)\[([^\]]+)\]";
+static REVERSED_LINK_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(REVERSED_LINK_REGEX_STR).unwrap());
 
 /// Classification of a link component
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,10 +120,7 @@ impl Rule for MD011NoReversedLinks {
 
             let mut last_end = 0;
 
-            while let Some(cap) = get_cached_regex(REVERSED_LINK_REGEX_STR)
-                .ok()
-                .and_then(|re| re.captures(&line[last_end..]))
-            {
+            while let Some(cap) = REVERSED_LINK_REGEX.captures(&line[last_end..]) {
                 let match_obj = cap.get(0).unwrap();
                 let prechar = &cap[1];
                 let paren_content = cap[2].to_string();
