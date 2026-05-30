@@ -62,6 +62,21 @@ fn gen_prose(paragraphs: usize, sentences: usize) -> String {
     s
 }
 
+/// Long paragraphs containing many inline links, for the word-wrap reflow path
+/// (reflow_elements), which handles non-Text elements.
+fn gen_prose_links(paragraphs: usize, items: usize) -> String {
+    let mut s = String::with_capacity(paragraphs * items * 50);
+    for p in 0..paragraphs {
+        for k in 0..items {
+            s.push_str(&format!(
+                "see [link {k}](https://example.com/p{p}/{k}) and more words here "
+            ));
+        }
+        s.push_str("\n\n");
+    }
+    s
+}
+
 /// Many `$$` math blocks, a quarter of them left unclosed within their line,
 /// to stress the math-block line-map lookahead.
 fn gen_math(blocks: usize) -> String {
@@ -201,6 +216,20 @@ fn bench_md013_reflow(c: &mut Criterion) {
     let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
     c.bench_function("md013_reflow/sentence_per_line_fix", |b| {
         b.iter(|| rule.fix(black_box(&ctx)));
+    });
+
+    // Word-wrap path (reflow_elements) with inline links (non-Text elements).
+    let wrap_content = gen_prose_links(40, 12);
+    let wrap_cfg = MD013Config {
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        line_length: rumdl_lib::types::LineLength::new(40),
+        ..Default::default()
+    };
+    let wrap_rule = MD013LineLength::from_config_struct(wrap_cfg);
+    let wrap_ctx = LintContext::new(&wrap_content, MarkdownFlavor::Standard, None);
+    c.bench_function("md013_reflow/wordwrap_elements_fix", |b| {
+        b.iter(|| wrap_rule.fix(black_box(&wrap_ctx)));
     });
 }
 

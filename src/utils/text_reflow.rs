@@ -2136,8 +2136,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let length_mode = options.length_mode;
 
     for (idx, element) in elements.iter().enumerate() {
+        // Derive the display width from the already-formatted string instead of
+        // calling element.display_width(), which would format the element again.
         let element_str = format!("{element}");
-        let element_len = element.display_width(length_mode);
+        let element_len = display_len(&element_str, length_mode);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no whitespace between them in the source:
