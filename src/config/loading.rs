@@ -17,6 +17,16 @@ use super::validation::validate_config_sourced_internal;
 /// Maximum depth for extends chains to prevent runaway recursion
 const MAX_EXTENDS_DEPTH: usize = 10;
 
+/// Cheap pre-filter for whether a `pyproject.toml` declares rumdl config.
+///
+/// Matches the flat section header `[tool.rumdl]` as well as dotted sections
+/// like `[tool.rumdl.MD013]` or `[tool.rumdl.rules.MD007]` (which are valid on
+/// their own, without a flat header). Requiring the leading `[` avoids matching
+/// incidental occurrences of `tool.rumdl` in comments or string values.
+fn pyproject_declares_rumdl_config(content: &str) -> bool {
+    content.contains("[tool.rumdl]") || content.contains("[tool.rumdl.")
+}
+
 /// Resolve an `extends` path relative to the config file that contains it.
 ///
 /// - `~/` prefix: expanded to home directory
@@ -446,7 +456,7 @@ impl SourcedConfig<ConfigLoaded> {
                         // For pyproject.toml, verify it contains [tool.rumdl] section
                         if *config_name == "pyproject.toml" {
                             if let Ok(content) = std::fs::read_to_string(&config_path) {
-                                if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                                if pyproject_declares_rumdl_config(&content) {
                                     log::debug!("[rumdl-config] Found config file: {}", config_path.display());
                                     // Store config, but continue looking for .git
                                     found_config = Some((config_path.clone(), current_dir.clone()));
@@ -573,7 +583,7 @@ impl SourcedConfig<ConfigLoaded> {
                 // For pyproject.toml, verify it contains [tool.rumdl] section
                 if *filename == "pyproject.toml" {
                     if let Ok(content) = std::fs::read_to_string(&config_path) {
-                        if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") {
+                        if pyproject_declares_rumdl_config(&content) {
                             log::debug!("[rumdl-config] Found user configuration at: {}", config_path.display());
                             return Some(config_path);
                         }
@@ -999,7 +1009,7 @@ impl SourcedConfig<ConfigLoaded> {
                 if config_path.exists() {
                     if *config_name == "pyproject.toml" {
                         if let Ok(content) = std::fs::read_to_string(&config_path)
-                            && (content.contains("[tool.rumdl]") || content.contains("tool.rumdl"))
+                            && pyproject_declares_rumdl_config(&content)
                         {
                             return Some(config_path);
                         }
@@ -1135,5 +1145,33 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
         config.canonicalize_rule_lists();
 
         config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pyproject_declares_rumdl_config;
+
+    #[test]
+    fn detects_flat_and_dotted_rumdl_sections() {
+        assert!(pyproject_declares_rumdl_config("[tool.rumdl]\nline-length = 80\n"));
+        // Dotted sections are valid on their own, without a flat header.
+        assert!(pyproject_declares_rumdl_config(
+            "[tool.rumdl.MD013]\nstyle = \"fixed\"\n"
+        ));
+        assert!(pyproject_declares_rumdl_config(
+            "[tool.rumdl.rules.MD007]\nindent = 4\n"
+        ));
+    }
+
+    #[test]
+    fn ignores_incidental_mentions() {
+        // A bare `tool.rumdl` in a comment or string value must not be treated
+        // as a config section.
+        assert!(!pyproject_declares_rumdl_config("# configure tool.rumdl later\n"));
+        assert!(!pyproject_declares_rumdl_config(
+            "[project]\ndependencies = [\"tool.rumdl-helper\"]\n"
+        ));
+        assert!(!pyproject_declares_rumdl_config("[tool.black]\nline-length = 88\n"));
     }
 }
