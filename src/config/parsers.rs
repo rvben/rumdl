@@ -441,7 +441,7 @@ pub(super) fn parse_pyproject_toml(
         || !fragment.global.unfixable.value.is_empty()
         || fragment.global.output_format.is_some()
         || fragment.global.cache_dir.is_some()
-        || !fragment.global.cache.value
+        || fragment.global.cache.source != ConfigSource::Default
         || fragment.global.flavor.source != ConfigSource::Default
         || fragment.global.respect_gitignore.source != ConfigSource::Default
         || fragment.global.force_exclude.source != ConfigSource::Default
@@ -1075,7 +1075,9 @@ mod tests {
     use super::*;
 
     fn parse(content: &str) -> Option<SourcedConfigFragment> {
-        parse_pyproject_toml(content, "pyproject.toml", ConfigSource::ProjectConfig).unwrap()
+        // Match the production call path: pyproject.toml is loaded with
+        // ConfigSource::PyprojectToml (see source_from_filename).
+        parse_pyproject_toml(content, "pyproject.toml", ConfigSource::PyprojectToml).unwrap()
     }
 
     #[test]
@@ -1098,6 +1100,16 @@ mod tests {
         let fragment = parse("[tool.rumdl]\nforce-exclude = true\n")
             .expect("[tool.rumdl] with only `force-exclude` must not be discarded");
         assert!(fragment.global.force_exclude.value);
+    }
+
+    #[test]
+    fn pyproject_with_only_cache_true_is_kept() {
+        // cache defaults to true, so an explicit `cache = true` must be
+        // detected via its source, not by a value heuristic.
+        let fragment =
+            parse("[tool.rumdl]\ncache = true\n").expect("[tool.rumdl] with only `cache = true` must not be discarded");
+        assert!(fragment.global.cache.value);
+        assert_ne!(fragment.global.cache.source, ConfigSource::Default);
     }
 
     #[test]
