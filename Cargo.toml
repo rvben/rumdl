@@ -153,3 +153,7 @@ harness = false
 [[bench]]
 name = "config_per_file_lookup"
 harness = false
+
+[[bench]]
+name = "perf_audit"
+harness = false
