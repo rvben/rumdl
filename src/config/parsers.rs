@@ -442,6 +442,9 @@ pub(super) fn parse_pyproject_toml(
         || fragment.global.output_format.is_some()
         || fragment.global.cache_dir.is_some()
         || !fragment.global.cache.value
+        || fragment.global.flavor.source != ConfigSource::Default
+        || fragment.global.respect_gitignore.source != ConfigSource::Default
+        || fragment.global.force_exclude.source != ConfigSource::Default
         || !fragment.per_file_ignores.value.is_empty()
         || !fragment.per_file_flavor.value.is_empty()
         || !fragment.rules.is_empty();
@@ -1065,4 +1068,40 @@ pub(super) fn load_from_markdownlint(path: &str) -> Result<SourcedConfigFragment
     let ml_config = crate::markdownlint_config::load_markdownlint_config(path)
         .map_err(|e| ConfigError::ParseError(format!("{display_path}: {e}")))?;
     Ok(ml_config.map_to_sourced_rumdl_config_fragment(Some(path)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(content: &str) -> Option<SourcedConfigFragment> {
+        parse_pyproject_toml(content, "pyproject.toml", ConfigSource::ProjectConfig).unwrap()
+    }
+
+    #[test]
+    fn pyproject_with_only_flavor_is_kept() {
+        let fragment = parse("[tool.rumdl]\nflavor = \"mkdocs\"\n")
+            .expect("[tool.rumdl] with only `flavor` must not be discarded");
+        assert_eq!(fragment.global.flavor.value, MarkdownFlavor::MkDocs);
+        assert_ne!(fragment.global.flavor.source, ConfigSource::Default);
+    }
+
+    #[test]
+    fn pyproject_with_only_respect_gitignore_is_kept() {
+        let fragment = parse("[tool.rumdl]\nrespect-gitignore = false\n")
+            .expect("[tool.rumdl] with only `respect-gitignore` must not be discarded");
+        assert!(!fragment.global.respect_gitignore.value);
+    }
+
+    #[test]
+    fn pyproject_with_only_force_exclude_is_kept() {
+        let fragment = parse("[tool.rumdl]\nforce-exclude = true\n")
+            .expect("[tool.rumdl] with only `force-exclude` must not be discarded");
+        assert!(fragment.global.force_exclude.value);
+    }
+
+    #[test]
+    fn pyproject_with_no_rumdl_section_is_none() {
+        assert!(parse("[tool.black]\nline-length = 88\n").is_none());
+    }
 }
