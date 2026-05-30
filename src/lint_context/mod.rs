@@ -642,6 +642,26 @@ impl<'a> LintContext<'a> {
             .filter(|span| !lines.get(span.line - 1).is_some_and(|l| l.in_kramdown_extension_block))
             .collect::<Vec<_>>();
 
+        // Mark lines covered by a list or table block so is_in_list_block /
+        // is_in_table_block are O(1) reads (mirrors in_html_block) instead of
+        // scanning the whole block vector on every call.
+        for block in &list_blocks {
+            // ListBlock line numbers are 1-indexed.
+            for line_num in block.start_line..=block.end_line {
+                if let Some(li) = lines.get_mut(line_num - 1) {
+                    li.in_list_block = true;
+                }
+            }
+        }
+        for block in &table_blocks {
+            // TableBlock line numbers are 0-indexed.
+            for idx in block.start_line..=block.end_line {
+                if let Some(li) = lines.get_mut(idx) {
+                    li.in_table_block = true;
+                }
+            }
+        }
+
         // Rebuild reference_defs_map after filtering
         let reference_defs_map: HashMap<String, usize> = reference_defs
             .iter()
@@ -1174,9 +1194,10 @@ impl<'a> LintContext<'a> {
 
     /// Check if a line is part of a list block
     pub fn is_in_list_block(&self, line_num: usize) -> bool {
-        self.list_blocks
-            .iter()
-            .any(|block| line_num >= block.start_line && line_num <= block.end_line)
+        if line_num == 0 || line_num > self.lines.len() {
+            return false;
+        }
+        self.lines[line_num - 1].in_list_block
     }
 
     /// Check if a line is within an HTML block
@@ -1193,13 +1214,10 @@ impl<'a> LintContext<'a> {
     /// `TableBlock` spans are stored 0-indexed; this helper accepts the
     /// 1-indexed line numbers used elsewhere in the rule API.
     pub fn is_in_table_block(&self, line_num: usize) -> bool {
-        if line_num == 0 {
+        if line_num == 0 || line_num > self.lines.len() {
             return false;
         }
-        let line_idx = line_num - 1;
-        self.table_blocks
-            .iter()
-            .any(|block| line_idx >= block.start_line && line_idx <= block.end_line)
+        self.lines[line_num - 1].in_table_block
     }
 
     /// Check if a line and column is within a code span

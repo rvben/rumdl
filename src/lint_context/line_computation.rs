@@ -136,6 +136,8 @@ pub(super) fn compute_basic_line_info(
             in_code_block,
             in_front_matter,
             in_html_block: false,
+            in_list_block: false,
+            in_table_block: false,
             in_html_comment,
             list_item,
             heading: None,
