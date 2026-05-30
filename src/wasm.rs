@@ -213,7 +213,7 @@ pub struct LinterConfig {
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
-    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", or "azure_devops"
+    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", or "myst"
     pub flavor: Option<String>,
 
     /// Rules allowed to apply fixes (if specified, only these rules are fixed)

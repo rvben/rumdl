@@ -1574,16 +1574,21 @@ server:
 
     #[test]
     fn test_fix_fenced_to_indented_preserves_empty_lines() {
-        // Empty lines within code blocks should also get the 4-space prefix
+        // Blank lines within a converted code block stay blank: they keep their
+        // place but must not gain the 4-space prefix (that would be trailing
+        // whitespace).
         let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Indented);
         let content = "```\nline1\n\nline2\n```\n";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
 
-        // The fixed content should have proper structure
+        // Content lines are indented; the blank line between them stays empty.
         assert!(fixed.contains("    line1"), "line1 should be indented");
         assert!(fixed.contains("    line2"), "line2 should be indented");
-        // Empty line between them is preserved (may or may not have spaces)
+        assert!(
+            fixed.contains("    line1\n\n    line2"),
+            "blank line must stay empty, got {fixed:?}"
+        );
     }
 
     #[test]

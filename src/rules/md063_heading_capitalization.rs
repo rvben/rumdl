@@ -676,7 +676,8 @@ impl MD063HeadingCapitalization {
         // Sort by start position
         special_regions.sort_by_key(|(start, _, _)| *start);
 
-        // Remove overlapping regions (code takes precedence)
+        // Drop regions that overlap one already kept. After sorting by start
+        // position, the earliest-starting region wins a conflict.
         let mut filtered_regions: Vec<(usize, usize, HeadingSegment)> = Vec::new();
         for region in special_regions {
             let overlaps = filtered_regions.iter().any(|(s, e, _)| region.0 < *e && region.1 > *s);

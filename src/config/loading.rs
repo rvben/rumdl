@@ -22,7 +22,9 @@ const MAX_EXTENDS_DEPTH: usize = 10;
 /// Matches the flat section header `[tool.rumdl]` as well as dotted sections
 /// like `[tool.rumdl.MD013]` or `[tool.rumdl.rules.MD007]` (which are valid on
 /// their own, without a flat header). Requiring the leading `[` avoids matching
-/// incidental occurrences of `tool.rumdl` in comments or string values.
+/// a bare `tool.rumdl` in prose or dependency names; a literal `[tool.rumdl...`
+/// inside a comment or string would still match, but the subsequent parse
+/// handles that gracefully.
 fn pyproject_declares_rumdl_config(content: &str) -> bool {
     content.contains("[tool.rumdl]") || content.contains("[tool.rumdl.")
 }
