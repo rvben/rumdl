@@ -664,6 +664,8 @@ mod tests {
             MarkdownFlavor::Quarto,
             MarkdownFlavor::Obsidian,
             MarkdownFlavor::Kramdown,
+            MarkdownFlavor::AzureDevOps,
+            MarkdownFlavor::MyST,
         ];
 
         for flavor in flavors {
@@ -676,6 +678,8 @@ mod tests {
                 MarkdownFlavor::Quarto => "quarto",
                 MarkdownFlavor::Obsidian => "obsidian",
                 MarkdownFlavor::Kramdown => "kramdown",
+                MarkdownFlavor::AzureDevOps => "azure_devops",
+                MarkdownFlavor::MyST => "myst",
             };
 
             let config = LinterConfig {
