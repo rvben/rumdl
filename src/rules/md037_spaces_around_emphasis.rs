@@ -10,8 +10,8 @@ use crate::utils::emphasis_utils::{
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{
-    is_in_html_comment, is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment,
-    is_in_mkdocs_markup, is_in_table_cell,
+    is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
+    is_in_table_cell,
 };
 
 /// Check if an emphasis span has spacing issues that should be flagged
@@ -142,7 +142,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                     let in_pandoc_construct = ctx.flavor.is_pandoc_compatible() && ctx.is_in_bracketed_span(byte_pos);
                     if !in_pandoc_construct
                         && !self.is_in_link(ctx, byte_pos)
-                        && !is_in_html_comment(content, byte_pos)
+                        && !ctx.is_in_html_comment(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !is_in_table_cell(ctx, line_num, warning.column)
                         && !ctx.is_in_code_span(line_num, warning.column)
