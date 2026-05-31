@@ -375,7 +375,11 @@ fn is_link_with_optional_emphasis(s: &str) -> bool {
             .rev()
             .take_while(|c| emphasis_chars.contains(c))
             .count();
-        if trailing_emphasis == leading_emphasis {
+        // Only strip when the leading and trailing emphasis runs are distinct
+        // (there is inner content between them). For an all-emphasis string like
+        // "**" the runs overlap and `leading + trailing > len`, which would make
+        // the slice start exceed its end and panic.
+        if trailing_emphasis == leading_emphasis && leading_emphasis + trailing_emphasis <= trimmed_end.len() {
             s = &s[leading_emphasis..trimmed_end.len() - trailing_emphasis];
         }
     }
@@ -563,6 +567,19 @@ mod tests {
             "[Rust](https://en.wikipedia.org/wiki/Rust_(programming_language))"
         ));
         assert!(is_standalone_link_or_image_line("[A](https://example.com/A_(B)_C)"));
+    }
+
+    #[test]
+    fn test_emphasis_only_line_is_not_a_standalone_link() {
+        // A line that reduces to only emphasis markers (matched leading/trailing
+        // runs that overlap) must not panic while stripping the wrappers, and is
+        // not a standalone link.
+        for s in ["*", "**", "***", "_", "__", "___", "*_*", "**_", "_**"] {
+            assert!(!is_standalone_link_or_image_line(s), "{s:?} is not a standalone link");
+        }
+        // Emphasis-wrapped real links still detected.
+        assert!(is_standalone_link_or_image_line("*[text](https://example.com)*"));
+        assert!(is_standalone_link_or_image_line("**[text](https://example.com)**"));
     }
 
     #[test]
