@@ -70,6 +70,7 @@ pub struct LintContext<'a> {
     reference_defs_map: HashMap<String, usize>, // O(1) lookup by lowercase ID -> index in reference_defs
     code_spans_cache: OnceLock<Arc<Vec<CodeSpan>>>, // Lazy-loaded inline code spans
     math_spans_cache: OnceLock<Arc<Vec<MathSpan>>>, // Lazy-loaded math spans ($...$ and $$...$$)
+    math_byte_ranges_cache: OnceLock<Vec<(usize, usize)>>, // Lazy-loaded math byte ranges for is_in_math_context
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
     pub char_frequency: CharFrequency,    // Character frequency analysis
     html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
@@ -842,7 +843,8 @@ impl<'a> LintContext<'a> {
             reference_defs,
             reference_defs_map,
             code_spans_cache: OnceLock::from(Arc::new(code_spans)),
-            math_spans_cache: OnceLock::new(), // Lazy-loaded on first access
+            math_spans_cache: OnceLock::new(),       // Lazy-loaded on first access
+            math_byte_ranges_cache: OnceLock::new(), // Lazy-loaded on first access
             list_blocks,
             char_frequency,
             html_tags_cache: OnceLock::new(),
@@ -945,6 +947,14 @@ impl<'a> LintContext<'a> {
             self.code_spans_cache
                 .get_or_init(|| Arc::new(element_parsers::parse_code_spans(self.content, &self.lines))),
         )
+    }
+
+    /// Math byte ranges (`$...$` inline and `$$...$$` display), computed once and
+    /// cached. Used by `is_in_math_context`; without the cache that helper
+    /// rescanned the whole document on every call.
+    pub fn math_byte_ranges(&self) -> &[(usize, usize)] {
+        self.math_byte_ranges_cache
+            .get_or_init(|| crate::utils::skip_context::math_byte_ranges(self.content))
     }
 
     /// Get math spans - computed lazily on first access

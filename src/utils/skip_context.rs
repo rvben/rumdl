@@ -138,7 +138,9 @@ pub fn is_in_html_tag(ctx: &LintContext, byte_pos: usize) -> bool {
 /// not math. Single-`$` inline spans are recognized anywhere. This keeps
 /// every math-aware rule agreeing on what is math.
 pub fn is_in_math_context(ctx: &LintContext, byte_pos: usize) -> bool {
-    math_byte_ranges(ctx.content)
+    // Use the cached ranges on the context; recomputing math_byte_ranges(content)
+    // on every call made callers that invoke this per element O(elements * content).
+    ctx.math_byte_ranges()
         .iter()
         .any(|&(start, end)| byte_pos >= start && byte_pos < end)
 }

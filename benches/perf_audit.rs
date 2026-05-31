@@ -17,7 +17,7 @@ use rumdl_lib::rules::md013_line_length::md013_config::ReflowMode;
 use rumdl_lib::rules::{
     AbsoluteLinksOption, MD011NoReversedLinks, MD013Config, MD013LineLength, MD018NoMissingSpaceAtx,
     MD021NoMultipleSpaceClosedAtx, MD027MultipleSpacesBlockquote, MD032BlanksAroundLists, MD033NoInlineHtml,
-    MD057Config, MD057ExistingRelativeLinks,
+    MD052ReferenceLinkImages, MD057Config, MD057ExistingRelativeLinks,
 };
 use rumdl_lib::workspace_index::{CrossFileLinkIndex, FileIndex, WorkspaceIndex};
 use std::hint::black_box;
@@ -170,6 +170,18 @@ fn gen_refs(n: usize) -> String {
     s
 }
 
+/// Many undefined reference-style links for MD052. Each undefined reference
+/// runs the per-link skip guards (including is_in_math_context).
+fn gen_ref_links(n: usize) -> String {
+    let mut s = String::with_capacity(n * 60);
+    for i in 0..n {
+        s.push_str(&format!(
+            "Paragraph {i} mentions [topic {i}][ref{i}] within ordinary prose text.\n\n"
+        ));
+    }
+    s
+}
+
 // ---------------------------------------------------------------------------
 // Benchmarks
 // ---------------------------------------------------------------------------
@@ -277,6 +289,13 @@ fn bench_md032(c: &mut Criterion) {
     });
 }
 
+fn bench_md052(c: &mut Criterion) {
+    let content = gen_ref_links(800);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let rule = MD052ReferenceLinkImages::new();
+    c.bench_function("md052/many_ref_links_check", |b| b.iter(|| rule.check(black_box(&ctx))));
+}
+
 fn bench_md057(c: &mut Criterion) {
     let content = gen_refs(600);
     let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
@@ -318,6 +337,7 @@ criterion_group!(
     bench_block_scan,
     bench_atx_headings,
     bench_md032,
+    bench_md052,
     bench_md057,
     bench_workspace_build,
 );
