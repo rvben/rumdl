@@ -632,15 +632,12 @@ pub fn process_file_with_index(
 
     let start_time = Instant::now();
     if verbose && !quiet {
-        // Display relative path for better UX, even if file_path is canonical (absolute)
-        let display_path = if let Ok(cwd) = std::env::current_dir() {
-            Path::new(file_path)
-                .strip_prefix(&cwd)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| file_path.to_string())
-        } else {
-            file_path.to_string()
-        };
+        // Display a relative path for better UX, even if file_path is canonical
+        // (absolute). to_display_path canonicalizes both the file and the base
+        // before stripping, so it relativizes correctly on Windows where the
+        // discovered path carries a `\\?\` verbatim prefix and a long name while
+        // the cwd may be an 8.3 short name. It also normalizes separators to `/`.
+        let display_path = to_display_path(file_path, None);
         println!("Processing file: {display_path}");
     }
 
