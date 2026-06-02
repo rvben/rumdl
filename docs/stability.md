@@ -97,7 +97,7 @@ test-enforced rather than adding features.
 - [ ] Machine-readable output schemas (`json`, `json-lines`, `sarif`, `junit`) documented as committed surfaces
 - [x] Config schema stability committed and kept in sync with SchemaStore
 - [x] Active deprecations have documented removal plans (currently: `force_exclude` removed in 1.0)
-- [ ] Cross-platform test coverage in CI (builds already cover all supported targets; CI tests are currently Linux-only)
+- [x] Cross-platform test coverage in CI (full test suite runs on Linux and Windows; Windows is part of the aggregate check on pushes to main)
 
 This list is intentionally dateless. It reflects the contracts rumdl wants to
 guarantee at 1.0, not a delivery schedule.

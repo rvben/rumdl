@@ -84,11 +84,10 @@ jobs:
       - name: Run tests
         run: make test-ci
 
-  # Canary: run the test suite on Windows to surface platform-divergent behavior.
-  # Intentionally NOT part of `all-checks-passed` (non-blocking) while we learn
-  # what, if anything, fails on Windows. Runs on pushes to main and manual
-  # dispatch, not on every PR, to limit Windows runner minutes. Promote to a
-  # required check (add to all-checks-passed needs) once it is reliably green.
+  # Run the full test suite on Windows to catch platform-divergent behavior.
+  # Part of `all-checks-passed`, so a Windows failure fails the aggregate check on
+  # pushes to main. Skipped on pull requests (`if` below) to limit Windows runner
+  # minutes; on PRs it reports `skipped`, which the gate treats as a pass.
   test-windows:
     name: Test (Windows)
     runs-on: windows-latest
@@ -159,7 +158,7 @@ jobs:
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test, docs-check]
+    needs: [lint, test, docs-check, test-windows]
     if: always()
     steps:
       - name: Verify all checks passed
