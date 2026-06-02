@@ -100,28 +100,16 @@ mod comprehensive_windows_tests {
         // Save original PATH
         let original_path = env::var("PATH").unwrap_or_default();
 
-        // Create a temporary executable in a custom directory
+        // Create a temporary executable in a custom directory. Use a real working
+        // binary (the rumdl test binary, which responds to `--version`) rather than a
+        // shell/batch script: on Windows a `.exe` containing batch text is not a valid
+        // executable, so direct execution of it would always fail.
         let temp_dir = TempDir::new().expect("Could not create temp dir");
         let custom_bin_dir = temp_dir.path().join("custom_bin");
         fs::create_dir_all(&custom_bin_dir).expect("Could not create custom bin dir");
 
         let fake_cmd_path = custom_bin_dir.join(if cfg!(windows) { "testcmd.exe" } else { "testcmd" });
-
-        let script_content = if cfg!(windows) {
-            "@echo off\nif \"%1\"==\"--version\" echo test-version-1.0\n"
-        } else {
-            "#!/bin/bash\nif [ \"$1\" = \"--version\" ]; then echo \"test-version-1.0\"; fi\n"
-        };
-
-        fs::write(&fake_cmd_path, script_content).expect("Could not write test command");
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(&fake_cmd_path).unwrap().permissions();
-            perms.set_mode(0o755);
-            fs::set_permissions(&fake_cmd_path, perms).unwrap();
-        }
+        fs::copy(env!("CARGO_BIN_EXE_rumdl"), &fake_cmd_path).expect("Could not copy test binary");
 
         // Test scenario 1: Command in PATH, both approaches should work
         let new_path = format!(

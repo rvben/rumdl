@@ -670,8 +670,11 @@ line-length:
             error_msg.contains("Failed to read config file"),
             "Error should mention file reading failure: {error_msg}"
         );
+        // Assert that the underlying OS I/O error is surfaced. The exact wording is
+        // platform-specific ("No such file or directory" on Unix, "The system cannot
+        // find the path specified." on Windows), so match the common "(os error N)".
         assert!(
-            error_msg.contains("No such file or directory"),
+            error_msg.contains("os error"),
             "Error should mention specific I/O error: {error_msg}"
         );
     }

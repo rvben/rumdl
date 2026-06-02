@@ -213,10 +213,12 @@ disable = ["MD041"]
     )
     .unwrap();
 
-    // Use the absolute path directly in the child config
+    // Use the absolute path directly in the child config. Written as a TOML
+    // literal string (single quotes) so Windows backslashes in the absolute path
+    // are not interpreted as TOML escape sequences.
     let base_absolute = base.canonicalize().unwrap();
     let child_content = format!(
-        r#"extends = "{}"
+        r#"extends = '{}'
 
 [global]
 disable = ["MD013"]

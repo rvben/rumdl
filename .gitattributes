@@ -1,0 +1,4 @@
+# The committed JSON schema is compared byte-for-byte against freshly generated
+# output (serde always emits LF) in `test_schema_file_is_up_to_date`. Force LF on
+# checkout so Windows autocrlf does not turn it into CRLF and break the test.
+rumdl.schema.json text eol=lf

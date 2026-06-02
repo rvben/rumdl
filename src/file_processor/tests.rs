@@ -196,7 +196,11 @@ fn test_strip_base_prefix_with_symlink() {
 
     let result = strip_base_prefix(&file, &canonical_base);
 
-    assert_eq!(result, Some("docs/guide.md".to_string()));
+    // strip_base_prefix is a path primitive that returns native separators;
+    // callers normalize for display. Build the expectation the same way so it
+    // holds on Windows (`docs\guide.md`) as well as Unix (`docs/guide.md`).
+    let expected = Path::new("docs").join("guide.md").to_string_lossy().to_string();
+    assert_eq!(result, Some(expected));
 }
 
 #[test]

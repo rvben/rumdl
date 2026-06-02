@@ -156,9 +156,11 @@ fn test_show_full_path_with_different_output_formats() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // JSON should contain the full path
+    // JSON should contain the full path. Displayed paths use `/` separators on all
+    // platforms, so normalize the expected path to match (no-op on Unix).
+    let expected = canonical_path.to_string_lossy().replace('\\', "/");
     assert!(
-        stdout.contains(&canonical_path.to_string_lossy().to_string()),
+        stdout.contains(&expected),
         "JSON output should contain absolute path:\n{stdout}"
     );
 }
@@ -285,9 +287,11 @@ fn test_show_full_path_in_sarif_format() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // SARIF should contain the full canonical path
+    // SARIF should contain the full canonical path. Displayed paths use `/`
+    // separators on all platforms, so normalize the expected path (no-op on Unix).
+    let expected = canonical_path.to_string_lossy().replace('\\', "/");
     assert!(
-        stdout.contains(&canonical_path.to_string_lossy().to_string()),
+        stdout.contains(&expected),
         "SARIF with --show-full-path should contain absolute path:\n{stdout}"
     );
 }

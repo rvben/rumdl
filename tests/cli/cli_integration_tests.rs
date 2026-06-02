@@ -1141,11 +1141,11 @@ fn test_server_loads_config_passed_via_short_c_flag() {
         .spawn()
         .expect("Failed to spawn 'rumdl server -c <path>'");
 
-    // Send a minimal LSP initialize so load_configuration runs.
-    let init = format!(
-        r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"capabilities":{{}},"rootUri":"file://{}","processId":null}}}}"#,
-        temp.path().display()
-    );
+    // Send a minimal LSP initialize so load_configuration runs. rootUri is null on
+    // purpose: load_configuration honours the `-c` path independently of the
+    // workspace root, and embedding a Windows path (with `\`) into a JSON string
+    // would produce invalid JSON escape sequences and break parsing.
+    let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"rootUri":null,"processId":null}}"#.to_string();
     let frame = format!("Content-Length: {}\r\n\r\n{}", init.len(), init);
     let stdin = child.stdin.as_mut().expect("stdin should be piped");
     stdin.write_all(frame.as_bytes()).unwrap();
@@ -1158,11 +1158,14 @@ fn test_server_loads_config_passed_via_short_c_flag() {
     let output = child.wait_with_output().expect("child should be reapable");
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-    let expected_path = config_path.display().to_string();
+    // The logged path representation can vary by platform (separators,
+    // canonicalization), so assert on the load message plus the unique config file
+    // name rather than the full path string.
+    let config_file_name = config_path.file_name().unwrap().to_string_lossy().to_string();
     assert!(
-        stderr.contains(&format!("Loaded rumdl config from: {expected_path}")),
+        stderr.contains("Loaded rumdl config from:") && stderr.contains(&config_file_name),
         "rumdl server -c <path> did not honour the config file. \
-         Expected stderr to contain 'Loaded rumdl config from: {expected_path}', got:\n{stderr}"
+         Expected stderr to mention loading '{config_file_name}', got:\n{stderr}"
     );
     assert!(
         !stderr.contains("Mismatch between definition and access"),

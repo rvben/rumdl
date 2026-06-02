@@ -1,7 +1,6 @@
 use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::MD034NoBareUrls;
-use std::fs::write;
 
 #[test]
 fn test_valid_urls() {
@@ -102,8 +101,6 @@ fn test_multiple_protocols() {
     let rule = MD034NoBareUrls;
     let content = "http://example.com\nhttps://secure.com\nftp://files.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let debug_str = format!("test_multiple_protocols\nMD034 test content: {content}\n");
-    let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 3, "All bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
@@ -115,8 +112,6 @@ fn test_mixed_content() {
     let rule = MD034NoBareUrls;
     let content = "# Heading\nVisit https://example.com\n> Quote with https://another.com";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let debug_str = format!("test_mixed_content\nMD034 test content: {content}\n");
-    let _ = write("/tmp/md034_ast_debug.txt", debug_str);
     let result = rule.check(&ctx).unwrap();
     assert_eq!(result.len(), 2, "Bare URLs should be flagged");
     let fixed = rule.fix(&ctx).unwrap();
@@ -160,18 +155,6 @@ fn test_multiple_badges_and_links_on_one_line() {
         result.is_empty(),
         "Multiple badges and links on one line should not be flagged as bare URLs"
     );
-}
-
-#[test]
-fn debug_ast_multiple_urls() {
-    let content = "Visit https://example.com and http://another.com";
-    let _ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
-    let debug_str = format!("MD034 test content: {content}\n");
-    match write("/tmp/md034_ast_debug.txt", debug_str) {
-        Ok(_) => (),
-        Err(e) => panic!("Failed to write AST debug file: {e}"),
-    }
-    // No assertion: this is for manual inspection
 }
 
 #[test]
