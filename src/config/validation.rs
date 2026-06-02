@@ -348,7 +348,8 @@ fn validate_config_sourced_impl(
 /// Convert a file path to a display-friendly relative path.
 ///
 /// Tries to make the path relative to the current working directory.
-/// If that fails, returns the original path unchanged.
+/// If that fails, returns the original path unchanged. The result uses `/`
+/// separators for consistent output across platforms.
 pub(super) fn to_relative_display_path(path: &str) -> String {
     let file_path = Path::new(path);
 
@@ -358,17 +359,26 @@ pub(super) fn to_relative_display_path(path: &str) -> String {
         if let (Ok(canonical_file), Ok(canonical_cwd)) = (file_path.canonicalize(), cwd.canonicalize())
             && let Ok(relative) = canonical_file.strip_prefix(&canonical_cwd)
         {
-            return relative.to_string_lossy().to_string();
+            return normalize_separators(relative.to_string_lossy().to_string());
         }
 
         // Fall back to non-canonicalized comparison
         if let Ok(relative) = file_path.strip_prefix(&cwd) {
-            return relative.to_string_lossy().to_string();
+            return normalize_separators(relative.to_string_lossy().to_string());
         }
     }
 
     // Return original if we can't make it relative
-    path.to_string()
+    normalize_separators(path.to_string())
+}
+
+/// Normalize path separators to `/` for consistent cross-platform output.
+///
+/// Only the platform's native separator is converted: on Windows `\` becomes `/`.
+/// On Unix this is a no-op, where `\` is a legal filename character that must be
+/// preserved.
+fn normalize_separators(path: String) -> String {
+    if cfg!(windows) { path.replace('\\', "/") } else { path }
 }
 
 /// Validate a loaded config against the rule registry, using SourcedConfig for unknown key tracking.

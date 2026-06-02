@@ -517,8 +517,9 @@ pub fn find_markdown_files(
                     if let Some(pattern) = matching_pattern {
                         // Always print a warning when excluding explicitly provided files
                         // This matches ESLint's behavior and helps users understand why the file wasn't linted
+                        let display_path = normalize_separators(cleaned_path.clone());
                         eprintln!(
-                            "warning: {cleaned_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
+                            "warning: {display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
                         );
                     } else {
                         file_paths.push(canonicalize_path_safe(&cleaned_path));
