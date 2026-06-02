@@ -90,27 +90,12 @@ fn generate_variants(canonical: &str) -> Vec<(String, String)> {
     variants
 }
 
-/// Build the test binary path. Uses the debug target directory.
-fn rumdl_binary() -> String {
-    // Use cargo to find the binary
-    let output = Command::new("cargo")
-        .args(["build", "--quiet"])
-        .output()
-        .expect("Failed to build rumdl");
-    assert!(
-        output.status.success(),
-        "cargo build failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    // Return the path to the debug binary
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest_dir}/target/debug/rumdl")
-}
-
 #[test]
 fn test_all_style_configs_accept_variant_forms() {
-    let binary = rumdl_binary();
+    // Use the binary the test harness already built. Invoking `cargo build` here
+    // would race with parallel tests that execute the binary: on Windows the
+    // relink step cannot remove a `rumdl.exe` that is currently running.
+    let binary = env!("CARGO_BIN_EXE_rumdl");
     let temp_dir = tempdir().expect("Failed to create temporary directory");
 
     // Create a minimal markdown file to lint
@@ -127,7 +112,7 @@ fn test_all_style_configs_accept_variant_forms() {
                 let config_path = temp_dir.path().join(".rumdl.toml");
                 fs::write(&config_path, &config_content).expect("Failed to write config");
 
-                let output = Command::new(&binary)
+                let output = Command::new(binary)
                     .args([
                         "check",
                         "--no-cache",
