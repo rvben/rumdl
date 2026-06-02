@@ -2,7 +2,7 @@
 
 This page compares rumdl with other Markdown linters and formatters. The goal is to help you evaluate which tool fits your workflow, not to declare a winner.
 
-> **Last verified: February 2026.** Tool capabilities change over time. If you notice an inaccuracy, please [open an issue](https://github.com/rvben/rumdl/issues).
+> **Last verified: June 2026.** Tool capabilities change over time. If you notice an inaccuracy, please [open an issue](https://github.com/rvben/rumdl/issues).
 
 For detailed comparisons with specific tools, see:
 
@@ -13,7 +13,7 @@ For detailed comparisons with specific tools, see:
 
 | Tool                  | Type          | Language | Rules                                     | Auto-fix | Flavors | Config format           | Plugins      | LSP |
 | --------------------- | ------------- | -------- | ----------------------------------------- | -------- | ------- | ----------------------- | ------------ | --- |
-| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> | Yes      | 6       | TOML, JSON, YAML        | No           | Yes |
+| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> | Yes      | 9       | TOML, JSON, YAML        | No           | Yes |
 | **markdownlint-cli**  | Lint          | Node.js  | 53                                        | Yes      | No      | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
 | **markdownlint-cli2** | Lint          | Node.js  | 53                                        | Yes      | No      | JSONC, YAML, JS         | Yes (JS)     | No  |
 | **remark-lint**       | Lint          | Node.js  | ~80 (via presets)                         | No       | No      | JS, JSON, YAML          | Yes (JS)     | No  |
@@ -54,14 +54,17 @@ Most tools treat Markdown as a single dialect and rely on configuration or plugi
 
 **rumdl** has built-in flavor support that adjusts rule behavior for specific documentation systems:
 
-| Flavor   | Target system      | Example adjustments                                    |
-| -------- | ------------------ | ------------------------------------------------------ |
-| standard | CommonMark + GFM   | Baseline behavior (GFM extensions included by default) |
-| mkdocs   | MkDocs / Material  | Admonitions, tabs, mkdocstrings                        |
-| mdx      | MDX                | JSX components, ESM imports                            |
-| obsidian | Obsidian           | Callouts, wikilinks, Dataview                          |
-| quarto   | Quarto / RMarkdown | Citations, shortcodes, executable blocks               |
-| kramdown | Jekyll / kramdown  | Attribute lists, TOC markers                           |
+| Flavor       | Target system       | Example adjustments                                                          |
+| ------------ | ------------------- | ---------------------------------------------------------------------------- |
+| standard     | CommonMark + GFM    | Baseline behavior (GFM extensions included by default)                       |
+| mkdocs       | MkDocs / Material   | Admonitions, tabs, mkdocstrings                                              |
+| mdx          | MDX                 | JSX components, ESM imports                                                  |
+| obsidian     | Obsidian            | Callouts, wikilinks, Dataview                                                |
+| pandoc       | Pandoc Markdown     | Fenced divs, attribute lists, citations, definition lists, math, grid tables |
+| quarto       | Quarto / RMarkdown  | Citations, shortcodes, executable blocks                                     |
+| kramdown     | Jekyll / kramdown   | Attribute lists, TOC markers                                                 |
+| azure_devops | Azure DevOps wikis  | Colon code fences (`:::mermaid … :::`) treated as opaque code blocks         |
+| myst         | MyST / Jupyter Book | Directives (`:::{name}`), roles (`` {role}`text` ``), `%` comments           |
 
 Note: `gfm`, `github`, and `commonmark` are accepted as aliases for `standard` since the parser includes GFM extensions by default.
 
@@ -74,6 +77,14 @@ flavor = "mkdocs"
 [per-file-flavor]
 "**/*.mdx" = "mdx"
 ```
+
+### Pandoc and Quarto: see also panache
+
+rumdl's `pandoc` and `quarto` flavors adjust its rules to avoid false positives on those dialects, and rumdl already covers some Quarto-specific structure: executable chunk labels (MD078, MD079),
+link anchors (MD051), and footnotes (MD066-MD068). For documents where Pandoc, Quarto, or R Markdown is the primary format, [panache](https://github.com/jolars/panache) is a complementary Rust tool
+worth knowing: a formatter, linter, and language server that parses Pandoc into a lossless concrete syntax tree. It goes further on Pandoc and Quarto semantics that rumdl does not check, such as
+bibliography and citation-key validation against `.bib` files, cross-reference resolution, and lossless reformatting of those constructs. rumdl remains the broader Markdown style linter, while
+panache focuses on Pandoc and Quarto document semantics.
 
 ## Editor Integrations
 
