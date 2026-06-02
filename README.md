@@ -1175,32 +1175,25 @@ For integration with other tools and automation, use `--output-format json`:
 rumdl check --output-format json README.md
 ```
 
-This produces structured JSON output:
+This produces a flat JSON array of warning objects, one per issue. Fixable issues
+include a `fix` object with the byte `range` to replace and the `replacement` text:
 
 ```json
-{
-  "summary": {
-    "total_files": 1,
-    "files_with_issues": 1,
-    "total_issues": 2,
-    "fixable_issues": 1
-  },
-  "files": [
-    {
-      "path": "README.md",
-      "issues": [
-        {
-          "line": 12,
-          "column": 1,
-          "rule": "MD022",
-          "message": "Headings should be surrounded by blank lines",
-          "fixable": true,
-          "severity": "error"
-        }
-      ]
+[
+  {
+    "file": "README.md",
+    "line": 12,
+    "column": 1,
+    "rule": "MD022",
+    "message": "Headings should be surrounded by blank lines",
+    "severity": "warning",
+    "fixable": true,
+    "fix": {
+      "range": { "start": 142, "end": 142 },
+      "replacement": "\n"
     }
-  ]
-}
+  }
+]
 ```
 
 ## Stability
