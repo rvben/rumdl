@@ -89,12 +89,12 @@ attestations. The work remaining
 before declaring 1.0 is primarily about making each contract explicit and
 test-enforced rather than adding features.
 
-- [ ] Formatter idempotency test-enforced across the full rule set
-- [ ] Default-enabled rule set documented and treated as frozen
+- [x] Formatter idempotency test-enforced across the full rule set
+- [x] Default-enabled rule set documented and treated as frozen
 - [ ] Machine-readable output schemas (`json`, `json-lines`, `sarif`, `junit`) documented as committed surfaces
-- [ ] Config schema stability committed and kept in sync with SchemaStore
-- [ ] Active deprecations have documented removal plans (currently: `force_exclude` removed in 1.0)
-- [ ] Cross-platform release coverage maintained across supported targets
+- [x] Config schema stability committed and kept in sync with SchemaStore
+- [x] Active deprecations have documented removal plans (currently: `force_exclude` removed in 1.0)
+- [ ] Cross-platform test coverage in CI (builds already cover all supported targets; CI tests are currently Linux-only)
 
 This list is intentionally dateless. It reflects the contracts rumdl wants to
 guarantee at 1.0, not a delivery schedule.
