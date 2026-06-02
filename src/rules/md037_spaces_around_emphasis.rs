@@ -319,8 +319,14 @@ impl MD037NoSpaceInEmphasis {
                     format!("{marker_char}{marker_char}")
                 };
 
-                // Create the fixed version by trimming spaces from content
-                let trimmed_content = span.content.trim();
+                // Create the fixed version by trimming spaces from content.
+                // Slice the content from the *original* line, not from the
+                // code/math-masked copy: `span.content` would contain the 'X'/'M'
+                // placeholders, which must never leak into the generated fix.
+                // Masking is length-preserving, so the span byte offsets are
+                // valid in `content`.
+                let original_content = &content[span.opening.end_pos()..span.closing.start_pos];
+                let trimmed_content = original_content.trim();
                 let fixed_text = format!("{marker_str}{trimmed_content}{marker_str}");
 
                 // Truncate long emphasis spans for readable warning messages
@@ -398,6 +404,19 @@ mod tests {
             !result.is_empty(),
             "Expected warnings for spaces in emphasis outside code block"
         );
+    }
+
+    #[test]
+    fn test_inline_code_inside_spaced_emphasis_preserved_on_fix() {
+        // Regression test: inline code inside a spaced emphasis span must survive the
+        // space-trimming fix. Previously the 'X' masking placeholder leaked into
+        // the fix output, destroying the code span.
+        let rule = MD037NoSpaceInEmphasis;
+        let content = "Set * the `id` field * below.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Set *the `id` field* below.");
+        assert!(!fixed.contains('X'), "masking placeholder leaked into fix: {fixed}");
     }
 
     #[test]
