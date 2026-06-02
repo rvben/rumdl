@@ -22,6 +22,32 @@ fn test_all_rules_returns_all_rules() {
     assert!(rule_names.contains("MD076"));
 }
 
+/// Freeze the exact set of opt-in (off-by-default) rules.
+///
+/// The default-enabled rule set is a documented stability surface (see
+/// `docs/rules.md` and `docs/stability.md`): which rules run by default must not
+/// change silently. Flipping a rule's `opt_in` flag, adding a new opt-in rule, or
+/// removing one all change the default set and trip this guard. The sibling test
+/// `test_all_rules_returns_all_rules` pins the total at 75, so together they pin
+/// the default-enabled set as well.
+///
+/// If this fails because of an intentional change, update both this set and the
+/// opt-in table in `docs/rules.md`.
+#[test]
+fn test_opt_in_rule_set_is_frozen() {
+    let expected: HashSet<&'static str> = ["MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080"]
+        .into_iter()
+        .collect();
+
+    assert_eq!(
+        opt_in_rules(),
+        expected,
+        "The opt-in (off-by-default) rule set changed. The default-enabled rule set is a \
+         documented stability surface - if this change is intentional, update this test and the \
+         opt-in table in docs/rules.md."
+    );
+}
+
 #[test]
 fn test_filter_rules_with_empty_config() {
     let config = Config::default();
