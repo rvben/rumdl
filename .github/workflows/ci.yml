@@ -122,7 +122,10 @@ jobs:
         run: choco install make --no-progress -y
 
       - name: Run tests
-        run: make test-ci
+        # Run inside the mise environment so the cargo-nextest shim is on PATH
+        # for cargo (mise-action's global activation does not reach the make
+        # child shell on Windows the way it does on Linux).
+        run: mise exec -- make test-ci
 
   docs-check:
     name: Docs fmt-check
