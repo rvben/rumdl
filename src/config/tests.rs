@@ -3030,7 +3030,7 @@ line-length = 120
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 extend-disable = ["MD036"]
@@ -3076,7 +3076,7 @@ disable = ["MD013", "MD033"]
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 disable = ["MD041"]
@@ -3112,7 +3112,7 @@ extend-enable = ["MD060"]
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 extend-enable = ["MD063"]
@@ -3156,7 +3156,7 @@ extend-enable = ["MD060"]
     fs::write(
         &parent_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 extend-enable = ["MD063"]
@@ -3170,7 +3170,7 @@ extend-enable = ["MD063"]
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 extend-disable = ["MD013"]
@@ -3203,7 +3203,7 @@ fn test_extends_circular_detection() {
     fs::write(
         &a_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 disable = ["MD013"]
@@ -3216,7 +3216,7 @@ disable = ["MD013"]
     fs::write(
         &b_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 disable = ["MD033"]
@@ -3245,7 +3245,7 @@ fn test_extends_self_reference() {
     fs::write(
         &a_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 disable = ["MD013"]
@@ -3289,7 +3289,7 @@ disable = ["MD013"]
         fs::write(
             &paths[i],
             format!(
-                r#"extends = "{}"
+                r#"extends = '{}'
 
 [global]
 extend-disable = ["MD{:03}"]
@@ -3392,7 +3392,7 @@ disable = ["MD013"]
         format!(
             r#"
 [tool.rumdl]
-extends = "{}"
+extends = '{}'
 extend-disable = ["MD033"]
 "#,
             parent_path.display()
@@ -3430,7 +3430,7 @@ disable = ["MD013", "MD033"]
         format!(
             r#"
 [tool.rumdl]
-extends = "{}"
+extends = '{}'
 disable = ["MD041"]
 "#,
             parent_path.display()
@@ -3464,7 +3464,7 @@ indent = 4
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [MD007]
 indent = 2
@@ -3501,7 +3501,7 @@ indent = 4
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 disable = ["MD013"]
@@ -3538,7 +3538,7 @@ disable = ["MD013"]
     fs::write(
         &child_path,
         format!(
-            r#"extends = "{}"
+            r#"extends = '{}'
 
 [global]
 extend-disable = ["MD033"]
