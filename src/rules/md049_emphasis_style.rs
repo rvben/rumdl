@@ -47,7 +47,10 @@ impl MD049EmphasisStyle {
         line_start_pos: usize,
         emphasis_info: &mut Vec<(usize, usize, usize, char, String)>, // (line, col, abs_pos, marker, content)
     ) {
-        // Replace inline code to avoid false positives
+        // Replace inline code to avoid false positives. `replace_inline_code`
+        // substitutes each inline-code span with an equal-length run of 'X', so
+        // every byte offset (and thus every emphasis marker position) is
+        // identical between `line` and `line_no_code`.
         let line_no_code = replace_inline_code(line);
 
         // Find all emphasis markers
@@ -64,7 +67,16 @@ impl MD049EmphasisStyle {
             let col = span.opening.start_pos + 1; // Convert to 1-based
             let abs_pos = line_start_pos + span.opening.start_pos;
 
-            emphasis_info.push((line_num, col, abs_pos, marker_char, span.content.clone()));
+            // Use the content from the *original* line, not the code-masked copy.
+            // The span content from `line_no_code` would contain the 'X'
+            // placeholders, which must never leak into the generated fix.
+            // Marker positions are byte offsets that are valid in `line` because
+            // masking preserves byte length and span boundaries.
+            let content_start = span.opening.end_pos();
+            let content_end = span.closing.start_pos;
+            let original_content = line[content_start..content_end].to_string();
+
+            emphasis_info.push((line_num, col, abs_pos, marker_char, original_content));
         }
     }
 }
@@ -482,6 +494,34 @@ This should be _flagged_ since we're using asterisk style.
             "Only emphasis outside mkdocstrings should be flagged. Got: {result:?}"
         );
         assert_eq!(result[0].line, 6);
+    }
+
+    #[test]
+    fn test_inline_code_inside_emphasis_preserved_on_fix() {
+        // Regression test: inline code inside an emphasis span must survive the
+        // style conversion. Previously the 'X' masking placeholder leaked into
+        // the fix output, destroying the code span.
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+        let content = "- _An item with `inline code` inside._ Trailing text.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "- *An item with `inline code` inside.* Trailing text.");
+        assert!(!fixed.contains('X'), "masking placeholder leaked into fix: {fixed}");
+
+        // Idempotent: fixing the already-fixed content changes nothing.
+        let ctx2 = crate::lint_context::LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx2).unwrap(), fixed);
+    }
+
+    #[test]
+    fn test_inline_code_inside_emphasis_underscore_style() {
+        // Same bug in the opposite direction (* -> _).
+        let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+        let content = "See *the `id` field* below.";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "See _the `id` field_ below.");
     }
 
     #[test]
