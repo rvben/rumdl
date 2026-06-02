@@ -273,6 +273,9 @@ RUMDL_OUTPUT_FORMAT=github rumdl check .
 | `sarif`      | SARIF 2.1.0 for static analysis tools   |
 | `junit`      | JUnit XML for CI test reporters         |
 
+See [Output Formats](../output-formats.md) for the field-level reference for each
+machine-readable format.
+
 **CI/CD formats:**
 
 | Format   | Description                                        |

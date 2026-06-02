@@ -38,6 +38,9 @@ are called out explicitly with migration notes.
 | Rust library API (using `rumdl` as a crate) and WASM bindings                                                                                  | **Out of scope**                         | Not covered by this policy and may change at any time. The stable surface is the CLI, configuration, and outputs.                                                                                                                                                                                |
 | `force_exclude` config key / `--force-exclude` flag                                                                                            | **Deprecated**                           | Accepted for backward compatibility but has no effect since v0.0.156 (exclude patterns are always respected). `--force-exclude` emits a deprecation warning. Scheduled for removal in 1.0.                                                                                                       |
 
+Field-level documentation for the machine-readable formats is in
+[Output Formats](output-formats.md).
+
 ## Versioning
 
 rumdl follows [Semantic Versioning](https://semver.org/).
