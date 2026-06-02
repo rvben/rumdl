@@ -106,6 +106,12 @@ test-push:
 test-ci:
 	cargo nextest run --profile ci
 
+# Like test-ci but reports every failure instead of stopping at the first.
+# Used by the non-blocking Windows canary so one run enumerates all
+# platform-specific failures.
+test-ci-no-fail-fast:
+	cargo nextest run --profile ci --no-fail-fast
+
 test-performance:
 	@echo "Running performance tests (this may take a few minutes)..."
 	@echo "Tests run serially to reduce noise - be patient!"

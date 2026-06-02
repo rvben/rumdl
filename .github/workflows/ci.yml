@@ -124,8 +124,9 @@ jobs:
       - name: Run tests
         # Run inside the mise environment so the cargo-nextest shim is on PATH
         # for cargo (mise-action's global activation does not reach the make
-        # child shell on Windows the way it does on Linux).
-        run: mise exec -- make test-ci
+        # child shell on Windows the way it does on Linux). Use the no-fail-fast
+        # target so one canary run enumerates every Windows failure.
+        run: mise exec -- make test-ci-no-fail-fast
 
   docs-check:
     name: Docs fmt-check
