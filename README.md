@@ -1254,6 +1254,7 @@ rumdl is used by these notable open source projects:
 | [chrisgrieser/nvim-various-textobjs](https://github.com/chrisgrieser/nvim-various-textobjs) | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-various-textobjs?style=flat-square) |
 | [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)           | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)      |
 | [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)     | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)   |
+| [mozilla-firefox/firefox/](https://github.com/mozilla-firefox/firefox)                     | ![stars](https://img.shields.io/github/stars/mozilla-firefox/firefox?style=flat-square)              |
 | [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                           | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)              |
 | [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                             | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)               |
 | [PyO3/pyo3](https://github.com/PyO3/pyo3)                                                   | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)                          |
