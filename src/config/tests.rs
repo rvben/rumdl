@@ -2,6 +2,15 @@ use super::*;
 use std::fs;
 use tempfile::tempdir;
 
+/// Creates a `.git` marker in `dir` so `discover_config_upward()` stops there.
+/// Without this, auto-discovery walks up past the test's tempdir into ancestors
+/// of the system temp dir and can pick up a stray config (e.g. `/tmp/.rumdl.toml`),
+/// making fallback tests depend on the host environment. Call on the directory the
+/// test makes its current working directory.
+fn bound_discovery(dir: &std::path::Path) {
+    fs::create_dir_all(dir.join(".git")).expect("create .git discovery boundary");
+}
+
 #[test]
 fn test_flavor_loading() {
     let temp_dir = tempdir().unwrap();
@@ -2028,6 +2037,7 @@ line-length = 88
     // Create a project directory WITHOUT any config
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
 
     // Change to project directory
     env::set_current_dir(&project_dir).unwrap();
@@ -2096,6 +2106,7 @@ extend-disable = ["MD033"]
     // Create a project directory WITHOUT any config
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
 
     // Change to project directory
     env::set_current_dir(&project_dir).unwrap();
@@ -2143,6 +2154,7 @@ line-length = 77
     // Project dir without any config
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     env::set_current_dir(&project_dir).unwrap();
 
     let sourced =
@@ -2180,6 +2192,7 @@ fn test_home_rumdl_toml_used_when_no_dotfile_present() {
 
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     env::set_current_dir(&project_dir).unwrap();
 
     let sourced =
@@ -2218,6 +2231,7 @@ fn test_xdg_config_wins_over_home_dotfile() {
 
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     env::set_current_dir(&project_dir).unwrap();
 
     let sourced =
@@ -2326,6 +2340,7 @@ extend-disable = ["MD033"]
 
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     env::set_current_dir(&project_dir).unwrap();
 
     let sourced =
@@ -2370,6 +2385,7 @@ fn test_home_dotfile_picked_up_over_rumdl_toml() {
 
     let project_dir = temp_dir.path().join("project_no_config");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     env::set_current_dir(&project_dir).unwrap();
 
     let sourced =
@@ -3777,6 +3793,7 @@ fn test_user_config_loaded_alongside_markdownlint_config() {
     // Project directory has a .markdownlint.yaml that disables MD013
     let project_dir = temp_dir.path().join("project");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     fs::write(project_dir.join(".markdownlint.yaml"), "MD013: false\n").unwrap();
 
     env::set_current_dir(&project_dir).unwrap();
@@ -3820,6 +3837,7 @@ fn test_user_config_settings_apply_when_markdownlint_present() {
     // Project directory has a .markdownlint.yaml that does NOT set line-length
     let project_dir = temp_dir.path().join("project2");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     fs::write(project_dir.join(".markdownlint.yaml"), "default: true\n").unwrap();
 
     env::set_current_dir(&project_dir).unwrap();
@@ -3860,6 +3878,7 @@ fn test_markdownlint_config_overrides_user_config_on_conflict() {
     // Markdownlint config disables MD013, does not mention MD001
     let project_dir = temp_dir.path().join("project3");
     fs::create_dir_all(&project_dir).unwrap();
+    bound_discovery(&project_dir);
     fs::write(project_dir.join(".markdownlint.yaml"), "MD013: false\n").unwrap();
 
     env::set_current_dir(&project_dir).unwrap();
@@ -3899,7 +3918,8 @@ fn test_user_config_applies_when_markdownlint_config_is_malformed() {
 
     let project_dir = temp_dir.path().join("project_malformed");
     fs::create_dir_all(&project_dir).unwrap();
-    // Unclosed YAML mapping — guaranteed parse failure
+    bound_discovery(&project_dir);
+    // Unclosed YAML mapping - guaranteed parse failure
     fs::write(project_dir.join(".markdownlint.yaml"), "{ not: [valid yaml\n").unwrap();
 
     env::set_current_dir(&project_dir).unwrap();

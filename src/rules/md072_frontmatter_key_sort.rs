@@ -74,8 +74,17 @@ impl MD072FrontmatterKeySort {
                 && !line.starts_with('\t')
                 && let Some(colon_pos) = line.find(':')
             {
-                let key = line[..colon_pos].trim();
-                if !key.is_empty() && !key.starts_with('#') {
+                let raw = line[..colon_pos].trim();
+                if !raw.is_empty() && !raw.starts_with('#') {
+                    // Sort by the key's content, not by surrounding quote
+                    // characters: a quoted key like "zebra" must compare as
+                    // `zebra`, not as `"zebra` (which would always sort before
+                    // any unquoted key because '"' is ASCII 34).
+                    let key = raw
+                        .strip_prefix('"')
+                        .and_then(|k| k.strip_suffix('"'))
+                        .or_else(|| raw.strip_prefix('\'').and_then(|k| k.strip_suffix('\'')))
+                        .unwrap_or(raw);
                     keys.push((idx, key.to_string()));
                 }
             }
@@ -287,13 +296,22 @@ impl Rule for MD072FrontmatterKeySort {
                     )
                 };
 
+                // out_of_place has surrounding quotes stripped for sorting, so
+                // span the raw key (quotes included) as it appears on the line.
+                let end_column = frontmatter_lines
+                    .get(key_idx)
+                    .and_then(|line| line.split_once(':'))
+                    .map_or(out_of_place.chars().count() + 1, |(key, _)| {
+                        key.trim().chars().count() + 1
+                    });
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
                     line: key_line,
                     column: 1,
                     end_line: key_line,
-                    end_column: out_of_place.len() + 1,
+                    end_column,
                     severity: Severity::Warning,
                     fix,
                 });
@@ -437,6 +455,17 @@ impl Rule for MD072FrontmatterKeySort {
 }
 
 impl MD072FrontmatterKeySort {
+    /// Restore the original document's trailing newline. The fix functions
+    /// rebuild content via `lines()` + `join("\n")`, which never re-emits a
+    /// final newline, so without this a file ending in `\n` would lose it on
+    /// every fix (a dirty, non-idempotent diff).
+    fn preserve_trailing_newline(original: &str, mut result: String) -> String {
+        if original.ends_with('\n') && !result.ends_with('\n') {
+            result.push('\n');
+        }
+        result
+    }
+
     fn fix_yaml(&self, content: &str) -> String {
         let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
         if frontmatter_lines.is_empty() {
@@ -492,7 +521,7 @@ impl MD072FrontmatterKeySort {
             result.push_str(&content_lines[fm_end..].join("\n"));
         }
 
-        result
+        Self::preserve_trailing_newline(content, result)
     }
 
     fn fix_toml(&self, content: &str) -> String {
@@ -550,7 +579,7 @@ impl MD072FrontmatterKeySort {
             result.push_str(&content_lines[fm_end..].join("\n"));
         }
 
-        result
+        Self::preserve_trailing_newline(content, result)
     }
 
     fn fix_json(&self, content: &str) -> String {
@@ -602,7 +631,7 @@ impl MD072FrontmatterKeySort {
                             result.push_str(&lines[fm_end..].join("\n"));
                         }
 
-                        result
+                        Self::preserve_trailing_newline(content, result)
                     }
                     Err(_) => content.to_string(),
                 }
@@ -756,6 +785,68 @@ mod tests {
         let fixed_twice = rule.fix(&ctx2).unwrap();
 
         assert_eq!(fixed_once, fixed_twice);
+    }
+
+    #[test]
+    fn test_yaml_fix_preserves_trailing_newline() {
+        let rule = create_enabled_rule();
+        // Content ends with a trailing newline; fix must not strip it.
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.ends_with('\n'),
+            "trailing newline must be preserved, got {fixed:?}"
+        );
+
+        // And the fix is idempotent on trailing-newline content.
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let fixed_twice = rule.fix(&ctx2).unwrap();
+        assert_eq!(fixed, fixed_twice);
+    }
+
+    #[test]
+    fn test_yaml_fix_whole_file_frontmatter_preserves_trailing_newline() {
+        let rule = create_enabled_rule();
+        // Frontmatter is the entire file (no body after the closing fence).
+        let content = "---\ntitle: Test\nauthor: John\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.ends_with('\n'),
+            "trailing newline must be preserved, got {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_yaml_quoted_keys_sort_by_content() {
+        let rule = create_enabled_rule();
+        // A quoted key must sort by its unquoted content, not by the leading
+        // quote char. "zebra" before apple is out of order alphabetically.
+        let content = "---\n\"zebra\": 1\napple: 2\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "quoted key out of order must be flagged");
+        assert!(result[0].message.contains("'apple' should come before 'zebra'"));
+    }
+
+    #[test]
+    fn test_yaml_quoted_key_warning_span_covers_quotes() {
+        let rule = create_enabled_rule();
+        // "apple" is out of order (should come before banana). Its quotes are
+        // stripped for sorting, but the diagnostic span must still cover the
+        // raw key as written, including the quotes.
+        let content = "---\nbanana: 1\n\"apple\": 2\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        let w = &result[0];
+        assert_eq!(w.line, 3);
+        assert_eq!(w.column, 1);
+        // Raw key `"apple"` is 7 chars, so end_column is 8 (not 6 for `apple`).
+        assert_eq!(w.end_column, 8, "diagnostic span must cover the quoted key");
     }
 
     #[test]

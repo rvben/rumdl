@@ -522,10 +522,13 @@ impl MD033NoInlineHtml {
         // Remove < and > and tag name
         let tag_content = tag.trim_start_matches('<').trim_end_matches('>').trim_end_matches('/');
 
-        // Find first whitespace to skip tag name
+        // Find first whitespace to skip tag name. Advance by the full UTF-8 width
+        // of the whitespace char so multi-byte whitespace (e.g. U+00A0) does not
+        // leave attr_start in the middle of a codepoint.
         let attr_start = tag_content
-            .find(|c: char| c.is_whitespace())
-            .map_or(tag_content.len(), |i| i + 1);
+            .char_indices()
+            .find(|(_, c)| c.is_whitespace())
+            .map_or(tag_content.len(), |(i, c)| i + c.len_utf8());
 
         if attr_start >= tag_content.len() {
             return attrs;
@@ -1239,6 +1242,18 @@ mod tests {
         assert_eq!(result.len(), 2); // <DiV>, <B> (not </B>, </dIv>)
         assert_eq!(result[0].message, "Inline HTML found: <DiV>");
         assert_eq!(result[1].message, "Inline HTML found: <B>");
+    }
+
+    #[test]
+    fn test_md033_multibyte_whitespace_in_tag_does_not_panic() {
+        // A non-ASCII whitespace (U+00A0 NO-BREAK SPACE) before the attributes
+        // must not cause a non-char-boundary slice panic while parsing attributes.
+        let rule = relaxed_fix_rule();
+        let content = "<img\u{00A0}src=\"test.png\" alt=\"x\">";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        // check() and fix() both reach parse_attributes; neither may panic.
+        let _ = rule.check(&ctx).unwrap();
+        let _ = rule.fix(&ctx).unwrap();
     }
 
     #[test]

@@ -8,22 +8,27 @@ pub(super) use md018_config::MD018Config;
 use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::calculate_single_line_range;
-use crate::utils::regex_cache::get_cached_regex;
+use regex::Regex;
+use std::sync::LazyLock;
 
 // Emoji and Unicode hashtag patterns
 const EMOJI_HASHTAG_PATTERN_STR: &str = r"^#️⃣|^#⃣";
 const UNICODE_HASHTAG_PATTERN_STR: &str = r"^#[\u{FE0F}\u{20E3}]";
+static EMOJI_HASHTAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(EMOJI_HASHTAG_PATTERN_STR).unwrap());
+static UNICODE_HASHTAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(UNICODE_HASHTAG_PATTERN_STR).unwrap());
 
 // MagicLink issue/PR reference pattern: #123, #10, etc.
 // Matches # followed by one or more digits, then either end of string,
 // whitespace, or punctuation (not alphanumeric continuation)
 const MAGICLINK_REF_PATTERN_STR: &str = r"^#\d+(?:\s|[^a-zA-Z0-9]|$)";
+static MAGICLINK_REF_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(MAGICLINK_REF_PATTERN_STR).unwrap());
 
 // Tag pattern: #tagname, #project/active, #my-tag_2023, etc.
 // Tags start with # followed by a non-digit, non-space character,
 // then any combination of word characters, hyphens, underscores, and slashes.
 // Tags cannot start with a number.
 const TAG_PATTERN_STR: &str = r"^#[^\d\s#][^\s#]*(?:\s|$)";
+static TAG_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(TAG_PATTERN_STR).unwrap());
 
 #[derive(Clone)]
 pub struct MD018NoMissingSpaceAtx {
@@ -50,12 +55,12 @@ impl MD018NoMissingSpaceAtx {
     /// Check if a line is a MagicLink-style issue/PR reference (e.g., #123, #10)
     /// Used by MkDocs flavor to skip PyMdown MagicLink patterns
     fn is_magiclink_ref(line: &str) -> bool {
-        get_cached_regex(MAGICLINK_REF_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
+        MAGICLINK_REF_PATTERN.is_match(line.trim_start())
     }
 
     /// Check if a line is a tag (e.g., #tagname, #project/active)
     fn is_tag(line: &str) -> bool {
-        get_cached_regex(TAG_PATTERN_STR).is_ok_and(|re| re.is_match(line.trim_start()))
+        TAG_PATTERN.is_match(line.trim_start())
     }
 
     /// Whether tag patterns should be recognized for the given flavor
@@ -83,12 +88,8 @@ impl MD018NoMissingSpaceAtx {
         }
 
         // Skip emoji hashtags and Unicode hashtag patterns
-        let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
-            .map(|re| re.is_match(trimmed_line))
-            .unwrap_or(false);
-        let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
-            .map(|re| re.is_match(trimmed_line))
-            .unwrap_or(false);
+        let is_emoji = EMOJI_HASHTAG_PATTERN.is_match(trimmed_line);
+        let is_unicode = UNICODE_HASHTAG_PATTERN.is_match(trimmed_line);
         if is_emoji || is_unicode {
             return None;
         }
@@ -214,12 +215,8 @@ impl Rule for MD018NoMissingSpaceAtx {
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
-                    let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
-                        .map(|re| re.is_match(trimmed))
-                        .unwrap_or(false);
-                    let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
-                        .map(|re| re.is_match(trimmed))
-                        .unwrap_or(false);
+                    let is_emoji = EMOJI_HASHTAG_PATTERN.is_match(trimmed);
+                    let is_unicode = UNICODE_HASHTAG_PATTERN.is_match(trimmed);
                     if is_emoji || is_unicode {
                         continue;
                     }
@@ -323,12 +320,8 @@ impl Rule for MD018NoMissingSpaceAtx {
                     let trimmed = line.trim_start();
 
                     // Skip emoji hashtags and Unicode hashtag patterns
-                    let is_emoji = get_cached_regex(EMOJI_HASHTAG_PATTERN_STR)
-                        .map(|re| re.is_match(trimmed))
-                        .unwrap_or(false);
-                    let is_unicode = get_cached_regex(UNICODE_HASHTAG_PATTERN_STR)
-                        .map(|re| re.is_match(trimmed))
-                        .unwrap_or(false);
+                    let is_emoji = EMOJI_HASHTAG_PATTERN.is_match(trimmed);
+                    let is_unicode = UNICODE_HASHTAG_PATTERN.is_match(trimmed);
 
                     // MagicLink config: skip MagicLink-style issue/PR refs (#123, #10, etc.)
                     let is_magiclink = self.config.magiclink && heading.level == 1 && Self::is_magiclink_ref(line);

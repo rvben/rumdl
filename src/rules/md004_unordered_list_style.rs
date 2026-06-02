@@ -82,7 +82,8 @@ impl MD004UnorderedListStyle {
 
     /// Count marker prevalence across all unordered list items in the document
     /// Returns the most prevalent marker character, preferring dash in case of ties
-    fn count_marker_prevalence(&self, ctx: &crate::lint_context::LintContext) -> Option<char> {
+    /// (and dash for a document with no unordered list items).
+    fn count_marker_prevalence(&self, ctx: &crate::lint_context::LintContext) -> char {
         let mut asterisk_count = 0;
         let mut dash_count = 0;
         let mut plus_count = 0;
@@ -92,8 +93,12 @@ impl MD004UnorderedListStyle {
                 if let Some(line_info) = ctx.line_info(item_line)
                     && let Some(list_item) = &line_info.list_item
                     && !list_item.is_ordered
+                    && let Some(marker) = list_item.marker.chars().next()
                 {
-                    match list_item.marker.chars().next()? {
+                    // Skip (rather than abort the whole count via `?`) on an
+                    // empty marker, mirroring the guard in check(); aborting
+                    // would return None and suppress all consistency warnings.
+                    match marker {
                         '*' => asterisk_count += 1,
                         '-' => dash_count += 1,
                         '+' => plus_count += 1,
@@ -106,11 +111,11 @@ impl MD004UnorderedListStyle {
         // Use the most prevalent marker as the target style
         // In case of a tie, prefer dash (most common, GitHub default)
         if dash_count >= asterisk_count && dash_count >= plus_count {
-            Some('-')
+            '-'
         } else if asterisk_count >= plus_count {
-            Some('*')
+            '*'
         } else {
-            Some('+')
+            '+'
         }
     }
 }
@@ -139,7 +144,7 @@ impl Rule for MD004UnorderedListStyle {
 
         // For consistent mode, count occurrences of each marker (prevalence-based approach)
         let target_marker_for_consistent = if self.config.style == UnorderedListStyle::Consistent {
-            self.count_marker_prevalence(ctx)
+            Some(self.count_marker_prevalence(ctx))
         } else {
             None
         };
@@ -162,8 +167,12 @@ impl Rule for MD004UnorderedListStyle {
                         continue;
                     }
 
-                    // Get the marker character
-                    let marker = list_item.marker.chars().next().unwrap();
+                    // Get the marker character. The parser populates a non-empty
+                    // marker for unordered items, but guard defensively so a
+                    // future parse path producing an empty marker cannot panic.
+                    let Some(marker) = list_item.marker.chars().next() else {
+                        continue;
+                    };
 
                     // Calculate offset for the marker position
                     let offset = line_info.byte_offset + list_item.marker_column;

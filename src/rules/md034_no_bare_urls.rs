@@ -312,6 +312,13 @@ impl MD034NoBareUrls {
                 continue;
             }
 
+            // Check if URL is a JSX component attribute value (e.g. `<Card href="..."/>`).
+            // These are string props, not bare prose; wrapping them in angle brackets
+            // would produce invalid JSX. No-op for non-JSX flavors.
+            if ctx.is_in_jsx_component_tag(absolute_pos) {
+                continue;
+            }
+
             // Check if we're inside an HTML comment
             if ctx.is_in_html_comment(absolute_pos) || ctx.is_in_mdx_comment(absolute_pos) {
                 continue;
@@ -395,6 +402,12 @@ impl MD034NoBareUrls {
 
                     // Check if email is inside an HTML tag (handles multiline tags)
                     if ctx.is_in_html_tag(absolute_pos) {
+                        continue;
+                    }
+
+                    // Check if email is a JSX component attribute value (e.g.
+                    // `<Contact email="..."/>`). No-op for non-JSX flavors.
+                    if ctx.is_in_jsx_component_tag(absolute_pos) {
                         continue;
                     }
 
@@ -497,6 +510,15 @@ impl Rule for MD034NoBareUrls {
             .skip_mdx_comments()
             .skip_obsidian_comments()
         {
+            // Skip MyST colon-fence directive openers (`:::{name} <arg>`). The text
+            // after the directive name is an opaque argument (a URL, path, or label),
+            // not markdown prose, so a bare URL there must not be wrapped in angle
+            // brackets. Directive body lines are not openers, so they fall through to
+            // `check_line` and are linted as usual.
+            if ctx.is_myst_colon_directive_opener_line(line.line_num) {
+                continue;
+            }
+
             let mut line_warnings =
                 self.check_line(line.content, ctx, line.line_num, &code_spans, &mut buffers, line_index);
 
@@ -662,6 +684,82 @@ mod tests {
         );
     }
 
+    /// Issue #649: a URL that is a JSX component attribute value (e.g. `href="..."`)
+    /// is a string prop, not bare prose. Wrapping it in angle brackets produces
+    /// invalid JSX, so MD034 must not flag it under the MDX flavor.
+    #[test]
+    fn test_url_in_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card title=\"Docs\" href=\"https://example.com/docs\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// The same exemption must apply when the JSX opening tag spans multiple lines.
+    #[test]
+    fn test_url_in_multiline_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card\n  title=\"Docs\"\n  href=\"https://example.com/docs\"\n/>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a multi-line JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// The exemption is surgical: a URL in the component's *attributes* is skipped,
+    /// but a bare URL in the component's *body* is genuine prose and still flagged.
+    #[test]
+    fn test_jsx_attribute_url_skipped_but_body_url_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card href=\"https://attr.example.com\">\n  Visit https://body.example.com now.\n</Card>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Only the body URL must be flagged, not the attribute URL: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("body.example.com"),
+            "The flagged URL must be the body one: {result:?}"
+        );
+    }
+
+    /// The email path has the same JSX-attribute blind spot; an email used as a
+    /// JSX component attribute value must not be flagged either.
+    #[test]
+    fn test_email_in_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Contact email=\"hello@example.com\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Email in a JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// Control: under the Standard flavor `<Card .../>` is parsed as an HTML tag,
+    /// so the attribute URL is already covered by the existing HTML-tag guard.
+    /// This locks in that the two flavors agree.
+    #[test]
+    fn test_jsx_attribute_url_not_flagged_in_standard_flavor() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card href=\"https://example.com/docs\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a tag attribute must not be flagged under Standard flavor either: {result:?}"
+        );
+    }
+
     /// URLs inside Pandoc line blocks (`| text`) must not be flagged as bare URLs.
     #[test]
     fn test_pandoc_skips_urls_in_line_blocks() {
@@ -730,6 +828,107 @@ Check `https://example.com/` here.
         assert!(
             result.is_empty(),
             "URL in backticks after a fenced code block inside MDX must not be flagged: {result:?}"
+        );
+    }
+
+    /// Issue #642: a URL given as the argument of a MyST colon-fence directive
+    /// (`:::{name} <url>`) is the directive's opaque argument, not markdown prose,
+    /// and must not be wrapped in angle brackets.
+    #[test]
+    fn test_myst_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{anywidget} https://cdn.jsdelivr.net/npm/repo-review-webapp@1.1.3/dist/repo-review-anywidget.mjs
+{
+  \"deps\": [\"repo-review~=1.1.0\"]
+}
+:::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on a MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// A nested MyST colon directive opener also carries an opaque argument.
+    #[test]
+    fn test_myst_nested_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+::::{grid}
+:::{card} https://example.com/card-target
+Some caption.
+:::
+::::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on a nested MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// A bare URL in the *body* of a content directive (e.g. `{note}`) is genuine
+    /// prose and must still be flagged. The opener exemption must not leak to the body.
+    #[test]
+    fn test_myst_directive_body_url_still_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{note}
+See https://example.com/docs for more details.
+:::
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Bare URL in a MyST directive body must still be flagged: {result:?}"
+        );
+    }
+
+    /// An unclosed colon directive (no terminating `:::`) still has its opener
+    /// argument treated as opaque: the URL must not be flagged.
+    #[test]
+    fn test_myst_unclosed_colon_directive_argument_url_not_flagged() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = "\
+:::{anywidget} https://example.com/widget.mjs
+Some trailing content with no closing fence.
+";
+        let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL argument on an unclosed MyST colon directive opener must not be flagged: {result:?}"
+        );
+    }
+
+    /// The colon-directive exemption is MyST-specific: under the Standard flavor a
+    /// `:::{...}` line is ordinary text and a bare URL on it must still be flagged.
+    #[test]
+    fn test_colon_directive_url_flagged_in_standard_flavor() {
+        use crate::config::MarkdownFlavor;
+        use crate::lint_context::LintContext;
+        let rule = MD034NoBareUrls;
+        let content = ":::{anywidget} https://example.com/widget.mjs\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Under Standard flavor a bare URL on a `:::` line must still be flagged: {result:?}"
         );
     }
 }

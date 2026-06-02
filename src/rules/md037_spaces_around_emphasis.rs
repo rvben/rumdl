@@ -10,8 +10,8 @@ use crate::utils::emphasis_utils::{
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{
-    is_in_html_comment, is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment,
-    is_in_mkdocs_markup, is_in_table_cell,
+    is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
+    is_in_table_cell,
 };
 
 /// Check if an emphasis span has spacing issues that should be flagged
@@ -142,7 +142,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                     let in_pandoc_construct = ctx.flavor.is_pandoc_compatible() && ctx.is_in_bracketed_span(byte_pos);
                     if !in_pandoc_construct
                         && !self.is_in_link(ctx, byte_pos)
-                        && !is_in_html_comment(content, byte_pos)
+                        && !ctx.is_in_html_comment(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
                         && !is_in_table_cell(ctx, line_num, warning.column)
                         && !ctx.is_in_code_span(line_num, warning.column)
@@ -319,8 +319,14 @@ impl MD037NoSpaceInEmphasis {
                     format!("{marker_char}{marker_char}")
                 };
 
-                // Create the fixed version by trimming spaces from content
-                let trimmed_content = span.content.trim();
+                // Create the fixed version by trimming spaces from content.
+                // Slice the content from the *original* line, not from the
+                // code/math-masked copy: `span.content` would contain the 'X'/'M'
+                // placeholders, which must never leak into the generated fix.
+                // Masking is length-preserving, so the span byte offsets are
+                // valid in `content`.
+                let original_content = &content[span.opening.end_pos()..span.closing.start_pos];
+                let trimmed_content = original_content.trim();
                 let fixed_text = format!("{marker_str}{trimmed_content}{marker_str}");
 
                 // Truncate long emphasis spans for readable warning messages
@@ -398,6 +404,19 @@ mod tests {
             !result.is_empty(),
             "Expected warnings for spaces in emphasis outside code block"
         );
+    }
+
+    #[test]
+    fn test_inline_code_inside_spaced_emphasis_preserved_on_fix() {
+        // Regression test: inline code inside a spaced emphasis span must survive the
+        // space-trimming fix. Previously the 'X' masking placeholder leaked into
+        // the fix output, destroying the code span.
+        let rule = MD037NoSpaceInEmphasis;
+        let content = "Set * the `id` field * below.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Set *the `id` field* below.");
+        assert!(!fixed.contains('X'), "masking placeholder leaked into fix: {fixed}");
     }
 
     #[test]

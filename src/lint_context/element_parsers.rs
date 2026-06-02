@@ -396,19 +396,25 @@ pub(super) fn parse_math_spans(content: &str, lines: &[LineInfo]) -> Vec<MathSpa
     math_spans
 }
 
-/// Parse HTML tags in the content
+/// Parse HTML tags in the content.
+///
+/// Returns `(html_tags, jsx_component_tags)`. JSX component tags (uppercase-named,
+/// only under JSX-supporting flavors) are split out rather than dropped, so that
+/// HTML-specific rules keep ignoring them while rules that must look inside a
+/// component's opening tag (e.g. MD034 attribute URLs) can still consult them.
 pub(super) fn parse_html_tags(
     content: &str,
     lines: &[LineInfo],
     code_blocks: &[(usize, usize)],
     flavor: MarkdownFlavor,
-) -> Vec<HtmlTag> {
+) -> (Vec<HtmlTag>, Vec<HtmlTag>) {
     static HTML_TAG_REGEX: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(r"(?i)<(/?)([a-zA-Z][a-zA-Z0-9-]*)(?:\s+[^>]*?)?\s*(/?)>").unwrap());
 
     let bytes = content.as_bytes();
     let content_len = bytes.len();
     let mut html_tags = Vec::new();
+    let mut jsx_component_tags = Vec::new();
     let mut search_pos = 0;
 
     // Find each '<' and run the regex from that position instead of scanning full content
@@ -456,11 +462,6 @@ pub(super) fn parse_html_tags(
             let tag_name = tag_name_original.to_lowercase();
             let is_self_closing = !cap.get(3).unwrap().as_str().is_empty();
 
-            // Skip JSX components in MDX files (tags starting with uppercase letter)
-            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(char::is_uppercase) {
-                continue;
-            }
-
             // Find which line this tag is on using binary search
             let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
             let line_idx = line_idx.saturating_sub(1);
@@ -472,7 +473,7 @@ pub(super) fn parse_html_tags(
                 lines[line_idx].byte_len
             };
 
-            html_tags.push(HtmlTag {
+            let tag = HtmlTag {
                 line: line_num,
                 start_col: col_start,
                 end_col: col_end,
@@ -481,14 +482,23 @@ pub(super) fn parse_html_tags(
                 tag_name,
                 is_closing,
                 is_self_closing,
-            });
+            };
+
+            // Split JSX component tags (uppercase-named, JSX flavors only) from real
+            // HTML tags. Both are recorded in document order, so each list stays sorted
+            // by byte offset for binary search.
+            if flavor.supports_jsx() && tag_name_original.chars().next().is_some_and(char::is_uppercase) {
+                jsx_component_tags.push(tag);
+            } else {
+                html_tags.push(tag);
+            }
 
             // Advance past the match to avoid overlapping
             search_pos = match_end;
         }
     }
 
-    html_tags
+    (html_tags, jsx_component_tags)
 }
 
 /// Parse table rows in the content

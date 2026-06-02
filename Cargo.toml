@@ -1,6 +1,6 @@
 [package]
 name = "rumdl"
-version = "0.2.3"
+version = "0.2.5"
 edition = "2024"
 rust-version = "1.94.0"
 description = "A fast Markdown linter written in Rust (Ru(st) MarkDown Linter)"
@@ -152,4 +152,8 @@ harness = false
 
 [[bench]]
 name = "config_per_file_lookup"
+harness = false
+
+[[bench]]
+name = "perf_audit"
 harness = false

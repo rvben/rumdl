@@ -24,9 +24,12 @@ pub(super) use md063_config::{HeadingCapStyle, MD063Config};
 // Regex to match inline code spans (backticks)
 static INLINE_CODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`+[^`]+`+").unwrap());
 
-// Regex to match markdown links [text](url) or [text][ref]
+// Regex to match markdown links [text](url) or [text][ref].
+// The inline-URL part allows one level of nested parentheses so URLs like
+// `https://example.com/docs/v(2)beta` are matched in full; otherwise the URL
+// would be truncated at the first ')' and its tail title-cased as prose.
 static LINK_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\([^)]*\)|\[([^\]]*)\]\[[^\]]*\]").unwrap());
+    LazyLock::new(|| Regex::new(r"\[([^\]]*)\]\((?:[^()]|\([^()]*\))*\)|\[([^\]]*)\]\[[^\]]*\]").unwrap());
 
 // Regex to match inline HTML tags commonly used in headings
 // Matches paired tags: <tag>content</tag>, <tag attr="val">content</tag>
@@ -57,6 +60,9 @@ enum HeadingSegment {
     },
     /// Inline HTML tag that should be preserved as-is
     Html(String),
+    /// Image `![alt](url)` preserved as-is, including alt text. Unlike link
+    /// text, image alt text is not recased.
+    Image(String),
 }
 
 /// Rule MD063: Heading capitalization
@@ -633,6 +639,20 @@ impl MD063HeadingCapitalization {
         // Find links
         for caps in LINK_REGEX.captures_iter(text) {
             let full_match = caps.get(0).unwrap();
+
+            // A '!' immediately before the match makes this an image. Preserve
+            // the whole image (including the leading '!' and its alt text)
+            // rather than recasing the alt text as if it were link text.
+            if full_match.start() >= 1 && text.as_bytes()[full_match.start() - 1] == b'!' {
+                let region_start = full_match.start() - 1;
+                special_regions.push((
+                    region_start,
+                    full_match.end(),
+                    HeadingSegment::Image(text[region_start..full_match.end()].to_string()),
+                ));
+                continue;
+            }
+
             let text_match = caps.get(1).or_else(|| caps.get(2));
 
             if let Some(text_m) = text_match {
@@ -656,7 +676,8 @@ impl MD063HeadingCapitalization {
         // Sort by start position
         special_regions.sort_by_key(|(start, _, _)| *start);
 
-        // Remove overlapping regions (code takes precedence)
+        // Drop regions that overlap one already kept. After sorting by start
+        // position, the earliest-starting region wins a conflict.
         let mut filtered_regions: Vec<(usize, usize, HeadingSegment)> = Vec::new();
         for region in special_regions {
             let overlaps = filtered_regions.iter().any(|(s, e, _)| region.0 < *e && region.1 > *s);
@@ -779,6 +800,10 @@ impl MD063HeadingCapitalization {
                 HeadingSegment::Html(h) => {
                     // Preserve HTML tags as-is (like code)
                     result_parts.push(h.clone());
+                }
+                HeadingSegment::Image(img) => {
+                    // Preserve images as-is, including alt text.
+                    result_parts.push(img.clone());
                 }
             }
         }
@@ -1162,6 +1187,38 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Self-Documenting Code"));
+    }
+
+    #[test]
+    fn test_title_case_preserves_url_with_nested_parens() {
+        let rule = create_rule();
+        // The URL contains a parenthesised segment followed by more URL text.
+        let content = "# guide for [the api](https://example.com/docs/v(2)beta)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // The whole URL, including the lowercase "beta" after the nested
+        // parens, must be preserved exactly and never title-cased.
+        assert!(
+            fixed.contains("https://example.com/docs/v(2)beta"),
+            "URL with nested parens was corrupted: {fixed:?}"
+        );
+    }
+
+    #[test]
+    fn test_title_case_does_not_recase_image_alt() {
+        let rule = create_rule();
+        let content = "# overview ![a small icon](icon.png)\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        // Image (alt text and all) is preserved as-is; only prose is recased.
+        assert!(
+            fixed.contains("![a small icon](icon.png)"),
+            "image alt text was modified: {fixed:?}"
+        );
+        assert!(
+            fixed.contains("# Overview"),
+            "surrounding prose should still be title-cased: {fixed:?}"
+        );
     }
 
     // Sentence case tests

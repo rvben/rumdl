@@ -22,6 +22,10 @@ pub struct LineInfo {
     pub in_front_matter: bool,
     /// Whether this line is inside an HTML block
     pub in_html_block: bool,
+    /// Whether this line is part of a list block (precomputed for O(1) lookup)
+    pub in_list_block: bool,
+    /// Whether this line is part of a table block (precomputed for O(1) lookup)
+    pub in_table_block: bool,
     /// Whether this line is inside an HTML comment
     pub in_html_comment: bool,
     /// List item information if this line starts a list item

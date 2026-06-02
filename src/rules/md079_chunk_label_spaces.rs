@@ -14,7 +14,7 @@
 
 use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::quarto_chunks::{
     ChunkLabelSource, is_executable_chunk, parse_hashpipe_labels, parse_inline_chunk_header,
 };
@@ -109,6 +109,11 @@ impl Rule for MD079ChunkLabelSpaces {
         Ok(warnings)
     }
 
+    fn fix_capability(&self) -> FixCapability {
+        // Renaming a label is a human decision; the rule is diagnostic-only.
+        FixCapability::Unfixable
+    }
+
     fn fix(&self, _ctx: &LintContext) -> Result<String, LintError> {
         // Renaming a label is a human decision (hyphen, underscore, or collapse).
         Err(LintError::FixFailed("MD079 has no auto-fix".to_string()))
@@ -192,6 +197,13 @@ mod tests {
     fn check_standard(content: &str) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         MD079ChunkLabelSpaces.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn declares_unfixable() {
+        // fix() returns Err, so the declared capability must be Unfixable to
+        // avoid a wasted fix() call on every fix pass.
+        assert_eq!(MD079ChunkLabelSpaces.fix_capability(), FixCapability::Unfixable);
     }
 
     #[test]

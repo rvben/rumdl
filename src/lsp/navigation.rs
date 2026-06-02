@@ -413,6 +413,71 @@ fn resolve_reference_to_target(text: &str, ref_id: &str) -> Option<FullLinkTarge
     None
 }
 
+/// Language hint for a fenced code block based on a file's extension.
+///
+/// Returns `None` for markdown files, whose preview should render as markdown
+/// rather than as fenced source.
+fn fence_language(file_path: &Path) -> Option<String> {
+    let ext = file_path.extension()?.to_str()?;
+    if matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown" | "mdx" | "mkd" | "mdown" | "markdn"
+    ) {
+        return None;
+    }
+    Some(crate::code_block_tools::LinguistResolver::new().resolve(ext))
+}
+
+/// Wrap `content` in a fenced code block tagged with `lang`.
+///
+/// The fence is made longer than the longest backtick run inside `content`, so
+/// an embedded fence cannot terminate the block early.
+fn fence_code(content: &str, lang: &str) -> String {
+    let longest_backtick_run = content
+        .as_bytes()
+        .split(|&b| b != b'`')
+        .map(<[u8]>::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_backtick_run.max(2) + 1);
+    format!("{fence}{lang}\n{content}\n{fence}")
+}
+
+/// A line-number anchor parsed from a link fragment (`#L12` or `#L12-L24`).
+///
+/// Line numbers are 1-indexed, matching the `#L<n>` convention used by GitHub
+/// and editors.
+enum LineAnchor {
+    Single(usize),
+    Range(usize, usize),
+}
+
+/// Parse a `#L<n>` / `#L<n>-L<m>` fragment into a [`LineAnchor`].
+///
+/// Returns `None` for anything that is not a line anchor (so it falls through to
+/// heading resolution), and for malformed ranges (`m < n`) or a zero line number.
+fn parse_line_anchor(anchor: &str) -> Option<LineAnchor> {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static LINE_ANCHOR_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^L(\d+)(?:-L(\d+))?$").unwrap());
+
+    let caps = LINE_ANCHOR_RE.captures(anchor)?;
+    let start: usize = caps.get(1)?.as_str().parse().ok()?;
+    if start == 0 {
+        return None;
+    }
+    match caps.get(2) {
+        None => Some(LineAnchor::Single(start)),
+        Some(end) => {
+            let end: usize = end.as_str().parse().ok()?;
+            if end < start {
+                return None;
+            }
+            Some(LineAnchor::Range(start, end))
+        }
+    }
+}
+
 impl RumdlLanguageServer {
     /// Handle `textDocument/definition` requests.
     ///
@@ -430,6 +495,24 @@ impl RumdlLanguageServer {
         }
 
         self.resolve_link_target(uri, &link).await
+    }
+
+    /// Base path for resolving a link target's relative file path.
+    ///
+    /// For `file://` URIs this is the document's own path. For non-file URIs
+    /// (unsaved buffers like `buffer:647`, `untitled:` documents) there is no
+    /// on-disk path, so relative links are anchored to the first workspace root.
+    /// Returns `None` when neither is available, so navigation degrades to a no-op.
+    ///
+    /// `resolve_link_path` resolves relative targets against the base's *parent*,
+    /// so a synthetic file name is hung off the workspace root to make the root the
+    /// parent directory.
+    async fn link_resolution_base(&self, uri: &Url) -> Option<PathBuf> {
+        if let Ok(path) = uri.to_file_path() {
+            return Some(path);
+        }
+        let root = self.workspace_roots.read().await.first().cloned()?;
+        Some(root.join("untitled.md"))
     }
 
     /// Handle `textDocument/hover` requests.
@@ -454,7 +537,7 @@ impl RumdlLanguageServer {
             });
         }
 
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = self.link_resolution_base(uri).await?;
         let target_path = self.resolve_link_path(&current_file, &link.file_path).await?;
 
         // Read target file content
@@ -462,8 +545,12 @@ impl RumdlLanguageServer {
         let target_content = self.get_document_content(&target_uri).await?;
 
         let preview = if !link.anchor.is_empty() {
-            self.build_anchor_preview(&target_path, &link.anchor, &target_content)
-                .await
+            if let Some(line_anchor) = parse_line_anchor(&link.anchor) {
+                self.build_line_anchor_preview(&target_path, &line_anchor, &target_content)
+            } else {
+                self.build_anchor_preview(&target_path, &link.anchor, &target_content)
+                    .await
+            }
         } else {
             self.build_file_preview(&target_path, &target_content)
         };
@@ -543,18 +630,66 @@ impl RumdlLanguageServer {
 
     /// Build a hover preview for a link targeting a whole file (no anchor).
     ///
-    /// Shows the file name and the first 15 lines of content.
+    /// Shows the file name and the first 15 lines of content. Non-markdown files
+    /// are wrapped in a fenced code block with a language hint so editors can
+    /// syntax-highlight the preview; markdown renders as-is.
     fn build_file_preview(&self, file_path: &Path, content: &str) -> String {
         let display_path = file_path.file_name().unwrap_or(file_path.as_os_str());
         let lines: Vec<&str> = content.lines().collect();
         let max_lines = 15;
         let preview_lines: Vec<&str> = lines.iter().take(max_lines).copied().collect();
+        let body = preview_lines.join("\n");
 
-        let mut preview = format!("**{}**\n\n{}", display_path.to_string_lossy(), preview_lines.join("\n"));
+        let body = match fence_language(file_path) {
+            Some(lang) => fence_code(&body, &lang),
+            None => body,
+        };
+
+        let mut preview = format!("**{}**\n\n{}", display_path.to_string_lossy(), body);
         if lines.len() > max_lines {
             preview.push_str("\n\n...");
         }
         preview
+    }
+
+    /// Build a hover preview for a link targeting specific line numbers.
+    ///
+    /// `#L<n>` shows the line with five lines of context on each side; `#L<n>-L<m>`
+    /// shows the range (capped at 15 lines). The slice is fenced with a language
+    /// hint when the target is not markdown.
+    fn build_line_anchor_preview(&self, file_path: &Path, anchor: &LineAnchor, content: &str) -> String {
+        const CONTEXT: usize = 5;
+        const MAX_RANGE_LINES: usize = 15;
+
+        let lines: Vec<&str> = content.lines().collect();
+        let total = lines.len();
+        let display = file_path.file_name().unwrap_or(file_path.as_os_str()).to_string_lossy();
+
+        let requested_start = match anchor {
+            LineAnchor::Single(n) | LineAnchor::Range(n, _) => *n,
+        };
+        if requested_start > total {
+            return format!("**{display}**\n\n*Line {requested_start} is past the end of the file ({total} lines)*");
+        }
+
+        let (start_1, end_1, label) = match anchor {
+            LineAnchor::Single(n) => {
+                let start = n.saturating_sub(CONTEXT).max(1);
+                let end = (n + CONTEXT).min(total);
+                (start, end, format!("line {n}"))
+            }
+            LineAnchor::Range(a, b) => {
+                let end = (*b).min(total).min(a + MAX_RANGE_LINES - 1);
+                (*a, end, format!("lines {a}-{b}"))
+            }
+        };
+
+        let slice = lines[start_1 - 1..end_1].join("\n");
+        let body = match fence_language(file_path) {
+            Some(lang) => fence_code(&slice, &lang),
+            None => slice,
+        };
+        format!("**{display}** ({label})\n\n{body}")
     }
 
     /// Handle `textDocument/references` requests.
@@ -682,7 +817,7 @@ impl RumdlLanguageServer {
     /// Shared between inline links and reference-style links to avoid
     /// duplicating the path resolution and heading lookup logic.
     async fn resolve_link_target(&self, uri: &Url, link: &FullLinkTarget) -> Option<GotoDefinitionResponse> {
-        let current_file = uri.to_file_path().ok()?;
+        let current_file = self.link_resolution_base(uri).await?;
         let target_path = self.resolve_link_path(&current_file, &link.file_path).await?;
 
         let target_uri = Url::from_file_path(&target_path).ok()?;

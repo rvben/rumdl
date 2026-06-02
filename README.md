@@ -206,7 +206,7 @@ mise ls-remote rumdl
 mise install rumdl
 
 # Use a specific version for the project
-mise use rumdl@0.2.3
+mise use rumdl@0.2.5
 ```
 
 ### Using Nix (macOS/Linux)
@@ -405,7 +405,7 @@ Add the following to your `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.3
+    rev: v0.2.5
     hooks:
       - id: rumdl      # Lint only (fails on issues)
       - id: rumdl-fmt  # Auto-format and fail if issues remain
@@ -427,7 +427,7 @@ However, for pre-commit workflows where you want to include all files, even when
 ```yaml
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.3
+    rev: v0.2.5
     hooks:
       - id: rumdl
         args: [--no-exclude]  # Disable all exclude patterns
@@ -1246,19 +1246,33 @@ rumdl is used by these notable open source projects:
 
 | Project                                                                                     | Stars                                                                                              |
 | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [aio-libs/aiobotocore](https://github.com/aio-libs/aiobotocore)                             | ![stars](https://img.shields.io/github/stars/aio-libs/aiobotocore?style=flat-square)               |
 | [apache/lucene](https://github.com/apache/lucene)                                           | ![stars](https://img.shields.io/github/stars/apache/lucene?style=flat-square)                      |
+| [beeware/beeware.github.io](https://github.com/beeware/beeware.github.io)                   | ![stars](https://img.shields.io/github/stars/beeware/beeware.github.io?style=flat-square)          |
 | [beeware/briefcase](https://github.com/beeware/briefcase)                                   | ![stars](https://img.shields.io/github/stars/beeware/briefcase?style=flat-square)                  |
 | [beeware/toga](https://github.com/beeware/toga)                                             | ![stars](https://img.shields.io/github/stars/beeware/toga?style=flat-square)                       |
+| [callowayproject/bump-my-version](https://github.com/callowayproject/bump-my-version)       | ![stars](https://img.shields.io/github/stars/callowayproject/bump-my-version?style=flat-square)    |
 | [chrisgrieser/nvim-scissors](https://github.com/chrisgrieser/nvim-scissors)                 | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-scissors?style=flat-square)         |
 | [chrisgrieser/nvim-spider](https://github.com/chrisgrieser/nvim-spider)                     | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-spider?style=flat-square)           |
 | [chrisgrieser/nvim-various-textobjs](https://github.com/chrisgrieser/nvim-various-textobjs) | ![stars](https://img.shields.io/github/stars/chrisgrieser/nvim-various-textobjs?style=flat-square) |
 | [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)           | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)      |
 | [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)     | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)   |
+| [copier-org/copier](https://github.com/copier-org/copier)                                   | ![stars](https://img.shields.io/github/stars/copier-org/copier?style=flat-square)                  |
+| [Hexlet/ru-test-assignments](https://github.com/Hexlet/ru-test-assignments)                 | ![stars](https://img.shields.io/github/stars/Hexlet/ru-test-assignments?style=flat-square)         |
+| [kreuzberg-dev/html-to-markdown](https://github.com/kreuzberg-dev/html-to-markdown)         | ![stars](https://img.shields.io/github/stars/kreuzberg-dev/html-to-markdown?style=flat-square)     |
+| [matrix-org/matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk)                 | ![stars](https://img.shields.io/github/stars/matrix-org/matrix-rust-sdk?style=flat-square)         |
 | [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                           | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)              |
 | [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                             | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)               |
+| [modular/modular](https://github.com/modular/modular)                                       | ![stars](https://img.shields.io/github/stars/modular/modular?style=flat-square)                    |
+| [mopidy/mopidy](https://github.com/mopidy/mopidy)                                           | ![stars](https://img.shields.io/github/stars/mopidy/mopidy?style=flat-square)                      |
+| [mozilla-firefox/firefox](https://github.com/mozilla-firefox/firefox)                       | ![stars](https://img.shields.io/github/stars/mozilla-firefox/firefox?style=flat-square)            |
 | [PyO3/pyo3](https://github.com/PyO3/pyo3)                                                   | ![stars](https://img.shields.io/github/stars/PyO3/pyo3?style=flat-square)                          |
+| [Ravencentric/awesome-arr](https://github.com/Ravencentric/awesome-arr)                     | ![stars](https://img.shields.io/github/stars/Ravencentric/awesome-arr?style=flat-square)           |
+| [rust-lang/rustlings](https://github.com/rust-lang/rustlings)                               | ![stars](https://img.shields.io/github/stars/rust-lang/rustlings?style=flat-square)                |
 | [scop/bash-completion](https://github.com/scop/bash-completion)                             | ![stars](https://img.shields.io/github/stars/scop/bash-completion?style=flat-square)               |
 | [Ulauncher/Ulauncher](https://github.com/Ulauncher/Ulauncher)                               | ![stars](https://img.shields.io/github/stars/Ulauncher/Ulauncher?style=flat-square)                |
+| [WeblateOrg/weblate](https://github.com/WeblateOrg/weblate)                                 | ![stars](https://img.shields.io/github/stars/WeblateOrg/weblate?style=flat-square)                 |
+| [wfxr/forgit](https://github.com/wfxr/forgit)                                               | ![stars](https://img.shields.io/github/stars/wfxr/forgit?style=flat-square)                        |
 
 *Using rumdl? [Let us know!](https://github.com/rvben/rumdl/issues/307)*
 

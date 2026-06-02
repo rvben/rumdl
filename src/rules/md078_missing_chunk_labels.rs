@@ -8,7 +8,7 @@
 
 use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
-use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::quarto_chunks::{is_executable_chunk, parse_hashpipe_labels, parse_inline_chunk_header};
 
 #[derive(Debug, Clone, Default)]
@@ -65,6 +65,11 @@ impl Rule for MD078MissingChunkLabels {
             });
         }
         Ok(warnings)
+    }
+
+    fn fix_capability(&self) -> FixCapability {
+        // A chunk label is a human-chosen identifier; the rule is diagnostic-only.
+        FixCapability::Unfixable
     }
 
     fn fix(&self, _ctx: &LintContext) -> Result<String, LintError> {
@@ -139,6 +144,13 @@ mod tests {
     fn check_standard(content: &str) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         MD078MissingChunkLabels.check(&ctx).unwrap()
+    }
+
+    #[test]
+    fn declares_unfixable() {
+        // fix() returns Err, so the declared capability must be Unfixable to
+        // avoid a wasted fix() call on every fix pass.
+        assert_eq!(MD078MissingChunkLabels.fix_capability(), FixCapability::Unfixable);
     }
 
     #[test]

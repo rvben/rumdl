@@ -899,11 +899,27 @@ impl MD060TableFormat {
                 let calc_aligned_width = 1 + (num_columns * 3) + column_widths.iter().sum::<usize>();
                 aligned_width = Some(calc_aligned_width);
 
-                // Auto-compact: if aligned table exceeds max width, use compact formatting instead
+                // Auto-compact: if aligned table exceeds max width, use compact formatting instead.
+                // The effective output style is now `compact`, so honor `aligned-delimiter`
+                // exactly as the explicit `compact` style does: align the delimiter row's pipes
+                // to the header column widths while body rows stay compact.
                 if calc_aligned_width > self.effective_max_width() {
                     auto_compacted = true;
-                    for line in &stripped_lines {
+                    let header_widths = if self.config.aligned_delimiter && stripped_lines.len() >= 2 {
+                        let header_cells = Self::parse_table_row_with_flavor(stripped_lines[0], flavor);
+                        Some(Self::header_cell_widths(&header_cells))
+                    } else {
+                        None
+                    };
+                    for (row_idx, line) in stripped_lines.iter().enumerate() {
                         let cells = Self::parse_table_row_with_flavor(line, flavor);
+                        if row_idx == 1
+                            && let Some(widths) = &header_widths
+                        {
+                            // Auto-compact always produces the single-space compact form.
+                            result.push(Self::format_delimiter_aligned_to_header(&cells, widths, true));
+                            continue;
+                        }
                         result.push(Self::format_table_compact(&cells));
                     }
                 } else {

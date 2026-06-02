@@ -332,10 +332,12 @@ impl MarkdownlintConfig {
                         enabled_rules.push(norm_rule_key.clone());
                     }
                 } else {
+                    // The value could not be represented in rumdl's internal
+                    // config format. Skip this rule and keep processing the rest
+                    // rather than terminating the process.
                     log::error!(
                         "Could not convert value for rule key {key:?} to rumdl's internal config format. This likely means the configuration value is invalid or not supported for this rule. Please check your markdownlint config."
                     );
-                    std::process::exit(1);
                 }
             }
         }
@@ -416,8 +418,11 @@ impl MarkdownlintConfig {
                 }
                 let toml_value: Option<toml::Value> = serde_yaml::from_value::<toml::Value>(value.clone()).ok();
                 let toml_value = toml_value.map(normalize_toml_table_keys);
-                let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                 if let Some(tv) = toml_value {
+                    // Only materialize the rule entry once the value is known to
+                    // be convertible, so an unconvertible value does not leave a
+                    // phantom empty RuleConfig behind.
+                    let rule_config = fragment.rules.entry(norm_rule_key.clone()).or_default();
                     // Special case: if line-length (MD013) is given a number value directly,
                     // treat it as {"line_length": value}
                     let tv = if norm_rule_key == "MD013" && tv.is_integer() {
@@ -491,6 +496,10 @@ impl MarkdownlintConfig {
                     if !default_enabled {
                         enabled_rules.push(display_name.clone());
                     }
+                } else {
+                    log::error!(
+                        "Could not convert value for rule key {key:?} to rumdl's internal config format; skipping this rule."
+                    );
                 }
             }
         }
@@ -772,6 +781,37 @@ ul-style:
         // Check that loaded_files is tracked
         assert_eq!(sourced_config.loaded_files.len(), 1);
         assert_eq!(sourced_config.loaded_files[0], "test.json");
+    }
+
+    #[test]
+    fn test_fragment_skips_unconvertible_value_cleanly() {
+        let mut config_map = HashMap::new();
+        // A YAML null has no toml::Value representation, so it hits the
+        // conversion-failure branch on the production fragment path.
+        config_map.insert("MD013".to_string(), serde_yaml::Value::Null);
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        let fragment = mdl_config.map_to_sourced_rumdl_config_fragment(None);
+
+        // The unconvertible rule must be skipped entirely, not left behind as a
+        // phantom empty RuleConfig entry.
+        assert!(
+            !fragment.rules.contains_key("MD013"),
+            "unconvertible MD013 value should not create a rules entry, got {:?}",
+            fragment.rules.get("MD013")
+        );
+    }
+
+    #[test]
+    fn test_legacy_map_skips_unconvertible_value_without_exiting() {
+        let mut config_map = HashMap::new();
+        config_map.insert("MD013".to_string(), serde_yaml::Value::Null);
+
+        let mdl_config = MarkdownlintConfig(config_map);
+        // Reaching the assertion proves the conversion-failure branch does not
+        // call process::exit (which would kill the test runner).
+        let sourced = mdl_config.map_to_sourced_rumdl_config(None);
+        assert!(sourced.rules.get("MD013").is_none_or(|r| r.values.is_empty()));
     }
 
     #[test]

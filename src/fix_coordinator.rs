@@ -272,8 +272,9 @@ impl FixCoordinator {
                 //      This is for rules whose fix() rewrites at the document
                 //      level rather than producing per-warning edits (e.g.
                 //      MD046 fence-style normalization, MD076 list spacing).
-                //      Rules that declare Unfixable are skipped here even if a
-                //      stray inline fix slipped through.
+                // A rule is skipped only when it has no inline fix AND advertises
+                // no fix capability (Unfixable). Unfixable rules attach no inline
+                // fixes, so in practice they are never dispatched to fix().
                 let has_inline_fix = filtered_warnings.iter().any(|w| w.fix.is_some());
                 let rule_advertises_fix = rule.fix_capability() != FixCapability::Unfixable;
                 if !has_inline_fix && !rule_advertises_fix {

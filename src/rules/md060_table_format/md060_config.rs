@@ -166,7 +166,9 @@ pub struct MD060Config {
     ///   body rows remain compact/tight and are not padded.
     ///
     /// No effect under `aligned` / `aligned-no-space` (those styles already
-    /// align the delimiter row by construction).
+    /// align the delimiter row by construction), except when a table exceeds
+    /// `max-width` and auto-compacts: the effective output style is then
+    /// `compact`, so the delimiter row is aligned to the header column widths.
     ///
     /// Mirrors markdownlint MD060's `aligned_delimiter` option; the snake_case
     /// alias is accepted for cross-tool compatibility.

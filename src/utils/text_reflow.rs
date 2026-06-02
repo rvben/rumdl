@@ -158,12 +158,11 @@ fn compute_inline_code_mask(text: &str) -> Vec<bool> {
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
 fn is_sentence_boundary(
     text: &str,
+    chars: &[char],
     pos: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> bool {
-    let chars: Vec<char> = text.chars().collect();
-
     if pos + 1 >= chars.len() {
         return false;
     }
@@ -338,6 +337,9 @@ fn split_into_sentences_with_set(
 ) -> Vec<String> {
     // Pre-compute which character positions are inside inline code spans
     let in_code = compute_inline_code_mask(text);
+    // Collect chars once and share the slice with is_sentence_boundary, which
+    // would otherwise re-collect the whole text on every position it checks.
+    let char_vec: Vec<char> = text.chars().collect();
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
@@ -347,7 +349,7 @@ fn split_into_sentences_with_set(
     while let Some(c) = chars.next() {
         current_sentence.push(c);
 
-        if !in_code[pos] && is_sentence_boundary(text, pos, abbreviations, require_sentence_capital) {
+        if !in_code[pos] && is_sentence_boundary(text, &char_vec, pos, abbreviations, require_sentence_capital) {
             // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
             while let Some(&next) = chars.peek() {
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
@@ -384,26 +386,26 @@ fn is_horizontal_rule(line: &str) -> bool {
         return false;
     }
 
-    // Check if line consists only of -, _, or * characters (at least 3)
-    let chars: Vec<char> = line.chars().collect();
-    if chars.is_empty() {
+    // Line must consist only of a single marker char (-, _, or *) plus spaces,
+    // with at least 3 markers. Scan chars directly to avoid allocating a Vec.
+    let mut chars = line.chars();
+    let Some(first_char) = chars.next() else {
         return false;
-    }
-
-    let first_char = chars[0];
+    };
     if first_char != '-' && first_char != '_' && first_char != '*' {
         return false;
     }
 
-    // All characters should be the same (allowing spaces between)
-    for c in &chars {
-        if *c != first_char && *c != ' ' {
+    let mut non_space_count = 1usize; // first_char is a marker
+    for c in chars {
+        if c == ' ' {
+            continue;
+        }
+        if c != first_char {
             return false;
         }
+        non_space_count += 1;
     }
-
-    // Count non-space characters
-    let non_space_count = chars.iter().filter(|c| **c != ' ').count();
     non_space_count >= 3
 }
 
@@ -689,16 +691,6 @@ impl std::fmt::Display for Element {
                 }
             }
         }
-    }
-}
-
-impl Element {
-    /// Calculate the display width of this element using the given length mode.
-    /// This formats the element and computes its width, correctly handling
-    /// visual width for CJK characters and other wide glyphs.
-    fn display_width(&self, mode: ReflowLengthMode) -> usize {
-        let formatted = format!("{self}");
-        display_len(&formatted, mode)
     }
 }
 
@@ -2134,8 +2126,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let length_mode = options.length_mode;
 
     for (idx, element) in elements.iter().enumerate() {
+        // Derive the display width from the already-formatted string rather than
+        // formatting the element a second time just to measure it.
         let element_str = format!("{element}");
-        let element_len = element.display_width(length_mode);
+        let element_len = display_len(&element_str, length_mode);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no whitespace between them in the source:

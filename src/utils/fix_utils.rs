@@ -161,6 +161,16 @@ pub fn apply_warning_fixes(content: &str, warnings: &[LintWarning]) -> Result<St
             ));
         }
 
+        // Reject ranges that do not lie on UTF-8 char boundaries. replace_range
+        // would panic on such a range; a rule emitting one is a bug, so surface
+        // it as an error rather than corrupting or crashing on the document.
+        if !result.is_char_boundary(edit.range.start) || !result.is_char_boundary(edit.range.end) {
+            return Err(format!(
+                "Fix range {}..{} does not lie on UTF-8 char boundaries",
+                edit.range.start, edit.range.end
+            ));
+        }
+
         // Skip fixes that overlap with an already-applied fix to prevent
         // offset corruption (e.g., nested link/image constructs in MD039).
         if edit.range.end > min_applied_start {
@@ -227,6 +237,15 @@ pub fn validate_fix_range(content: &str, fix: &Fix) -> Result<(), String> {
         ));
     }
 
+    // Mirror apply_warning_fixes: a range that splits a UTF-8 codepoint is
+    // invalid and would panic if applied.
+    if !content.is_char_boundary(fix.range.start) || !content.is_char_boundary(fix.range.end) {
+        return Err(format!(
+            "Fix range {}..{} does not lie on UTF-8 char boundaries",
+            fix.range.start, fix.range.end
+        ));
+    }
+
     Ok(())
 }
 
@@ -234,6 +253,20 @@ pub fn validate_fix_range(content: &str, fix: &Fix) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::rule::{Fix, LintWarning, Severity};
+
+    #[test]
+    fn test_validate_fix_range_rejects_non_char_boundary() {
+        // "é" is 2 bytes (0xC3 0xA9); the range 1..2 splits it.
+        let content = "é world";
+        let fix = Fix::new(1..2, "x".to_string());
+        assert!(
+            validate_fix_range(content, &fix).is_err(),
+            "validate_fix_range must reject a range that splits a codepoint"
+        );
+        // A boundary-aligned range is still accepted.
+        let ok_fix = Fix::new(0..2, "x".to_string());
+        assert!(validate_fix_range(content, &ok_fix).is_ok());
+    }
 
     #[test]
     fn test_apply_single_fix() {
@@ -251,6 +284,30 @@ mod tests {
 
         let result = apply_warning_fixes(content, &[warning]).unwrap();
         assert_eq!(result, "1. Multiple spaces");
+    }
+
+    #[test]
+    fn test_apply_fix_with_non_char_boundary_range_does_not_panic() {
+        // A buggy rule could emit a fix range that lands inside a multi-byte
+        // codepoint. The central apply path must reject it rather than panic
+        // in replace_range. "é" is 2 bytes (0xC3 0xA9); 1..2 splits it.
+        let content = "é world";
+        let warning = LintWarning {
+            message: "bad range".to_string(),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 2,
+            severity: Severity::Warning,
+            fix: Some(Fix::new(1..2, "x".to_string())),
+            rule_name: Some("MDTEST".to_string()),
+        };
+
+        let result = apply_warning_fixes(content, &[warning]);
+        assert!(
+            result.is_err(),
+            "non-char-boundary range must be rejected, got {result:?}"
+        );
     }
 
     #[test]

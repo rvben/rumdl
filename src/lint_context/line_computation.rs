@@ -50,11 +50,14 @@ pub(super) fn compute_basic_line_info(
     // from non-Markdown regions (like unclosed fences) can't leak into real Markdown.
     // The masked content preserves byte length and newline positions for offset stability.
     let pulldown_content;
-    let pulldown_input = if let Some(extension_line_map) = &extension_line_map {
-        pulldown_content = mask_kramdown_extension_lines(content, line_offsets, extension_line_map);
-        pulldown_content.as_str()
-    } else {
-        content
+    let pulldown_input = match extension_line_map.as_deref() {
+        // Only build the masked copy when there is actually an extension block
+        // to mask; otherwise the mask would clone the whole document for nothing.
+        Some(map) if map.iter().any(|&in_ext| in_ext) => {
+            pulldown_content = mask_kramdown_extension_lines(content, line_offsets, map);
+            pulldown_content.as_str()
+        }
+        _ => content,
     };
 
     // Use pulldown-cmark to detect list items AND emphasis spans in a single pass
@@ -136,6 +139,8 @@ pub(super) fn compute_basic_line_info(
             in_code_block,
             in_front_matter,
             in_html_block: false,
+            in_list_block: false,
+            in_table_block: false,
             in_html_comment,
             list_item,
             heading: None,
@@ -327,6 +332,20 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
     let num_lines = content_lines.len();
     let mut in_math_block = vec![false; num_lines];
 
+    // Precompute the highest-index non-code line that carries a `$$` marker
+    // (after blockquote stripping). An opener with no inline closer opens a
+    // multi-line block iff some later line carries `$$`; comparing against this
+    // single value makes that check O(1) instead of a full forward scan per
+    // unclosed opener.
+    let last_marker_line: Option<usize> = content_lines.iter().enumerate().rev().find_map(|(j, l)| {
+        if code_block_map.get(j).copied().unwrap_or(false) {
+            return None;
+        }
+        let t = l.trim();
+        let icj = crate::utils::blockquote::parse_blockquote_prefix(t).map_or(t, |p| p.content.trim());
+        icj.contains("$$").then_some(j)
+    });
+
     let mut inside_math = false;
 
     for (i, line) in content_lines.iter().enumerate() {
@@ -376,17 +395,12 @@ pub(super) fn compute_math_block_line_map(content_lines: &[&str], code_block_map
             //   still exempted while the trailing prose is checked.
             match after_open.find("$$") {
                 None => {
-                    // Look ahead for a closer using the same blockquote and
-                    // code-block treatment the close loop above applies, so
-                    // "would this block ever close" is decided identically.
-                    let has_closer = content_lines.iter().enumerate().skip(i + 1).any(|(j, l)| {
-                        if code_block_map.get(j).copied().unwrap_or(false) {
-                            return false;
-                        }
-                        let t = l.trim();
-                        let icj = crate::utils::blockquote::parse_blockquote_prefix(t).map_or(t, |p| p.content.trim());
-                        icj.contains("$$")
-                    });
+                    // The opener has no inline closer; it opens a multi-line
+                    // block iff some later non-code line carries `$$`. That is
+                    // exactly `last_marker_line > i` (the precomputed scan uses
+                    // the same blockquote/code-block treatment as the close
+                    // loop, so the decision is identical).
+                    let has_closer = last_marker_line.is_some_and(|last| last > i);
                     if has_closer {
                         in_math_block[i] = true;
                         inside_math = true;

@@ -635,9 +635,7 @@ impl MD032BlanksAroundLists {
                     let is_prev_excluded = ctx
                         .line_info(content_line)
                         .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                    let prev_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(prev_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(prev_line_str).map_or("", |m| m.as_str());
                     let prefixes_match = prev_prefix.trim() == prefix.trim();
 
                     // Only require blank lines for content in the same context (same blockquote level)
@@ -678,18 +676,14 @@ impl MD032BlanksAroundLists {
                         || (content_line <= ctx.lines.len()
                             && ctx.lines[content_line - 1].in_code_block
                             && ctx.lines[content_line - 1].indent >= 2);
-                    let next_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(next_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
 
                     // Check blockquote levels to detect boundary transitions
                     // If the list ends inside a blockquote but the following line exits the blockquote
                     // (fewer > chars in prefix), no blank line is needed - the blockquote boundary
                     // provides semantic separation
                     let end_line_str = lines[end_line - 1];
-                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(end_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE.find(end_line_str).map_or("", |m| m.as_str());
                     let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
                     let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
                     let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
@@ -922,9 +916,7 @@ impl MD032BlanksAroundLists {
                     let is_prev_excluded = ctx
                         .line_info(content_line)
                         .is_some_and(|info| info.in_code_block || info.in_front_matter);
-                    let prev_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(prev_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let prev_prefix = BLOCKQUOTE_PREFIX_RE.find(prev_line_str).map_or("", |m| m.as_str());
 
                     let should_require = Self::should_require_blank_line_before(ctx, content_line, start_line);
                     // Compare trimmed prefixes to handle varying whitespace after > markers
@@ -959,15 +951,11 @@ impl MD032BlanksAroundLists {
                                     .content(ctx.content)
                                     .trim()
                                     .starts_with("~~~")));
-                    let next_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(next_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let next_prefix = BLOCKQUOTE_PREFIX_RE.find(next_line_str).map_or("", |m| m.as_str());
 
                     // Check blockquote levels to detect boundary transitions
                     let end_line_str = lines[end_line - 1];
-                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE
-                        .find(end_line_str)
-                        .map_or(String::new(), |m| m.as_str().to_string());
+                    let end_line_prefix = BLOCKQUOTE_PREFIX_RE.find(end_line_str).map_or("", |m| m.as_str());
                     let end_line_bq_level = end_line_prefix.chars().filter(|&c| c == '>').count();
                     let next_line_bq_level = next_prefix.chars().filter(|&c| c == '>').count();
                     let exits_blockquote = end_line_bq_level > 0 && next_line_bq_level < end_line_bq_level;
