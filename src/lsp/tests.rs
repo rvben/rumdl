@@ -8,6 +8,17 @@ fn create_test_server() -> RumdlLanguageServer {
     service.inner().clone()
 }
 
+/// Build an absolute, cross-platform path for navigation/hover/rename tests.
+///
+/// A hardcoded `/tmp/...` literal is not an absolute path on Windows (it lacks a
+/// drive letter), so `Url::from_file_path` rejects it and the test panics during
+/// setup. Routing the suffix through `std::env::temp_dir()` yields a valid
+/// absolute path on every platform. These paths are used only as in-memory
+/// document and workspace-index keys; no files are created on disk.
+fn test_temp_path(suffix: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(suffix)
+}
+
 #[test]
 fn test_is_valid_rule_name() {
     // Valid rule names - canonical MDxxx format
@@ -3891,7 +3902,7 @@ async fn test_goto_definition_file_path_only() {
     let server = create_test_server();
 
     // Set up file paths
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4095,7 +4106,7 @@ async fn test_goto_definition_file_with_anchor() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test2/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test2/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4166,7 +4177,7 @@ async fn test_goto_definition_same_file_anchor() {
 
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test3/readme.md");
+    let file = test_temp_path("rumdl-nav-test3/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     // Content with a same-file anchor link
@@ -4221,7 +4232,7 @@ async fn test_goto_definition_same_file_anchor() {
 async fn test_goto_definition_cursor_not_on_link() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test4/readme.md");
+    let file = test_temp_path("rumdl-nav-test4/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "# Title\n\nJust some plain text here.\n";
@@ -4247,7 +4258,7 @@ async fn test_find_references_heading_with_incoming_links() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test5/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test5/docs");
     let target_file = docs_dir.join("guide.md");
     let source_file_a = docs_dir.join("index.md");
     let source_file_b = docs_dir.join("faq.md");
@@ -4407,7 +4418,7 @@ async fn test_find_references_heading_no_incoming_links() {
 
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test6/docs/lonely.md");
+    let file = test_temp_path("rumdl-nav-test6/docs/lonely.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "# Lonely Heading\n\nNo one links here.\n";
@@ -4446,7 +4457,7 @@ async fn test_goto_definition_with_custom_anchor() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test7/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test7/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4499,7 +4510,7 @@ async fn test_goto_definition_anchor_not_found_falls_back_to_line_zero() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test8/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test8/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4550,7 +4561,7 @@ async fn test_find_references_from_link_position() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test9/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test9/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
     let other_file = docs_dir.join("faq.md");
@@ -4622,7 +4633,7 @@ async fn test_find_references_from_target_file_without_selecting_link() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test9b/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test9b/docs");
     let source_file = docs_dir.join("file-to-link-from.md");
     let target_file = docs_dir.join("file-to-link-to.md");
 
@@ -4678,7 +4689,7 @@ async fn test_goto_definition_link_with_title() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test10/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test10/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4733,7 +4744,7 @@ async fn test_goto_definition_angle_bracket_link() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test11/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test11/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4786,7 +4797,7 @@ async fn test_find_references_includes_same_file_fragment_links() {
 
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test12/docs/readme.md");
+    let file = test_temp_path("rumdl-nav-test12/docs/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     // File with a heading and a same-file fragment link to it
@@ -4835,7 +4846,7 @@ async fn test_find_references_includes_same_file_fragment_links() {
 async fn test_goto_definition_external_url_returns_none() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-url-test/readme.md");
+    let file = test_temp_path("rumdl-nav-url-test/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "See [example](https://example.com) for details.\n";
@@ -4858,7 +4869,7 @@ async fn test_goto_definition_external_url_returns_none() {
 async fn test_goto_definition_mailto_returns_none() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-mailto-test/readme.md");
+    let file = test_temp_path("rumdl-nav-mailto-test/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Email [us](mailto:info@example.com) for help.\n";
@@ -4886,7 +4897,7 @@ async fn test_goto_definition_reference_link() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-ref-test/docs");
+    let docs_dir = test_temp_path("rumdl-nav-ref-test/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4939,7 +4950,7 @@ async fn test_goto_definition_collapsed_reference() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-collapsed-test/docs");
+    let docs_dir = test_temp_path("rumdl-nav-collapsed-test/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -4991,7 +5002,7 @@ async fn test_goto_definition_reference_definition_line() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-refdef-test/docs");
+    let docs_dir = test_temp_path("rumdl-nav-refdef-test/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -5038,7 +5049,7 @@ async fn test_goto_definition_reference_definition_line() {
 async fn test_goto_definition_reference_link_external_url() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-ref-ext-test/readme.md");
+    let file = test_temp_path("rumdl-nav-ref-ext-test/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     // Reference link that resolves to an external URL
@@ -5561,7 +5572,7 @@ async fn test_find_references_fallback_to_file_links() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test-fallback/docs");
     let target_file = docs_dir.join("file-to-link-to.md");
     let source_file = docs_dir.join("file-to-link-from.md");
 
@@ -5620,7 +5631,7 @@ async fn test_find_references_fallback_no_references() {
 
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback2/docs/lonely.md");
+    let file = test_temp_path("rumdl-nav-test-fallback2/docs/lonely.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Some text without anything special.\n";
@@ -5652,7 +5663,7 @@ async fn test_find_references_fallback_multiple_sources() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback3/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test-fallback3/docs");
     let target_file = docs_dir.join("target.md");
     let source_a = docs_dir.join("a.md");
     let source_b = docs_dir.join("b.md");
@@ -5716,7 +5727,7 @@ async fn test_find_references_heading_takes_priority_over_fallback() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-nav-test-fallback4/docs");
+    let docs_dir = test_temp_path("rumdl-nav-test-fallback4/docs");
     let target_file = docs_dir.join("guide.md");
     let source_with_anchor = docs_dir.join("a.md");
     let source_without_anchor = docs_dir.join("b.md");
@@ -5796,7 +5807,7 @@ async fn test_hover_inline_link_to_file() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test1/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test1/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -5863,7 +5874,7 @@ async fn test_hover_buffer_uri_resolves_via_workspace_root() {
     // the base directory for relative link targets.
     let server = create_test_server();
 
-    let workspace = std::path::PathBuf::from("/tmp/rumdl-hover-buffer/proj");
+    let workspace = test_temp_path("rumdl-hover-buffer/proj");
     let target_file = workspace.join("results.md");
     let target_uri = Url::from_file_path(&target_file).unwrap();
 
@@ -5948,7 +5959,7 @@ async fn test_hover_non_markdown_file_preview_is_fenced() {
     // syntax-highlight it.
     let server = create_test_server();
 
-    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-fence/proj");
+    let dir = test_temp_path("rumdl-hover-fence/proj");
     let current_file = dir.join("index.md");
     let target_file = dir.join("source.py");
     let current_uri = Url::from_file_path(&current_file).unwrap();
@@ -6000,7 +6011,7 @@ async fn test_hover_markdown_file_preview_not_fenced() {
     // and emphasis in the preview render natively.
     let server = create_test_server();
 
-    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-md/proj");
+    let dir = test_temp_path("rumdl-hover-md/proj");
     let current_file = dir.join("index.md");
     let target_file = dir.join("guide.md");
     let current_uri = Url::from_file_path(&current_file).unwrap();
@@ -6044,7 +6055,7 @@ async fn test_hover_markdown_file_preview_not_fenced() {
 // Helper: insert current + target documents and return the configured server.
 async fn setup_line_anchor_hover(link_line: &str, target_content: &str) -> (RumdlLanguageServer, Url) {
     let server = create_test_server();
-    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-lineanchor/proj");
+    let dir = test_temp_path("rumdl-hover-lineanchor/proj");
     let current_file = dir.join("index.md");
     let target_file = dir.join("sample.py");
     let current_uri = Url::from_file_path(&current_file).unwrap();
@@ -6135,7 +6146,7 @@ async fn test_hover_inline_link_with_anchor() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test2/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test2/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6222,7 +6233,7 @@ async fn test_hover_reference_style_link() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test3/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test3/docs");
     let current_file = docs_dir.join("readme.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6284,7 +6295,7 @@ async fn test_hover_reference_style_link() {
 async fn test_hover_external_url() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test4/readme.md");
+    let file = test_temp_path("rumdl-hover-test4/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Visit [example](https://example.com) for more.\n";
@@ -6316,7 +6327,7 @@ async fn test_hover_external_url() {
 async fn test_hover_plain_text_returns_none() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test5/readme.md");
+    let file = test_temp_path("rumdl-hover-test5/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Just some plain text here.\n";
@@ -6340,7 +6351,7 @@ async fn test_hover_plain_text_returns_none() {
 async fn test_hover_nonexistent_file_returns_none() {
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test6/readme.md");
+    let file = test_temp_path("rumdl-hover-test6/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "See [missing](nonexistent.md) file.\n";
@@ -6366,7 +6377,7 @@ async fn test_hover_same_file_anchor() {
 
     let server = create_test_server();
 
-    let file = std::path::PathBuf::from("/tmp/rumdl-hover-test7/readme.md");
+    let file = test_temp_path("rumdl-hover-test7/readme.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "# Title\n\nSee [below](#configuration) for config.\n\nSome text.\n\n## Configuration\n\nSet `key = value` in config.\n\nMore config details.\n";
@@ -6420,7 +6431,7 @@ async fn test_hover_file_preview_truncates() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test8/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test8/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("long.md");
 
@@ -6479,7 +6490,7 @@ async fn test_hover_anchor_section_end_no_ellipsis() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test9/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test9/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6559,7 +6570,7 @@ async fn test_hover_anchor_preview_skips_code_block_hashes() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test10/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test10/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6627,7 +6638,7 @@ async fn test_hover_empty_file() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test11/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test11/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("empty.md");
 
@@ -6678,7 +6689,7 @@ async fn test_hover_anchor_does_not_stop_at_hashtag_word() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test12/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test12/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6746,7 +6757,7 @@ async fn test_hover_anchor_stops_at_indented_heading() {
 
     let server = create_test_server();
 
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-hover-test13/docs");
+    let docs_dir = test_temp_path("rumdl-hover-test13/docs");
     let current_file = docs_dir.join("index.md");
     let target_file = docs_dir.join("guide.md");
 
@@ -6820,7 +6831,7 @@ async fn test_prepare_rename_atx_heading() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test1/doc.md");
+    let file = test_temp_path("rumdl-rename-test1/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Installation Guide\n\nSome content.\n";
@@ -6865,7 +6876,7 @@ async fn test_prepare_rename_setext_heading() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test2/doc.md");
+    let file = test_temp_path("rumdl-rename-test2/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Installation Guide\n==================\n\nContent.\n";
@@ -6907,7 +6918,7 @@ async fn test_prepare_rename_setext_heading() {
 #[tokio::test]
 async fn test_prepare_rename_not_heading() {
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test3/doc.md");
+    let file = test_temp_path("rumdl-rename-test3/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "Just some text here.\n";
@@ -6930,7 +6941,7 @@ async fn test_rename_heading_updates_same_file_links() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test4/doc.md");
+    let file = test_temp_path("rumdl-rename-test4/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content =
@@ -6982,7 +6993,7 @@ async fn test_rename_heading_with_custom_anchor_only_changes_text() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test5/doc.md");
+    let file = test_temp_path("rumdl-rename-test5/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Guide {#install}\n\nSee [link](#install) for details.\n";
@@ -7026,7 +7037,7 @@ async fn test_rename_heading_updates_cross_file_links() {
     use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-rename-test6/docs");
+    let docs_dir = test_temp_path("rumdl-rename-test6/docs");
     let target_file = docs_dir.join("guide.md");
     let source_file = docs_dir.join("index.md");
 
@@ -7103,7 +7114,7 @@ async fn test_rename_refuses_empty_name() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test7/doc.md");
+    let file = test_temp_path("rumdl-rename-test7/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Heading\n";
@@ -7142,7 +7153,7 @@ async fn test_rename_refuses_anchor_collision() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test8/doc.md");
+    let file = test_temp_path("rumdl-rename-test8/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Foo\n\n## Bar\n";
@@ -7186,7 +7197,7 @@ async fn test_rename_heading_with_closing_atx() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test9/doc.md");
+    let file = test_temp_path("rumdl-rename-test9/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Hello ##\n";
@@ -7230,7 +7241,7 @@ async fn test_rename_updates_same_file_ref_definitions() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let file = std::path::PathBuf::from("/tmp/rumdl-rename-test10/doc.md");
+    let file = test_temp_path("rumdl-rename-test10/doc.md");
     let uri = Url::from_file_path(&file).unwrap();
 
     let content = "## Getting Started\n\nSee [ref] for info.\n\n[ref]: #getting-started\n";
@@ -7284,7 +7295,7 @@ async fn test_rename_cross_file_multiple_links_same_line() {
     use crate::workspace_index::{CrossFileLinkIndex, FileIndex, HeadingIndex};
 
     let server = create_test_server();
-    let docs_dir = std::path::PathBuf::from("/tmp/rumdl-rename-test11/docs");
+    let docs_dir = test_temp_path("rumdl-rename-test11/docs");
     let target_file = docs_dir.join("guide.md");
     let source_file = docs_dir.join("index.md");
 
