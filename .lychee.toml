@@ -18,6 +18,11 @@ include_mail = false
 # Accept 429 (rate limiting) as valid
 accept = [200, 429]
 
+# Exclude URLs from checking (regex). npmjs.com returns 403 to automated link
+# checkers due to bot protection; the package page is valid and is linked from
+# the stability docs alongside crates.io and PyPI.
+exclude = ['^https://www\.npmjs\.com/']
+
 # Timeout per request in seconds
 timeout = 30
 
