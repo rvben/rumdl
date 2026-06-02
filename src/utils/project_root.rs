@@ -122,6 +122,8 @@ mod tests {
         assert_eq!(discover_project_root_from(&start), inner, "closest marker should win");
     }
 
+    // Uses Unix symlinks; Windows symlink creation requires elevated privileges.
+    #[cfg(unix)]
     #[test]
     fn test_canonicalizes_symlinked_root() {
         let temp = tempdir().unwrap();

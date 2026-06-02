@@ -441,6 +441,8 @@ fn get_process_memory(pid: u32) -> Result<u64, Box<dyn std::error::Error>> {
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
+        // pid is only consumed by the macOS/Linux implementations above.
+        let _ = pid;
         // For other platforms, return a dummy value
         Ok(1000) // 1MB baseline
     }

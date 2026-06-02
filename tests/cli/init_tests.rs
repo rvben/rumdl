@@ -51,32 +51,34 @@ fn test_create_default_config_existing_file() {
     assert_eq!(content, "dummy content");
 }
 
+// The read-only-directory permission model is Unix-specific; on Windows a
+// read-only directory does not block file creation the same way, so this test
+// only exists on Unix.
+#[cfg(unix)]
 #[test]
 fn test_create_default_config_permission_error() {
-    if cfg!(unix) {
-        // Skip this test on Windows as permission model is different
-        // Create a temporary directory with no write permissions
-        let temp_dir = tempdir().unwrap();
-        let unwritable_dir = temp_dir.path().join("unwritable");
-        fs::create_dir(&unwritable_dir).unwrap();
+    use std::os::unix::fs::PermissionsExt;
 
-        // On Unix, set directory permissions to read-only (no write access)
-        use std::os::unix::fs::PermissionsExt;
-        let read_only = fs::Permissions::from_mode(0o555);
-        fs::set_permissions(&unwritable_dir, read_only).unwrap();
+    // Create a temporary directory with no write permissions
+    let temp_dir = tempdir().unwrap();
+    let unwritable_dir = temp_dir.path().join("unwritable");
+    fs::create_dir(&unwritable_dir).unwrap();
 
-        // Try to create config file in read-only directory
-        let config_path = unwritable_dir.join("rumdl.toml");
-        let config_path_str = config_path.to_str().unwrap();
+    // Set directory permissions to read-only (no write access)
+    let read_only = fs::Permissions::from_mode(0o555);
+    fs::set_permissions(&unwritable_dir, read_only).unwrap();
 
-        let result = create_default_config(config_path_str);
-        assert!(result.is_err());
-        match result {
-            Err(ConfigError::IoError { path, .. }) => {
-                assert_eq!(path, config_path_str);
-            }
-            _ => panic!("Expected IoError variant"),
+    // Try to create config file in read-only directory
+    let config_path = unwritable_dir.join("rumdl.toml");
+    let config_path_str = config_path.to_str().unwrap();
+
+    let result = create_default_config(config_path_str);
+    assert!(result.is_err());
+    match result {
+        Err(ConfigError::IoError { path, .. }) => {
+            assert_eq!(path, config_path_str);
         }
+        _ => panic!("Expected IoError variant"),
     }
 }
 

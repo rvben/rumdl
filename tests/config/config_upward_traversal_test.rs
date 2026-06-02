@@ -1,4 +1,6 @@
 use std::fs;
+// Only the Unix-gated symlink test below uses this.
+#[cfg(unix)]
 use std::os::unix::fs as unix_fs;
 use std::process::Command;
 use tempfile::tempdir;
