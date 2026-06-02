@@ -5857,6 +5857,279 @@ async fn test_hover_inline_link_to_file() {
 }
 
 #[tokio::test]
+async fn test_hover_buffer_uri_resolves_via_workspace_root() {
+    // Issue #647: links in unsaved buffers (non-file:// URIs like `buffer:647`)
+    // must still resolve their hover preview, using the first workspace root as
+    // the base directory for relative link targets.
+    let server = create_test_server();
+
+    let workspace = std::path::PathBuf::from("/tmp/rumdl-hover-buffer/proj");
+    let target_file = workspace.join("results.md");
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    // Unsaved buffer: a non-file URI with no on-disk path.
+    let buffer_uri = Url::parse("buffer:647").unwrap();
+    let content = "# Notes\n\nSee [results](results.md) for details.\n";
+    server.documents.write().await.insert(
+        buffer_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let target_content = "# Results\n\nThe results are good.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Clients like Sublime/VS Code send rootUri/workspaceFolders on initialize.
+    server.workspace_roots.write().await.push(workspace.clone());
+
+    // Cursor on "results.md" inside `](results.md)`
+    let position = Position { line: 2, character: 17 };
+
+    let result = server.handle_hover(&buffer_uri, position).await;
+    assert!(
+        result.is_some(),
+        "Hover on a buffer-URI link should resolve via the workspace root"
+    );
+    if let HoverContents::Markup(markup) = result.unwrap().contents {
+        assert!(
+            markup.value.contains("results.md"),
+            "preview should name the target file: {}",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("The results are good"),
+            "preview should include target content: {}",
+            markup.value
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_buffer_uri_without_workspace_root_returns_none() {
+    // Without any workspace root there is no base directory to resolve a relative
+    // link against, so hover degrades gracefully to None (same as before the fix).
+    let server = create_test_server();
+
+    let buffer_uri = Url::parse("buffer:647").unwrap();
+    let content = "See [x](results.md) here.\n";
+    server.documents.write().await.insert(
+        buffer_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let position = Position { line: 0, character: 10 };
+    let result = server.handle_hover(&buffer_uri, position).await;
+    assert!(
+        result.is_none(),
+        "A buffer link with no workspace root has no base dir to resolve against"
+    );
+}
+
+#[tokio::test]
+async fn test_hover_non_markdown_file_preview_is_fenced() {
+    // Issue #648: a preview of a non-markdown file is wrapped in a fenced code
+    // block tagged with a language derived from the extension, so editors can
+    // syntax-highlight it.
+    let server = create_test_server();
+
+    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-fence/proj");
+    let current_file = dir.join("index.md");
+    let target_file = dir.join("source.py");
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [src](source.py) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let target_content = "import os\n\ndef main():\n    pass\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on "source.py"
+    let position = Position { line: 0, character: 13 };
+    let result = server.handle_hover(&current_uri, position).await;
+    assert!(result.is_some(), "Should return a hover preview for the file link");
+    if let HoverContents::Markup(markup) = result.unwrap().contents {
+        assert!(
+            markup.value.contains("```python"),
+            "non-markdown preview should open a python code fence: {}",
+            markup.value
+        );
+        assert!(
+            markup.value.contains("import os"),
+            "preview should include the file content: {}",
+            markup.value
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_markdown_file_preview_not_fenced() {
+    // A markdown target keeps rendering as markdown (no code fence), so headings
+    // and emphasis in the preview render natively.
+    let server = create_test_server();
+
+    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-md/proj");
+    let current_file = dir.join("index.md");
+    let target_file = dir.join("guide.md");
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    let content = "See [g](guide.md) here.\n";
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let target_content = "# Guide\n\nSome plain text.\n";
+    server.documents.write().await.insert(
+        target_uri.clone(),
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on "guide.md"
+    let position = Position { line: 0, character: 12 };
+    let result = server.handle_hover(&current_uri, position).await.unwrap();
+    if let HoverContents::Markup(markup) = result.contents {
+        assert!(
+            !markup.value.contains("```"),
+            "markdown preview must not be code-fenced: {}",
+            markup.value
+        );
+        assert!(markup.value.contains("# Guide"), "preview should include the heading");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+// Helper: insert current + target documents and return the configured server.
+async fn setup_line_anchor_hover(link_line: &str, target_content: &str) -> (RumdlLanguageServer, Url) {
+    let server = create_test_server();
+    let dir = std::path::PathBuf::from("/tmp/rumdl-hover-lineanchor/proj");
+    let current_file = dir.join("index.md");
+    let target_file = dir.join("sample.py");
+    let current_uri = Url::from_file_path(&current_file).unwrap();
+    let target_uri = Url::from_file_path(&target_file).unwrap();
+
+    server.documents.write().await.insert(
+        current_uri.clone(),
+        DocumentEntry {
+            content: format!("{link_line}\n"),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    server.documents.write().await.insert(
+        target_uri,
+        DocumentEntry {
+            content: target_content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    (server, current_uri)
+}
+
+#[tokio::test]
+async fn test_hover_single_line_anchor() {
+    // Issue #648: `#L12` shows the target line with five lines of context on each
+    // side (lines 7-17), fenced with a language hint.
+    let rows = (1..=20).map(|n| format!("row {n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+    let (server, uri) = setup_line_anchor_hover("See [code](sample.py#L12) here.", &rows).await;
+
+    let position = Position { line: 0, character: 18 };
+    let result = server.handle_hover(&uri, position).await.unwrap();
+    if let HoverContents::Markup(markup) = result.contents {
+        let v = &markup.value;
+        assert!(v.contains("```python"), "line preview should be fenced: {v}");
+        assert!(v.contains("row 07"), "should include 5 lines above (line 7): {v}");
+        assert!(v.contains("row 12"), "should include the target line: {v}");
+        assert!(v.contains("row 17"), "should include 5 lines below (line 17): {v}");
+        assert!(!v.contains("row 06"), "should not include line 6: {v}");
+        assert!(!v.contains("row 18"), "should not include line 18: {v}");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_line_range_anchor() {
+    // `#L5-L8` shows exactly that line range.
+    let rows = (1..=20).map(|n| format!("row {n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+    let (server, uri) = setup_line_anchor_hover("See [code](sample.py#L5-L8) here.", &rows).await;
+
+    let position = Position { line: 0, character: 18 };
+    let result = server.handle_hover(&uri, position).await.unwrap();
+    if let HoverContents::Markup(markup) = result.contents {
+        let v = &markup.value;
+        assert!(v.contains("row 05"), "range should include line 5: {v}");
+        assert!(v.contains("row 08"), "range should include line 8: {v}");
+        assert!(!v.contains("row 04"), "range should not include line 4: {v}");
+        assert!(!v.contains("row 09"), "range should not include line 9: {v}");
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
+async fn test_hover_line_anchor_out_of_range() {
+    // A line number past EOF returns a graceful note rather than nothing.
+    let (server, uri) = setup_line_anchor_hover("See [c](sample.py#L99) here.", "one\ntwo\nthree\n").await;
+
+    let position = Position { line: 0, character: 16 };
+    let result = server.handle_hover(&uri, position).await;
+    assert!(result.is_some(), "out-of-range line anchor should still return a hover");
+    if let HoverContents::Markup(markup) = result.unwrap().contents {
+        assert!(
+            markup.value.contains("99"),
+            "note should mention the requested line: {}",
+            markup.value
+        );
+    } else {
+        panic!("Expected Markup hover contents");
+    }
+}
+
+#[tokio::test]
 async fn test_hover_inline_link_with_anchor() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 
