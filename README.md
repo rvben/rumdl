@@ -133,6 +133,7 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
   - [Output Format](#output-format)
     - [Text Output (Default)](#text-output-default)
     - [JSON Output](#json-output)
+- [Stability](#stability)
 - [Development](#development)
   - [Prerequisites](#prerequisites)
   - [Building](#building)
@@ -1202,11 +1203,19 @@ This produces structured JSON output:
 }
 ```
 
+## Stability
+
+rumdl is currently **Beta** while its compatibility policy and 1.0 exit criteria are formalized. The core CLI, configuration model, and rule set are already intended for production use.
+
+See [Stability and Compatibility](docs/stability.md) for the compatibility guarantees, versioning, deprecation, and MSRV policies, and a dateless checklist of what remains before 1.0.
+
+If a release breaks something documented as stable, that is a bug.
+
 ## Development
 
 ### Prerequisites
 
-- Rust 1.91 or higher
+- Rust 1.94 or higher
 - Make (for development commands)
 
 ### Building

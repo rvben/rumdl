@@ -106,4 +106,8 @@ With intelligent caching, subsequent runs are even faster - rumdl only re-lints 
 
     Customize rumdl for your project.
 
+-   [:octicons-shield-check-24: **Stability**](stability.md)
+
+    What you can rely on, the versioning policy, and the path to 1.0.
+
 </div>
