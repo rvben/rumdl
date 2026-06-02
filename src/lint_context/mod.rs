@@ -74,18 +74,19 @@ pub struct LintContext<'a> {
     pub list_blocks: Vec<ListBlock>,      // Pre-parsed list blocks
     pub char_frequency: CharFrequency,    // Character frequency analysis
     html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
+    jsx_component_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded JSX component tags (shares the html_tags parse)
     emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
-    table_rows_cache: OnceLock<Arc<Vec<TableRow>>>, // Lazy-loaded table rows
-    bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>, // Lazy-loaded bare URLs
+    table_rows_cache: OnceLock<Arc<Vec<TableRow>>>,        // Lazy-loaded table rows
+    bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,          // Lazy-loaded bare URLs
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
     pub table_blocks: Vec<crate::utils::table_utils::TableBlock>, // Pre-computed table blocks
     pub line_index: crate::utils::range_utils::LineIndex<'a>, // Pre-computed line index for byte position calculations
-    jinja_ranges: Vec<(usize, usize)>,    // Pre-computed Jinja template ranges ({{ }}, {% %})
-    pub flavor: MarkdownFlavor,           // Markdown flavor being used
-    pub source_file: Option<PathBuf>,     // Source file path (for rules that need file context)
-    jsx_expression_ranges: Vec<(usize, usize)>, // Pre-computed JSX expression ranges (MDX: {expression})
-    mdx_comment_ranges: Vec<(usize, usize)>, // Pre-computed MDX comment ranges ({/* ... */})
+    jinja_ranges: Vec<(usize, usize)>,            // Pre-computed Jinja template ranges ({{ }}, {% %})
+    pub flavor: MarkdownFlavor,                   // Markdown flavor being used
+    pub source_file: Option<PathBuf>,             // Source file path (for rules that need file context)
+    jsx_expression_ranges: Vec<(usize, usize)>,   // Pre-computed JSX expression ranges (MDX: {expression})
+    mdx_comment_ranges: Vec<(usize, usize)>,      // Pre-computed MDX comment ranges ({/* ... */})
     citation_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto citation ranges (@key, [@key])
     pandoc_div_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed Pandoc/Quarto div block ranges (::: ... :::)
     colon_fence_ranges: Vec<(usize, usize)>, // Pre-computed Azure DevOps colon code fence ranges (:::lang ... :::)
@@ -848,6 +849,7 @@ impl<'a> LintContext<'a> {
             list_blocks,
             char_frequency,
             html_tags_cache: OnceLock::new(),
+            jsx_component_tags_cache: OnceLock::new(),
             emphasis_spans_cache: OnceLock::from(Arc::new(emphasis_spans)),
             table_rows_cache: OnceLock::new(),
             bare_urls_cache: OnceLock::new(),
@@ -1030,22 +1032,48 @@ impl<'a> LintContext<'a> {
         })
     }
 
-    /// Get HTML tags - computed lazily on first access
+    /// Drop tags that live inside kramdown extension blocks, preserving order.
+    fn filter_kramdown_tags(&self, tags: Vec<HtmlTag>) -> Vec<HtmlTag> {
+        tags.into_iter()
+            .filter(|tag| {
+                !self
+                    .lines
+                    .get(tag.line - 1)
+                    .is_some_and(|l| l.in_kramdown_extension_block)
+            })
+            .collect()
+    }
+
+    /// Get HTML tags - computed lazily on first access.
+    ///
+    /// JSX component tags (e.g. `<Card .../>`) are excluded so HTML-specific rules
+    /// keep ignoring them; use [`Self::jsx_component_tags`] to access those. The
+    /// single underlying parse populates both caches at once.
     pub fn html_tags(&self) -> Arc<Vec<HtmlTag>> {
         Arc::clone(self.html_tags_cache.get_or_init(|| {
-            let tags = element_parsers::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
-            // Filter out HTML tags inside kramdown extension blocks
-            Arc::new(
-                tags.into_iter()
-                    .filter(|tag| {
-                        !self
-                            .lines
-                            .get(tag.line - 1)
-                            .is_some_and(|l| l.in_kramdown_extension_block)
-                    })
-                    .collect(),
-            )
+            let (html_tags, jsx_component_tags) =
+                element_parsers::parse_html_tags(self.content, &self.lines, &self.code_blocks, self.flavor);
+            // Populate the JSX-component cache from the same parse so it is built once.
+            let _ = self
+                .jsx_component_tags_cache
+                .set(Arc::new(self.filter_kramdown_tags(jsx_component_tags)));
+            Arc::new(self.filter_kramdown_tags(html_tags))
         }))
+    }
+
+    /// Get JSX component tags (e.g. `<Card .../>`) - computed lazily, sharing the
+    /// HTML-tag parse. Always empty for flavors without JSX support.
+    pub fn jsx_component_tags(&self) -> Arc<Vec<HtmlTag>> {
+        if let Some(cached) = self.jsx_component_tags_cache.get() {
+            return Arc::clone(cached);
+        }
+        // Trigger the shared parse, which also fills jsx_component_tags_cache.
+        let _ = self.html_tags();
+        Arc::clone(
+            self.jsx_component_tags_cache
+                .get()
+                .expect("html_tags() populates jsx_component_tags_cache"),
+        )
     }
 
     /// Get emphasis spans - pre-computed during construction
@@ -1290,6 +1318,19 @@ impl<'a> LintContext<'a> {
     #[inline]
     pub fn is_in_html_tag(&self, byte_pos: usize) -> bool {
         let tags = self.html_tags();
+        let idx = tags.partition_point(|tag| tag.byte_offset <= byte_pos);
+        idx > 0 && byte_pos < tags[idx - 1].byte_end
+    }
+
+    /// Check if a byte position is within a JSX component tag (e.g. `<Card .../>`),
+    /// including its attribute values and multiline tags. Always false for flavors
+    /// without JSX support. O(log n).
+    #[inline]
+    pub fn is_in_jsx_component_tag(&self, byte_pos: usize) -> bool {
+        if !self.flavor.supports_jsx() {
+            return false;
+        }
+        let tags = self.jsx_component_tags();
         let idx = tags.partition_point(|tag| tag.byte_offset <= byte_pos);
         idx > 0 && byte_pos < tags[idx - 1].byte_end
     }

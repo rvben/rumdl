@@ -312,6 +312,13 @@ impl MD034NoBareUrls {
                 continue;
             }
 
+            // Check if URL is a JSX component attribute value (e.g. `<Card href="..."/>`).
+            // These are string props, not bare prose; wrapping them in angle brackets
+            // would produce invalid JSX. No-op for non-JSX flavors.
+            if ctx.is_in_jsx_component_tag(absolute_pos) {
+                continue;
+            }
+
             // Check if we're inside an HTML comment
             if ctx.is_in_html_comment(absolute_pos) || ctx.is_in_mdx_comment(absolute_pos) {
                 continue;
@@ -395,6 +402,12 @@ impl MD034NoBareUrls {
 
                     // Check if email is inside an HTML tag (handles multiline tags)
                     if ctx.is_in_html_tag(absolute_pos) {
+                        continue;
+                    }
+
+                    // Check if email is a JSX component attribute value (e.g.
+                    // `<Contact email="..."/>`). No-op for non-JSX flavors.
+                    if ctx.is_in_jsx_component_tag(absolute_pos) {
                         continue;
                     }
 
@@ -668,6 +681,82 @@ mod tests {
         assert!(
             result.is_empty(),
             "URL in backticks inside nested MDX component must not be flagged: {result:?}"
+        );
+    }
+
+    /// Issue #649: a URL that is a JSX component attribute value (e.g. `href="..."`)
+    /// is a string prop, not bare prose. Wrapping it in angle brackets produces
+    /// invalid JSX, so MD034 must not flag it under the MDX flavor.
+    #[test]
+    fn test_url_in_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card title=\"Docs\" href=\"https://example.com/docs\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// The same exemption must apply when the JSX opening tag spans multiple lines.
+    #[test]
+    fn test_url_in_multiline_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card\n  title=\"Docs\"\n  href=\"https://example.com/docs\"\n/>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a multi-line JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// The exemption is surgical: a URL in the component's *attributes* is skipped,
+    /// but a bare URL in the component's *body* is genuine prose and still flagged.
+    #[test]
+    fn test_jsx_attribute_url_skipped_but_body_url_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card href=\"https://attr.example.com\">\n  Visit https://body.example.com now.\n</Card>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Only the body URL must be flagged, not the attribute URL: {result:?}"
+        );
+        assert!(
+            result[0].message.contains("body.example.com"),
+            "The flagged URL must be the body one: {result:?}"
+        );
+    }
+
+    /// The email path has the same JSX-attribute blind spot; an email used as a
+    /// JSX component attribute value must not be flagged either.
+    #[test]
+    fn test_email_in_jsx_component_attribute_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "<Contact email=\"hello@example.com\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Email in a JSX component attribute must not be flagged: {result:?}"
+        );
+    }
+
+    /// Control: under the Standard flavor `<Card .../>` is parsed as an HTML tag,
+    /// so the attribute URL is already covered by the existing HTML-tag guard.
+    /// This locks in that the two flavors agree.
+    #[test]
+    fn test_jsx_attribute_url_not_flagged_in_standard_flavor() {
+        let rule = MD034NoBareUrls;
+        let content = "<Card href=\"https://example.com/docs\" />\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a tag attribute must not be flagged under Standard flavor either: {result:?}"
         );
     }
 
