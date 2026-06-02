@@ -9,6 +9,7 @@ rules:
     ignore:
       - ci.yml
       - docs.yml
+      - idempotency.yml
       - performance.yml
       - release.yml
       - sync-schemastore.yml

@@ -1,0 +1,47 @@
+name: Idempotency
+
+# Runs the formatter idempotency property tests at a high case count
+# (PROPTEST_CASES=2000). This is too slow to gate every pull request, so it runs
+# nightly and on demand. The regular `make test-ci` already runs the same tests
+# at lower case counts on every push and pull request.
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  idempotency:
+    name: Formatter idempotency (high case count)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install mise tools
+        run: |
+          for attempt in 1 2 3; do
+            mise install --yes && break
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+
+      - name: Run high-case-count idempotency property tests
+        run: make test-idempotency
