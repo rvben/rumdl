@@ -291,11 +291,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
                 // Collect warnings for batch output formats
                 if needs_collection && !warnings.is_empty() {
-                    let display_path = if args.show_full_path {
-                        file_path.clone()
-                    } else {
-                        crate::file_processor::to_display_path(&file_path, project_root)
-                    };
+                    let display_path =
+                        crate::file_processor::resolve_display_path(&file_path, args.show_full_path, project_root);
                     batch_file_warnings.push((display_path, warnings.clone()));
                 }
 
@@ -399,11 +396,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
                 // Collect warnings for batch output formats
                 if needs_collection && !warnings.is_empty() {
-                    let display_path = if args.show_full_path {
-                        file_path.to_string()
-                    } else {
-                        crate::file_processor::to_display_path(file_path, project_root)
-                    };
+                    let display_path =
+                        crate::file_processor::resolve_display_path(file_path, args.show_full_path, project_root);
                     batch_file_warnings.push((display_path, warnings.clone()));
                 }
 
@@ -516,11 +510,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                         has_errors = true;
                     }
 
-                    let display_path = if args.show_full_path {
-                        file_path.to_string_lossy().to_string()
-                    } else {
-                        crate::file_processor::to_display_path(&file_path.to_string_lossy(), project_root)
-                    };
+                    let display_path = crate::file_processor::resolve_display_path(
+                        &file_path.to_string_lossy(),
+                        args.show_full_path,
+                        project_root,
+                    );
 
                     if needs_collection {
                         // Collect cross-file warnings for batch output

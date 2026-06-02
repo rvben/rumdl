@@ -231,18 +231,40 @@ pub fn to_display_path(file_path: &str, project_root: Option<&Path>) -> String {
     if let Some(root) = project_root
         && let Some(relative) = strip_base_prefix(effective_path, root)
     {
-        return relative;
+        return normalize_separators(relative);
     }
 
     // Fall back to CWD-relative
     if let Ok(cwd) = std::env::current_dir()
         && let Some(relative) = strip_base_prefix(effective_path, &cwd)
     {
-        return relative;
+        return normalize_separators(relative);
     }
 
     // If all else fails, return as-is
-    file_path.to_string()
+    normalize_separators(file_path.to_string())
+}
+
+/// Resolve the path string to show in output for a file.
+///
+/// With `show_full_path` the path is shown as-is (not relativized); otherwise it
+/// is relativized via [`to_display_path`]. In both cases the result uses `/`
+/// separators for consistent output across platforms.
+pub fn resolve_display_path(file_path: &str, show_full_path: bool, project_root: Option<&Path>) -> String {
+    if show_full_path {
+        normalize_separators(file_path.to_string())
+    } else {
+        to_display_path(file_path, project_root)
+    }
+}
+
+/// Normalize path separators to `/` for consistent cross-platform output.
+///
+/// Only the platform's native separator is converted: on Windows `\` becomes `/`.
+/// On Unix this is a no-op, where `\` is a legal filename character that must be
+/// preserved.
+fn normalize_separators(path: String) -> String {
+    if cfg!(windows) { path.replace('\\', "/") } else { path }
 }
 
 /// Try to strip a base path prefix from a file path.
