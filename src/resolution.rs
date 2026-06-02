@@ -28,18 +28,22 @@ pub struct ConfigGroup {
 /// Root-level means the config lives directly in the project root
 /// or in `project_root/.config/`. Both are considered the "root config"
 /// and should not create a separate subdirectory group.
+///
+/// Paths are canonicalized before comparison so platform-specific
+/// representations do not cause a false negative. On Windows the discovered
+/// `config_path` is a canonical, long-name `\\?\` path while `project_root` may
+/// be an 8.3 short name (e.g. `RUNNER~1`); on Unix symlinks can differ. A false
+/// negative here misclassifies the root config as a subdirectory config and
+/// reloads it without the inline `--config` overrides.
 fn is_root_level_config(config_path: &Path, project_root: &Path) -> bool {
-    if let Some(parent) = config_path.parent() {
-        // Direct child of project root: .rumdl.toml, rumdl.toml, pyproject.toml
-        if parent == project_root {
-            return true;
-        }
-        // Config in .config/ subdirectory: .config/rumdl.toml
-        if parent == project_root.join(".config") {
-            return true;
-        }
-    }
-    false
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let Some(parent) = config_path.parent() else {
+        return false;
+    };
+    let parent = canon(parent);
+    // Direct child of project root: .rumdl.toml, rumdl.toml, pyproject.toml
+    // or config in a `.config/` subdirectory: .config/rumdl.toml
+    parent == canon(project_root) || parent == canon(&project_root.join(".config"))
 }
 
 /// Resolve files into config groups based on per-directory config discovery.
