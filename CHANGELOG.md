@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.6](https://github.com/rvben/rumdl/compare/v0.2.5...v0.2.6) - 2026-06-03
+
+### Fixed
+
+- **config**: stop directory config discovery at the canonical project root ([ef9f3f6](https://github.com/rvben/rumdl/commit/ef9f3f618febea769004a2e3d0c1d42ff05bb31c))
+- **config**: match root config by canonical path in per-directory resolution ([4442a9f](https://github.com/rvben/rumdl/commit/4442a9fe86c771d09f317df40765b3e2c327d0a8))
+- **output**: relativize the verbose 'Processing file' path on Windows ([35986d6](https://github.com/rvben/rumdl/commit/35986d6c51e1f4f55c87ea4a91988da03c0a180d))
+- **output**: normalize remaining displayed paths to forward slashes on Windows ([dbfb3ef](https://github.com/rvben/rumdl/commit/dbfb3ef35c25256b9320240042c9fc9dc7685afa))
+- **output**: use forward slashes in displayed paths on Windows ([7049c01](https://github.com/rvben/rumdl/commit/7049c013c4c2476eccce56777c5a1c63b4dfce21))
+- **MD049,MD037**: Preserve inline code inside emphasis during auto-fix (#652) ([a1b1055](https://github.com/rvben/rumdl/commit/a1b1055af11a96b9ea3db1d074cf2ae373266975))
+
 ## [0.2.5](https://github.com/rvben/rumdl/compare/v0.2.4...v0.2.5) - 2026-06-02
 
 ### Added
