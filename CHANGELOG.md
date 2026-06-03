@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.7](https://github.com/rvben/rumdl/compare/v0.2.6...v0.2.7) - 2026-06-03
+
+### Fixed
+
+- **MD077**: normalize over-indented loose list continuation ([6b9fcee](https://github.com/rvben/rumdl/commit/6b9fcee51851c3dd3397b0a45df1dcdc5f2cb555))
+
 ## [0.2.6](https://github.com/rvben/rumdl/compare/v0.2.5...v0.2.6) - 2026-06-03
 
 ### Fixed
