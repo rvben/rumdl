@@ -111,6 +111,29 @@ impl MD062LinkDestinationWhitespace {
         Some((dest_content_start, dest_content_start + dest_content_end, dest_content))
     }
 
+    /// Split destination content into (url, optional title).
+    ///
+    /// A title is recognized only when it is a *balanced* quoted string
+    /// (`"..."` or `'...'`) that forms the trailing token of the destination
+    /// (only whitespace may follow the closing quote). A lone or unbalanced quote
+    /// is treated as part of the URL. This prevents the fix from turning a stray
+    /// quote into an unterminated title that, when the document is re-parsed,
+    /// swallows the following line - which would make the fix non-idempotent and
+    /// drop content.
+    fn split_url_and_title(dest: &str) -> (&str, Option<&str>) {
+        // Quote characters are ASCII, so byte and char indices coincide here.
+        if let Some(q_start) = dest.find(['"', '\'']) {
+            let quote = dest.as_bytes()[q_start] as char;
+            if let Some(rel_close) = dest[q_start + 1..].find(quote) {
+                let close = q_start + 1 + rel_close;
+                if dest[close + 1..].trim().is_empty() {
+                    return (&dest[..q_start], Some(&dest[q_start..=close]));
+                }
+            }
+        }
+        (dest, None)
+    }
+
     /// Check if destination has leading/trailing whitespace
     /// Returns the type of whitespace issue found, if any
     fn check_destination_whitespace(&self, full_dest: &str) -> Option<WhitespaceIssue> {
@@ -123,14 +146,12 @@ impl MD062LinkDestinationWhitespace {
 
         let has_leading = first_char.is_some_and(char::is_whitespace);
 
-        // Check for trailing whitespace - either at the end or before title
+        // Check for trailing whitespace - either at the end or before a title
         let has_trailing = if last_char.is_some_and(char::is_whitespace) {
             true
-        } else if let Some(title_start) = full_dest.find(['"', '\'']) {
-            let url_portion = &full_dest[..title_start];
-            url_portion.ends_with(char::is_whitespace)
         } else {
-            false
+            let (url_portion, title) = Self::split_url_and_title(full_dest);
+            title.is_some() && url_portion.ends_with(char::is_whitespace)
         };
 
         match (has_leading, has_trailing) {
@@ -148,14 +169,11 @@ impl MD062LinkDestinationWhitespace {
         // Get the full destination content (may include title)
         let full_dest_content = &raw_link[dest_start..dest_end];
 
-        // Split into URL and optional title
-        let (url_part, title_part) = if let Some(title_start) = full_dest_content.find(['"', '\'']) {
-            let url = full_dest_content[..title_start].trim();
-            let title = &full_dest_content[title_start..];
-            (url, Some(title.trim()))
-        } else {
-            (full_dest_content.trim(), None)
-        };
+        // Split into URL and optional title. Only a balanced quoted title is
+        // recognized; a stray quote stays part of the URL (see split_url_and_title).
+        let (url_raw, title_raw) = Self::split_url_and_title(full_dest_content);
+        let url_part = url_raw.trim();
+        let title_part = title_raw.map(str::trim);
 
         // Reconstruct: text part + ( + trimmed_url + optional_title + )
         let text_part = &raw_link[..dest_start]; // Includes '[text]('
@@ -412,6 +430,31 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](https://example.com) and ![img](/path/to/img.png)");
+    }
+
+    #[test]
+    fn test_fix_idempotent_with_unbalanced_quote() {
+        // Regression: a lone quote inside a destination must not be treated as a
+        // title. Previously the fix inserted a space before the stray quote
+        // (`![](X" )` -> `![](X ")`), which re-parsed as an unterminated title
+        // that swallowed the following line, making the fix non-idempotent and
+        // dropping content. The character is U+2A700 (4 bytes in UTF-8) to also
+        // guard the byte/char offset handling.
+        let rule = MD062LinkDestinationWhitespace::new();
+        let content = "![](\u{2a700}\" )\n![](\")";
+
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let once = rule.fix(&ctx).unwrap();
+
+        let ctx2 = LintContext::new(&once, MarkdownFlavor::Standard, None);
+        let twice = rule.fix(&ctx2).unwrap();
+
+        assert_eq!(once, twice, "MD062 fix must be idempotent for unbalanced quotes");
+        assert_eq!(
+            once.lines().count(),
+            2,
+            "fix must not drop the second image line, got: {once:?}"
+        );
     }
 
     #[test]
