@@ -1002,6 +1002,15 @@ impl SourcedConfig<ConfigLoaded> {
     ///
     /// Returns the config file path if found. Does NOT use CWD.
     pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
+        // The walk keeps `current_dir` in its original representation so the
+        // returned config path matches what callers passed in. The project-root
+        // stop check, however, compares canonical paths: on Windows the walked
+        // directory is a canonical long-name `\\?\` path while `project_root` may
+        // be an 8.3 short name, and on Unix symlinks differ. Comparing the raw
+        // forms would never match, so the walk would overshoot past the project
+        // root and could pick up a config file in a parent directory outside the
+        // project.
+        let canonical_project_root = std::fs::canonicalize(project_root).ok();
         let mut current_dir = dir.to_path_buf();
 
         loop {
@@ -1029,8 +1038,13 @@ impl SourcedConfig<ConfigLoaded> {
                 }
             }
 
-            // Stop at project root (inclusive - we already checked it)
-            if current_dir == project_root {
+            // Stop at project root (inclusive - we already checked it). Compare
+            // canonically so differing path representations still match.
+            let reached_root = match (&canonical_project_root, std::fs::canonicalize(&current_dir).ok()) {
+                (Some(root), Some(current)) => &current == root,
+                _ => current_dir == project_root,
+            };
+            if reached_root {
                 break;
             }
 
@@ -1175,5 +1189,40 @@ mod tests {
             "[project]\ndependencies = [\"tool.rumdl-helper\"]\n"
         ));
         assert!(!pyproject_declares_rumdl_config("[tool.black]\nline-length = 88\n"));
+    }
+
+    /// Discovery must stop at the project root even when the root is supplied in
+    /// a different path representation than the walked directory's ancestors.
+    ///
+    /// This reproduces the Windows 8.3-short-name / canonical mismatch using a
+    /// Unix symlink: the project root is passed as a symlink to the real root, so
+    /// it does not string-match the canonical ancestors of the starting
+    /// directory. Without canonicalization the walk overshoots the project root
+    /// and incorrectly picks up the config in the parent directory.
+    #[cfg(unix)]
+    #[test]
+    fn discover_stops_at_project_root_across_path_representations() {
+        use super::SourcedConfig;
+        use std::os::unix::fs::symlink;
+        use tempfile::tempdir;
+
+        let tmp = tempdir().unwrap();
+        // A config ABOVE the project root that must never be discovered.
+        std::fs::write(tmp.path().join(".rumdl.toml"), "").unwrap();
+
+        let real_root = tmp.path().join("project");
+        let subdir = real_root.join("docs");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        // Supply the project root via a symlink so it does not string-match the
+        // canonical ancestors of `subdir`.
+        let linked_root = tmp.path().join("project-link");
+        symlink(&real_root, &linked_root).unwrap();
+
+        let found = SourcedConfig::discover_config_for_dir(&subdir, &linked_root);
+        assert_eq!(
+            found, None,
+            "discovery must stop at the project root, not overshoot to the parent config"
+        );
     }
 }
