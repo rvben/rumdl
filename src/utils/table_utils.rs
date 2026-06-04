@@ -253,12 +253,24 @@ impl TableUtils {
         let mut tables = Vec::new();
         let mut i = 0;
 
-        // Pre-compute line positions for efficient code block checking
+        // Pre-compute line positions for efficient code block checking.
+        // `str::lines()` strips the trailing `\r` from CRLF lines, so advancing by
+        // `line.len() + 1` undercounts by one byte per CRLF line; the positions then
+        // drift out of sync with the raw byte offsets that `code_blocks` uses, which
+        // can misclassify a later table header as being inside a code block. Walk the
+        // actual line terminator (`\n` or `\r\n`) from the raw bytes instead.
         let mut line_positions = Vec::with_capacity(lines.len());
+        let content_bytes = content.as_bytes();
         let mut pos = 0;
         for line in &lines {
             line_positions.push(pos);
-            pos += line.len() + 1; // +1 for newline
+            pos += line.len();
+            if content_bytes.get(pos) == Some(&b'\r') {
+                pos += 1;
+            }
+            if content_bytes.get(pos) == Some(&b'\n') {
+                pos += 1;
+            }
         }
 
         // Stack of active list content indents for continuation table tracking.

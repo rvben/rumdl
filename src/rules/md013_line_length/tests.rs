@@ -7433,3 +7433,42 @@ fn test_md013_new_options_default_to_unset_or_false() {
     assert!(config.code_block_line_length.is_none());
     assert!(!config.stern);
 }
+
+#[test]
+fn test_issue_125_tables_false_exempts_table_after_two_crlf_code_blocks() {
+    // Issue #125: with CRLF line endings, `tables = false` failed to exempt a
+    // table that appeared after two fenced code blocks. Table detection computed
+    // line byte offsets as `line.len() + 1`, but `str::lines()` strips `\r`, so on
+    // CRLF input the offset drifts one byte short per line. The drift eventually
+    // pushed the second table's header byte position inside the preceding code
+    // block's byte range, so the table was dropped from `ctx.table_blocks` and its
+    // long rows were flagged despite `tables = false`. The first table (before any
+    // code block) was unaffected, matching the reporter's "only the second table
+    // fails".
+    let long_cell = "Contrary to popular belief, Lorem Ipsum is not simply random text. It has roots in a piece of classical Latin literature from 45 BC, making it over 2000 years old.";
+    let wide_table =
+        format!("| 1 | 2 | 3 | 4 |\n| --- | --- | --- | --- |\n| {long_cell} | 123 | 456 | 789 |\n|  |  |  |  |\n");
+    let content_lf = format!(
+        "# Test rumdl linting in VScode\n\n## Wide table 1\n\n{wide_table}\n### Running the Command\n\nSome code\n\n```bash\necho \"First code block\"\n```\n\nMore code\n\n```bash\necho \"Second code block\"\n```\n\n## Wide table 2\n\n{wide_table}"
+    );
+    let content = content_lf.replace('\n', "\r\n");
+
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+
+    // Both wide tables must be detected; the byte-offset bug dropped the second.
+    assert_eq!(
+        ctx.table_blocks.len(),
+        2,
+        "both wide tables should be detected in CRLF content; found {} table block(s)",
+        ctx.table_blocks.len()
+    );
+
+    // line_length=120, code_blocks=false, tables=false, headings=true, strict=false
+    let rule = MD013LineLength::new(120, false, false, true, false);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "`tables = false` must exempt every table row, including the second table after two CRLF code blocks; got warnings at lines {:?}",
+        result.iter().map(|w| w.line).collect::<Vec<_>>()
+    );
+}
