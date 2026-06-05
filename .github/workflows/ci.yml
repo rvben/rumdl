@@ -166,22 +166,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: jdx/mise-action@v4
-        with:
-          experimental: true
-          install: false
-
-      - name: Install mise tools
-        run: |
-          for attempt in 1 2 3; do
-            mise install --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
-            sleep 10
-          done
-
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ci
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - uses: denoland/setup-deno@v2
         with:
@@ -192,20 +183,22 @@ jobs:
           terraform_wrapper: false
 
       # Provision the fast-to-install built-in tools so the execution harness actually
-      # exercises them here. The heavy toolchains (ormolu/Haskell, ktfmt/JVM,
-      # swift-format, nixfmt) and cargo-compile tools (taplo, stylua, oxfmt) are left
-      # out: their harness tests skip, and the coverage gate still accounts for them.
+      # exercises them here. Heavy toolchains (ormolu/Haskell, ktfmt/JVM, swift-format,
+      # nixfmt) and cargo-compile tools (taplo, stylua, oxfmt) are left out: their
+      # harness tests skip, and the coverage gate still accounts for them. mise is not
+      # used here so its `uv` shim cannot shadow pipx; Python tools go in a clean venv.
       - name: Install external code-block tools
         run: |
           set -eux
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck clang-format
-          for pkg in ruff black sqlfluff djlint beautysh; do pipx install "$pkg"; done
+          python3 -m venv "$HOME/cbt-venv"
+          "$HOME/cbt-venv/bin/pip" install --quiet ruff black sqlfluff djlint beautysh
+          echo "$HOME/cbt-venv/bin" >> "$GITHUB_PATH"
           npm install -g prettier elm-format
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
           go install github.com/google/yamlfmt/cmd/yamlfmt@latest
           go install golang.org/x/tools/cmd/goimports@latest
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Run code-block tools execution harness
