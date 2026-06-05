@@ -246,11 +246,18 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // SQL - sqlfluff
+    // SQL - sqlfluff. Requires a dialect; without `--dialect` it errors ("No dialect
+    // was specified"). Default to ansi; override with a custom tool for other dialects.
     m.insert(
         "sqlfluff:lint",
         ToolDefinition {
-            command: vec!["sqlfluff".to_string(), "lint".to_string(), "-".to_string()],
+            command: vec![
+                "sqlfluff".to_string(),
+                "lint".to_string(),
+                "--dialect".to_string(),
+                "ansi".to_string(),
+                "-".to_string(),
+            ],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -261,7 +268,13 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
     m.insert(
         "sqlfluff:fix",
         ToolDefinition {
-            command: vec!["sqlfluff".to_string(), "fix".to_string(), "-".to_string()],
+            command: vec![
+                "sqlfluff".to_string(),
+                "fix".to_string(),
+                "--dialect".to_string(),
+                "ansi".to_string(),
+                "-".to_string(),
+            ],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -317,11 +330,11 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Nix - nixfmt
+    // Nix - nixfmt (bare invocation is deprecated; `-` reads anonymous stdin)
     m.insert(
         "nixfmt",
         ToolDefinition {
-            command: vec!["nixfmt".to_string()],
+            command: vec!["nixfmt".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
             lint_args: vec!["--check".to_string()],
@@ -341,7 +354,7 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Ruby - rubocop
+    // Ruby - rubocop (--stdin <name> is rubocop's documented stdin form)
     m.insert(
         "rubocop",
         ToolDefinition {
@@ -353,11 +366,11 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Haskell - ormolu
+    // Haskell - ormolu (stdin needs --stdin-input-file to pick up the .hs dialect)
     m.insert(
         "ormolu",
         ToolDefinition {
-            command: vec!["ormolu".to_string()],
+            command: vec!["ormolu".to_string(), "--stdin-input-file=_.hs".to_string()],
             stdin: true,
             stdout: true,
             lint_args: vec!["--check-idempotence".to_string()],
@@ -377,50 +390,26 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Zig - zig fmt
-    m.insert(
-        "zig-fmt",
-        ToolDefinition {
-            command: vec!["zig".to_string(), "fmt".to_string(), "--stdin".to_string()],
-            stdin: true,
-            stdout: true,
-            lint_args: vec!["--check".to_string()],
-            format_args: vec![],
-        },
-    );
-
-    // Dart - dart format
-    m.insert(
-        "dart-format",
-        ToolDefinition {
-            command: vec!["dart".to_string(), "format".to_string()],
-            stdin: true,
-            stdout: true,
-            lint_args: vec!["--output=none".to_string(), "--set-exit-if-changed".to_string()],
-            format_args: vec![],
-        },
-    );
-
-    // Swift - swift-format
+    // Swift - swift-format (bare invocation is deprecated; `format -` reads stdin)
     m.insert(
         "swift-format",
         ToolDefinition {
-            command: vec!["swift-format".to_string()],
+            command: vec!["swift-format".to_string(), "format".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["lint".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
 
-    // Kotlin - ktfmt
+    // Kotlin - ktfmt (`-` reads stdin; `--stdin` is not a valid flag)
     m.insert(
         "ktfmt",
         ToolDefinition {
-            command: vec!["ktfmt".to_string(), "--stdin".to_string()],
+            command: vec!["ktfmt".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
-            lint_args: vec!["--dry-run".to_string()],
+            lint_args: vec![],
             format_args: vec![],
         },
     );
@@ -857,22 +846,6 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Elm",
         kind: ToolKind::Format,
         doc_group: "elm-format",
-        display_command: None,
-        runtime: true,
-    },
-    ToolDocMeta {
-        id: "zig-fmt",
-        language: "Zig",
-        kind: ToolKind::Format,
-        doc_group: "zig-fmt",
-        display_command: None,
-        runtime: true,
-    },
-    ToolDocMeta {
-        id: "dart-format",
-        language: "Dart",
-        kind: ToolKind::Format,
-        doc_group: "dart-format",
         display_command: None,
         runtime: true,
     },
@@ -1648,7 +1621,7 @@ mod tests {
         // Both-typed tools show the lint and format invocations when they differ.
         assert_eq!(cmd("`djlint`"), "`djlint - / djlint - --reformat`");
         // Lint-typed tools include their subcommand args.
-        assert_eq!(cmd("`sqlfluff:lint`"), "`sqlfluff lint -`");
+        assert_eq!(cmd("`sqlfluff:lint`"), "`sqlfluff lint --dialect ansi -`");
     }
 
     #[test]

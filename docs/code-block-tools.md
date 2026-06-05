@@ -119,21 +119,19 @@ rumdl includes definitions for common tools:
 | `gofmt`           | Go         | Format | `gofmt`                                           |
 | `goimports`       | Go         | Format | `goimports`                                       |
 | `clang-format`    | C/C++      | Format | `clang-format`                                    |
-| `sqlfluff:lint`   | SQL        | Lint   | `sqlfluff lint -`                                 |
-| `sqlfluff:fix`    | SQL        | Format | `sqlfluff fix -`                                  |
+| `sqlfluff:lint`   | SQL        | Lint   | `sqlfluff lint --dialect ansi -`                  |
+| `sqlfluff:fix`    | SQL        | Format | `sqlfluff fix --dialect ansi -`                   |
 | `jq`              | JSON       | Both   | `jq .`                                            |
 | `yamlfmt`         | YAML       | Format | `yamlfmt -`                                       |
 | `taplo`           | TOML       | Format | `taplo fmt -`                                     |
 | `terraform-fmt`   | Terraform  | Format | `terraform fmt -`                                 |
-| `nixfmt`          | Nix        | Format | `nixfmt`                                          |
+| `nixfmt`          | Nix        | Format | `nixfmt -`                                        |
 | `stylua`          | Lua        | Format | `stylua -`                                        |
 | `rubocop`         | Ruby       | Both   | `rubocop --stdin / rubocop --stdin --autocorrect` |
-| `ormolu`          | Haskell    | Format | `ormolu`                                          |
+| `ormolu`          | Haskell    | Format | `ormolu --stdin-input-file=_.hs`                  |
 | `elm-format`      | Elm        | Format | `elm-format --stdin`                              |
-| `zig-fmt`         | Zig        | Format | `zig fmt --stdin`                                 |
-| `dart-format`     | Dart       | Format | `dart format`                                     |
-| `swift-format`    | Swift      | Format | `swift-format`                                    |
-| `ktfmt`           | Kotlin     | Format | `ktfmt --stdin`                                   |
+| `swift-format`    | Swift      | Format | `swift-format format -`                           |
+| `ktfmt`           | Kotlin     | Format | `ktfmt -`                                         |
 | `djlint`          | Jinja/HTML | Both   | `djlint - / djlint - --reformat`                  |
 | `djlint:lint`     | Jinja/HTML | Lint   | `djlint -`                                        |
 | `djlint:reformat` | Jinja/HTML | Format | `djlint - --reformat`                             |
@@ -376,7 +374,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 35             | 339        |
+| Built-in tools   | 33             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |
