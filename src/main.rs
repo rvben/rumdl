@@ -95,6 +95,16 @@ pub enum SchemaAction {
 }
 
 #[derive(Subcommand)]
+pub enum CodeBlockToolsDocsAction {
+    /// Generate/update the built-in tools table in docs/code-block-tools.md
+    Generate,
+    /// Check if the built-in tools docs are up-to-date
+    Check,
+    /// Print the generated table to stdout
+    Print,
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Lint Markdown files and print warnings/errors
     Check(CheckArgs),
@@ -166,6 +176,11 @@ enum Commands {
     Schema {
         #[command(subcommand)]
         action: SchemaAction,
+    },
+    /// Generate or check the built-in code-block-tools docs table
+    CodeBlockToolsDocs {
+        #[command(subcommand)]
+        action: CodeBlockToolsDocsAction,
     },
     /// Import and convert markdownlint configuration files
     Import {
@@ -372,6 +387,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Commands::Schema { action } => {
                 commands::schema::handle_schema(action);
+            }
+            Commands::CodeBlockToolsDocs { action } => {
+                commands::code_block_tools_docs::handle_code_block_tools_docs(action);
             }
             Commands::Server { port, stdio, verbose } => {
                 let config_path = if cli.no_config || cli.isolated {

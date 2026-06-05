@@ -5,6 +5,7 @@
 
 pub mod check;
 pub mod clean;
+pub mod code_block_tools_docs;
 pub mod completions;
 pub mod config;
 pub mod explain;
