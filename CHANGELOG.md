@@ -47,6 +47,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.8](https://github.com/rvben/rumdl/compare/v0.2.7...v0.2.8) - 2026-06-05
+
+### Added
+
+- **code-block-tools**: add deno fmt as a built-in formatter ([755b086](https://github.com/rvben/rumdl/commit/755b086982ce01032415d492952dc98925d51b0a))
+- **junit**: report passing files, not just failures ([dc8a964](https://github.com/rvben/rumdl/commit/dc8a9645aa941372b3cc79d4773a8a2842d7728d))
+- **code-block-tools**: generate built-in tools docs table from the registry ([fe9d52c](https://github.com/rvben/rumdl/commit/fe9d52c214bb8fdcf92dc3df1f7e3ac1144d7785))
+
+### Fixed
+
+- **code-block-tools**: drop rubocop (not usable as a generic code-block linter) ([fa7fa83](https://github.com/rvben/rumdl/commit/fa7fa8332326206fced97b518ee61bf972288d9f))
+- **code-block-tools**: correct and drop built-ins after verifying real binaries ([9106da9](https://github.com/rvben/rumdl/commit/9106da9d3f7b97cdf41dbc708e826827d73424b9))
+- **code-block-tools**: correct shellcheck invocation, drop unworkable eslint ([415fab0](https://github.com/rvben/rumdl/commit/415fab08617fea16e9986694b2fe98b76ee2171f))
+- **MD026**: make trailing-punctuation removal idempotent ([3dfeb83](https://github.com/rvben/rumdl/commit/3dfeb838f115020e5595759c489a56ebd62b106c))
+- **config**: bound project config discovery at the home directory ([0cdf3b7](https://github.com/rvben/rumdl/commit/0cdf3b72a6d2f6bababe4ec6f6605d183848f1ad))
+- **tables**: use real line terminator for byte offsets in table detection ([751b158](https://github.com/rvben/rumdl/commit/751b158c74b67682cc9de2023adfd7c82ad3e562))
+
 ## [0.2.7](https://github.com/rvben/rumdl/compare/v0.2.6...v0.2.7) - 2026-06-03
 
 ### Fixed
