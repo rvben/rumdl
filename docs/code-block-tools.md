@@ -107,41 +107,40 @@ rumdl includes definitions for common tools:
 
 <!-- BEGIN builtin-tools (generated) -->
 
-| Tool ID           | Language   | Type   | Command                                           |
-| ----------------- | ---------- | ------ | ------------------------------------------------- |
-| `ruff:check`      | Python     | Lint   | `ruff check --output-format=concise -`            |
-| `ruff:format`     | Python     | Format | `ruff format -`                                   |
-| `black`           | Python     | Format | `black --quiet -`                                 |
-| `prettier`        | Multi      | Format | `prettier --stdin-filepath=_.EXT`                 |
-| `shellcheck`      | Shell      | Lint   | `shellcheck --shell=bash -`                       |
-| `shfmt`           | Shell      | Format | `shfmt`                                           |
-| `rustfmt`         | Rust       | Format | `rustfmt`                                         |
-| `gofmt`           | Go         | Format | `gofmt`                                           |
-| `goimports`       | Go         | Format | `goimports`                                       |
-| `clang-format`    | C/C++      | Format | `clang-format`                                    |
-| `sqlfluff:lint`   | SQL        | Lint   | `sqlfluff lint --dialect ansi -`                  |
-| `sqlfluff:fix`    | SQL        | Format | `sqlfluff fix --dialect ansi -`                   |
-| `jq`              | JSON       | Both   | `jq .`                                            |
-| `yamlfmt`         | YAML       | Format | `yamlfmt -`                                       |
-| `taplo`           | TOML       | Format | `taplo fmt -`                                     |
-| `terraform-fmt`   | Terraform  | Format | `terraform fmt -`                                 |
-| `nixfmt`          | Nix        | Format | `nixfmt -`                                        |
-| `stylua`          | Lua        | Format | `stylua -`                                        |
-| `rubocop`         | Ruby       | Both   | `rubocop --stdin / rubocop --stdin --autocorrect` |
-| `ormolu`          | Haskell    | Format | `ormolu --stdin-input-file=_.hs`                  |
-| `elm-format`      | Elm        | Format | `elm-format --stdin`                              |
-| `swift-format`    | Swift      | Format | `swift-format format -`                           |
-| `ktfmt`           | Kotlin     | Format | `ktfmt -`                                         |
-| `djlint`          | Jinja/HTML | Both   | `djlint - / djlint - --reformat`                  |
-| `djlint:lint`     | Jinja/HTML | Lint   | `djlint -`                                        |
-| `djlint:reformat` | Jinja/HTML | Format | `djlint - --reformat`                             |
-| `beautysh`        | Shell      | Both   | `beautysh - --check / beautysh -`                 |
-| `tombi`           | TOML       | Lint   | `tombi lint -`                                    |
-| `tombi:format`    | TOML       | Format | `tombi format -`                                  |
-| `tombi:lint`      | TOML       | Lint   | `tombi lint -`                                    |
-| `oxfmt`           | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`                    |
-| `deno-fmt`        | Multi      | Format | `deno fmt --ext=EXT -`                            |
-| `rumdl`           | Markdown   | Lint   | `built-in markdown linting`                       |
+| Tool ID           | Language   | Type   | Command                                |
+| ----------------- | ---------- | ------ | -------------------------------------- |
+| `ruff:check`      | Python     | Lint   | `ruff check --output-format=concise -` |
+| `ruff:format`     | Python     | Format | `ruff format -`                        |
+| `black`           | Python     | Format | `black --quiet -`                      |
+| `prettier`        | Multi      | Format | `prettier --stdin-filepath=_.EXT`      |
+| `shellcheck`      | Shell      | Lint   | `shellcheck --shell=bash -`            |
+| `shfmt`           | Shell      | Format | `shfmt`                                |
+| `rustfmt`         | Rust       | Format | `rustfmt`                              |
+| `gofmt`           | Go         | Format | `gofmt`                                |
+| `goimports`       | Go         | Format | `goimports`                            |
+| `clang-format`    | C/C++      | Format | `clang-format`                         |
+| `sqlfluff:lint`   | SQL        | Lint   | `sqlfluff lint --dialect ansi -`       |
+| `sqlfluff:fix`    | SQL        | Format | `sqlfluff fix --dialect ansi -`        |
+| `jq`              | JSON       | Both   | `jq .`                                 |
+| `yamlfmt`         | YAML       | Format | `yamlfmt -`                            |
+| `taplo`           | TOML       | Format | `taplo fmt -`                          |
+| `terraform-fmt`   | Terraform  | Format | `terraform fmt -`                      |
+| `nixfmt`          | Nix        | Format | `nixfmt -`                             |
+| `stylua`          | Lua        | Format | `stylua -`                             |
+| `ormolu`          | Haskell    | Format | `ormolu --stdin-input-file=_.hs`       |
+| `elm-format`      | Elm        | Format | `elm-format --stdin`                   |
+| `swift-format`    | Swift      | Format | `swift-format format -`                |
+| `ktfmt`           | Kotlin     | Format | `ktfmt -`                              |
+| `djlint`          | Jinja/HTML | Both   | `djlint - / djlint - --reformat`       |
+| `djlint:lint`     | Jinja/HTML | Lint   | `djlint -`                             |
+| `djlint:reformat` | Jinja/HTML | Format | `djlint - --reformat`                  |
+| `beautysh`        | Shell      | Both   | `beautysh - --check / beautysh -`      |
+| `tombi`           | TOML       | Lint   | `tombi lint -`                         |
+| `tombi:format`    | TOML       | Format | `tombi format -`                       |
+| `tombi:lint`      | TOML       | Lint   | `tombi lint -`                         |
+| `oxfmt`           | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`         |
+| `deno-fmt`        | Multi      | Format | `deno fmt --ext=EXT -`                 |
+| `rumdl`           | Markdown   | Lint   | `built-in markdown linting`            |
 
 <!-- END builtin-tools (generated) -->
 
@@ -374,7 +373,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 33             | 339        |
+| Built-in tools   | 32             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |

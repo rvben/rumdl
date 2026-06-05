@@ -354,18 +354,6 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Ruby - rubocop (--stdin <name> is rubocop's documented stdin form)
-    m.insert(
-        "rubocop",
-        ToolDefinition {
-            command: vec!["rubocop".to_string(), "--stdin".to_string(), "_.rb".to_string()],
-            stdin: true,
-            stdout: true,
-            lint_args: vec![],
-            format_args: vec!["--autocorrect".to_string()],
-        },
-    );
-
     // Haskell - ormolu (stdin needs --stdin-input-file to pick up the .hs dialect)
     m.insert(
         "ormolu",
@@ -823,14 +811,6 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         kind: ToolKind::Format,
         doc_group: "stylua",
         display_command: None,
-        runtime: true,
-    },
-    ToolDocMeta {
-        id: "rubocop",
-        language: "Ruby",
-        kind: ToolKind::Both,
-        doc_group: "rubocop",
-        display_command: Some("rubocop --stdin / rubocop --stdin --autocorrect"),
         runtime: true,
     },
     ToolDocMeta {
