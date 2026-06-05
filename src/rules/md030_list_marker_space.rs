@@ -19,6 +19,17 @@ enum ListType {
     Ordered,
 }
 
+/// How a following line relates to the list item being scanned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Continuation {
+    /// Part of the item (a continuation line or nested content).
+    Belongs,
+    /// A blank line, which neither continues nor ends the item.
+    Skip,
+    /// The item is over (a sibling/ancestor marker or under-indented content).
+    Ends,
+}
+
 #[derive(Clone, Default)]
 pub struct MD030ListMarkerSpace {
     config: MD030Config,
@@ -259,65 +270,69 @@ impl MD030ListMarkerSpace {
         !line[marker_end..].trim().is_empty()
     }
 
-    /// Check if a list item is multi-line (spans multiple lines or contains nested content)
-    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
-        // Get the current list item info
-        let current_line_info = match ctx.line_info(line_num) {
-            Some(info) if info.list_item.is_some() => info,
-            _ => return false,
+    /// The marker column, blockquote nesting level, and minimum (blockquote-aware)
+    /// indent a following line needs to continue the list item on `line_num`. These
+    /// are the inputs shared by every continuation scan. `None` if the line isn't a
+    /// list item. Inside a blockquote the indent excludes the prefix so it stays in
+    /// the coordinate system of [`effective_indent_in_blockquote`].
+    fn continuation_params(ctx: &crate::lint_context::LintContext, line_num: usize) -> Option<(usize, usize, usize)> {
+        let info = ctx.line_info(line_num)?;
+        let list = info.list_item.as_ref()?;
+        let (bq_level, min_indent) = match &info.blockquote {
+            Some(bq) if bq.nesting_level > 0 => (bq.nesting_level, list.content_column.saturating_sub(bq.prefix.len())),
+            _ => (0, list.content_column),
         };
+        Some((list.marker_column, bq_level, min_indent))
+    }
 
-        let current_list = current_line_info.list_item.as_ref().unwrap();
+    /// Classify the line at `next_line_num` (1-based) relative to a list item whose
+    /// marker is at `marker_column` with continuation threshold (`bq_level`,
+    /// `min_indent`). The single source of truth for what belongs to a list item.
+    fn classify_continuation(
+        ctx: &crate::lint_context::LintContext,
+        next_line_num: usize,
+        lines: &[&str],
+        marker_column: usize,
+        bq_level: usize,
+        min_indent: usize,
+    ) -> Continuation {
+        let Some(info) = ctx.line_info(next_line_num) else {
+            return Continuation::Skip;
+        };
+        // A deeper marker is nested content; one at the same or a shallower column
+        // ends the item.
+        if let Some(next_list) = &info.list_item {
+            return if next_list.marker_column <= marker_column {
+                Continuation::Ends
+            } else {
+                Continuation::Belongs
+            };
+        }
+        let content = lines.get(next_line_num - 1).copied().unwrap_or("");
+        if content.trim().is_empty() {
+            return Continuation::Skip; // Blank lines don't decide on their own.
+        }
+        let raw_indent = content.len() - content.trim_start().len();
+        if effective_indent_in_blockquote(content, bq_level, raw_indent) < min_indent {
+            Continuation::Ends
+        } else {
+            Continuation::Belongs
+        }
+    }
 
-        // Check subsequent lines to see if they are continuation of this list item
-        for next_line_num in (line_num + 1)..=lines.len() {
-            if let Some(next_line_info) = ctx.line_info(next_line_num) {
-                // If we encounter another list item at the same or higher level, this item is done
-                if let Some(next_list) = &next_line_info.list_item {
-                    if next_list.marker_column <= current_list.marker_column {
-                        break; // Found the next list item at same/higher level
-                    }
-                    // If there's a nested list item, this is multi-line
-                    return true;
-                }
-
-                // If we encounter a non-empty line that's not indented enough to be part of this list item,
-                // this list item is done
-                let line_content = lines.get(next_line_num - 1).unwrap_or(&"");
-                if !line_content.trim().is_empty() {
-                    // Get blockquote level from the current list item's line
-                    let bq_level = current_line_info.blockquote.as_ref().map_or(0, |bq| bq.nesting_level);
-
-                    // For blockquote lists, min continuation indent is just the marker width
-                    // (not the full content_column which includes blockquote prefix)
-                    let min_continuation_indent = if bq_level > 0 {
-                        // For lists in blockquotes, use marker width (2 for "* " or "- ")
-                        // content_column includes blockquote prefix, so subtract that
-                        current_list
-                            .content_column
-                            .saturating_sub(current_line_info.blockquote.as_ref().map_or(0, |bq| bq.prefix.len()))
-                    } else {
-                        current_list.content_column
-                    };
-
-                    // Calculate effective indent (blockquote-aware)
-                    let raw_indent = line_content.len() - line_content.trim_start().len();
-                    let actual_indent = effective_indent_in_blockquote(line_content, bq_level, raw_indent);
-
-                    if actual_indent < min_continuation_indent {
-                        break; // Line is not indented enough to be part of this list item
-                    }
-
-                    // If we find a continuation line, this is multi-line
-                    if actual_indent >= min_continuation_indent {
-                        return true;
-                    }
-                }
-
-                // Empty lines don't affect the multi-line status by themselves
+    /// Whether the list item on `line_num` spans multiple lines (has continuation or
+    /// nested content). Stops at the first line that belongs to it.
+    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
+        let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num) else {
+            return false;
+        };
+        for next in (line_num + 1)..=lines.len() {
+            match Self::classify_continuation(ctx, next, lines, marker_column, bq_level, min_indent) {
+                Continuation::Belongs => return true,
+                Continuation::Ends => break,
+                Continuation::Skip => {}
             }
         }
-
         false
     }
 
