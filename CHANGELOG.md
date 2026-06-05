@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **config**: bound project config discovery at the home directory ([0cdf3b7](https://github.com/rvben/rumdl/commit/0cdf3b72a6d2f6bababe4ec6f6605d183848f1ad))
 - **tables**: use real line terminator for byte offsets in table detection ([751b158](https://github.com/rvben/rumdl/commit/751b158c74b67682cc9de2023adfd7c82ad3e562))
 
+### Removed
+
+- **code-block-tools**: removed built-in tools that do not work over stdin (the model code-block tools use), after verifying each against its real binary: `eslint` and `rubocop` (need a project config; produce errors/noise otherwise, and rubocop's autocorrect corrupts the block over stdin), `shuck` (the released CLI has no `check -` stdin support), and `zig-fmt` / `dart-format` (stdin unverifiable). Each can still be configured as a custom tool.
+
 ## [0.2.7](https://github.com/rvben/rumdl/compare/v0.2.6...v0.2.7) - 2026-06-03
 
 ### Fixed
