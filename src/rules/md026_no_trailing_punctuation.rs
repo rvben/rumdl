@@ -84,10 +84,33 @@ impl MD026NoTrailingPunctuation {
         }
     }
 
-    // Remove trailing punctuation from text
+    // Remove trailing punctuation from text.
+    //
+    // A single removal is not enough when punctuation is separated from the end by
+    // interior whitespace (e.g. `. :`): removing `:` leaves `. `, whose trailing space
+    // then exposes `.`, so a second fix pass would change the result again. This keeps
+    // stripping while trimming the exposed whitespace reveals further trailing
+    // punctuation, making one fix call fully converge (idempotent). Trailing whitespace
+    // that does not hide more punctuation is preserved, matching the single-punctuation
+    // behavior (e.g. `Title :` -> `Title `).
     #[inline]
     fn remove_trailing_punctuation(&self, text: &str, re: &Regex) -> String {
-        re.replace_all(text.trim(), "").to_string()
+        let mut result = text.trim().to_string();
+        loop {
+            let stripped = re.replace(&result, "").into_owned();
+            if stripped.len() == result.len() {
+                // No trailing punctuation run at the very end.
+                return stripped;
+            }
+            // Continue only if trimming the whitespace exposed by this removal reveals
+            // more trailing punctuation; otherwise keep the result (whitespace and all).
+            let trimmed = stripped.trim_end();
+            if trimmed.len() != stripped.len() && re.is_match(trimmed) {
+                result = trimmed.to_string();
+            } else {
+                return stripped;
+            }
+        }
     }
 
     // Optimized ATX heading fix using unified regex

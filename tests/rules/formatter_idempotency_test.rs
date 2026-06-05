@@ -262,6 +262,17 @@ fn test_md026_fix_idempotent() {
     assert_fix_idempotent(&rule, content, "MD026");
 }
 
+#[test]
+fn test_md026_fix_idempotent_punctuation_separated_by_space() {
+    // Regression: when a heading's trailing punctuation is separated from the end by
+    // interior whitespace (e.g. "# . :"), a single fix pass must fully converge.
+    // Removing only the last punctuation run left "# . ", whose now-trailing space
+    // exposed another punctuation char on the next pass -> not idempotent.
+    // Minimal failing input from the high-case-count idempotency property tests.
+    let rule = MD026NoTrailingPunctuation::default();
+    assert_fix_idempotent(&rule, "# . :\n", "MD026");
+}
+
 // ============================================================================
 // MD027 - Multiple Spaces Blockquote
 // ============================================================================

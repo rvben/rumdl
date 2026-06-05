@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 3d8e5452f67660cab20b3df513575253268fd2a7e18380b9f8b1faa051aeacfb # shrinks to content = "# \n### \n### "
 cc f6e0c7200ee15154b36de508ae536dbac883ca2a47319fe43aecd0e74c7cb2fa # shrinks to content = "[\\ῷ]()\n---"
+cc 1346c8dfe17688b4294db7f110a0468a1d1f4fb43bb75af2bec91d0466581369 # shrinks to content = "# . :"
