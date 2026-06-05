@@ -26,8 +26,10 @@ fn tool_available(tool: &str) -> bool {
 /// Write a `.rumdl.toml` and a markdown file with a single fenced block, in a temp dir.
 fn setup(config_lang: &str, slot: &str, tool: &str, lang_tag: &str, code: &str) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
+    // `exact` language resolution so config_lang == lang_tag deterministically
+    // (avoids linguist-alias surprises like cpp -> c++).
     let config = format!(
-        "[code-block-tools]\nenabled = true\non-error = \"warn\"\n\n\
+        "[code-block-tools]\nenabled = true\nnormalize-language = \"exact\"\non-error = \"warn\"\n\n\
          [code-block-tools.languages]\n{config_lang} = {{ {slot} = [\"{tool}\"] }}\n"
     );
     fs::write(dir.path().join(".rumdl.toml"), config).unwrap();
@@ -158,4 +160,151 @@ fn deno_fmt_formats_typescript() {
         out.contains("const x = 1;"),
         "deno-fmt:ts should reformat the block:\n{out}"
     );
+}
+
+#[test]
+fn black_formats_python() {
+    require_tool!("black");
+    let out = format("python", "black", "python", "x=1");
+    assert!(out.contains("x = 1"), "black should reformat the block:\n{out}");
+}
+
+#[test]
+fn shfmt_formats_shell() {
+    require_tool!("shfmt");
+    let out = format("shell", "shfmt", "shell", "if true;then echo hi;fi");
+    assert!(out.contains("; then"), "shfmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn goimports_formats_go() {
+    require_tool!("goimports");
+    let out = format("go", "goimports", "go", "package main\nfunc  main(){}");
+    assert!(
+        out.contains("func main()"),
+        "goimports should reformat the block:\n{out}"
+    );
+}
+
+#[test]
+fn clang_format_formats_cpp() {
+    require_tool!("clang-format");
+    let out = format("cpp", "clang-format", "cpp", "int  main(){return 0;}");
+    assert!(
+        out.contains("int main()"),
+        "clang-format should reformat the block:\n{out}"
+    );
+}
+
+#[test]
+fn yamlfmt_formats_yaml() {
+    require_tool!("yamlfmt");
+    let out = format("yaml", "yamlfmt", "yaml", "a:   1");
+    assert!(out.contains("a: 1"), "yamlfmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn taplo_formats_toml() {
+    require_tool!("taplo");
+    let out = format("toml", "taplo", "toml", "a=1");
+    assert!(out.contains("a = 1"), "taplo should reformat the block:\n{out}");
+}
+
+#[test]
+fn terraform_fmt_formats_terraform() {
+    require_tool!("terraform");
+    let out = format("terraform", "terraform-fmt", "terraform", "a=1");
+    assert!(out.contains("a = 1"), "terraform fmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn stylua_formats_lua() {
+    require_tool!("stylua");
+    let out = format("lua", "stylua", "lua", "x=1");
+    assert!(out.contains("x = 1"), "stylua should reformat the block:\n{out}");
+}
+
+#[test]
+fn oxfmt_formats_javascript() {
+    require_tool!("oxfmt");
+    let out = format("javascript", "oxfmt", "javascript", "const x=1");
+    assert!(out.contains("const x = 1;"), "oxfmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn tombi_formats_toml() {
+    require_tool!("tombi");
+    let out = format("toml", "tombi:format", "toml", "a=1");
+    assert!(out.contains("a = 1"), "tombi:format should reformat the block:\n{out}");
+}
+
+#[test]
+fn beautysh_formats_shell() {
+    require_tool!("beautysh");
+    let out = format("shell", "beautysh", "shell", "if true\nthen\necho hi\nfi");
+    assert!(out.contains("    echo hi"), "beautysh should indent the block:\n{out}");
+}
+
+#[test]
+fn nixfmt_formats_nix() {
+    require_tool!("nixfmt");
+    let out = format("nix", "nixfmt", "nix", "{ a=1; }");
+    assert!(out.contains("a = 1"), "nixfmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn ormolu_formats_haskell() {
+    require_tool!("ormolu");
+    let out = format("haskell", "ormolu", "haskell", "main=putStrLn \"hi\"");
+    assert!(
+        out.contains("main = putStrLn"),
+        "ormolu should reformat the block:\n{out}"
+    );
+}
+
+#[test]
+fn swift_format_formats_swift() {
+    require_tool!("swift-format");
+    let out = format("swift", "swift-format", "swift", "let x  =  1");
+    assert!(
+        out.contains("let x = 1"),
+        "swift-format should reformat the block:\n{out}"
+    );
+}
+
+#[test]
+fn ktfmt_formats_kotlin() {
+    require_tool!("ktfmt");
+    let out = format("kotlin", "ktfmt", "kotlin", "fun main(){}");
+    assert!(out.contains("fun main() {}"), "ktfmt should reformat the block:\n{out}");
+}
+
+#[test]
+fn elm_format_formats_elm() {
+    require_tool!("elm-format");
+    let out = format("elm", "elm-format", "elm", "module Main exposing (main)\nmain= 1");
+    // elm-format moves the body onto its own indented line.
+    assert!(
+        out.contains("main =\n    1"),
+        "elm-format should reformat the block:\n{out}"
+    );
+}
+
+#[test]
+fn sqlfluff_lints_sql_with_dialect() {
+    require_tool!("sqlfluff");
+    // Regression guard for the `--dialect ansi` fix: without it sqlfluff errors
+    // ("No dialect was specified") instead of linting.
+    let out = lint("sql", "sqlfluff:lint", "sql", "select 1");
+    assert!(
+        !out.contains("No dialect") && !out.contains("User Error"),
+        "sqlfluff should lint with a dialect, not error:\n{out}"
+    );
+}
+
+#[test]
+fn djlint_lints_html() {
+    require_tool!("djlint");
+    let out = lint("html", "djlint", "html", "<div><p>hi</div>");
+    assert!(out.contains("orphan"), "djlint should flag the orphan tag:\n{out}");
 }
