@@ -596,6 +596,27 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
+    // Multi-language - deno fmt. stdin needs --ext to pick the parser, so one entry
+    // per supported extension. Bare "deno-fmt" defaults to TypeScript.
+    let deno_fmt = |ext: &str| ToolDefinition {
+        command: vec![
+            "deno".to_string(),
+            "fmt".to_string(),
+            format!("--ext={ext}"),
+            "-".to_string(),
+        ],
+        stdin: true,
+        stdout: true,
+        lint_args: vec!["--check".to_string()],
+        format_args: vec![],
+    };
+    m.insert("deno-fmt", deno_fmt("ts"));
+    m.insert("deno-fmt:ts", deno_fmt("ts"));
+    m.insert("deno-fmt:js", deno_fmt("js"));
+    m.insert("deno-fmt:json", deno_fmt("json"));
+    m.insert("deno-fmt:jsonc", deno_fmt("jsonc"));
+    m.insert("deno-fmt:md", deno_fmt("md"));
+
     m
 });
 
@@ -1002,6 +1023,54 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         kind: ToolKind::Format,
         doc_group: "oxfmt",
         display_command: Some("oxfmt --stdin-filepath=_.EXT"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt:ts",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt:js",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt:json",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt:jsonc",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "deno-fmt:md",
+        language: "Multi",
+        kind: ToolKind::Format,
+        doc_group: "deno-fmt",
+        display_command: Some("deno fmt --ext=EXT -"),
         runtime: true,
     },
     // Docs-only: rumdl's own markdown linting, short-circuited in the processor before
@@ -1414,6 +1483,22 @@ mod tests {
             tombi_lint.command, tombi_format.command,
             "tombi:lint and tombi:format should be distinct"
         );
+    }
+
+    #[test]
+    fn test_deno_fmt_has_per_extension_variants() {
+        // deno fmt bakes the extension into each variant (the registry does no runtime
+        // substitution), so a per-language slot picks the right parser.
+        let registry = ToolRegistry::default();
+
+        let deno_json = registry.get("deno-fmt:json").expect("deno-fmt:json");
+        assert!(deno_json.command.iter().any(|a| a == "--ext=json"));
+        let deno_md = registry.get("deno-fmt:md").expect("deno-fmt:md");
+        assert!(deno_md.command.iter().any(|a| a == "--ext=md"));
+
+        // Bare entry defaults to TypeScript.
+        let deno = registry.get("deno-fmt").expect("deno-fmt");
+        assert!(deno.command.iter().any(|a| a == "--ext=ts"));
     }
 
     // =========================================================================

@@ -143,6 +143,7 @@ rumdl includes definitions for common tools:
 | `tombi:format`    | TOML       | Format | `tombi format -`                                  |
 | `tombi:lint`      | TOML       | Lint   | `tombi lint -`                                    |
 | `oxfmt`           | Multi      | Format | `oxfmt --stdin-filepath=_.EXT`                    |
+| `deno-fmt`        | Multi      | Format | `deno fmt --ext=EXT -`                            |
 | `rumdl`           | Markdown   | Lint   | `built-in markdown linting`                       |
 
 <!-- END builtin-tools (generated) -->
@@ -376,7 +377,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 35             | 339        |
+| Built-in tools   | 36             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |
