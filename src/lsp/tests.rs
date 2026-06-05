@@ -8273,3 +8273,75 @@ async fn test_alias_in_rumdl_toml_disable_is_canonicalized() {
         filtered.iter().map(|r| r.name()).collect::<Vec<_>>(),
     );
 }
+
+#[test]
+fn test_lsp_config_walk_stops_at_home_boundary() {
+    // A config file in $HOME is user-level, not a project config. When the linted file
+    // lives in a config-less directory under $HOME and no workspace root bounds the walk
+    // (single-file edit), the upward project-config search must NOT return ~/.rumdl.toml.
+    // Otherwise it shadows the platform user-config dir, which is exactly the precedence
+    // inversion reported on Windows (%HOMEPATH%\.rumdl.toml beating %APPDATA%\rumdl).
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let fake_home = temp.path().join("home");
+    let work_dir = fake_home.join("notes").join("subdir");
+    fs::create_dir_all(&work_dir).unwrap();
+    fs::write(fake_home.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    let candidates = crate::lsp::configuration::collect_project_config_candidates(&work_dir, None, Some(&fake_home));
+
+    assert!(
+        candidates.is_empty(),
+        "Home dotfile must not be discovered as a project config, got: {candidates:?}"
+    );
+}
+
+#[test]
+fn test_lsp_config_walk_finds_project_config_below_home() {
+    // The home boundary must not suppress a genuine project config that lives in a
+    // subdirectory of $HOME -- only $HOME itself is off-limits as a project root.
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let fake_home = temp.path().join("home");
+    let project = fake_home.join("project");
+    let nested = project.join("docs");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(project.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let candidates = crate::lsp::configuration::collect_project_config_candidates(&nested, None, Some(&fake_home));
+
+    assert_eq!(
+        candidates.first(),
+        Some(&project.join(".rumdl.toml")),
+        "A real project config below $HOME must still be discovered"
+    );
+}
+
+#[test]
+fn test_lsp_config_walk_collects_same_dir_fallback_candidates() {
+    // Within a directory, every config file is collected in precedence order so the
+    // caller can fall through to a lower-precedence file when a higher-precedence one
+    // fails to load. Without this, a stale/malformed `.rumdl.toml` would hide a valid
+    // markdownlint config sitting next to it.
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let dir = temp.path().join("proj");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+    fs::write(dir.join(".markdownlint.json"), "{}\n").unwrap();
+
+    // Bound the walk to this directory (workspace root) so only its own files are scanned.
+    let candidates = crate::lsp::configuration::collect_project_config_candidates(&dir, Some(&dir), None);
+
+    assert_eq!(
+        candidates,
+        vec![dir.join(".rumdl.toml"), dir.join(".markdownlint.json")],
+        "both same-directory config files must be collected in precedence order"
+    );
+}

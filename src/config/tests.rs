@@ -2304,6 +2304,101 @@ fn test_project_config_wins_over_home_dotfile() {
 
 #[serial_test::serial]
 #[test]
+fn test_xdg_config_wins_over_home_dotfile_when_cwd_is_under_home() {
+    // Regression for the reported precedence inversion: when the file being linted
+    // lives in a config-less directory *under* $HOME (no project config and no .git
+    // boundary between the file and home), the upward project-config walk must NOT
+    // pick up ~/.rumdl.toml as a project config. A dotfile in $HOME is user-level,
+    // so the platform user-config dir (#3) must still win over the home dotfile (#4).
+    //
+    // This is the real-world layout the sibling-home tests above never exercise.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // Fake $HOME with a dotfile that would disable MD041 if (wrongly) used as project config.
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(fake_home.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    // Platform user-config dir (e.g. %APPDATA%\rumdl on Windows) disables MD013.
+    let user_config_dir = temp_dir.path().join("user_config");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+    fs::write(rumdl_config_dir.join("rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    // A config-less working directory *inside* $HOME, with NO .git boundary. The
+    // upward walk would climb into $HOME and find the dotfile if not bounded there.
+    let work_dir = fake_home.join("notes").join("subdir");
+    fs::create_dir_all(&work_dir).unwrap();
+    env::set_current_dir(&work_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    env::set_current_dir(original_dir).unwrap();
+
+    assert!(
+        config.global.disable.contains(&"MD013".to_string()),
+        "Platform user-config (#3) must win when cwd is under $HOME"
+    );
+    assert!(
+        !config.global.disable.contains(&"MD041".to_string()),
+        "~/.rumdl.toml must NOT be picked up as a project config via the upward walk"
+    );
+}
+
+#[serial_test::serial]
+#[test]
+fn test_home_markdownlint_not_used_as_project_config() {
+    // The home boundary must bound markdownlint discovery too: a markdownlint config in
+    // $HOME (e.g. ~/.markdownlint.yaml) is user-level, not a project config. When the cwd
+    // is a config-less directory under $HOME, the markdownlint upward walk must not pick
+    // it up, otherwise it shadows the platform user-config dir (the same inversion the
+    // rumdl dotfile had) and diverges from the LSP candidate collector.
+    use std::env;
+
+    let temp_dir = tempdir().unwrap();
+    let original_dir = env::current_dir().unwrap();
+
+    // Fake $HOME with a markdownlint config that would disable MD013 if wrongly used.
+    let fake_home = temp_dir.path().join("home");
+    fs::create_dir_all(&fake_home).unwrap();
+    fs::write(fake_home.join(".markdownlint.yaml"), "MD013: false\n").unwrap();
+
+    // Platform user-config dir sets a rumdl-specific flavor: the legitimate fallback.
+    let user_config_dir = temp_dir.path().join("user_config");
+    let rumdl_config_dir = user_config_dir.join("rumdl");
+    fs::create_dir_all(&rumdl_config_dir).unwrap();
+    fs::write(rumdl_config_dir.join("rumdl.toml"), "[global]\nflavor = \"mkdocs\"\n").unwrap();
+
+    // Config-less working dir inside $HOME, with NO .git boundary.
+    let work_dir = fake_home.join("notes").join("subdir");
+    fs::create_dir_all(&work_dir).unwrap();
+    env::set_current_dir(&work_dir).unwrap();
+
+    let sourced =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&fake_home)).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    env::set_current_dir(&original_dir).unwrap();
+
+    assert!(
+        !config.global.disable.contains(&"MD013".to_string()),
+        "~/.markdownlint.yaml must NOT be used as a project config, got disable={:?}",
+        config.global.disable
+    );
+    assert_eq!(
+        config.global.flavor,
+        MarkdownFlavor::MkDocs,
+        "Platform user-config (#3) must still apply as the fallback"
+    );
+}
+
+#[serial_test::serial]
+#[test]
 fn test_home_dotfile_supports_extends() {
     // ~/.rumdl.toml must support `extends` chains -- a relative `extends` resolves
     // against the dotfile's parent directory ($HOME), and the inherited config is

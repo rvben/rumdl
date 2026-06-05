@@ -419,12 +419,47 @@ impl SourcedConfig<ConfigLoaded> {
         start_dir.to_path_buf()
     }
 
+    /// Resolve the home-directory boundary used to stop project-config discovery.
+    ///
+    /// `home_override` wins (supplied by tests); otherwise the real home is resolved on
+    /// native builds via `etcetera`. Wasm has no home/project walk to bound, so it
+    /// returns `None` there.
+    fn resolve_home_boundary(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
+        home_override.map(Path::to_path_buf).or_else(|| {
+            #[cfg(feature = "native")]
+            {
+                use etcetera::{BaseStrategy, choose_base_strategy};
+                choose_base_strategy().ok().map(|s| s.home_dir().to_path_buf())
+            }
+            #[cfg(not(feature = "native"))]
+            {
+                None
+            }
+        })
+    }
+
+    /// Whether `current_dir` is the home-directory boundary. Compares canonically so
+    /// differing path representations (Windows 8.3 short names, Unix symlinks) match,
+    /// falling back to a literal comparison when canonicalization fails.
+    fn at_home_boundary(current_dir: &Path, home_dir: Option<&Path>, canonical_home: Option<&Path>) -> bool {
+        match (canonical_home, std::fs::canonicalize(current_dir).ok()) {
+            (Some(home), Some(current)) => current == home,
+            _ => home_dir == Some(current_dir),
+        }
+    }
+
     /// Discover configuration file by traversing up the directory tree.
     /// Returns the first configuration file found.
     /// Discovers config file and returns both the config path and project root.
     /// Returns: (config_file_path, project_root_path)
     /// Project root is the directory containing .git, or config parent as fallback.
-    fn discover_config_upward() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    ///
+    /// The walk stops at the home directory: a config file located in `$HOME`
+    /// itself is user-level, not a project config, and must reach the loader only
+    /// through the user-config fallback (`load_user_config`) so the platform
+    /// user-config directory keeps precedence over `~/.rumdl.toml`. `home_override`
+    /// supplies the boundary for tests; production resolves the real home directory.
+    fn discover_config_upward(home_override: Option<&Path>) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
         use std::env;
 
         const MAX_DEPTH: usize = 100; // Prevent infinite traversal
@@ -437,6 +472,12 @@ impl SourcedConfig<ConfigLoaded> {
             }
         };
 
+        // Resolve the home-directory boundary so a user-level `~/.rumdl.toml` is never
+        // treated as a project config; it reaches the loader only via the user-config
+        // fallback, which keeps the platform user-config dir ahead of the home dotfile.
+        let home_dir = Self::resolve_home_boundary(home_override);
+        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
+
         let mut current_dir = start_dir.clone();
         let mut depth = 0;
         let mut found_config: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
@@ -444,6 +485,13 @@ impl SourcedConfig<ConfigLoaded> {
         loop {
             if depth >= MAX_DEPTH {
                 log::debug!("[rumdl-config] Maximum traversal depth reached");
+                break;
+            }
+
+            // Stop at the home directory: any config already found below home is
+            // returned; home and above are left to the user-config fallback.
+            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
+                log::debug!("[rumdl-config] Reached home directory boundary; stopping project discovery");
                 break;
             }
 
@@ -506,9 +554,10 @@ impl SourcedConfig<ConfigLoaded> {
     }
 
     /// Discover markdownlint configuration file by traversing up the directory tree.
-    /// Similar to discover_config_upward but for .markdownlint.yaml/json files.
-    /// Returns the path to the config file if found.
-    fn discover_markdownlint_config_upward() -> Option<std::path::PathBuf> {
+    /// Similar to discover_config_upward but for .markdownlint.yaml/json files, and
+    /// bounded at the home directory for the same reason: a markdownlint config in
+    /// `$HOME` is user-level, not a project config.
+    fn discover_markdownlint_config_upward(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
         use std::env;
 
         const MAX_DEPTH: usize = 100;
@@ -521,12 +570,21 @@ impl SourcedConfig<ConfigLoaded> {
             }
         };
 
+        let home_dir = Self::resolve_home_boundary(home_override);
+        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
+
         let mut current_dir = start_dir.clone();
         let mut depth = 0;
 
         loop {
             if depth >= MAX_DEPTH {
                 log::debug!("[rumdl-config] Maximum traversal depth reached for markdownlint discovery");
+                break;
+            }
+
+            // Stop at the home directory, mirroring rumdl config discovery.
+            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
+                log::debug!("[rumdl-config] Reached home directory boundary; stopping markdownlint discovery");
                 break;
             }
 
@@ -835,7 +893,7 @@ impl SourcedConfig<ConfigLoaded> {
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");
 
             // Try to discover project config first
-            if let Some((config_file, project_root)) = Self::discover_config_upward() {
+            if let Some((config_file, project_root)) = Self::discover_config_upward(home_dir) {
                 // Project config found - use ONLY this (standalone, no user config).
                 // Rumdl project configs can express all settings directly, so user config
                 // is not needed and omitting it ensures CI and local runs are identical.
@@ -853,7 +911,7 @@ impl SourcedConfig<ConfigLoaded> {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");
 
-                if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward() {
+                if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward(home_dir) {
                     let path_str = markdownlint_path.display().to_string();
                     log::debug!("[rumdl-config] Found markdownlint config: {path_str}");
                     // Load user config first as a base so rumdl-specific settings (e.g. flavor,
