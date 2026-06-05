@@ -46,6 +46,18 @@ impl ToolRegistry {
     }
 }
 
+/// IDs of all built-in (registry) tools, sorted.
+///
+/// Exposed so the execution-test harness can assert every built-in is either
+/// verified by an execution test or explicitly exempted (see that harness). When you
+/// add a built-in tool, run it through rumdl and add an execution test; if it cannot
+/// be verified to work over stdin, do not ship it.
+pub fn builtin_tool_ids() -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = BUILTIN_TOOLS.keys().copied().collect();
+    ids.sort_unstable();
+    ids
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new(BTreeMap::new())

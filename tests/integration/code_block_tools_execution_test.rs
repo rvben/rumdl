@@ -7,6 +7,19 @@
 //! CI that installs it) and skips otherwise. This is what would have caught the
 //! shuck (no stdin), eslint (needs a config), and shellcheck (missing `--shell`)
 //! problems before they shipped.
+//!
+//! ## Adding a built-in tool
+//!
+//! 1. Install the tool and run it through rumdl on a fenced block (a temp `.rumdl.toml`
+//!    with `[code-block-tools]` plus `rumdl check`/`fmt`). Confirm it reads stdin and
+//!    its output parses into real diagnostics / formatted code. If it can't be made to
+//!    work over stdin, do not ship it (see the removed eslint/shuck/rubocop entries).
+//! 2. Add an execution test below and list its registry id in `VERIFIED`. For a pure
+//!    extension/subcommand variant of an already-tested tool (e.g. `prettier:json`),
+//!    add it to `EXEMPT` with the reason instead.
+//!
+//! `every_builtin_tool_is_verified_or_exempt` is a CI gate: a new registry entry that
+//! is neither tested nor exempted fails the suite, so unverified tools cannot ship.
 
 use std::fs;
 use std::path::Path;
@@ -307,4 +320,94 @@ fn djlint_lints_html() {
     require_tool!("djlint");
     let out = lint("html", "djlint", "html", "<div><p>hi</div>");
     assert!(out.contains("orphan"), "djlint should flag the orphan tag:\n{out}");
+}
+
+// ---- coverage gate --------------------------------------------------------
+
+/// Built-in tool ids that have a dedicated execution test above.
+const VERIFIED: &[&str] = &[
+    "ruff:check",
+    "ruff:format",
+    "black",
+    "prettier",
+    "shellcheck",
+    "shfmt",
+    "rustfmt",
+    "gofmt",
+    "goimports",
+    "clang-format",
+    "sqlfluff:lint",
+    "jq",
+    "yamlfmt",
+    "taplo",
+    "terraform-fmt",
+    "nixfmt",
+    "stylua",
+    "ormolu",
+    "elm-format",
+    "swift-format",
+    "ktfmt",
+    "djlint",
+    "beautysh",
+    "tombi:format",
+    "oxfmt",
+    "deno-fmt:ts",
+];
+
+/// Built-in tool ids without a dedicated test because they are pure
+/// extension/subcommand variants of a VERIFIED tool (same binary), with the reason.
+const EXEMPT: &[(&str, &str)] = &[
+    (
+        "prettier:json",
+        "prettier variant (different --stdin-filepath extension)",
+    ),
+    ("prettier:yaml", "prettier variant"),
+    ("prettier:html", "prettier variant"),
+    ("prettier:css", "prettier variant"),
+    ("prettier:markdown", "prettier variant"),
+    ("sqlfluff:fix", "sqlfluff variant (sqlfluff:lint verified)"),
+    ("djlint:lint", "djlint variant"),
+    ("djlint:reformat", "djlint variant"),
+    ("tombi", "tombi variant (tombi:format verified)"),
+    ("tombi:lint", "tombi variant"),
+    ("oxfmt:js", "oxfmt variant"),
+    ("oxfmt:ts", "oxfmt variant"),
+    ("oxfmt:jsx", "oxfmt variant"),
+    ("oxfmt:tsx", "oxfmt variant"),
+    ("oxfmt:json", "oxfmt variant"),
+    ("oxfmt:css", "oxfmt variant"),
+    ("deno-fmt", "deno-fmt variant (deno-fmt:ts verified)"),
+    ("deno-fmt:js", "deno-fmt variant"),
+    ("deno-fmt:json", "deno-fmt variant"),
+    ("deno-fmt:jsonc", "deno-fmt variant"),
+    ("deno-fmt:md", "deno-fmt variant"),
+];
+
+/// Gate: every built-in must have an execution test or an explicit exemption, so a new
+/// registry entry cannot ship unverified. Fails if a tool is uncovered, double-listed,
+/// or if VERIFIED/EXEMPT reference a tool no longer in the registry.
+#[test]
+fn every_builtin_tool_is_verified_or_exempt() {
+    use std::collections::BTreeSet;
+
+    let registry: BTreeSet<&str> = rumdl_lib::code_block_tools::builtin_tool_ids().into_iter().collect();
+    let verified: BTreeSet<&str> = VERIFIED.iter().copied().collect();
+    let exempt: BTreeSet<&str> = EXEMPT.iter().map(|(id, _)| *id).collect();
+
+    let both: Vec<&&str> = verified.intersection(&exempt).collect();
+    assert!(both.is_empty(), "ids listed as both verified and exempt: {both:?}");
+
+    let covered: BTreeSet<&str> = verified.union(&exempt).copied().collect();
+
+    let uncovered: Vec<&&str> = registry.difference(&covered).collect();
+    assert!(
+        uncovered.is_empty(),
+        "built-in tools with no execution test or exemption (add a test to VERIFIED or an entry to EXEMPT): {uncovered:?}"
+    );
+
+    let stale: Vec<&&str> = covered.difference(&registry).collect();
+    assert!(
+        stale.is_empty(),
+        "VERIFIED/EXEMPT reference tools no longer in the registry (remove them): {stale:?}"
+    );
 }
