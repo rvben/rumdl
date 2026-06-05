@@ -158,6 +158,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
     );
 
+    // JUnit additionally reports passing files, so it needs every checked file's path,
+    // not just the ones with warnings. Other batch formats are issue-lists and don't.
+    let collect_all_files = matches!(output_format, OutputFormat::Junit);
+
     // Use a silent output writer for batch formats so per-file output is suppressed
     // (warnings are collected and formatted as a batch at the end)
     let batch_output_writer;
@@ -194,6 +198,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
 
     // For batch formats, collect (display_path, warnings) tuples
     let mut batch_file_warnings: Vec<(String, Vec<rumdl_lib::rule::LintWarning>)> = Vec::new();
+    // For JUnit, the display paths of every checked file (clean and dirty).
+    let mut batch_all_files: Vec<String> = Vec::new();
 
     let (
         mut has_issues,
@@ -289,11 +295,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                     has_errors = true;
                 }
 
-                // Collect warnings for batch output formats
-                if needs_collection && !warnings.is_empty() {
+                // Collect warnings for batch output formats; for JUnit also record every
+                // checked file so passing files appear in the report.
+                if needs_collection && (collect_all_files || !warnings.is_empty()) {
                     let display_path =
                         crate::file_processor::resolve_display_path(&file_path, args.show_full_path, project_root);
-                    batch_file_warnings.push((display_path, warnings.clone()));
+                    if collect_all_files {
+                        batch_all_files.push(display_path.clone());
+                    }
+                    if !warnings.is_empty() {
+                        batch_file_warnings.push((display_path, warnings.clone()));
+                    }
                 }
 
                 if args.statistics {
@@ -394,11 +406,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                     has_errors = true;
                 }
 
-                // Collect warnings for batch output formats
-                if needs_collection && !warnings.is_empty() {
+                // Collect warnings for batch output formats; for JUnit also record every
+                // checked file so passing files appear in the report.
+                if needs_collection && (collect_all_files || !warnings.is_empty()) {
                     let display_path =
                         crate::file_processor::resolve_display_path(file_path, args.show_full_path, project_root);
-                    batch_file_warnings.push((display_path, warnings.clone()));
+                    if collect_all_files {
+                        batch_all_files.push(display_path.clone());
+                    }
+                    if !warnings.is_empty() {
+                        batch_file_warnings.push((display_path, warnings.clone()));
+                    }
                 }
 
                 if args.statistics {
@@ -572,9 +590,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             }
             OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&batch_file_warnings),
             OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&batch_file_warnings),
-            OutputFormat::Junit => {
-                rumdl_lib::output::formatters::junit::format_junit_report(&batch_file_warnings, duration_ms)
-            }
+            OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(
+                &batch_file_warnings,
+                &batch_all_files,
+                duration_ms,
+            ),
             _ => unreachable!("needs_collection check above guarantees only batch formats here"),
         };
 

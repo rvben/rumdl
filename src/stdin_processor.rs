@@ -245,7 +245,8 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                                 rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings)
                             }
                             OutputFormat::Junit => {
-                                rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0)
+                                let all_files = vec![display_filename.to_string()];
+                                rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, &all_files, 0)
                             }
                             _ => unreachable!(),
                         };
@@ -349,7 +350,10 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
                 OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
                 OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
-                OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, 0),
+                OutputFormat::Junit => {
+                    let all_files = vec![display_filename.to_string()];
+                    rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, &all_files, 0)
+                }
                 _ => unreachable!("Outer match guarantees only batch formats here"),
             };
 
