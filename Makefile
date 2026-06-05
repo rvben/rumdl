@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema sync-code-block-tools check-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
 
 # Development environment setup
 setup-mise:
@@ -177,6 +177,14 @@ schema:
 # Check if JSON schema is up-to-date
 check-schema:
 	cargo run --bin rumdl -- schema check
+
+# Sync the built-in code-block-tools table in docs/ from the registry.
+sync-code-block-tools:
+	cargo run --bin rumdl -- code-block-tools-docs generate
+
+# Verify the built-in code-block-tools docs table is in sync with the registry.
+check-code-block-tools:
+	cargo run --bin rumdl -- code-block-tools-docs check
 
 # Verify version references in vership-tracked files are in sync with Cargo.toml.
 # Guards against vership's text-mode version_files silently no-op'ing when the

@@ -53,6 +53,9 @@ jobs:
       - name: Check rule-count docs in sync with registry
         run: make check-rule-docs
 
+      - name: Check code-block-tools docs in sync with registry
+        run: make check-code-block-tools
+
       - name: Run linting
         run: make lint
 

@@ -2,3 +2,8 @@
 # output (serde always emits LF) in `test_schema_file_is_up_to_date`. Force LF on
 # checkout so Windows autocrlf does not turn it into CRLF and break the test.
 rumdl.schema.json text eol=lf
+
+# The built-in tools table is regenerated and compared against the committed file
+# by `code-block-tools-docs check` (the generator emits LF). Force LF on checkout so
+# Windows autocrlf does not turn it into CRLF and break the check.
+docs/code-block-tools.md text eol=lf

@@ -153,3 +153,11 @@ repos:
         files: \.(rs|md)$
         pass_filenames: false
         stages: [pre-push]
+
+      - id: code-block-tools-check
+        name: check built-in tools docs in sync with registry
+        entry: mise exec -- make check-code-block-tools
+        language: system
+        files: \.(rs|md)$
+        pass_filenames: false
+        stages: [pre-push]
