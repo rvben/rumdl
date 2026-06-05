@@ -113,8 +113,7 @@ rumdl includes definitions for common tools:
 | `ruff:format`     | Python     | Format | `ruff format -`                                   |
 | `black`           | Python     | Format | `black --quiet -`                                 |
 | `prettier`        | Multi      | Format | `prettier --stdin-filepath=_.EXT`                 |
-| `eslint`          | JS/TS      | Lint   | `eslint --stdin`                                  |
-| `shellcheck`      | Shell      | Lint   | `shellcheck -`                                    |
+| `shellcheck`      | Shell      | Lint   | `shellcheck --shell=bash -`                       |
 | `shfmt`           | Shell      | Format | `shfmt`                                           |
 | `rustfmt`         | Rust       | Format | `rustfmt`                                         |
 | `gofmt`           | Go         | Format | `gofmt`                                           |
@@ -377,7 +376,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 36             | 339        |
+| Built-in tools   | 35             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |

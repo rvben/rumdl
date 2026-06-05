@@ -171,27 +171,14 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // JavaScript/TypeScript - eslint (lint only)
-    m.insert(
-        "eslint",
-        ToolDefinition {
-            command: vec![
-                "eslint".to_string(),
-                "--stdin".to_string(),
-                "--stdin-filename=_.js".to_string(),
-            ],
-            stdin: true,
-            stdout: true,
-            lint_args: vec![],
-            format_args: vec!["--fix-dry-run".to_string()],
-        },
-    );
-
-    // Shell - shellcheck (lint only)
+    // Shell - shellcheck (lint only). `--shell=bash` because code blocks rarely carry
+    // a shebang; without it shellcheck emits a "target shell unknown" tip instead of
+    // real diagnostics. bash is the common, permissive default; override with a custom
+    // tool for sh/ksh/dash.
     m.insert(
         "shellcheck",
         ToolDefinition {
-            command: vec!["shellcheck".to_string(), "-".to_string()],
+            command: vec!["shellcheck".to_string(), "--shell=bash".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -735,14 +722,6 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         kind: ToolKind::Format,
         doc_group: "prettier",
         display_command: Some("prettier --stdin-filepath=_.EXT"),
-        runtime: true,
-    },
-    ToolDocMeta {
-        id: "eslint",
-        language: "JS/TS",
-        kind: ToolKind::Lint,
-        doc_group: "eslint",
-        display_command: Some("eslint --stdin"),
         runtime: true,
     },
     ToolDocMeta {
@@ -1618,7 +1597,7 @@ mod tests {
                 .any(|(i, l, k, c)| i == id && l == lang && k == kind && c == cmd)
         };
         // One exact row per kind, plus a collapsed group and the docs-only row.
-        assert!(has("`shellcheck`", "Shell", "Lint", "`shellcheck -`"));
+        assert!(has("`shellcheck`", "Shell", "Lint", "`shellcheck --shell=bash -`"));
         assert!(has("`rustfmt`", "Rust", "Format", "`rustfmt`"));
         assert!(has("`jq`", "JSON", "Both", "`jq .`"));
         assert!(has(
