@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema sync-code-block-tools check-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
 
 # Development environment setup
 setup-mise:
@@ -185,6 +185,12 @@ sync-code-block-tools:
 # Verify the built-in code-block-tools docs table is in sync with the registry.
 check-code-block-tools:
 	cargo run --bin rumdl -- code-block-tools-docs check
+
+# Run the built-in code-block tools through rumdl against the real binaries. Each test
+# skips when its tool is absent, so this verifies whatever is installed; install more
+# tools to widen coverage (the CI code-block-tools job installs the fast ones).
+test-code-block-tools:
+	cargo nextest run --profile ci -E 'test(code_block_tools_execution)'
 
 # Verify version references in vership-tracked files are in sync with Cargo.toml.
 # Guards against vership's text-mode version_files silently no-op'ing when the
