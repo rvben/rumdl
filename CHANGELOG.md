@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **md022**: keep the blanks-around-headings fix idempotent when a heading sits between a list and a list marker
 - **md030**: reject out-of-range ol-align-column values ([3620545](https://github.com/rvben/rumdl/commit/3620545e4eb73fc364562c1b1e4f578882d2daa5))
 - **md030**: keep nested content attached when a marker widens (#657) ([3bcc4c4](https://github.com/rvben/rumdl/commit/3bcc4c4ad109ef9d741d694b2eaa1a0944f02053)) - thanks @chandlerc
 

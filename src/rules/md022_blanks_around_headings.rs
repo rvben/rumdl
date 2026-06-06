@@ -11,6 +11,28 @@ use toml;
 pub(crate) mod md022_config;
 use md022_config::MD022Config;
 
+/// Whether a trimmed line begins with a list marker: `-`, `*`, or `+`, or one or more
+/// digits followed by `.` or `)`, in each case followed by a space or the end of the line.
+///
+/// This is a parse-stable substitute for the per-line `list_item` flag when deciding whether
+/// a heading is followed by a list. The flag depends on surrounding block context and can flip
+/// when a blank line is inserted above the heading, which would make the blank-below fix
+/// non-idempotent; the syntactic shape of the following line does not change.
+fn starts_with_list_marker(trimmed: &str) -> bool {
+    let bytes = trimmed.as_bytes();
+    match bytes.first() {
+        Some(b'-' | b'*' | b'+') => matches!(bytes.get(1), None | Some(b' ')),
+        Some(b'0'..=b'9') => {
+            let mut i = 0;
+            while bytes.get(i).is_some_and(u8::is_ascii_digit) {
+                i += 1;
+            }
+            matches!(bytes.get(i), Some(b'.' | b')')) && matches!(bytes.get(i + 1), None | Some(b' '))
+        }
+        _ => false,
+    }
+}
+
 ///
 /// This rule enforces consistent spacing around headings to improve document readability
 /// and visual structure.
@@ -514,8 +536,13 @@ impl Rule for MD022BlanksAroundHeadings {
                                     .nth(3)
                                     .is_some_and(|c| c.is_whitespace() || c.is_alphabetic())));
 
-                    // Check for list item
-                    let is_list_item = next_line.list_item.is_some();
+                    // Check for list item. The parser's `list_item` flag for a following
+                    // marker is not parse-stable here: a sibling list directly above the
+                    // heading can leak list context onto this line, so inserting the blank
+                    // line above the heading flips the flag (e.g. `2. ` counts as a list
+                    // item in one pass and not the next). Detect the marker syntactically as
+                    // well, so the guard - and therefore the fix - stays idempotent.
+                    let is_list_item = next_line.list_item.is_some() || starts_with_list_marker(next_trimmed);
 
                     is_code_fence || is_list_item
                 };
@@ -953,6 +980,28 @@ Final content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.fix_content(&ctx);
         assert_eq!(result, expected, "Fix should not add blank lines before lists");
+    }
+
+    #[test]
+    fn test_fix_idempotent_when_heading_follows_a_list_and_precedes_a_marker() {
+        // Regression: a list directly above a heading (`- a\n# H`) makes the parser tag the
+        // following marker line (`2. `) as a list item, so the blank-below was skipped.
+        // Inserting the blank above closed that list and flipped the flag, so a second pass
+        // then added the blank below — a non-idempotent fix. The marker is now recognized
+        // syntactically, so the heading-followed-by-list decision is stable across passes.
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "- a\n# H\n2. ";
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::MDX,
+        ] {
+            let ctx1 = LintContext::new(content, flavor, None);
+            let fixed1 = rule.fix(&ctx1).unwrap();
+            let ctx2 = LintContext::new(&fixed1, flavor, None);
+            let fixed2 = rule.fix(&ctx2).unwrap();
+            assert_eq!(fixed1, fixed2, "MD022 fix must be idempotent (flavor={flavor:?})");
+        }
     }
 
     #[test]
