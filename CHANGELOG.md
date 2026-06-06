@@ -48,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.9](https://github.com/rvben/rumdl/compare/v0.2.8...v0.2.9) - 2026-06-06
+
+### Added
+
+- **md030**: align ordered list text to a column with ol-align-column (#658) ([221cdaa](https://github.com/rvben/rumdl/commit/221cdaabfb0de54151b496d7ae867193eddcd6a5)) - thanks @chandlerc
+
+### Fixed
+
+- **md030**: reject out-of-range ol-align-column values ([3620545](https://github.com/rvben/rumdl/commit/3620545e4eb73fc364562c1b1e4f578882d2daa5))
+- **md030**: keep nested content attached when a marker widens (#657) ([3bcc4c4](https://github.com/rvben/rumdl/commit/3bcc4c4ad109ef9d741d694b2eaa1a0944f02053)) - thanks @chandlerc
+
 ## [0.2.8](https://github.com/rvben/rumdl/compare/v0.2.7...v0.2.8) - 2026-06-05
 
 ### Added
