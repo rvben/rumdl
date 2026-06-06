@@ -21,6 +21,13 @@ pub(super) struct MD030Config {
     /// Spaces for multi-line ordered list items (default: 1)
     #[serde(default = "default_spaces", alias = "ol_multi")]
     pub ol_multi: PositiveUsize,
+
+    /// Align ordered list text to this column, measured from the start of the
+    /// marker (default: 0 = off; 4 is the usual choice). Narrower markers are
+    /// padded up to the column; markers too wide for it overflow with one space
+    /// rather than pushing the rest of the list over. See docs/md030.md.
+    #[serde(default, alias = "ol_align_column")]
+    pub ol_align_column: usize,
 }
 
 fn default_spaces() -> PositiveUsize {
@@ -34,6 +41,7 @@ impl Default for MD030Config {
             ul_multi: default_spaces(),
             ol_single: default_spaces(),
             ol_multi: default_spaces(),
+            ol_align_column: 0,
         }
     }
 }
@@ -74,5 +82,20 @@ mod tests {
         assert_eq!(config.ol_single.get(), 3);
         assert_eq!(config.ul_multi.get(), 4);
         assert_eq!(config.ol_multi.get(), 5);
+    }
+
+    #[test]
+    fn test_ol_align_column_defaults_to_zero() {
+        let config = MD030Config::default();
+        assert_eq!(config.ol_align_column, 0, "ol-align-column should default to 0 (off)");
+    }
+
+    #[test]
+    fn test_ol_align_column_kebab_and_snake_case() {
+        let kebab: MD030Config = toml::from_str("ol-align-column = 4").unwrap();
+        assert_eq!(kebab.ol_align_column, 4);
+
+        let snake: MD030Config = toml::from_str("ol_align_column = 4").unwrap();
+        assert_eq!(snake.ol_align_column, 4);
     }
 }
