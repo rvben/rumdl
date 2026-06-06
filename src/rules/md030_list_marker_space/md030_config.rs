@@ -1,5 +1,5 @@
 use crate::rule_config_serde::RuleConfig;
-use crate::types::PositiveUsize;
+use crate::types::{OlAlignColumn, PositiveUsize};
 use serde::{Deserialize, Serialize};
 
 /// Configuration for MD030 (Spaces after list markers)
@@ -23,11 +23,12 @@ pub(super) struct MD030Config {
     pub ol_multi: PositiveUsize,
 
     /// Align ordered list text to this column, measured from the start of the
-    /// marker (default: 0 = off; 4 is the usual choice). Narrower markers are
-    /// padded up to the column; markers too wide for it overflow with one space
-    /// rather than pushing the rest of the list over. See docs/md030.md.
+    /// marker (default: 0 = off; valid values are 3-6, with 4 the usual choice).
+    /// Narrower markers are padded up to the column; markers too wide for it
+    /// overflow with one space rather than pushing the rest of the list over.
+    /// See docs/md030.md.
     #[serde(default, alias = "ol_align_column")]
-    pub ol_align_column: usize,
+    pub ol_align_column: OlAlignColumn,
 }
 
 fn default_spaces() -> PositiveUsize {
@@ -41,7 +42,7 @@ impl Default for MD030Config {
             ul_multi: default_spaces(),
             ol_single: default_spaces(),
             ol_multi: default_spaces(),
-            ol_align_column: 0,
+            ol_align_column: OlAlignColumn::default(),
         }
     }
 }
@@ -87,15 +88,42 @@ mod tests {
     #[test]
     fn test_ol_align_column_defaults_to_zero() {
         let config = MD030Config::default();
-        assert_eq!(config.ol_align_column, 0, "ol-align-column should default to 0 (off)");
+        assert_eq!(
+            config.ol_align_column.get(),
+            0,
+            "ol-align-column should default to 0 (off)"
+        );
     }
 
     #[test]
     fn test_ol_align_column_kebab_and_snake_case() {
         let kebab: MD030Config = toml::from_str("ol-align-column = 4").unwrap();
-        assert_eq!(kebab.ol_align_column, 4);
+        assert_eq!(kebab.ol_align_column.get(), 4);
 
         let snake: MD030Config = toml::from_str("ol_align_column = 4").unwrap();
-        assert_eq!(snake.ol_align_column, 4);
+        assert_eq!(snake.ol_align_column.get(), 4);
+    }
+
+    #[test]
+    fn test_ol_align_column_accepts_off_and_valid_range() {
+        for column in [0, 3, 4, 5, 6] {
+            let config: MD030Config = toml::from_str(&format!("ol-align-column = {column}")).unwrap();
+            assert_eq!(config.ol_align_column.get(), column);
+        }
+    }
+
+    #[test]
+    fn test_ol_align_column_rejects_out_of_range() {
+        // 1 and 2 are below the narrowest marker's reach; 7+ would need 5+ spaces,
+        // which CommonMark parses as an indented code block. All are rejected.
+        for column in [1, 2, 7, 8, 100] {
+            let result: Result<MD030Config, _> = toml::from_str(&format!("ol-align-column = {column}"));
+            assert!(result.is_err(), "ol-align-column = {column} should be rejected");
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("must be 0 (off) or between 3 and 6") || err.contains(&format!("got {column}")),
+                "unexpected error for {column}: {err}"
+            );
+        }
     }
 }

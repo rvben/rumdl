@@ -8,6 +8,7 @@ mod heading_level;
 mod indent_size;
 mod line_length;
 mod non_negative_usize;
+mod ol_align_column;
 mod positive_usize;
 
 pub use br_spaces::{BrSpaces, BrSpacesError};
@@ -15,4 +16,5 @@ pub use heading_level::{HeadingLevel, HeadingLevelError};
 pub use indent_size::{IndentSize, IndentSizeError};
 pub use line_length::LineLength;
 pub use non_negative_usize::{NonNegativeUsize, NonNegativeUsizeError};
+pub use ol_align_column::{OlAlignColumn, OlAlignColumnError};
 pub use positive_usize::{PositiveUsize, PositiveUsizeError};

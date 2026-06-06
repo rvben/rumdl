@@ -58,7 +58,7 @@ impl MD030ListMarkerSpace {
                     .unwrap_or(crate::types::PositiveUsize::from_const(1)),
                 ol_multi: crate::types::PositiveUsize::new(ol_multi)
                     .unwrap_or(crate::types::PositiveUsize::from_const(1)),
-                ol_align_column: 0,
+                ol_align_column: crate::types::OlAlignColumn::default(),
             },
         }
     }
@@ -68,16 +68,18 @@ impl MD030ListMarkerSpace {
     }
 
     /// Set the ordered-list alignment column. Intended for tests; production code
-    /// configures this via `MD030.ol-align-column`.
+    /// configures this via `MD030.ol-align-column`. Panics on an out-of-range value
+    /// (the config path rejects those with a diagnostic instead).
     #[cfg(test)]
     fn with_ol_align_column(mut self, column: usize) -> Self {
-        self.config.ol_align_column = column;
+        self.config.ol_align_column =
+            crate::types::OlAlignColumn::new(column).expect("test ol-align-column out of range");
         self
     }
 
     /// The target column for ordered list text, or `None` when alignment is off.
     fn ol_align_column(&self) -> Option<usize> {
-        (self.config.ol_align_column > 0).then_some(self.config.ol_align_column)
+        self.config.ol_align_column.enabled()
     }
 
     fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
@@ -1149,10 +1151,11 @@ mod tests {
     }
 
     #[test]
-    fn test_ol_align_column_caps_at_four_spaces() {
-        // A large column must not push content 5+ spaces past the marker, which
-        // CommonMark parses as an indented code block. Spacing is capped at 4.
-        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(8);
+    fn test_ol_align_column_max_is_four_spaces() {
+        // Column 6 is the maximum the config allows: a `1.` marker reaches it with
+        // exactly 4 spaces, the CommonMark ceiling (5+ would start an indented code
+        // block). Larger columns are rejected at the config layer, not clamped here.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(6);
         let content = indoc! {"
             1. one
             2. two
@@ -1164,7 +1167,7 @@ mod tests {
                 1.    one
                 2.    two
             "},
-            "spacing must be capped at 4 to avoid an indented code block"
+            "column 6 pads `1.` to exactly 4 spaces, never more"
         );
         assert_fix_resolves_all_violations(&rule, content);
     }
