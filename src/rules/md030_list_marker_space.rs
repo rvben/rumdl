@@ -30,6 +30,17 @@ enum Continuation {
     Ends,
 }
 
+/// An open list item (or inline bullet) whose content the current line may
+/// continue, tracked on a stack. `shift` is its cumulative indent shift (its own
+/// marker re-spacing plus every ancestor's), applied to the continuation lines it
+/// owns.
+struct AlignFrame {
+    marker_column: usize,
+    bq_level: usize,
+    min_indent: usize,
+    shift: isize,
+}
+
 #[derive(Clone, Default)]
 pub struct MD030ListMarkerSpace {
     config: MD030Config,
@@ -87,74 +98,139 @@ impl Rule for MD030ListMarkerSpace {
         // Track which lines we've already processed (to avoid duplicates)
         let mut processed_lines = std::collections::HashSet::new();
 
-        // First pass: Check parser-recognized list items
+        // Content only needs re-indenting when a marker can *widen*, pushing content
+        // right, which otherwise detaches nested lists (a multi-line `1.` marker that
+        // grows leaves its `   1. inner` child under-indented and flattened). Narrowing
+        // leaves content over-indented but attached, which MD077 tightens, so we skip
+        // the whole mechanism unless some configured spacing exceeds 1. Widening needs
+        // an expected width above the 1 that recognized markers already have.
+        let may_widen = self.config.ul_single.get() > 1
+            || self.config.ul_multi.get() > 1
+            || self.config.ol_single.get() > 1
+            || self.config.ol_multi.get() > 1;
+
+        // Active list items (and inline bullets) whose content the current line may
+        // continue. Each frame carries the item's cumulative indent shift (its own
+        // marker re-spacing plus every ancestor's), so a continuation line is
+        // re-indented by the shift of the innermost frame that still owns it. Because
+        // the loop walks top to bottom, every owning item is already on the stack by
+        // the time we reach its content, so the shift is known on the spot.
+        let mut stack: Vec<AlignFrame> = Vec::new();
+
+        // Main pass: re-indent each continuation/nested line as the loop reaches it,
+        // and check parser-recognized list items.
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
+            let line_num_1based = line_num + 1;
+            let line = lines[line_num];
+
+            // Drop frames whose item has ended, then read the shift and blockquote
+            // level of the innermost item that still owns this line.
+            let (owner_shift, owner_bq_level) = if may_widen {
+                while let Some(&AlignFrame {
+                    marker_column,
+                    bq_level,
+                    min_indent,
+                    ..
+                }) = stack.last()
+                {
+                    if Self::classify_continuation(ctx, line_num_1based, lines, marker_column, bq_level, min_indent)
+                        == Continuation::Ends
+                    {
+                        stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+                stack.last().map_or((0, 0), |f| (f.shift, f.bq_level))
+            } else {
+                (0, 0)
+            };
+
             // Skip code blocks, math blocks, PyMdown blocks, and MkDocs markdown HTML divs (grid cards use custom spacing)
-            if line_info.list_item.is_some()
+            let is_list_item = line_info.list_item.is_some()
                 && !line_info.in_code_block
                 && !line_info.in_math_block
                 && !line_info.in_pymdown_block
                 && !line_info.in_mkdocs_html_markdown
-                && !line_info.in_footnote_definition
+                && !line_info.in_footnote_definition;
+
+            if !is_list_item {
+                // A continuation/nested line follows its owning item's shift.
+                if owner_shift > 0
+                    && !line.trim().is_empty()
+                    && let Some(warning) = self.indent_shift_warning(ctx, line, line_num, owner_bq_level, owner_shift)
+                {
+                    processed_lines.insert(line_num_1based);
+                    warnings.push(warning);
+                }
+                continue;
+            }
+
+            processed_lines.insert(line_num_1based);
+            let Some(list_info) = &line_info.list_item else {
+                continue;
+            };
+
+            // The item is content of its parent, so its leading indent follows too.
+            if may_widen
+                && let Some(warning) = self.indent_shift_warning(ctx, line, line_num, owner_bq_level, owner_shift)
             {
-                let line_num_1based = line_num + 1;
-                processed_lines.insert(line_num_1based);
+                warnings.push(warning);
+            }
 
-                let line = lines[line_num];
+            let list_type = if list_info.is_ordered {
+                ListType::Ordered
+            } else {
+                ListType::Unordered
+            };
+            let marker_end = list_info.marker_column + list_info.marker.len();
 
-                if let Some(list_info) = &line_info.list_item {
-                    let list_type = if list_info.is_ordered {
-                        ListType::Ordered
-                    } else {
-                        ListType::Unordered
-                    };
+            // MD030 only applies when there is content after the marker.
+            if !Self::has_content_after_marker(line, marker_end) {
+                continue;
+            }
 
-                    // Calculate actual spacing after marker
-                    let marker_end = list_info.marker_column + list_info.marker.len();
+            let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-                    // Skip if there's no content on this line after the marker
-                    // MD030 only applies when there IS content after the marker
-                    if !Self::has_content_after_marker(line, marker_end) {
-                        continue;
-                    }
+            // A fixed number of spaces by list type and whether the item is single- or
+            // multi-line.
+            let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
+            let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
 
-                    let actual_spaces = list_info.content_column.saturating_sub(marker_end);
+            if actual_spaces != expected_spaces {
+                warnings.push(self.spacing_fix_warning(
+                    ctx,
+                    line,
+                    line_num,
+                    marker_end..marker_end + actual_spaces,
+                    expected_spaces,
+                    format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})"),
+                ));
+            }
 
-                    // Determine if this is a multi-line list item
-                    let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
-                    let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
-
-                    if actual_spaces != expected_spaces {
-                        let whitespace_start_pos = marker_end;
-                        let whitespace_len = actual_spaces;
-
-                        let (start_line, start_col, end_line, end_col) =
-                            calculate_match_range(line_num_1based, line, whitespace_start_pos, whitespace_len);
-
-                        let correct_spaces = " ".repeat(expected_spaces);
-                        let line_start_byte = ctx.line_offsets.get(line_num).copied().unwrap_or(0);
-                        let whitespace_start_byte = line_start_byte + whitespace_start_pos;
-                        let whitespace_end_byte = whitespace_start_byte + whitespace_len;
-
-                        let fix = Some(crate::rule::Fix::new(
-                            whitespace_start_byte..whitespace_end_byte,
-                            correct_spaces,
-                        ));
-
-                        let message =
-                            format!("Spaces after list markers (Expected: {expected_spaces}; Actual: {actual_spaces})");
-
-                        warnings.push(LintWarning {
-                            rule_name: Some(self.name().to_string()),
-                            severity: Severity::Warning,
-                            line: start_line,
-                            column: start_col,
-                            end_line,
-                            end_column: end_col,
-                            message,
-                            fix,
-                        });
-                    }
+            // Push this item's frame so its continuation lines follow it, and space any
+            // inline nested bullet (`1. - x`), which gets its own frame.
+            if may_widen
+                && let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num_1based)
+            {
+                let item_shift = owner_shift + (expected_spaces as isize - actual_spaces as isize);
+                stack.push(AlignFrame {
+                    marker_column,
+                    bq_level,
+                    min_indent,
+                    shift: item_shift,
+                });
+                if list_info.is_ordered
+                    && let Some(warning) = self.align_inline_bullet(
+                        ctx,
+                        line_num_1based,
+                        lines,
+                        list_info.content_column,
+                        item_shift,
+                        &mut stack,
+                    )
+                {
+                    warnings.push(warning);
                 }
             }
         }
@@ -270,6 +346,53 @@ impl MD030ListMarkerSpace {
         !line[marker_end..].trim().is_empty()
     }
 
+    /// Build a warning that replaces the whitespace run at byte range `span` within
+    /// the line at `line_idx` (0-based) with `want` spaces. Shared by the marker-
+    /// spacing checks and the nested-content re-indentation.
+    fn spacing_fix_warning(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line: &str,
+        line_idx: usize,
+        span: std::ops::Range<usize>,
+        want: usize,
+        message: String,
+    ) -> LintWarning {
+        let (start_line, start_col, end_line, end_col) =
+            calculate_match_range(line_idx + 1, line, span.start, span.len());
+        let base = ctx.line_offsets.get(line_idx).copied().unwrap_or(0);
+        LintWarning {
+            rule_name: Some(self.name().to_string()),
+            severity: Severity::Warning,
+            line: start_line,
+            column: start_col,
+            end_line,
+            end_column: end_col,
+            message,
+            fix: Some(crate::rule::Fix::new(
+                base + span.start..base + span.end,
+                " ".repeat(want),
+            )),
+        }
+    }
+
+    /// If the content at byte `content_col` of `line` is an inline unordered marker
+    /// (`-`/`*`/`+` followed by spaces and then content, as in `1. - x`), return the
+    /// byte offset of the spaces after that bullet and their current count. `None`
+    /// for anything else (e.g. `1. -x` or `1. *emphasis*`, which aren't markers).
+    fn inline_unordered_spaces(line: &str, content_col: usize) -> Option<(usize, usize)> {
+        if !matches!(line.as_bytes().get(content_col), Some(b'-' | b'*' | b'+')) {
+            return None;
+        }
+        let offset = content_col + 1;
+        let rest = line.get(offset..)?;
+        let spaces = rest.len() - rest.trim_start_matches(' ').len();
+        if spaces == 0 || rest[spaces..].is_empty() {
+            return None;
+        }
+        Some((offset, spaces))
+    }
+
     /// The marker column, blockquote nesting level, and minimum (blockquote-aware)
     /// indent a following line needs to continue the list item on `line_num`. These
     /// are the inputs shared by every continuation scan. `None` if the line isn't a
@@ -321,11 +444,25 @@ impl MD030ListMarkerSpace {
     }
 
     /// Whether the list item on `line_num` spans multiple lines (has continuation or
-    /// nested content). Stops at the first line that belongs to it.
+    /// nested content).
     fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
         let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num) else {
             return false;
         };
+        Self::has_continuation(ctx, line_num, lines, marker_column, bq_level, min_indent)
+    }
+
+    /// Whether any line after `line_num` (1-based) belongs to an item with the given
+    /// continuation threshold, scanning until the item ends. Shared by the multi-line
+    /// check and the inline-bullet check.
+    fn has_continuation(
+        ctx: &crate::lint_context::LintContext,
+        line_num: usize,
+        lines: &[&str],
+        marker_column: usize,
+        bq_level: usize,
+        min_indent: usize,
+    ) -> bool {
         for next in (line_num + 1)..=lines.len() {
             match Self::classify_continuation(ctx, next, lines, marker_column, bq_level, min_indent) {
                 Continuation::Belongs => return true,
@@ -334,6 +471,97 @@ impl MD030ListMarkerSpace {
             }
         }
         false
+    }
+
+    /// Byte offset on `line` where its shiftable indent begins: column 0 when the
+    /// owning item is at top level, or just past the blockquote prefix when it sits
+    /// inside a blockquote (its indent lives after the `>` markers).
+    fn write_offset(owner_bq_level: usize, line: &str) -> usize {
+        match owner_bq_level {
+            0 => 0,
+            _ => parse_blockquote_prefix(line).map_or(0, |p| p.prefix.len()),
+        }
+    }
+
+    /// Build the warning that re-indents a continuation/nested `line` (0-based
+    /// `line_idx`) by `shift` columns, within its owning item's coordinate system.
+    /// Only a positive shift (content moving right, to stay attached to a widened
+    /// marker) is emitted; a non-positive shift leaves content over-indented but
+    /// attached, which MD077 cleans up. `None` when nothing moves.
+    fn indent_shift_warning(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line: &str,
+        line_idx: usize,
+        owner_bq_level: usize,
+        shift: isize,
+    ) -> Option<LintWarning> {
+        if shift <= 0 {
+            return None;
+        }
+        let offset = Self::write_offset(owner_bq_level, line);
+        let after = &line[offset..];
+        let indent = after.len() - after.trim_start().len();
+        let new_indent = (indent as isize + shift).max(0) as usize;
+        if new_indent == indent {
+            return None;
+        }
+        Some(self.spacing_fix_warning(
+            ctx,
+            line,
+            line_idx,
+            offset..offset + indent,
+            new_indent,
+            format!(
+                "Nested content should align with the list marker (Expected indent: {new_indent}; Actual: {indent})"
+            ),
+        ))
+    }
+
+    /// The first item of a nested unordered list shares the ordered marker's line
+    /// (`1. - x`), where the parser exposes only the outer marker. Space that inline
+    /// bullet like a sibling bullet on its own line; when its spacing changes, push a
+    /// frame so its own continuation lines pick up the extra shift. `item_shift` is
+    /// the enclosing ordered item's cumulative shift. Returns the bullet's spacing
+    /// warning, if any.
+    fn align_inline_bullet(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        line_num: usize,
+        lines: &[&str],
+        content_column: usize,
+        item_shift: isize,
+        stack: &mut Vec<AlignFrame>,
+    ) -> Option<LintWarning> {
+        let line = lines[line_num - 1];
+        let (offset, spaces) = Self::inline_unordered_spaces(line, content_column)?;
+        let bullet_content_col = offset + spaces;
+        // ul-multi if the bullet itself spans lines, else ul-single, measured with a
+        // raw indent (bq_level 0) like a bullet that begins its own line.
+        let multi = Self::has_continuation(ctx, line_num, lines, content_column, 0, bullet_content_col);
+        let want = if multi {
+            self.config.ul_multi.get()
+        } else {
+            self.config.ul_single.get()
+        };
+        if spaces == want {
+            return None;
+        }
+        let bullet_delta = want as isize - spaces as isize;
+        stack.push(AlignFrame {
+            marker_column: content_column,
+            bq_level: 0,
+            min_indent: bullet_content_col,
+            shift: item_shift + bullet_delta,
+        });
+        Some(self.spacing_fix_warning(
+            ctx,
+            line,
+            line_num - 1,
+            offset..offset + spaces,
+            want,
+            format!("Spaces after list markers (Expected: {want}; Actual: {spaces})"),
+        ))
     }
 
     /// Detect list-like patterns that the parser didn't recognize (e.g., "1.Text" with no space)
@@ -476,6 +704,7 @@ impl MD030ListMarkerSpace {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+    use indoc::indoc;
 
     /// Assert that running `fix()` on content with violations produces output that
     /// passes `check()` with zero remaining violations.
@@ -766,6 +995,51 @@ mod tests {
 
         // Verify the full roundtrip: fix() must resolve everything check() found.
         assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_multi_reindents_nested_to_stay_attached() {
+        // Regression: widening a multi-line marker (here ol-multi = 3) moves its
+        // content right. Without re-indenting the nested list it would end up left of
+        // the parent's content column and detach (the nested `1.` would flatten into a
+        // sibling). The shifts accumulate down the levels so everything stays nested.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 3); // ol-multi = 3
+        let content = indoc! {"
+            1. outer
+               1. inner
+                  deep
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.   outer
+                     1.   inner
+                          deep
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_multi_does_not_reindent_when_narrowing() {
+        // The mirror case: removing extra spaces (narrowing) leaves content
+        // over-indented but attached, which MD077 tightens, so MD030 leaves the
+        // continuation alone rather than fighting that rule.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1); // defaults: markers narrow to 1
+        let content = indoc! {"
+            1.   outer
+                 continuation
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1. outer
+                     continuation
+            "},
+            "marker narrows to 1 space; the over-indented continuation is left for MD077"
+        );
     }
 
     #[test]
