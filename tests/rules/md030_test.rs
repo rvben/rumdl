@@ -1,7 +1,28 @@
 mod tests {
     use rumdl_lib::lint_context::LintContext;
     use rumdl_lib::rule::Rule;
-    use rumdl_lib::rules::MD030ListMarkerSpace;
+    use rumdl_lib::rules::{MD030ListMarkerSpace, MD077ListContinuationIndent};
+
+    /// Apply each rule's fix in turn (re-parsing between), mirroring how the pipeline
+    /// combines MD030 (marker spacing) with MD077 (continuation indentation).
+    fn fix_pipeline(content: &str, rules: &[&dyn Rule]) -> String {
+        let mut out = content.to_string();
+        for rule in rules {
+            let ctx = LintContext::new(&out, rumdl_lib::config::MarkdownFlavor::Standard, None);
+            out = rule.fix(&ctx).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn test_combined_narrowing_tightens_continuation_default() {
+        // MD030 narrows the marker, leaving the continuation over-indented; MD077 then
+        // tightens it to the new content column. Neither rule alone gets there.
+        let md030 = MD030ListMarkerSpace::default();
+        let md077 = MD077ListContinuationIndent;
+        let out = fix_pipeline("*   item\n    continuation\n", &[&md030 as &dyn Rule, &md077]);
+        assert_eq!(out, "* item\n  continuation\n");
+    }
 
     #[test]
     fn test_valid_single_line_lists() {
@@ -576,7 +597,8 @@ mod tests {
 
     #[test]
     fn test_multi_line_configuration_support() {
-        // Test that ul_multi and ol_multi configuration options are actually used
+        // ul_multi and ol_multi widen multi-line markers; widening pushes content
+        // right, so MD030 re-indents each continuation to stay attached to its marker.
         let rule = MD030ListMarkerSpace::new(
             1, // ul_single
             3, // ul_multi  - key test: multi-line should use this
@@ -588,27 +610,22 @@ mod tests {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // Should find 2 violations:
-        // - Line 2: multi-line unordered list (expects 3 spaces, has 2)
-        // - Line 5: multi-line ordered list (expects 4 spaces, has 3)
-        assert_eq!(
-            result.len(),
-            2,
-            "Should detect multi-line spacing violations, got: {result:?}"
-        );
+        // Two marker violations (lines 2 and 5), each followed by a continuation
+        // (lines 3 and 6) that must follow the widened marker.
+        assert_eq!(result.len(), 4, "Got: {result:?}");
 
-        // Check the specific violations
         assert_eq!(result[0].line, 2);
-        assert!(result[0].message.contains("Expected: 3"));
-        assert!(result[0].message.contains("Actual: 2"));
+        assert!(result[0].message.contains("Expected: 3") && result[0].message.contains("Actual: 2"));
+        assert_eq!(result[1].line, 3);
+        assert!(result[1].message.contains("align with the list marker"));
+        assert_eq!(result[2].line, 5);
+        assert!(result[2].message.contains("Expected: 4") && result[2].message.contains("Actual: 3"));
+        assert_eq!(result[3].line, 6);
+        assert!(result[3].message.contains("align with the list marker"));
 
-        assert_eq!(result[1].line, 5);
-        assert!(result[1].message.contains("Expected: 4"));
-        assert!(result[1].message.contains("Actual: 3"));
-
-        // Test the fix
+        // The fix widens the markers and re-indents the continuations to match.
         let fixed = rule.fix(&ctx).unwrap();
-        let expected = "* Single line\n*   Multi-line item\n   with continuation\n1. Single ordered\n1.    Multi-line ordered\n     with continuation";
+        let expected = "* Single line\n*   Multi-line item\n    with continuation\n1. Single ordered\n1.    Multi-line ordered\n      with continuation";
         assert_eq!(fixed, expected, "Multi-line spacing should be fixed correctly");
     }
 
@@ -630,18 +647,22 @@ mod tests {
         let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
-        // First item is multi-line (has continuation), so should expect 3 spaces (ul_multi)
-        // It only has 1 space, so should be flagged
-        assert_eq!(
-            result.len(),
-            1,
-            "Multi-line blockquote list item should be detected. Got: {result:?}"
-        );
-        assert_eq!(result[0].line, 1, "Warning should be on line 1");
+        // First item is multi-line (has continuation), so its marker expects 3 spaces
+        // (ul_multi); widening it drags `more text` right to stay attached.
+        assert_eq!(result.len(), 2, "Got: {result:?}");
+        assert_eq!(result[0].line, 1, "Marker warning on line 1");
         assert!(
             result[0].message.contains("Expected: 3"),
             "Should expect ul_multi (3) spaces. Got: {}",
             result[0].message
+        );
+        assert_eq!(result[1].line, 2, "Continuation re-indent on line 2");
+        assert!(result[1].message.contains("align with the list marker"));
+
+        // The fix keeps `more text` aligned under `First item` inside the blockquote.
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "> -   First item\n>     more text\n> - Second item"
         );
     }
 
