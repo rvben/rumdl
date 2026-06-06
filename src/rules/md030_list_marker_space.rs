@@ -58,12 +58,26 @@ impl MD030ListMarkerSpace {
                     .unwrap_or(crate::types::PositiveUsize::from_const(1)),
                 ol_multi: crate::types::PositiveUsize::new(ol_multi)
                     .unwrap_or(crate::types::PositiveUsize::from_const(1)),
+                ol_align_column: 0,
             },
         }
     }
 
     fn from_config_struct(config: MD030Config) -> Self {
         Self { config }
+    }
+
+    /// Set the ordered-list alignment column. Intended for tests; production code
+    /// configures this via `MD030.ol-align-column`.
+    #[cfg(test)]
+    fn with_ol_align_column(mut self, column: usize) -> Self {
+        self.config.ol_align_column = column;
+        self
+    }
+
+    /// The target column for ordered list text, or `None` when alignment is off.
+    fn ol_align_column(&self) -> Option<usize> {
+        (self.config.ol_align_column > 0).then_some(self.config.ol_align_column)
     }
 
     fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
@@ -102,9 +116,11 @@ impl Rule for MD030ListMarkerSpace {
         // right, which otherwise detaches nested lists (a multi-line `1.` marker that
         // grows leaves its `   1. inner` child under-indented and flattened). Narrowing
         // leaves content over-indented but attached, which MD077 tightens, so we skip
-        // the whole mechanism unless some configured spacing exceeds 1. Widening needs
-        // an expected width above the 1 that recognized markers already have.
-        let may_widen = self.config.ul_single.get() > 1
+        // the whole mechanism unless some configured spacing exceeds 1 (or we align to
+        // a column). Widening needs an expected width above the 1 that recognized
+        // markers already have.
+        let may_widen = self.ol_align_column().is_some()
+            || self.config.ul_single.get() > 1
             || self.config.ul_multi.get() > 1
             || self.config.ol_single.get() > 1
             || self.config.ol_multi.get() > 1;
@@ -192,10 +208,21 @@ impl Rule for MD030ListMarkerSpace {
 
             let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-            // A fixed number of spaces by list type and whether the item is single- or
-            // multi-line.
-            let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
-            let expected_spaces = self.get_expected_spaces(list_type, is_multi_line);
+            let expected_spaces = if list_type == ListType::Ordered
+                && let Some(target_column) = self.ol_align_column()
+            {
+                // Align ordered text to the target column, overriding ol-single/
+                // ol-multi: pad a narrow marker up to it, and let one too wide overflow
+                // with a single space. Capped at 4 spaces, since 5+ start an indented
+                // code block in CommonMark.
+                let marker_len = list_info.marker.len();
+                target_column.saturating_sub(marker_len).clamp(1, 4)
+            } else {
+                // Default: a fixed number of spaces by list type and whether the item
+                // is single- or multi-line.
+                let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
+                self.get_expected_spaces(list_type, is_multi_line)
+            };
 
             if actual_spaces != expected_spaces {
                 warnings.push(self.spacing_fix_warning(
@@ -1039,6 +1066,439 @@ mod tests {
                      continuation
             "},
             "marker narrows to 1 space; the over-indented continuation is left for MD077"
+        );
+    }
+
+    #[test]
+    fn test_ol_align_column_off_by_default() {
+        // Without ol-align-column (the default), a list with uniform single spaces
+        // is valid even when markers differ in width.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1);
+        let content = indoc! {"
+            1. one
+            9. nine
+            10. ten
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "Default behaviour should not require column alignment"
+        );
+    }
+
+    #[test]
+    fn test_ol_align_column_basic() {
+        // Issue #644: aligning to column 4 keeps the text column fixed across a
+        // digit boundary (9. -> 10.).
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. one
+            9. nine
+            10. ten
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            2,
+            "Single-digit markers should be flagged; got: {warnings:?}"
+        );
+        assert!(warnings.iter().all(|w| w.line == 1 || w.line == 2));
+        assert!(
+            warnings[0].message.contains("Expected: 2") && warnings[0].message.contains("Actual: 1"),
+            "Message should report the aligned target; got: {}",
+            warnings[0].message
+        );
+        assert_eq!(
+            warnings[0].column, 3,
+            "Span should start at the whitespace after the marker"
+        );
+
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  one
+                9.  nine
+                10. ten
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_wide_marker_overflows() {
+        // A marker too wide for the column overflows with a single space rather
+        // than pushing the narrow entries further right.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. a
+            100. b
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  a
+                100. b
+            "},
+            "narrow marker sits at column 4; wide marker overflows to column 5"
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_caps_at_four_spaces() {
+        // A large column must not push content 5+ spaces past the marker, which
+        // CommonMark parses as an indented code block. Spacing is capped at 4.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(8);
+        let content = indoc! {"
+            1. one
+            2. two
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.    one
+                2.    two
+            "},
+            "spacing must be capped at 4 to avoid an indented code block"
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_already_aligned_is_clean() {
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1.  one
+            9.  nine
+            10. ten
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "Already-aligned list should produce no warnings"
+        );
+    }
+
+    #[test]
+    fn test_ol_align_column_reindents_nested_list() {
+        // A nested unordered list shifts with the ordered marker, and both bullets
+        // get ul-single, including the first one, which shares the `1.` line (the
+        // parser exposes only the outer `1.` marker there). With ol-align-column = 4
+        // and ul-single = 3 the whole structure lands on a 4-column grid.
+        let rule = MD030ListMarkerSpace::new(3, 1, 1, 1).with_ol_align_column(4); // ul-single = 3
+        let content = indoc! {"
+            1. - x
+               - y
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  -   x
+                    -   y
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_inline_non_marker_left_alone() {
+        // Only a real inline bullet (marker + space) gets ul-single; content that
+        // merely starts with `-`/`*` (a word, emphasis) must be left untouched, while
+        // the ordered marker still aligns to column 4.
+        let rule = MD030ListMarkerSpace::new(3, 1, 1, 1).with_ol_align_column(4);
+        for (input, expected) in [
+            ("1. -text\n", "1.  -text\n"),
+            ("1. *emphasis* here\n", "1.  *emphasis* here\n"),
+        ] {
+            let ctx = LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn test_ol_align_column_reindents_multi_level() {
+        // Shifts accumulate across nesting levels: the parent's widening and the
+        // nested item's widening both move the deepest line, in a single pass.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. text
+               1. a
+                  z
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  text
+                    1.  a
+                        z
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_reindents_multiline_nested_unordered() {
+        // A nested unordered list whose items span multiple lines: bullets align to
+        // column 4 and get ul-multi (they're multi-line), and their continuation
+        // lines shift to follow. The first bullet shares the `1.` line and is spaced
+        // just like `- second` on its own line.
+        let rule = MD030ListMarkerSpace::new(1, 3, 1, 1).with_ol_align_column(4); // ul-single=1, ul-multi=3
+        let content = indoc! {"
+            1. - first
+                 more first
+               - second
+                 more second
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  -   first
+                        more first
+                    -   second
+                        more second
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_reindents_multiline_nested_ordered() {
+        // A multi-line ordered list nested in a multi-line ordered list: every
+        // marker aligns to column 4 (relative to its own start), and continuation
+        // lines shift to follow, accumulating across the two levels.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. text
+               more text
+               1. inner
+                  more inner
+               2. inner2
+                  more inner2
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  text
+                    more text
+                    1.  inner
+                        more inner
+                    2.  inner2
+                        more inner2
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_nested_aligns_relative() {
+        // A nested ordered list shifts to follow the widened parent and aligns to
+        // column 4 relative to its own markers (single-digit → 2 spaces, `10.` → 1).
+        // (A nested ordered list is only recognized when it starts at 1.)
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. p
+               1. a
+               2. b
+               9. i
+               10. j
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  p
+                    1.  a
+                    2.  b
+                    9.  i
+                    10. j
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_blockquote_items_in_a_list() {
+        // Several blockquote items in one list: each marker reaches column 4 and
+        // its blockquote continuation shifts to follow.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. > a
+               > b
+            2. > c
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  > a
+                    > b
+                2.  > c
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_detached_blockquote_left_alone() {
+        // The blockquote sits at column 3 while the item's content is at column 4, so
+        // the parser already treats `> y` as its own top-level block, not this item's
+        // content. It must be left untouched (no re-attaching). The attached case is
+        // covered by `test_ol_align_column_blockquote_items_in_a_list`.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let detached = indoc! {"
+            1.  > x
+               > y
+        "};
+        let ctx = LintContext::new(detached, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            detached,
+            "a detached top-level blockquote must be left as is"
+        );
+    }
+
+    #[test]
+    fn test_ol_align_column_preserves_blockquote_alignment() {
+        // The motivating case: ordered items wrapping blockquotes whose content
+        // already sits at column 4. Aligning keeps every outer marker at column 4
+        // (rather than reducing the multi-line items 1 and 3), and the blockquote
+        // structure is preserved.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1.  > 1.  x
+                > 2.  y
+
+            2.  > z
+
+            3.  > 1.  a
+                > 2.  b
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        // Already at column 4, so nothing to change. Crucially, the multi-line
+        // items 1 and 3 are not reduced to column 3.
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "items already at column 4 must not be flagged; got: {:?}",
+            rule.check(&ctx).unwrap()
+        );
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "fix must leave the aligned input untouched"
+        );
+    }
+
+    #[test]
+    fn test_ol_align_column_reindents_mixed_content() {
+        // An item containing a blockquote and a nested list: every kind of attached
+        // content shifts together to follow the widened marker.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            1. > x
+               - sub
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                1.  > x
+                    - sub
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_in_blockquote() {
+        // Blockquoted ordered lists align correctly (the column is measured from
+        // the marker, independent of the blockquote prefix).
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            > 1. one
+            > 9. nine
+            > 10. ten
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                > 1.  one
+                > 9.  nine
+                > 10. ten
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_multiline_item_in_blockquote() {
+        // A multi-line ordered item *inside* a blockquote. Its continuation indent
+        // lives after the `>` prefix, not at the start of the line, so the generic
+        // shift moves that, keeping `more` under `text` and the blockquote intact,
+        // and the marker aligns to column 4 just like an item outside a blockquote.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            > 1. text
+            >    more
+            > 2. second
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                > 1.  text
+                >     more
+                > 2.  second
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_nested_list_in_blockquote() {
+        // A nested ordered list inside a blockquoted item: shifts accumulate across
+        // both levels in the blockquote's own coordinate system, so the inner marker
+        // lands under the outer text and the deepest line under the inner content.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            > 1. text
+            >    1. inner
+            >       more
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                > 1.  text
+                >     1.  inner
+                >         more
+            "}
+        );
+        assert_fix_resolves_all_violations(&rule, content);
+    }
+
+    #[test]
+    fn test_ol_align_column_does_not_affect_unordered_lists() {
+        // ol-align-column only governs ordered lists; unordered lists are unchanged.
+        let rule = MD030ListMarkerSpace::new(1, 1, 1, 1).with_ol_align_column(4);
+        let content = indoc! {"
+            - a
+            - b
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        assert!(
+            rule.check(&ctx).unwrap().is_empty(),
+            "Unordered lists should be unaffected by ol-align-column"
         );
     }
 
