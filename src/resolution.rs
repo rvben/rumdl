@@ -23,6 +23,35 @@ pub struct ConfigGroup {
     pub files: Vec<String>,
 }
 
+/// The two roots that anchor config resolution for a run.
+///
+/// They coincide for the common case (a project root discovered below the cwd).
+/// They diverge only for a multi-path run with no discovered project config: then
+/// `grouping_root` is the common-ancestor anchor (so subdirectory configs are still
+/// grouped) while `project_root` stays unset (so the cache dir, per-file globs and
+/// displayed paths remain cwd-relative).
+pub struct ResolutionRoots<'a> {
+    /// Upper bound for the per-directory config walk.
+    pub grouping_root: Option<&'a Path>,
+    /// The run's project root; bases a discovered subdir config's per-file globs.
+    pub project_root: Option<&'a Path>,
+}
+
+/// The directory a config file governs (its scope).
+///
+/// For `.rumdl.toml`, `rumdl.toml` and `pyproject.toml` this is the containing
+/// directory. A `.config/rumdl.toml` config governs the directory that holds
+/// `.config/`, not `.config/` itself, so its scope is the grandparent. Used to base
+/// a discovered subdir config's per-file globs on the files it actually governs.
+fn config_scope_dir(config_path: &Path) -> Option<&Path> {
+    let parent = config_path.parent()?;
+    if parent.file_name() == Some(std::ffi::OsStr::new(".config")) {
+        parent.parent()
+    } else {
+        Some(parent)
+    }
+}
+
 /// Check whether a config path is at a root-level location.
 ///
 /// Root-level means the config lives directly in the project root
@@ -52,19 +81,21 @@ fn is_root_level_config(config_path: &Path, project_root: &Path) -> bool {
 /// config files will use that config instead of the root config.
 ///
 /// Fast path: when `explicit_config` or `isolated` is set, or there is no
-/// project root, all files use the root config (zero overhead).
+/// grouping root, all files use the root config (zero overhead).
+///
+/// See [`ResolutionRoots`] for how the grouping root and project root relate.
 pub fn resolve_config_groups(
     file_paths: &[String],
     root_config: &rumdl_config::Config,
     args: &crate::CheckArgs,
-    project_root: Option<&Path>,
+    roots: &ResolutionRoots<'_>,
     cache: &Option<Arc<LintCache>>,
     explicit_config: bool,
     isolated: bool,
 ) -> Vec<ConfigGroup> {
-    // Fast path: explicit config, isolated mode, or no project root
+    // Fast path: explicit config, isolated mode, or no grouping root
     // All files use the root config
-    if explicit_config || isolated || project_root.is_none() {
+    if explicit_config || isolated || roots.grouping_root.is_none() {
         let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, root_config);
         let cache_hashes = cache
             .as_ref()
@@ -78,7 +109,7 @@ pub fn resolve_config_groups(
         }];
     }
 
-    let project_root = project_root.unwrap();
+    let grouping_root = roots.grouping_root.unwrap();
 
     // Cache: directory → Option<config file path>
     // None means "no subdirectory config found, use root"
@@ -92,14 +123,14 @@ pub fn resolve_config_groups(
         let path = Path::new(file_path);
         let parent_dir = match path.parent() {
             Some(dir) if dir.is_dir() => dir.to_path_buf(),
-            _ => project_root.to_path_buf(),
+            _ => grouping_root.to_path_buf(),
         };
 
         // Look up or discover the config for this directory
-        let config_path = discover_with_cache(&parent_dir, project_root, &mut dir_config_cache);
+        let config_path = discover_with_cache(&parent_dir, grouping_root, &mut dir_config_cache);
 
-        // Configs at the project root level use the already-loaded root config
-        let effective_config = config_path.filter(|cp| !is_root_level_config(cp, project_root));
+        // Configs at the grouping root level use the already-loaded root config
+        let effective_config = config_path.filter(|cp| !is_root_level_config(cp, grouping_root));
 
         file_config_map
             .entry(effective_config)
@@ -126,8 +157,14 @@ pub fn resolve_config_groups(
                 });
             }
             Some(path) => {
-                // Subdirectory config group
-                match rumdl_config::SourcedConfig::load_config_for_path(&path, project_root) {
+                // Subdirectory config group. Base its per-file globs on the real
+                // project root, or on the directory the config governs when there is
+                // none, never on the grouping anchor (which may sit above its scope).
+                let subconfig_root = roots
+                    .project_root
+                    .or_else(|| config_scope_dir(&path))
+                    .unwrap_or(grouping_root);
+                match rumdl_config::SourcedConfig::load_config_for_path(&path, subconfig_root) {
                     Ok(mut subdir_config) => {
                         // Apply CLI overrides that should take effect everywhere
                         apply_cli_config_overrides(&mut subdir_config, args);
@@ -234,5 +271,32 @@ fn apply_cli_config_overrides(config: &mut rumdl_config::Config, args: &crate::C
 
     if let Some(respect_gitignore) = args.respect_gitignore {
         config.global.respect_gitignore = respect_gitignore;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_scope_dir;
+    use std::path::Path;
+
+    #[test]
+    fn config_scope_dir_uses_containing_dir_for_plain_configs() {
+        for name in ["myproj/.rumdl.toml", "myproj/rumdl.toml", "myproj/pyproject.toml"] {
+            assert_eq!(
+                config_scope_dir(Path::new(name)),
+                Some(Path::new("myproj")),
+                "{name} should be scoped to its containing directory"
+            );
+        }
+    }
+
+    #[test]
+    fn config_scope_dir_skips_dot_config_directory() {
+        // `.config/rumdl.toml` governs the directory that holds `.config`, not
+        // `.config` itself, so its per-file globs must resolve one level up.
+        assert_eq!(
+            config_scope_dir(Path::new("myproj/.config/rumdl.toml")),
+            Some(Path::new("myproj"))
+        );
     }
 }

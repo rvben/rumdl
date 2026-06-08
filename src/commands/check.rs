@@ -81,38 +81,6 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // 2. Load sourced config (for provenance and validation)
     let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
 
-    // 2a. For multi-path runs, ensure the project root is the common-ancestor
-    // anchor we computed above when discovery did not establish one of its own.
-    // Config discovery only sets `project_root` when it finds a config file; a
-    // tree with no root config (with or without `.git`) would otherwise leave it
-    // `None`, and per-directory grouping (`resolve_config_groups`) would take its
-    // fast path and ignore standalone subdirectory configs entirely. Only fill it
-    // in when discovery found none so a genuinely discovered project root wins.
-    //
-    // Never synthesize a root at or above the home directory: per-directory
-    // discovery would then walk up through `$HOME` and treat `~/.rumdl.toml` as a
-    // project config, bypassing the home boundary the loader enforces and the
-    // platform user-config precedence. In that case leave `project_root` unset so
-    // the global baseline (already resolved with the home boundary respected)
-    // applies to all files.
-    //
-    // Skip entirely when discovery was intentionally bypassed (`--isolated` or an
-    // explicit `--config`): those modes leave `project_root` unset on purpose, and
-    // synthesizing one would change the cache location and re-enable per-directory
-    // discovery they opted out of.
-    if sourced.project_root.is_none()
-        && !isolated
-        && global_config_path.is_none()
-        && let Some(root) = &multi_path_root
-    {
-        let crosses_home = rumdl_config::SourcedConfig::home_boundary()
-            .and_then(|home| std::fs::canonicalize(&home).ok())
-            .is_some_and(|home| home.starts_with(root));
-        if !crosses_home {
-            sourced.project_root = Some(root.clone());
-        }
-    }
-
     // 2b. Apply inline `--config 'RULE.key=value'` overrides at CLI precedence
     // (highest), so they win over both file-loaded values and any later CLI
     // arg overrides that touch top-level globals.
@@ -163,6 +131,17 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         .map(|sv| std::path::PathBuf::from(&sv.value));
 
     let project_root = sourced.project_root.clone();
+
+    // Grouping root: the upper bound for per-directory config grouping. It is the
+    // discovered `project_root` when there is one; otherwise, for a multi-path run,
+    // it falls back to the common-ancestor anchor so standalone subdirectory
+    // configs are still grouped. Unlike `project_root` it does not base the cache
+    // dir, per-file globs or displayed paths, so those stay cwd-relative when no
+    // project config was found. `discover_config_for_dir` keeps the home boundary,
+    // so a grouping root above home never promotes `~/.rumdl.toml`. Isolated and
+    // explicit-config runs are unaffected: `resolve_config_groups` fast-paths on
+    // those regardless of the grouping root.
+    let grouping_root = project_root.clone().or(multi_path_root);
 
     // 5. Convert to Config for the rest of the linter
     // Validation warnings are already printed above, so we use into_validated_unchecked
@@ -216,6 +195,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         cache,
         workspace_cache_dir,
         project_root: project_root.as_deref(),
+        grouping_root: grouping_root.as_deref(),
         explicit_config: global_config_path.is_some(),
         isolated,
     };

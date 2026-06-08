@@ -498,17 +498,6 @@ impl SourcedConfig<ConfigLoaded> {
         start_dir.to_path_buf()
     }
 
-    /// The user's home directory, the upper boundary for project-config discovery.
-    ///
-    /// Exposed so callers that synthesize a project root (e.g. the CLI anchoring
-    /// multi-path discovery) can avoid placing it at or above the home directory,
-    /// which would let per-directory discovery cross the boundary and promote
-    /// `~/.rumdl.toml` to a project config. Returns `None` when no home is
-    /// resolvable (e.g. wasm).
-    pub fn home_boundary() -> Option<std::path::PathBuf> {
-        Self::resolve_home_boundary(None)
-    }
-
     /// Resolve the home-directory boundary used to stop project-config discovery.
     ///
     /// `home_override` wins (supplied by tests); otherwise the real home is resolved on
@@ -1155,9 +1144,25 @@ impl SourcedConfig<ConfigLoaded> {
         // root and could pick up a config file in a parent directory outside the
         // project.
         let canonical_project_root = std::fs::canonicalize(project_root).ok();
+
+        // Resolve the home boundary so the walk never treats `~/.rumdl.toml` as a
+        // project config, consistent with `discover_config_upward`. This only has
+        // an effect when `project_root` is at or above the home directory (e.g. a
+        // multi-path run whose grouping root spans the home boundary); for the
+        // usual project root below home the walk stops there first.
+        let home_dir = Self::resolve_home_boundary(None);
+        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
+
         let mut current_dir = dir.to_path_buf();
 
         loop {
+            // Stop at the home directory without checking its config: `~/.rumdl.toml`
+            // reaches the loader only via the user-config fallback, never as a
+            // project config promoted over the platform user config.
+            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
+                break;
+            }
+
             // Check rumdl config files first (higher precedence)
             for config_name in RUMDL_CONFIG_FILES {
                 let config_path = current_dir.join(config_name);

@@ -144,6 +144,7 @@ pub fn run_watch_mode(
         cache: None,
         workspace_cache_dir: None,
         project_root: project_root.as_deref(),
+        grouping_root: project_root.as_deref(),
         explicit_config,
         isolated,
     });
@@ -234,6 +235,7 @@ pub fn run_watch_mode(
                             cache: None,
                             workspace_cache_dir: None,
                             project_root: project_root.as_deref(),
+                            grouping_root: project_root.as_deref(),
                             explicit_config,
                             isolated,
                         });

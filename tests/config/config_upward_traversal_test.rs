@@ -708,3 +708,163 @@ fn test_multi_path_isolated_does_not_synthesize_project_root() {
         "isolated multi-path run should anchor the relative cache at the cwd"
     );
 }
+
+#[test]
+#[cfg(unix)]
+fn test_multi_path_cross_home_applies_config_below_home() {
+    // A multi-path run spanning the home tree and an outside tree must still
+    // discover and apply a real project config *below* home. The home boundary
+    // only blocks the home dotfile itself, not configs in subdirectories under
+    // home. (Grouping is anchored at the common ancestor; the home-aware
+    // per-directory walk stops at $HOME without promoting `~/.rumdl.toml`.)
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path();
+
+    let home = root.join("home");
+    let other = root.join("other");
+    let repo = home.join("repo");
+    let xdg = root.join("xdg");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&other).unwrap();
+    fs::create_dir_all(&xdg).unwrap(); // empty: no platform user config
+
+    // A genuine project config below home that disables MD013.
+    fs::write(repo.join(".rumdl.toml"), "[global]\ndisable = [\"MD013\"]\n").unwrap();
+
+    let long_line = "word word word word word word word word word over eighty characters long here now today";
+    fs::write(repo.join("a.md"), format!("# A\n\n{long_line}\n")).unwrap();
+    fs::write(other.join("b.md"), format!("# B\n\n{long_line}\n")).unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache"])
+        .arg(repo.join("a.md"))
+        .arg(other.join("b.md"))
+        .current_dir(root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.lines().any(|l| l.contains("a.md") && l.contains("MD013")),
+        "MD013 must NOT fire for home/repo/a.md (its config below home disables it). Output: {combined}"
+    );
+    assert!(
+        combined.lines().any(|l| l.contains("b.md") && l.contains("MD013")),
+        "MD013 must fire for other/b.md (no config, default baseline). Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_multi_path_cross_home_user_config_per_file_ignore_stays_cwd_relative() {
+    // Regression guard: a cross-home multi-path run with no project config falls
+    // back to the platform user config, whose per-file globs must keep matching
+    // relative to the cwd (the project root stays unset). Synthesizing a project
+    // root above home would re-base those globs and silently break them, e.g. a
+    // `[per-file-ignores] "a.md"` entry would stop matching `a.md` in the cwd.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path();
+
+    let home = root.join("home");
+    let other = root.join("other");
+    let xdg = root.join("xdg");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&other).unwrap();
+    fs::create_dir_all(xdg.join("rumdl")).unwrap();
+
+    // Platform user config: ignore MD013 for `a.md` (a cwd-relative glob).
+    fs::write(
+        xdg.join("rumdl").join("rumdl.toml"),
+        "[per-file-ignores]\n\"a.md\" = [\"MD013\"]\n",
+    )
+    .unwrap();
+
+    let long_line = "word word word word word word word word word over eighty characters long here now today";
+    fs::write(home.join("a.md"), format!("# A\n\n{long_line}\n")).unwrap();
+    fs::write(other.join("b.md"), format!("# B\n\n{long_line}\n")).unwrap();
+
+    // Run from $HOME with relative paths: `a.md` is cwd-relative, `../other/b.md`
+    // is outside home, so the common ancestor sits above home.
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "a.md", "../other/b.md"])
+        .current_dir(&home)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    // The user-config per-file-ignore for `a.md` (cwd-relative) must apply.
+    assert!(
+        !combined.lines().any(|l| l.contains("a.md") && l.contains("MD013")),
+        "MD013 must NOT fire for a.md: the user-config per-file-ignore is cwd-relative. Output: {combined}"
+    );
+    // b.md is not ignored, proving MD013 is otherwise active.
+    assert!(
+        combined.lines().any(|l| l.contains("b.md") && l.contains("MD013")),
+        "MD013 must fire for ../other/b.md (not covered by the per-file-ignore). Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_multi_path_cross_home_subdir_config_per_file_ignore_is_scope_relative() {
+    // A discovered subdirectory config's per-file globs must resolve relative to
+    // that config's own scope, not the grouping anchor. In a cross-home run the
+    // grouping root can be the common ancestor above home; using it as the
+    // subconfig's project root would rebase `"a.md"` to `home/repo/a.md` and break
+    // the ignore. The subconfig must stay anchored at its own directory.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path();
+
+    let home = root.join("home");
+    let other = root.join("other");
+    let repo = home.join("repo");
+    let xdg = root.join("xdg");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&other).unwrap();
+    fs::create_dir_all(&xdg).unwrap(); // empty: no platform user config
+
+    // Subdirectory project config below home with a scope-relative per-file-ignore.
+    fs::write(repo.join(".rumdl.toml"), "[per-file-ignores]\n\"a.md\" = [\"MD013\"]\n").unwrap();
+
+    let long_line = "word word word word word word word word word over eighty characters long here now today";
+    fs::write(repo.join("a.md"), format!("# A\n\n{long_line}\n")).unwrap();
+    fs::write(other.join("b.md"), format!("# B\n\n{long_line}\n")).unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache"])
+        .arg(repo.join("a.md"))
+        .arg(other.join("b.md"))
+        .current_dir(root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    // `a.md` is ignored by its own subdir config (scope-relative glob).
+    assert!(
+        !combined.lines().any(|l| l.contains("a.md") && l.contains("MD013")),
+        "MD013 must NOT fire for home/repo/a.md (its subdir config ignores a.md). Output: {combined}"
+    );
+    // `other/b.md` has no config and fires, proving MD013 is otherwise active.
+    assert!(
+        combined.lines().any(|l| l.contains("b.md") && l.contains("MD013")),
+        "MD013 must fire for other/b.md (no config). Output: {combined}"
+    );
+}
