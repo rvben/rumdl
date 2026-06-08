@@ -49,6 +49,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.10](https://github.com/rvben/rumdl/compare/v0.2.9...v0.2.10) - 2026-06-08
+
+### Added
+
+- **config**: warn when multiple rumdl configs shadow each other in a directory ([49cd393](https://github.com/rvben/rumdl/commit/49cd393105e7eb1972f25d326c7b941817226c3a))
+
+### Fixed
+
+- **config**: apply inline --config overrides to subdirectory config groups ([45800e8](https://github.com/rvben/rumdl/commit/45800e8064fc3c90792a60526327b9f0c0f11126))
+- **config**: anchor multi-path config discovery at the common ancestor of the target paths ([5b0d3c7](https://github.com/rvben/rumdl/commit/5b0d3c7de87399bf2be465cd49027f2e0d74b2a6))
+- **config**: discover global config from cwd for multi-path runs (#660) ([3c28327](https://github.com/rvben/rumdl/commit/3c283270f6c85fb84976bef077b126e9c7d294a0))
+- **config**: show shadowed-config warning paths relative to their directory ([37358a1](https://github.com/rvben/rumdl/commit/37358a1e94826fe4ae0622cbafc238578f1c51ab))
+
+Thanks to [@darwin](https://github.com/darwin) for reporting and contributing the initial fix for multi-path config discovery in [#660](https://github.com/rvben/rumdl/pull/660).
+
 ## [0.2.9](https://github.com/rvben/rumdl/compare/v0.2.8...v0.2.9) - 2026-06-06
 
 ### Added
