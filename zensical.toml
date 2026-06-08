@@ -30,6 +30,7 @@ nav = [
     { "Pre-commit" = "usage/pre-commit.md" },
   ]},
   { "Configuration" = [
+    "configuration/index.md",
     { "Global Settings" = "global-settings.md" },
     { "Inline Configuration" = "inline-configuration.md" },
     { "Markdown Flavors" = "flavors.md" },

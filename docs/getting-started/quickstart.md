@@ -53,7 +53,10 @@ rumdl init
 rumdl init --preset google
 ```
 
-This creates a `.rumdl.toml` file in your current directory.
+This creates a `.rumdl.toml` file in your current directory. rumdl can also read
+`rumdl.toml`, `.config/rumdl.toml`, or a `[tool.rumdl]` section in `pyproject.toml` -
+see [Configuration Files](../configuration/index.md) for the full list and how rumdl
+picks one.
 
 ## Example Configuration
 

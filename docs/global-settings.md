@@ -4,8 +4,10 @@ This document provides a comprehensive reference for rumdl's global configuratio
 
 ## Overview
 
-Global settings are configured in the `[global]` section of your configuration file (`.rumdl.toml` or
-`pyproject.toml`). These settings control file selection, rule enablement, and general linting behavior.
+Global settings are configured in the `[global]` section of your configuration file. rumdl supports
+several config file names and locations (`.rumdl.toml`, `rumdl.toml`, `.config/rumdl.toml`, and
+`pyproject.toml`) - see [Configuration Files](configuration/index.md) for the full list and discovery
+order. These settings control file selection, rule enablement, and general linting behavior.
 
 > **Tip:** In `.rumdl.toml`, global keys can also be placed at the top level without a `[global]` section
 > header, similar to [ruff.toml](https://docs.astral.sh/ruff/settings/). If both top-level and `[global]`
@@ -1023,13 +1025,10 @@ This follows the same model as [Ruff's per-directory configuration](https://docs
 
 ### Config file search order
 
-At each directory level, rumdl checks for config files in this order:
-
-1. `.rumdl.toml`
-2. `rumdl.toml`
-3. `.config/rumdl.toml`
-4. `pyproject.toml` (only if it contains a `[tool.rumdl]` section)
-5. Markdownlint config files (`.markdownlint.json`, `.markdownlint.yaml`, etc.) as fallback
+At each directory level, rumdl checks for config files in the standard precedence order
+(`.rumdl.toml` > `rumdl.toml` > `.config/rumdl.toml` > `pyproject.toml`, with markdownlint configs as a
+fallback). See [Configuration Files](configuration/index.md) for the complete list, user-level configs,
+and details.
 
 ### Subdirectory configs are standalone
 
