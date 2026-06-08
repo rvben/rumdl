@@ -872,8 +872,10 @@ impl SourcedConfig<ConfigLoaded> {
     /// Load and merge user-level configuration into this `SourcedConfig`.
     ///
     /// Discovers the user config file in this order, taking the first match:
-    /// 1. Platform user-config directory (XDG on Linux, `~/Library/Application Support`
-    ///    on macOS, `%APPDATA%` on Windows). Override with `user_config_dir` for tests.
+    /// 1. Platform user-config directory, resolved via `etcetera::choose_base_strategy`
+    ///    (the CLI/XDG convention): `~/.config` on Linux and macOS, `%APPDATA%` on
+    ///    Windows. Note macOS uses the XDG-style `~/.config`, not the GUI-app location
+    ///    `~/Library/Application Support`. Override with `user_config_dir` for tests.
     /// 2. Home-directory dotfile (`~/.rumdl.toml`, then `~/rumdl.toml`). Override with
     ///    `home_dir` for tests. Honors the classic Unix dotfile convention.
     ///
