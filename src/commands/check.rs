@@ -42,19 +42,31 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         return;
     }
 
-    // 1. Determine the directory for config discovery
-    // Use the first target path for config discovery if it's a directory
-    // Otherwise use current directory to ensure config files are found
-    // when pre-commit or other tools pass relative file paths
-    // When multiple paths are given they may span several config scopes
-    // (e.g. a repo root config plus nested `.rumdl.toml` files that
-    // `extend-disable` a rule). Seeding the *global* config from the first
-    // path's directory then makes whichever file sorts first decide the
-    // baseline for every file — a nested `extend-disable = ["MD013"]` would
-    // silently disable that rule repo-wide. For multi-path runs discover the
-    // global config from the cwd (project root) instead; per-file grouping
-    // still layers each file's own nearest config on top. Only a single path
-    // keeps the "discover next to that path" behaviour.
+    // 1. Determine the directory for config discovery.
+    //
+    // A single path discovers config next to that path (if it's a directory) or
+    // next to its parent. This keeps file-scoped runs (and pre-commit passing one
+    // relative file) finding the right nearest config.
+    //
+    // Multiple paths may span several config scopes (e.g. a repo-root config plus
+    // nested `.rumdl.toml` files that `extend-disable` a rule). The *global*
+    // config is the baseline for every file whose nearest config is the project
+    // root, so it must reflect the shared scope of the files being checked, not
+    // any single path's own directory. Anchoring at the first path's directory
+    // would let that directory's nested config become the baseline for files in
+    // sibling directories (silently suppressing a rule there); anchoring at the
+    // current working directory would leak an unrelated cwd config onto files
+    // elsewhere. So we anchor discovery at the nearest common ancestor of all
+    // target paths and let discovery walk up from there to the project root.
+    // Per-file grouping still layers each file's own nearest config on top.
+    //
+    // Zero paths (lint the cwd recursively) keeps the cwd-based discovery.
+    let multi_path_root = if args.paths.len() > 1 {
+        common_ancestor_dir(&args.paths)
+    } else {
+        None
+    };
+
     let discovery_dir = if args.paths.len() == 1 {
         let first_path = std::path::Path::new(&args.paths[0]);
         if first_path.is_dir() {
@@ -63,11 +75,43 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
             first_path.parent().filter(|&parent| parent.is_dir())
         }
     } else {
-        None
+        multi_path_root.as_deref()
     };
 
     // 2. Load sourced config (for provenance and validation)
     let mut sourced = load_config_with_cli_error_handling_with_dir(global_config_path, isolated, discovery_dir);
+
+    // 2a. For multi-path runs, ensure the project root is the common-ancestor
+    // anchor we computed above when discovery did not establish one of its own.
+    // Config discovery only sets `project_root` when it finds a config file; a
+    // tree with no root config (with or without `.git`) would otherwise leave it
+    // `None`, and per-directory grouping (`resolve_config_groups`) would take its
+    // fast path and ignore standalone subdirectory configs entirely. Only fill it
+    // in when discovery found none so a genuinely discovered project root wins.
+    //
+    // Never synthesize a root at or above the home directory: per-directory
+    // discovery would then walk up through `$HOME` and treat `~/.rumdl.toml` as a
+    // project config, bypassing the home boundary the loader enforces and the
+    // platform user-config precedence. In that case leave `project_root` unset so
+    // the global baseline (already resolved with the home boundary respected)
+    // applies to all files.
+    //
+    // Skip entirely when discovery was intentionally bypassed (`--isolated` or an
+    // explicit `--config`): those modes leave `project_root` unset on purpose, and
+    // synthesizing one would change the cache location and re-enable per-directory
+    // discovery they opted out of.
+    if sourced.project_root.is_none()
+        && !isolated
+        && global_config_path.is_none()
+        && let Some(root) = &multi_path_root
+    {
+        let crosses_home = rumdl_config::SourcedConfig::home_boundary()
+            .and_then(|home| std::fs::canonicalize(&home).ok())
+            .is_some_and(|home| home.starts_with(root));
+        if !crosses_home {
+            sourced.project_root = Some(root.clone());
+        }
+    }
 
     // 2b. Apply inline `--config 'RULE.key=value'` overrides at CLI precedence
     // (highest), so they win over both file-loaded values and any later CLI
@@ -194,4 +238,60 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     if should_fail && args.fix_mode != FixMode::Format {
         exit::violations_found();
     }
+}
+
+/// The nearest common-ancestor directory of every target path, resolved against
+/// the current working directory.
+///
+/// Used to anchor multi-path config discovery so the global baseline reflects the
+/// shared scope of the targets rather than any single path's (possibly
+/// nested-config) directory. Each path is reduced to its containing directory (the
+/// path itself when it is a directory, otherwise its parent); the result is the
+/// longest shared component prefix of those directories. Returns `None` when the
+/// paths share no common ancestor (e.g. different Windows drives) or the working
+/// directory cannot be resolved for a relative path, in which case the caller
+/// falls back to cwd-based discovery.
+fn common_ancestor_dir(paths: &[String]) -> Option<std::path::PathBuf> {
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
+
+    let cwd = std::env::current_dir().ok();
+
+    let to_dir = |p: &str| -> Option<PathBuf> {
+        let path = Path::new(p);
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            cwd.as_ref()?.join(path)
+        };
+        let dir = if abs.is_dir() {
+            abs
+        } else {
+            abs.parent().map(Path::to_path_buf).unwrap_or(abs)
+        };
+        // Canonicalize so `..`/`.` components are resolved before the prefix is
+        // computed; a literal `../sibling` would otherwise share the first path's
+        // directory as a false common prefix. Falls back to the raw directory when
+        // the path does not exist (it will be reported later as a missing file).
+        Some(std::fs::canonicalize(&dir).unwrap_or(dir))
+    };
+
+    let components = |dir: &Path| -> Vec<OsString> { dir.components().map(|c| c.as_os_str().to_owned()).collect() };
+
+    let mut dirs = paths.iter().filter_map(|p| to_dir(p));
+    let mut common = components(&dirs.next()?);
+    for dir in dirs {
+        let comps = components(&dir);
+        let shared = common.iter().zip(&comps).take_while(|(a, b)| a == b).count();
+        common.truncate(shared);
+        if common.is_empty() {
+            return None;
+        }
+    }
+
+    let mut result = PathBuf::new();
+    for component in common {
+        result.push(component);
+    }
+    Some(result)
 }

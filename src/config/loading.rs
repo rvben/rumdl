@@ -498,6 +498,17 @@ impl SourcedConfig<ConfigLoaded> {
         start_dir.to_path_buf()
     }
 
+    /// The user's home directory, the upper boundary for project-config discovery.
+    ///
+    /// Exposed so callers that synthesize a project root (e.g. the CLI anchoring
+    /// multi-path discovery) can avoid placing it at or above the home directory,
+    /// which would let per-directory discovery cross the boundary and promote
+    /// `~/.rumdl.toml` to a project config. Returns `None` when no home is
+    /// resolvable (e.g. wasm).
+    pub fn home_boundary() -> Option<std::path::PathBuf> {
+        Self::resolve_home_boundary(None)
+    }
+
     /// Resolve the home-directory boundary used to stop project-config discovery.
     ///
     /// `home_override` wins (supplied by tests); otherwise the real home is resolved on
