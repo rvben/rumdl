@@ -868,3 +868,54 @@ fn test_multi_path_cross_home_subdir_config_per_file_ignore_is_scope_relative() 
         "MD013 must fire for other/b.md (no config). Output: {combined}"
     );
 }
+
+#[test]
+fn test_multi_path_inline_config_override_reaches_subdir_groups() {
+    // Inline `--config 'RULE.key=value'` overrides are highest precedence and must
+    // apply to every file, including those grouped under a subdirectory config.
+    // A multi-path run reloads subdir configs through per-directory resolution, so
+    // the override has to be re-applied there too, not only to the root config.
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path();
+    fs::create_dir(project_dir.join(".git")).unwrap();
+
+    // Root config: lenient MD013. Subdir config: strict MD013 (line-length 40).
+    fs::write(project_dir.join(".rumdl.toml"), "[MD013]\nline-length = 120\n").unwrap();
+    let sub = project_dir.join("sub");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(
+        sub.join(".rumdl.toml"),
+        "extends = \"../.rumdl.toml\"\n\n[MD013]\nline-length = 40\n",
+    )
+    .unwrap();
+
+    // ~88-char line: over the subdir's 40, but under an inline override of 200.
+    let line = "word word word word word word word word over forty but well under two hundred chars here";
+    fs::write(sub.join("s.md"), format!("# S\n\n{line}\n")).unwrap();
+    fs::write(project_dir.join("r.md"), format!("# R\n\n{line}\n")).unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args([
+            "check",
+            "--no-cache",
+            "--config",
+            "MD013.line-length=200",
+            "sub/s.md",
+            "r.md",
+        ])
+        .current_dir(project_dir)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    // The inline 200 override must reach the subdir group, so s.md (88 < 200) is clean.
+    assert!(
+        !combined.lines().any(|l| l.contains("s.md") && l.contains("MD013")),
+        "MD013 must NOT fire for sub/s.md: the inline --config override (200) must reach the \
+         subdir group, overriding its line-length of 40. Output: {combined}"
+    );
+}

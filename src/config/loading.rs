@@ -1207,12 +1207,16 @@ impl SourcedConfig<ConfigLoaded> {
         None
     }
 
-    /// Load a config from a specific file path, with extends resolution.
+    /// Load a config from a specific file path, with extends resolution, returning
+    /// the still-`Loaded` `SourcedConfig` (before validation and conversion).
     ///
-    /// Creates a fresh `SourcedConfig`, loads the config file using the
-    /// appropriate parser, and converts to `Config`. Used for per-directory
-    /// config loading where each subdirectory config is standalone.
-    pub fn load_config_for_path(config_path: &Path, project_root: &Path) -> Result<Config, ConfigError> {
+    /// Used by per-directory resolution so the caller can layer CLI-level overrides
+    /// (e.g. inline `--config`) on top before converting to `Config`, matching the
+    /// precedence applied to the global config.
+    pub fn load_sourced_for_path(
+        config_path: &Path,
+        project_root: &Path,
+    ) -> Result<SourcedConfig<ConfigLoaded>, ConfigError> {
         let mut sourced_config = SourcedConfig {
             project_root: Some(project_root.to_path_buf()),
             ..SourcedConfig::default()
@@ -1241,7 +1245,16 @@ impl SourcedConfig<ConfigLoaded> {
             load_config_with_extends(&mut sourced_config, config_path, &mut visited, chain_source)?;
         }
 
-        Ok(sourced_config.into_validated_unchecked().into())
+        Ok(sourced_config)
+    }
+
+    /// Load a config from a specific file path, with extends resolution, and convert
+    /// to `Config`. Used for per-directory config loading where each subdirectory
+    /// config is standalone.
+    pub fn load_config_for_path(config_path: &Path, project_root: &Path) -> Result<Config, ConfigError> {
+        Ok(Self::load_sourced_for_path(config_path, project_root)?
+            .into_validated_unchecked()
+            .into())
     }
 }
 

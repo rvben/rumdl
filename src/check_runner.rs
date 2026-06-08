@@ -29,6 +29,9 @@ pub struct CheckRunContext<'a> {
     /// are still grouped while `project_root` stays unset (keeping the cache dir,
     /// per-file globs and displayed paths cwd-relative).
     pub grouping_root: Option<&'a Path>,
+    /// Inline `--config 'RULE.key=value'` overrides, re-applied to each discovered
+    /// subdirectory config so CLI precedence holds across all config groups.
+    pub inline_overrides: &'a [toml::Table],
     pub explicit_config: bool,
     pub isolated: bool,
 }
@@ -48,6 +51,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         workspace_cache_dir,
         project_root,
         grouping_root,
+        inline_overrides,
         explicit_config,
         isolated,
     } = *ctx;
@@ -123,9 +127,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                 grouping_root,
                 project_root,
             },
+            inline_overrides,
             cache,
-            explicit_config,
-            isolated,
+            explicit_config || isolated,
         )
     );
 

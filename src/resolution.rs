@@ -80,8 +80,13 @@ fn is_root_level_config(config_path: &Path, project_root: &Path) -> bool {
 /// In auto-discovery mode, files in subdirectories that contain their own
 /// config files will use that config instead of the root config.
 ///
-/// Fast path: when `explicit_config` or `isolated` is set, or there is no
-/// grouping root, all files use the root config (zero overhead).
+/// Fast path: when discovery is bypassed (`bypass_discovery`, i.e. an explicit
+/// `--config` or `--isolated`) or there is no grouping root, all files use the root
+/// config (zero overhead).
+///
+/// `inline_overrides` are the inline `--config 'RULE.key=value'` overrides already
+/// merged into `root_config`; they are re-applied on top of each discovered
+/// subdirectory config so CLI precedence holds across every group, not just the root.
 ///
 /// See [`ResolutionRoots`] for how the grouping root and project root relate.
 pub fn resolve_config_groups(
@@ -89,13 +94,12 @@ pub fn resolve_config_groups(
     root_config: &rumdl_config::Config,
     args: &crate::CheckArgs,
     roots: &ResolutionRoots<'_>,
+    inline_overrides: &[toml::Table],
     cache: &Option<Arc<LintCache>>,
-    explicit_config: bool,
-    isolated: bool,
+    bypass_discovery: bool,
 ) -> Vec<ConfigGroup> {
-    // Fast path: explicit config, isolated mode, or no grouping root
-    // All files use the root config
-    if explicit_config || isolated || roots.grouping_root.is_none() {
+    // Fast path: discovery bypassed or no grouping root; all files use the root config
+    if bypass_discovery || roots.grouping_root.is_none() {
         let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, root_config);
         let cache_hashes = cache
             .as_ref()
@@ -164,9 +168,13 @@ pub fn resolve_config_groups(
                     .project_root
                     .or_else(|| config_scope_dir(&path))
                     .unwrap_or(grouping_root);
-                match rumdl_config::SourcedConfig::load_config_for_path(&path, subconfig_root) {
-                    Ok(mut subdir_config) => {
-                        // Apply CLI overrides that should take effect everywhere
+                match rumdl_config::SourcedConfig::load_sourced_for_path(&path, subconfig_root) {
+                    Ok(mut sourced) => {
+                        // Layer inline `--config` overrides on top at CLI precedence
+                        // (as the global config does), then convert and apply the
+                        // flavor / gitignore overrides that take effect everywhere.
+                        crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
+                        let mut subdir_config: rumdl_config::Config = sourced.into_validated_unchecked().into();
                         apply_cli_config_overrides(&mut subdir_config, args);
 
                         let enabled_rules =

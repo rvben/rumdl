@@ -196,6 +196,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         workspace_cache_dir,
         project_root: project_root.as_deref(),
         grouping_root: grouping_root.as_deref(),
+        inline_overrides,
         explicit_config: global_config_path.is_some(),
         isolated,
     };
