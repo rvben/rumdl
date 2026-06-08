@@ -46,7 +46,16 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // Use the first target path for config discovery if it's a directory
     // Otherwise use current directory to ensure config files are found
     // when pre-commit or other tools pass relative file paths
-    let discovery_dir = if !args.paths.is_empty() {
+    // When multiple paths are given they may span several config scopes
+    // (e.g. a repo root config plus nested `.rumdl.toml` files that
+    // `extend-disable` a rule). Seeding the *global* config from the first
+    // path's directory then makes whichever file sorts first decide the
+    // baseline for every file — a nested `extend-disable = ["MD013"]` would
+    // silently disable that rule repo-wide. For multi-path runs discover the
+    // global config from the cwd (project root) instead; per-file grouping
+    // still layers each file's own nearest config on top. Only a single path
+    // keeps the "discover next to that path" behaviour.
+    let discovery_dir = if args.paths.len() == 1 {
         let first_path = std::path::Path::new(&args.paths[0]);
         if first_path.is_dir() {
             Some(first_path)
