@@ -235,6 +235,37 @@ async fn test_load_config_for_lsp() {
     assert!(result.is_err());
 }
 
+/// The LSP workspace-load path (`load_config_for_lsp(None)` -> auto-discovery) must
+/// carry the same shadowed-config warning the CLI does, so `load_configuration` can
+/// surface it to editor users. Pins CLI/LSP parity on the shared discovery helper.
+/// Mutates the process cwd, so it runs serially.
+#[test]
+#[serial_test::serial]
+fn test_lsp_discovery_carries_shadowed_config_warning() {
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join(".git")).unwrap(); // bound discovery here
+    std::fs::write(temp.path().join(".rumdl.toml"), "line-length = 11\n").unwrap();
+    std::fs::write(temp.path().join("rumdl.toml"), "line-length = 22\n").unwrap();
+    let cwd = temp.path().canonicalize().unwrap();
+
+    let prev_cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&cwd).unwrap();
+    let result = std::panic::catch_unwind(|| RumdlLanguageServer::load_config_for_lsp(None));
+    std::env::set_current_dir(&prev_cwd).unwrap();
+
+    let sourced = result.unwrap().expect("config should load");
+    assert!(
+        sourced
+            .discovery_warnings
+            .iter()
+            .any(|w| w.contains("multiple rumdl config files")),
+        "LSP discovery should record a shadowed-config warning, got: {:?}",
+        sourced.discovery_warnings
+    );
+}
+
 #[tokio::test]
 async fn test_warning_conversion() {
     let warning = LintWarning {

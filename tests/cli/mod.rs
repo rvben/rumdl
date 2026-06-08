@@ -14,6 +14,7 @@ mod cli_respect_gitignore_test;
 mod cli_rules_wrapper_test;
 mod cli_show_full_path_test;
 mod cli_statistics_test;
+mod config_shadow_warning_test;
 mod exclude_with_explicit_paths_test;
 pub(crate) mod fixtures;
 mod import_command_test;

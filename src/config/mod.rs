@@ -12,6 +12,7 @@ pub mod source_tracking;
 pub use source_tracking::*;
 
 mod loading;
+pub(crate) use loading::rumdl_configs_in_dir;
 
 pub mod registry;
 pub use registry::*;

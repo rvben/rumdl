@@ -65,6 +65,15 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // arg overrides that touch top-level globals.
     crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
 
+    // 2c. Surface config-discovery warnings (e.g. a `rumdl.toml` shadowed by a
+    // sibling `.rumdl.toml`). Resolution is unchanged; this only tells the user
+    // which file is winning. Suppressed by --silent, like other config warnings.
+    if !sourced.discovery_warnings.is_empty() && !args.silent {
+        for warning in &sourced.discovery_warnings {
+            eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");
+        }
+    }
+
     // 3. Validate configuration
     let registry = rumdl_config::default_registry();
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced, registry);

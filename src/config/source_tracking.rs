@@ -264,6 +264,10 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub unknown_keys: Vec<(String, String, Option<String>)>, // (section, key, file_path)
     /// Project root directory (parent of config file), used for resolving relative paths
     pub project_root: Option<std::path::PathBuf>,
+    /// Warnings produced during config discovery (e.g. a `rumdl.toml` shadowed by a
+    /// sibling `.rumdl.toml`). Populated by auto-discovery only; empty for explicit
+    /// `--config` paths and `--no-config`/`--isolated`.
+    pub discovery_warnings: Vec<String>,
     /// Validation warnings (populated after validate() is called)
     pub validation_warnings: Vec<ConfigValidationWarning>,
     /// Phantom data for the state type parameter
@@ -284,6 +288,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
             project_root: None,
+            discovery_warnings: Vec::new(),
             validation_warnings: Vec::new(),
             _state: PhantomData,
         }

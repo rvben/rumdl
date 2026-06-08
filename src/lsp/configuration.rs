@@ -53,22 +53,15 @@ pub(crate) fn collect_project_config_candidates(
         // of them (rather than only the first) lets the caller fall through to a
         // lower-precedence file in the same directory when a higher-precedence one
         // fails to load, matching the prior per-directory resolution behavior.
-        for config_file_name in RUMDL_CONFIG_FILES.iter().chain(MARKDOWNLINT_CONFIG_FILES.iter()) {
+        //
+        // rumdl-native configs come from the shared `rumdl_configs_in_dir` helper -
+        // the single source of truth that also gates `pyproject.toml` on a real
+        // `[tool.rumdl]` section, keeping CLI and LSP discovery identical. markdownlint
+        // configs are a separate fallback tier appended after.
+        candidates.extend(crate::config::rumdl_configs_in_dir(&current_dir));
+        for config_file_name in MARKDOWNLINT_CONFIG_FILES {
             let config_path = current_dir.join(config_file_name);
             if config_path.exists() {
-                if *config_file_name == "pyproject.toml" {
-                    match std::fs::read_to_string(&config_path) {
-                        Ok(content) if content.contains("[tool.rumdl]") || content.contains("tool.rumdl") => {}
-                        Ok(_) => {
-                            log::debug!("Found pyproject.toml but no [tool.rumdl] section, skipping");
-                            continue;
-                        }
-                        Err(_) => {
-                            log::warn!("Failed to read pyproject.toml: {}", config_path.display());
-                            continue;
-                        }
-                    }
-                }
                 candidates.push(config_path);
             }
         }
@@ -383,8 +376,18 @@ impl RumdlLanguageServer {
         match Self::load_config_for_lsp(explicit_config_path.as_deref()) {
             Ok(sourced_config) => {
                 let loaded_files = sourced_config.loaded_files.clone();
+                let discovery_warnings = sourced_config.discovery_warnings.clone();
                 // Use into_validated_unchecked since LSP doesn't need validation warnings
                 *self.rumdl_config.write().await = sourced_config.into_validated_unchecked().into();
+
+                // Surface shadowed-config collisions (e.g. `rumdl.toml` ignored next to
+                // `.rumdl.toml`) so editor users learn which file is winning.
+                for warning in &discovery_warnings {
+                    log::warn!("{warning}");
+                    if notify_client {
+                        self.client.log_message(MessageType::WARNING, warning).await;
+                    }
+                }
 
                 if !loaded_files.is_empty() {
                     let message = format!("Loaded rumdl config from: {}", loaded_files.join(", "));

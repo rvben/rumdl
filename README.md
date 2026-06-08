@@ -817,6 +817,7 @@ The search follows these rules:
 - Searches upward for `.rumdl.toml`, `rumdl.toml`, `<dir>/.config/rumdl.toml`, or `pyproject.toml` (with `[tool.rumdl]` section)
 - Precedence order: `.rumdl.toml` > `rumdl.toml` > `<dir>/.config/rumdl.toml` > `pyproject.toml`
 - Stops at the first configuration file found
+- Warns when more than one of these files exists in the same directory, so you can tell which is winning (`rumdl config file` prints the loaded config's path)
 - Stops searching when it encounters a `.git` directory (project boundary)
 - Maximum traversal depth of 100 directories
 - Falls back to markdownlint config files (`.markdownlint.yaml`, etc.) using the same upward traversal

@@ -244,6 +244,12 @@ fn handle_config_get(key: &str, config_path: Option<&str>, no_config: bool, inli
 fn handle_config_file(config_path: Option<&str>, no_config: bool, isolated: bool) {
     let sourced = load_config_with_cli_error_handling(config_path, no_config || isolated);
 
+    // Warn to stderr (keeping stdout the bare path) when a sibling config is shadowed,
+    // so `rumdl config file` shows both the winner and what it overrides.
+    for warning in &sourced.discovery_warnings {
+        eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");
+    }
+
     if sourced.loaded_files.is_empty() {
         if no_config || isolated {
             println!("No configuration file loaded (--no-config/--isolated specified)");
@@ -302,6 +308,9 @@ fn handle_config_display(
     };
     if !defaults {
         crate::cli_config_override::apply_inline_overrides(&mut sourced_reg, inline_overrides);
+    }
+    for warning in &sourced_reg.discovery_warnings {
+        eprintln!("\x1b[33m[config warning]\x1b[0m {warning}");
     }
     let validation_warnings = rumdl_config::validate_config_sourced(&sourced_reg, registry);
     if !validation_warnings.is_empty() {
