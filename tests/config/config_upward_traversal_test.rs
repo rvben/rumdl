@@ -253,3 +253,60 @@ MD013:
         "MD013 should not trigger - .markdownlint.yaml at repo root should be discovered. Output: {combined}"
     );
 }
+
+#[test]
+fn test_multi_path_global_config_not_seeded_from_first_path() {
+    // Regression: with multiple paths spanning several config scopes, the
+    // *global* config must be discovered from the project root (cwd), not from
+    // the first path's directory. Otherwise whichever file sorts first decides
+    // the baseline for every file, so a nested `extend-disable` silently
+    // disables that rule for files in other directories that inherit the root
+    // config (e.g. `rumdl check .claude/a.md d/b.md` would drop MD013 on d/b.md
+    // because `.claude/.rumdl.toml` extend-disables it).
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path();
+
+    // `.git` marks the project root so config discovery treats `project_dir`
+    // (not `dir_a`) as the project root for the inheriting files.
+    fs::create_dir(project_dir.join(".git")).unwrap();
+
+    // Project-root config: MD013 enabled.
+    fs::write(project_dir.join(".rumdl.toml"), "[MD013]\nline-length = 120\n").unwrap();
+
+    // dir_a: nested config that extend-disables MD013.
+    let dir_a = project_dir.join("dir_a");
+    fs::create_dir_all(&dir_a).unwrap();
+    fs::write(
+        dir_a.join(".rumdl.toml"),
+        "extends = \"../.rumdl.toml\"\n\n[global]\nextend-disable = [\"MD013\"]\n",
+    )
+    .unwrap();
+    fs::write(dir_a.join("a.md"), "# A\n\nshort line.\n").unwrap();
+
+    // dir_b: no own config, inherits the root config, so its long line must fire MD013.
+    let dir_b = project_dir.join("dir_b");
+    fs::create_dir_all(&dir_b).unwrap();
+    let long_line = "This is a deliberately long line in dir_b which inherits the root config and clearly exceeds one hundred twenty characters so MD013 must fire.";
+    fs::write(dir_b.join("b.md"), format!("# B\n\n{long_line}\n")).unwrap();
+
+    // Pass the dir_a file FIRST: a regression seeds the global config from
+    // dir_a (MD013 disabled) and wrongly suppresses MD013 for dir_b/b.md.
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "dir_a/a.md", "dir_b/b.md"])
+        .current_dir(project_dir)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    // Only dir_b/b.md can produce MD013 (dir_a disables it and a.md is short),
+    // so the rule firing at all proves dir_b kept the root config's MD013.
+    assert!(
+        combined.contains("MD013"),
+        "MD013 must fire for dir_b/b.md (inherits root config) even though the \
+         first path is in dir_a whose config extend-disables MD013. Output: {combined}"
+    );
+}
