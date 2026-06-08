@@ -128,23 +128,22 @@ pub(crate) fn detect_shadowed_configs(dir: &Path) -> Option<ShadowedConfigs> {
 
 /// Format a shadowed-config collision as a single user-facing warning line.
 ///
-/// Paths are normalized to forward slashes on Windows for stable, copy-pasteable
-/// output; non-UTF-8 components degrade lossily rather than panicking.
+/// The directory is named once; the winner and shadowed files are shown relative
+/// to it (e.g. `.rumdl.toml`, `.config/rumdl.toml`) rather than repeating the full
+/// directory in every path. Paths are normalized to forward slashes on Windows for
+/// stable, copy-pasteable output; non-UTF-8 components degrade lossily rather than
+/// panicking.
 pub(crate) fn format_shadow_warning(shadow: &ShadowedConfigs) -> String {
-    let display = |path: &Path| -> String {
-        let s = path.to_string_lossy().into_owned();
-        if cfg!(windows) { s.replace('\\', "/") } else { s }
+    let norm = |s: String| if cfg!(windows) { s.replace('\\', "/") } else { s };
+    let rel = |path: &Path| {
+        let relative = path.strip_prefix(&shadow.dir).unwrap_or(path);
+        norm(relative.to_string_lossy().into_owned())
     };
-    let shadowed = shadow
-        .shadowed
-        .iter()
-        .map(|p| display(p))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let shadowed = shadow.shadowed.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ");
     format!(
         "multiple rumdl config files in {}: using {}, ignoring {}",
-        display(&shadow.dir),
-        display(&shadow.winner),
+        norm(shadow.dir.to_string_lossy().into_owned()),
+        rel(&shadow.winner),
         shadowed,
     )
 }
@@ -1465,7 +1464,7 @@ mod tests {
         }
 
         #[test]
-        fn warning_message_names_winner_and_all_shadowed() {
+        fn warning_names_dir_once_with_relative_filenames() {
             let tmp = tempdir().unwrap();
             std::fs::write(tmp.path().join(".rumdl.toml"), "").unwrap();
             std::fs::write(tmp.path().join("rumdl.toml"), "").unwrap();
@@ -1473,12 +1472,22 @@ mod tests {
 
             let shadow = detect_shadowed_configs(tmp.path()).unwrap();
             let msg = format_shadow_warning(&shadow);
+
+            let dir = {
+                let s = tmp.path().to_string_lossy().into_owned();
+                if cfg!(windows) { s.replace('\\', "/") } else { s }
+            };
             assert!(msg.contains("multiple rumdl config files"), "got: {msg}");
-            assert!(msg.contains(".rumdl.toml"), "should name the winner: {msg}");
-            assert!(msg.contains("rumdl.toml"), "should name shadowed rumdl.toml: {msg}");
+            // The directory is named once; files are shown relative to it (no
+            // repeated directory prefix on every path).
+            assert_eq!(
+                msg.matches(dir.as_str()).count(),
+                1,
+                "directory should appear exactly once, got: {msg}"
+            );
             assert!(
-                msg.contains("pyproject.toml"),
-                "should name shadowed pyproject.toml: {msg}"
+                msg.contains("using .rumdl.toml, ignoring rumdl.toml, pyproject.toml"),
+                "winner and shadowed files should be relative names in precedence order, got: {msg}"
             );
             // Paths are normalized to forward slashes on all platforms.
             assert!(!msg.contains('\\'), "paths must be normalized to '/': {msg}");
