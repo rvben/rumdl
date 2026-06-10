@@ -153,13 +153,21 @@ impl ExcludeMatchers {
 /// canonicalizing both sides so symlinks (e.g. macOS `/tmp`) and Windows
 /// path-representation differences don't defeat the prefix strip. Returns
 /// `None` when `path` is not under `base`.
+///
+/// Separators are normalized to `/` on Windows, following the project
+/// convention for path strings; globset matches either form, but log
+/// output and assertions see one canonical shape.
 pub fn path_relative_to(path: &Path, base: &Path) -> Option<String> {
     let canonical_base = base.canonicalize().ok()?;
     let canonical_path = path.canonicalize().ok()?;
-    canonical_path
-        .strip_prefix(&canonical_base)
-        .ok()
-        .map(|rel| rel.to_string_lossy().to_string())
+    canonical_path.strip_prefix(&canonical_base).ok().map(|rel| {
+        let rel = rel.to_string_lossy();
+        if cfg!(windows) {
+            rel.replace('\\', "/")
+        } else {
+            rel.to_string()
+        }
+    })
 }
 
 #[cfg(test)]
