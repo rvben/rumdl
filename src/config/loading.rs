@@ -1012,9 +1012,11 @@ impl SourcedConfig<ConfigLoaded> {
     ///
     /// Returns the config file path if found. Does NOT use CWD.
     pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        // The walk keeps directories in their original representation so the
-        // returned config path matches what callers passed in; only the stop
-        // checks inside `UpwardWalk` compare canonically.
+        // The walk never canonicalizes the directories it yields (symlinks and
+        // Windows short names stay as the caller wrote them); only the stop
+        // checks inside `UpwardWalk` compare canonically. A relative `dir` is
+        // resolved against the current directory, so the returned config path
+        // is always absolute.
         //
         // The home boundary keeps the walk from treating `~/.rumdl.toml` as a
         // project config, consistent with `discover_config_upward`. This only has
