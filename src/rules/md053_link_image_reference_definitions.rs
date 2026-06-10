@@ -582,28 +582,7 @@ impl Rule for MD053LinkImageReferenceDefinitions {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD053Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD053Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD053Config>(config);
-        Box::new(MD053LinkImageReferenceDefinitions::from_config_struct(rule_config))
-    }
+    crate::impl_rule_config_methods!(MD053Config);
 }
 
 #[cfg(test)]

@@ -1184,10 +1184,7 @@ impl Rule for MD033NoInlineHtml {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&self.config)?;
-        Some((self.name().to_string(), toml::Value::Table(table)))
-    }
+    crate::impl_rule_config_methods!(MD033Config, nullable);
 
     fn config_aliases(&self) -> Option<std::collections::HashMap<String, String>> {
         let mut aliases = std::collections::HashMap::new();
@@ -1195,14 +1192,6 @@ impl Rule for MD033NoInlineHtml {
         aliases.insert("allowed".to_string(), "allowed-elements".to_string());
         aliases.insert("disallowed".to_string(), "disallowed-elements".to_string());
         Some(aliases)
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD033Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

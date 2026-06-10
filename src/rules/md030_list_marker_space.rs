@@ -4,7 +4,6 @@
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::RuleConfig;
 use crate::utils::blockquote::{effective_indent_in_blockquote, parse_blockquote_prefix};
 use crate::utils::calculate_indentation_width_default;
 use crate::utils::range_utils::calculate_match_range;
@@ -321,26 +320,7 @@ impl Rule for MD030ListMarkerSpace {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD030Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD030Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule> {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD030Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
-    }
+    crate::impl_rule_config_methods!(MD030Config);
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, crate::rule::LintError> {
         if self.should_skip(ctx) {

@@ -173,7 +173,7 @@ proptest! {
             Box::new(MD042NoEmptyLinks::default()),
             Box::new(MD043RequiredHeadings::new(vec![])),
             Box::new(MD044ProperNames::new(vec![], true)),
-            Box::new(MD045NoAltText::default()),
+            Box::new(MD045NoAltText::new()),
             Box::new(MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced)),
             Box::new(MD047SingleTrailingNewline),
             Box::new(MD048CodeFenceStyle::new(rumdl_lib::rules::code_fence_utils::CodeFenceStyle::Backtick)),
@@ -498,7 +498,7 @@ idempotent_rule!(
     markdown_content_strategy(),
     Standard
 );
-idempotent_rule!(md045, MD045NoAltText::default(), markdown_content_strategy(), Standard);
+idempotent_rule!(md045, MD045NoAltText::new(), markdown_content_strategy(), Standard);
 idempotent_rule!(
     md046,
     MD046CodeBlockStyle::new(rumdl_lib::rules::CodeBlockStyle::Fenced),

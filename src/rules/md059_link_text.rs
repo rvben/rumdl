@@ -1,4 +1,3 @@
-use crate::config::Config;
 use crate::lint_context::LintContext;
 use crate::rule::{LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
@@ -139,24 +138,10 @@ impl Rule for MD059LinkText {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let json_value = serde_json::to_value(&self.config).ok()?;
-        Some((
-            self.name().to_string(),
-            crate::rule_config_serde::json_to_toml_value(&json_value)?,
-        ))
-    }
+    crate::impl_rule_config_methods!(MD059Config);
 
     fn fix_capability(&self) -> crate::rule::FixCapability {
         crate::rule::FixCapability::Unfixable
-    }
-
-    fn from_config(config: &Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD059Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {

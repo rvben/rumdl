@@ -130,7 +130,7 @@ fn get_all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(MD041FirstLineHeading::default()),
         Box::new(MD042NoEmptyLinks::default()),
         // MD044 requires names config, skip
-        Box::new(MD045NoAltText::default()),
+        Box::new(MD045NoAltText::new()),
         // MD046 and MD048 require style config, skip
         Box::new(MD047SingleTrailingNewline),
         Box::new(MD049EmphasisStyle::default()),

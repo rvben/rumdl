@@ -11,26 +11,18 @@ use md045_config::MD045Config;
 /// This rule is diagnostic-only — it does not offer auto-fix because meaningful
 /// alt text requires human judgment. Automated placeholders are harmful for
 /// accessibility (screen readers would read fabricated text to users).
-#[derive(Clone)]
-pub struct MD045NoAltText {
-    config: MD045Config,
-}
-
-impl Default for MD045NoAltText {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+#[derive(Clone, Default)]
+pub struct MD045NoAltText;
 
 impl MD045NoAltText {
     pub fn new() -> Self {
-        Self {
-            config: MD045Config::default(),
-        }
+        Self
     }
 
-    pub fn from_config_struct(config: MD045Config) -> Self {
-        Self { config }
+    /// The config struct only carries the deprecated `placeholder-text`
+    /// stub, so nothing from it is stored.
+    pub fn from_config_struct(_config: MD045Config) -> Self {
+        Self
     }
 }
 
@@ -86,11 +78,15 @@ impl Rule for MD045NoAltText {
         self
     }
 
+    // Not impl_rule_config_methods!: MD045Config's only field is the
+    // deprecated skip_serializing placeholder, so its section table is empty
+    // and the macro would return None. The empty Some keeps the [MD045]
+    // section recognized by config validation and `rumdl explain`.
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let json_value = serde_json::to_value(&self.config).ok()?;
+        use crate::rule_config_serde::RuleConfig;
         Some((
-            self.name().to_string(),
-            crate::rule_config_serde::json_to_toml_value(&json_value)?,
+            MD045Config::RULE_NAME.to_string(),
+            toml::Value::Table(toml::map::Map::new()),
         ))
     }
 

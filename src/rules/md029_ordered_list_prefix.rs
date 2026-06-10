@@ -2,7 +2,6 @@
 ///
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::RuleConfig;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use std::collections::HashMap;
 use toml;
@@ -383,28 +382,7 @@ impl Rule for MD029OrderedListPrefix {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD029Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD029Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD029Config>(config);
-        Box::new(MD029OrderedListPrefix::from_config_struct(rule_config))
-    }
+    crate::impl_rule_config_methods!(MD029Config);
 }
 
 #[cfg(test)]

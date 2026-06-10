@@ -283,11 +283,7 @@ impl Rule for MD054LinkImageStyle {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let json_value = serde_json::to_value(&self.config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-        Some((self.name().to_string(), toml_value))
-    }
+    crate::impl_rule_config_methods!(MD054Config);
 
     fn polymorphic_config_keys(&self) -> &'static [&'static str] {
         // `preferred-style` accepts either a scalar string or a list of strings.
@@ -296,14 +292,6 @@ impl Rule for MD054LinkImageStyle {
         // the user-facing default config (`rumdl config --defaults`) keeps the
         // serialized scalar form.
         &["preferred-style"]
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD054Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
     }
 }
 

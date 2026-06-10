@@ -441,18 +441,7 @@ impl Rule for MD072FrontmatterKeySort {
         self
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let table = crate::rule_config_serde::config_schema_table(&MD072Config::default())?;
-        Some((MD072Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD072Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
-    }
+    crate::impl_rule_config_methods!(MD072Config, nullable);
 }
 
 impl MD072FrontmatterKeySort {

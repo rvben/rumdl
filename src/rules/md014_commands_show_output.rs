@@ -4,7 +4,6 @@
 //! See [docs/md014.md](../../docs/md014.md) for full documentation, configuration, and examples.
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rule_config_serde::RuleConfig;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::get_cached_regex;
 use toml;
@@ -287,29 +286,7 @@ impl Rule for MD014CommandsShowOutput {
         ctx.content.is_empty() || !ctx.likely_has_code()
     }
 
-    fn default_config_section(&self) -> Option<(String, toml::Value)> {
-        let default_config = MD014Config::default();
-        let json_value = serde_json::to_value(&default_config).ok()?;
-        let toml_value = crate::rule_config_serde::json_to_toml_value(&json_value)?;
-
-        if let toml::Value::Table(table) = toml_value {
-            if !table.is_empty() {
-                Some((MD014Config::RULE_NAME.to_string(), toml::Value::Table(table)))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn from_config(config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        let rule_config = crate::rule_config_serde::load_rule_config::<MD014Config>(config);
-        Box::new(Self::from_config_struct(rule_config))
-    }
+    crate::impl_rule_config_methods!(MD014Config);
 }
 
 #[cfg(test)]

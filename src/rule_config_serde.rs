@@ -101,6 +101,71 @@ pub fn config_schema_table<T: RuleConfig>(config: &T) -> Option<toml::map::Map<S
     Some(table)
 }
 
+/// Default config section for a rule backed by a serde `RuleConfig` struct.
+///
+/// Serializes `T::default()` through the JSON→TOML path, which drops nullable
+/// (`None`) fields. Returns `None` when no fields remain. Rules whose
+/// `Option`-typed keys must stay visible to config validation use
+/// [`nullable_config_section_for`] instead.
+pub fn default_config_section_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
+    let json_value = serde_json::to_value(T::default()).ok()?;
+    let toml_value = json_to_toml_value(&json_value)?;
+    match toml_value {
+        toml::Value::Table(table) if !table.is_empty() => Some((T::RULE_NAME.to_string(), toml::Value::Table(table))),
+        _ => None,
+    }
+}
+
+/// Default config section that keeps nullable (`None`) fields visible as
+/// schema sentinels, so key validation recognizes `Option`-typed settings.
+/// Returns `None` when no fields remain, like [`default_config_section_for`].
+pub fn nullable_config_section_for<T: RuleConfig>() -> Option<(String, toml::Value)> {
+    let table = config_schema_table(&T::default())?;
+    if table.is_empty() {
+        return None;
+    }
+    Some((T::RULE_NAME.to_string(), toml::Value::Table(table)))
+}
+
+/// Implements `default_config_section` and `from_config` for a rule backed by
+/// a serde `RuleConfig` struct. Use inside the rule's `impl Rule` block; the
+/// rule must provide a `from_config_struct(config)` constructor.
+///
+/// The default arm drops nullable (`None`) fields from the config section;
+/// the `nullable` arm keeps them visible as schema sentinels so config
+/// validation recognizes `Option`-typed keys.
+#[macro_export]
+macro_rules! impl_rule_config_methods {
+    ($config_ty:ty) => {
+        fn default_config_section(&self) -> Option<(String, toml::Value)> {
+            $crate::rule_config_serde::default_config_section_for::<$config_ty>()
+        }
+
+        fn from_config(config: &$crate::config::Config) -> Box<dyn $crate::rule::Rule>
+        where
+            Self: Sized,
+        {
+            Box::new(Self::from_config_struct(
+                $crate::rule_config_serde::load_rule_config::<$config_ty>(config),
+            ))
+        }
+    };
+    ($config_ty:ty, nullable) => {
+        fn default_config_section(&self) -> Option<(String, toml::Value)> {
+            $crate::rule_config_serde::nullable_config_section_for::<$config_ty>()
+        }
+
+        fn from_config(config: &$crate::config::Config) -> Box<dyn $crate::rule::Rule>
+        where
+            Self: Sized,
+        {
+            Box::new(Self::from_config_struct(
+                $crate::rule_config_serde::load_rule_config::<$config_ty>(config),
+            ))
+        }
+    };
+}
+
 /// Convert JSON value to TOML value for default config generation
 pub fn json_to_toml_value(json_val: &serde_json::Value) -> Option<toml::Value> {
     match json_val {
