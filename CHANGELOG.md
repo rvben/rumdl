@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.11](https://github.com/rvben/rumdl/compare/v0.2.10...v0.2.11) - 2026-06-10
+
+### Fixed
+
+- **lsp**: rebuild and prune workspace index when configuration changes ([9ca9049](https://github.com/rvben/rumdl/commit/9ca9049b8f5507054b7f522f843a95ccf545e35b))
+- **lsp**: align workspace file discovery with CLI semantics ([7a5d6aa](https://github.com/rvben/rumdl/commit/7a5d6aab8187d0b2007acfb60f9f97a647a3e781))
+
 ## [0.2.10](https://github.com/rvben/rumdl/compare/v0.2.9...v0.2.10) - 2026-06-08
 
 ### Added
