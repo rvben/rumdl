@@ -9,7 +9,6 @@ use tower_lsp::lsp_types::*;
 
 use crate::code_block_tools::CodeBlockToolProcessor;
 use crate::embedded_lint::{check_embedded_markdown_blocks, should_lint_embedded_markdown};
-use crate::lint;
 use crate::rule::FixCapability;
 use crate::rules;
 
@@ -249,11 +248,6 @@ impl RumdlLanguageServer {
         let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
 
         let all_rules = rules::all_rules(&rumdl_config);
-        let flavor = if let Some(ref path) = file_path {
-            rumdl_config.get_flavor_for_file(path)
-        } else {
-            rumdl_config.markdown_flavor()
-        };
 
         // Use the standard filter_rules function which respects config's disabled rules
         let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
@@ -269,65 +263,30 @@ impl RumdlLanguageServer {
             }
         }
 
-        // First, run lint to get active warnings (respecting ignore comments)
-        // This tells us which rules actually have unfixed issues
-        let mut rules_with_warnings = std::collections::HashSet::new();
+        // Apply fixes through the FixCoordinator, the same engine `rumdl fmt`
+        // uses: rules run in dependency order, fixes iterate to a fixpoint
+        // with oscillation detection, inline disable comments and the
+        // fixable/unfixable config lists are honored. Editor fix-all and the
+        // CLI therefore produce identical output.
         let mut fixed_text = text.to_string();
-
-        match lint(
-            &fixed_text,
+        let coordinator = crate::fix_coordinator::FixCoordinator::new();
+        if let Err(e) = coordinator.apply_fixes_iterative(
             &filtered_rules,
-            false,
-            flavor,
-            file_path.clone(),
-            Some(&rumdl_config),
+            &[],
+            &mut fixed_text,
+            &rumdl_config,
+            100,
+            file_path.as_deref(),
         ) {
-            Ok(warnings) => {
-                for warning in warnings {
-                    if let Some(rule_name) = &warning.rule_name {
-                        rules_with_warnings.insert(rule_name.clone());
-                    }
-                }
-            }
-            Err(e) => {
-                log::warn!("Failed to lint document for auto-fix: {e}");
-                return Ok(None);
-            }
-        }
-
-        // Early return if no warnings to fix
-        if rules_with_warnings.is_empty() {
+            log::warn!("Failed to apply fixes: {e}");
             return Ok(None);
         }
 
-        // Only apply fixes for rules that have active warnings
-        let mut any_changes = false;
-
-        for rule in &filtered_rules {
-            // Skip rules that don't have any active warnings
-            if !rules_with_warnings.contains(rule.name()) {
-                continue;
-            }
-
-            let ctx = crate::lint_context::LintContext::new(&fixed_text, flavor, file_path.clone());
-            match rule.fix(&ctx) {
-                Ok(new_text) => {
-                    if new_text != fixed_text {
-                        fixed_text = new_text;
-                        any_changes = true;
-                    }
-                }
-                Err(e) => {
-                    // Only log if it's an actual error, not just "rule doesn't support auto-fix"
-                    let msg = e.to_string();
-                    if !msg.contains("does not support automatic fixing") {
-                        log::warn!("Failed to apply fix for rule {}: {}", rule.name(), e);
-                    }
-                }
-            }
+        if fixed_text != text {
+            Ok(Some(fixed_text))
+        } else {
+            Ok(None)
         }
-
-        if any_changes { Ok(Some(fixed_text)) } else { Ok(None) }
     }
 
     /// Get the end position of a document
