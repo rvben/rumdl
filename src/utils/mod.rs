@@ -39,6 +39,7 @@ pub mod string_interner;
 pub mod table_utils;
 pub mod text_reflow;
 pub mod thematic_break;
+pub mod upward_walk;
 pub mod utf8_offsets;
 
 pub use code_block_utils::CodeBlockUtils;

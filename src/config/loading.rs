@@ -13,6 +13,7 @@ use super::source_tracking::{
 };
 use super::types::{Config, ConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES, RuleConfig};
 use super::validation::validate_config_sourced_internal;
+use crate::utils::upward_walk::UpwardWalk;
 
 /// Maximum depth for extends chains to prevent runaway recursion
 const MAX_EXTENDS_DEPTH: usize = 10;
@@ -470,32 +471,15 @@ impl SourcedConfig<ConfigLoaded> {
     /// Finds project root by walking up from start_dir looking for .git directory.
     /// Falls back to start_dir if no .git found.
     fn find_project_root_from(start_dir: &Path) -> std::path::PathBuf {
-        // Convert relative paths to absolute to ensure correct traversal
-        let mut current = if start_dir.is_relative() {
-            std::env::current_dir().map_or_else(|_| start_dir.to_path_buf(), |cwd| cwd.join(start_dir))
-        } else {
-            start_dir.to_path_buf()
-        };
-        const MAX_DEPTH: usize = 100;
-
-        for _ in 0..MAX_DEPTH {
-            if current.join(".git").exists() {
-                log::debug!("[rumdl-config] Found .git at: {}", current.display());
-                return current;
-            }
-
-            match current.parent() {
-                Some(parent) => current = parent.to_path_buf(),
-                None => break,
-            }
-        }
-
-        // No .git found, use start_dir as project root
-        log::debug!(
-            "[rumdl-config] No .git found, using config location as project root: {}",
-            start_dir.display()
-        );
-        start_dir.to_path_buf()
+        UpwardWalk::new(start_dir)
+            .find(|dir| dir.join(".git").exists())
+            .unwrap_or_else(|| {
+                log::debug!(
+                    "[rumdl-config] No .git found, using config location as project root: {}",
+                    start_dir.display()
+                );
+                start_dir.to_path_buf()
+            })
     }
 
     /// Resolve the home-directory boundary used to stop project-config discovery.
@@ -517,16 +501,6 @@ impl SourcedConfig<ConfigLoaded> {
         })
     }
 
-    /// Whether `current_dir` is the home-directory boundary. Compares canonically so
-    /// differing path representations (Windows 8.3 short names, Unix symlinks) match,
-    /// falling back to a literal comparison when canonicalization fails.
-    fn at_home_boundary(current_dir: &Path, home_dir: Option<&Path>, canonical_home: Option<&Path>) -> bool {
-        match (canonical_home, std::fs::canonicalize(current_dir).ok()) {
-            (Some(home), Some(current)) => current == home,
-            _ => home_dir == Some(current_dir),
-        }
-    }
-
     /// Discover configuration file by traversing up the directory tree.
     /// Returns the first configuration file found.
     /// Discovers config file and returns both the config path and project root.
@@ -541,11 +515,7 @@ impl SourcedConfig<ConfigLoaded> {
     fn discover_config_upward(
         home_override: Option<&Path>,
     ) -> Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> {
-        use std::env;
-
-        const MAX_DEPTH: usize = 100; // Prevent infinite traversal
-
-        let start_dir = match env::current_dir() {
+        let start_dir = match std::env::current_dir() {
             Ok(dir) => dir,
             Err(e) => {
                 log::debug!("[rumdl-config] Failed to get current directory: {e}");
@@ -553,71 +523,23 @@ impl SourcedConfig<ConfigLoaded> {
             }
         };
 
-        // Resolve the home-directory boundary so a user-level `~/.rumdl.toml` is never
-        // treated as a project config; it reaches the loader only via the user-config
-        // fallback, which keeps the platform user-config dir ahead of the home dotfile.
-        let home_dir = Self::resolve_home_boundary(home_override);
-        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
+        // `rumdl_configs_in_dir` is the single source of truth for "which rumdl
+        // configs live here", shared with the LSP and the shadow detector, so the
+        // winner and the silently-shadowed siblings are computed identically.
+        let (config_path, config_dir, shadow) = UpwardWalk::new(&start_dir)
+            .stop_below(Self::resolve_home_boundary(home_override))
+            .stop_at_git_root()
+            .find_map(|dir| {
+                rumdl_configs_in_dir(&dir).into_iter().next().map(|winner| {
+                    log::debug!("[rumdl-config] Found config file: {}", winner.display());
+                    let shadow = detect_shadowed_configs(&dir);
+                    (winner, dir, shadow)
+                })
+            })?;
 
-        let mut current_dir = start_dir.clone();
-        let mut depth = 0;
-        // (winning config path, directory it was found in, any shadowed siblings there)
-        let mut found_config: Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> = None;
-
-        loop {
-            if depth >= MAX_DEPTH {
-                log::debug!("[rumdl-config] Maximum traversal depth reached");
-                break;
-            }
-
-            // Stop at the home directory: any config already found below home is
-            // returned; home and above are left to the user-config fallback.
-            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
-                log::debug!("[rumdl-config] Reached home directory boundary; stopping project discovery");
-                break;
-            }
-
-            log::debug!("[rumdl-config] Searching for config in: {}", current_dir.display());
-
-            // Check for config files in order of precedence (only if not already found).
-            // `rumdl_configs_in_dir` is the single source of truth for "which rumdl
-            // configs live here", shared with the LSP and the shadow detector, so the
-            // winner and the silently-shadowed siblings are computed identically.
-            if found_config.is_none()
-                && let Some(winner) = rumdl_configs_in_dir(&current_dir).into_iter().next()
-            {
-                log::debug!("[rumdl-config] Found config file: {}", winner.display());
-                let shadow = detect_shadowed_configs(&current_dir);
-                // Store config, but continue looking for .git
-                found_config = Some((winner, current_dir.clone(), shadow));
-            }
-
-            // Check for .git directory (stop boundary)
-            if current_dir.join(".git").exists() {
-                log::debug!("[rumdl-config] Stopping at .git directory");
-                break;
-            }
-
-            // Move to parent directory
-            match current_dir.parent() {
-                Some(parent) => {
-                    current_dir = parent.to_owned();
-                    depth += 1;
-                }
-                None => {
-                    log::debug!("[rumdl-config] Reached filesystem root");
-                    break;
-                }
-            }
-        }
-
-        // If config found, determine project root by walking up from config location
-        if let Some((config_path, config_dir, shadow)) = found_config {
-            let project_root = Self::find_project_root_from(&config_dir);
-            return Some((config_path, project_root, shadow));
-        }
-
-        None
+        // Determine project root by walking up from the config location.
+        let project_root = Self::find_project_root_from(&config_dir);
+        Some((config_path, project_root, shadow))
     }
 
     /// Discover markdownlint configuration file by traversing up the directory tree.
@@ -625,11 +547,7 @@ impl SourcedConfig<ConfigLoaded> {
     /// bounded at the home directory for the same reason: a markdownlint config in
     /// `$HOME` is user-level, not a project config.
     fn discover_markdownlint_config_upward(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
-        use std::env;
-
-        const MAX_DEPTH: usize = 100;
-
-        let start_dir = match env::current_dir() {
+        let start_dir = match std::env::current_dir() {
             Ok(dir) => dir,
             Err(e) => {
                 log::debug!("[rumdl-config] Failed to get current directory for markdownlint discovery: {e}");
@@ -637,58 +555,15 @@ impl SourcedConfig<ConfigLoaded> {
             }
         };
 
-        let home_dir = Self::resolve_home_boundary(home_override);
-        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
-
-        let mut current_dir = start_dir.clone();
-        let mut depth = 0;
-
-        loop {
-            if depth >= MAX_DEPTH {
-                log::debug!("[rumdl-config] Maximum traversal depth reached for markdownlint discovery");
-                break;
-            }
-
-            // Stop at the home directory, mirroring rumdl config discovery.
-            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
-                log::debug!("[rumdl-config] Reached home directory boundary; stopping markdownlint discovery");
-                break;
-            }
-
-            log::debug!(
-                "[rumdl-config] Searching for markdownlint config in: {}",
-                current_dir.display()
-            );
-
-            // Check for markdownlint config files in order of precedence
-            for config_name in MARKDOWNLINT_CONFIG_FILES {
-                let config_path = current_dir.join(config_name);
-                if config_path.exists() {
-                    log::debug!("[rumdl-config] Found markdownlint config: {}", config_path.display());
-                    return Some(config_path);
-                }
-            }
-
-            // Check for .git directory (stop boundary)
-            if current_dir.join(".git").exists() {
-                log::debug!("[rumdl-config] Stopping markdownlint search at .git directory");
-                break;
-            }
-
-            // Move to parent directory
-            match current_dir.parent() {
-                Some(parent) => {
-                    current_dir = parent.to_owned();
-                    depth += 1;
-                }
-                None => {
-                    log::debug!("[rumdl-config] Reached filesystem root during markdownlint search");
-                    break;
-                }
-            }
-        }
-
-        None
+        UpwardWalk::new(&start_dir)
+            .stop_below(Self::resolve_home_boundary(home_override))
+            .stop_at_git_root()
+            .find_map(|dir| {
+                MARKDOWNLINT_CONFIG_FILES
+                    .iter()
+                    .map(|name| dir.join(name))
+                    .find(|path| path.exists())
+            })
     }
 
     /// Internal implementation that accepts config directory for testing
@@ -1137,76 +1012,41 @@ impl SourcedConfig<ConfigLoaded> {
     ///
     /// Returns the config file path if found. Does NOT use CWD.
     pub fn discover_config_for_dir(dir: &Path, project_root: &Path) -> Option<PathBuf> {
-        // The walk keeps `current_dir` in its original representation so the
-        // returned config path matches what callers passed in. The project-root
-        // stop check, however, compares canonical paths: on Windows the walked
-        // directory is a canonical long-name `\\?\` path while `project_root` may
-        // be an 8.3 short name, and on Unix symlinks differ. Comparing the raw
-        // forms would never match, so the walk would overshoot past the project
-        // root and could pick up a config file in a parent directory outside the
-        // project.
-        let canonical_project_root = std::fs::canonicalize(project_root).ok();
-
-        // Resolve the home boundary so the walk never treats `~/.rumdl.toml` as a
+        // The walk keeps directories in their original representation so the
+        // returned config path matches what callers passed in; only the stop
+        // checks inside `UpwardWalk` compare canonically.
+        //
+        // The home boundary keeps the walk from treating `~/.rumdl.toml` as a
         // project config, consistent with `discover_config_upward`. This only has
         // an effect when `project_root` is at or above the home directory (e.g. a
         // multi-path run whose grouping root spans the home boundary); for the
         // usual project root below home the walk stops there first.
-        let home_dir = Self::resolve_home_boundary(None);
-        let canonical_home = home_dir.as_deref().and_then(|h| std::fs::canonicalize(h).ok());
-
-        let mut current_dir = dir.to_path_buf();
-
-        loop {
-            // Stop at the home directory without checking its config: `~/.rumdl.toml`
-            // reaches the loader only via the user-config fallback, never as a
-            // project config promoted over the platform user config.
-            if Self::at_home_boundary(&current_dir, home_dir.as_deref(), canonical_home.as_deref()) {
-                break;
-            }
-
-            // Check rumdl config files first (higher precedence)
-            for config_name in RUMDL_CONFIG_FILES {
-                let config_path = current_dir.join(config_name);
-                if config_path.exists() {
-                    if *config_name == "pyproject.toml" {
-                        if let Ok(content) = std::fs::read_to_string(&config_path)
-                            && pyproject_declares_rumdl_config(&content)
-                        {
-                            return Some(config_path);
+        UpwardWalk::new(dir)
+            .stop_below(Self::resolve_home_boundary(None))
+            .stop_at(project_root)
+            .find_map(|current| {
+                // Check rumdl config files first (higher precedence)
+                for config_name in RUMDL_CONFIG_FILES {
+                    let config_path = current.join(config_name);
+                    if config_path.exists() {
+                        if *config_name == "pyproject.toml" {
+                            if let Ok(content) = std::fs::read_to_string(&config_path)
+                                && pyproject_declares_rumdl_config(&content)
+                            {
+                                return Some(config_path);
+                            }
+                            continue;
                         }
-                        continue;
+                        return Some(config_path);
                     }
-                    return Some(config_path);
                 }
-            }
 
-            // Check markdownlint config files (lower precedence)
-            for config_name in MARKDOWNLINT_CONFIG_FILES {
-                let config_path = current_dir.join(config_name);
-                if config_path.exists() {
-                    return Some(config_path);
-                }
-            }
-
-            // Stop at project root (inclusive - we already checked it). Compare
-            // canonically so differing path representations still match.
-            let reached_root = match (&canonical_project_root, std::fs::canonicalize(&current_dir).ok()) {
-                (Some(root), Some(current)) => &current == root,
-                _ => current_dir == project_root,
-            };
-            if reached_root {
-                break;
-            }
-
-            // Move to parent directory
-            match current_dir.parent() {
-                Some(parent) => current_dir = parent.to_path_buf(),
-                None => break,
-            }
-        }
-
-        None
+                // Check markdownlint config files (lower precedence)
+                MARKDOWNLINT_CONFIG_FILES
+                    .iter()
+                    .map(|name| current.join(name))
+                    .find(|path| path.exists())
+            })
     }
 
     /// Load a config from a specific file path, with extends resolution, returning

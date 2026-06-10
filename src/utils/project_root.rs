@@ -3,16 +3,13 @@
 //! Walks up the directory tree from a starting point looking for a project
 //! marker (`.git`, `.rumdl.toml`, `pyproject.toml`, or `.markdownlint.json`).
 //! When a marker is found, its containing directory is returned as the project
-//! root. When no marker is found within `MAX_DEPTH` levels, the start directory
-//! is returned as a sensible fallback. The result is canonicalized when
-//! possible so callers get a stable, symlink-resolved path.
+//! root. When no marker is found, the start directory is returned as a
+//! sensible fallback. The result is canonicalized when possible so callers
+//! get a stable, symlink-resolved path.
 
 use std::path::{Path, PathBuf};
 
-/// Maximum number of parent directories to traverse before giving up.
-/// Matches `Config::find_project_root_from` to keep the two implementations
-/// consistent for the same input.
-const MAX_DEPTH: usize = 100;
+use super::upward_walk::{UpwardWalk, absolutize};
 
 /// Markers that anchor a project root, in priority order.
 /// The first directory that contains any of these is the project root.
@@ -29,24 +26,8 @@ const PROJECT_MARKERS: &[&str] = &[".git", ".rumdl.toml", "pyproject.toml", ".ma
 /// fails (e.g. because the path no longer exists), the un-canonicalized
 /// path is returned instead.
 pub fn discover_project_root_from(start_dir: &Path) -> PathBuf {
-    let absolute_start = if start_dir.is_relative() {
-        std::env::current_dir().map_or_else(|_| start_dir.to_path_buf(), |cwd| cwd.join(start_dir))
-    } else {
-        start_dir.to_path_buf()
-    };
-
-    let mut current = absolute_start.clone();
-    for _ in 0..MAX_DEPTH {
-        if PROJECT_MARKERS.iter().any(|marker| current.join(marker).exists()) {
-            return canonicalize_or_keep(current);
-        }
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            None => break,
-        }
-    }
-
-    canonicalize_or_keep(absolute_start)
+    let found = UpwardWalk::new(start_dir).find(|dir| PROJECT_MARKERS.iter().any(|marker| dir.join(marker).exists()));
+    canonicalize_or_keep(found.unwrap_or_else(|| absolutize(start_dir)))
 }
 
 fn canonicalize_or_keep(path: PathBuf) -> PathBuf {
