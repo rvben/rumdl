@@ -14,26 +14,18 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
 use crate::config::{Config, is_valid_rule_name};
+use crate::discovery::{ExcludeMatchers, is_markdown_extension};
 use crate::lsp::index_worker::IndexWorker;
 use crate::lsp::types::{IndexState, IndexUpdate, LspRuleSettings, RumdlLspConfig};
 use crate::rule::FixCapability;
 use crate::rules;
 use crate::workspace_index::WorkspaceIndex;
 
-/// Supported markdown file extensions (without leading dot)
-const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
-
 /// Maximum number of rules in enable/disable lists (DoS protection)
 const MAX_RULE_LIST_SIZE: usize = 100;
 
 /// Maximum allowed line length value (DoS protection)
 const MAX_LINE_LENGTH: usize = 10_000;
-
-/// Check if a file extension is a markdown extension
-#[inline]
-fn is_markdown_extension(ext: &str) -> bool {
-    MARKDOWN_EXTENSIONS.contains(&ext.to_lowercase().as_str())
-}
 
 /// Represents a document in the LSP server's cache
 #[derive(Clone, Debug, PartialEq)]
@@ -108,6 +100,7 @@ impl RumdlLanguageServer {
         let workspace_index = Arc::new(RwLock::new(WorkspaceIndex::new()));
         let index_state = Arc::new(RwLock::new(IndexState::default()));
         let workspace_roots = Arc::new(RwLock::new(Vec::new()));
+        let rumdl_config = Arc::new(RwLock::new(Config::default()));
 
         // Create channels for index worker communication
         let (update_tx, update_rx) = mpsc::channel::<IndexUpdate>(100);
@@ -121,13 +114,14 @@ impl RumdlLanguageServer {
             client.clone(),
             workspace_roots.clone(),
             relint_tx,
+            rumdl_config.clone(),
         );
         tokio::spawn(worker.run());
 
         Self {
             client,
             config: Arc::new(RwLock::new(initial_config)),
-            rumdl_config: Arc::new(RwLock::new(Config::default())),
+            rumdl_config,
             documents: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots,
             config_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -884,7 +878,6 @@ impl LanguageServer for RumdlLanguageServer {
         for change in &params.changes {
             if let Ok(path) = change.uri.to_file_path() {
                 let file_name = path.file_name().and_then(|f| f.to_str());
-                let extension = path.extension().and_then(|e| e.to_str());
 
                 // Handle config file changes
                 if let Some(name) = file_name
@@ -906,7 +899,7 @@ impl LanguageServer for RumdlLanguageServer {
                 }
 
                 // Handle markdown file changes for workspace index
-                if let Some(ext) = extension
+                if let Some(ext) = path.extension()
                     && is_markdown_extension(ext)
                 {
                     match change.typ {
@@ -916,7 +909,14 @@ impl LanguageServer for RumdlLanguageServer {
                             // them. Explicitly opened/edited files bypass this via
                             // the did_open/did_change handlers.
                             let roots = self.workspace_roots.read().await.clone();
-                            if crate::lsp::index_worker::path_is_ignored_for_index(&roots, &path) {
+                            let (options, excludes) = {
+                                let config = self.rumdl_config.read().await;
+                                (
+                                    crate::lsp::index_worker::index_walk_options(&config),
+                                    ExcludeMatchers::new(&config.global.exclude),
+                                )
+                            };
+                            if crate::lsp::index_worker::path_is_ignored_for_index(&roots, &path, &options, &excludes) {
                                 // A file that was indexed before an ignore rule began
                                 // matching it (e.g. just added to .gitignore) must be
                                 // evicted so completions and navigation stop surfacing

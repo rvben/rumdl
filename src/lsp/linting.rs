@@ -34,40 +34,26 @@ impl RumdlLanguageServer {
             return false;
         }
 
-        // Convert path to relative path for pattern matching
-        // This matches the CLI behavior in find_markdown_files
-        let path_to_check = if file_path.is_absolute() {
-            // Try to make it relative to the current directory
-            if let Ok(cwd) = std::env::current_dir() {
-                // Canonicalize both paths to handle symlinks
-                if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), file_path.canonicalize()) {
-                    if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
-                        relative.to_string_lossy().to_string()
-                    } else {
-                        // Path is absolute but not under cwd
-                        file_path.to_string_lossy().to_string()
-                    }
-                } else {
-                    // Canonicalization failed
-                    file_path.to_string_lossy().to_string()
-                }
-            } else {
-                file_path.to_string_lossy().to_string()
-            }
-        } else {
-            // Already relative
-            file_path.to_string_lossy().to_string()
+        // Relativize for pattern matching, like the CLI relativizes against
+        // the project root: prefer the deepest workspace root containing the
+        // file, fall back to the current directory, then to the path as-is.
+        let base = {
+            let roots = self.workspace_roots.read().await;
+            roots
+                .iter()
+                .filter(|r| file_path.starts_with(r))
+                .max_by_key(|r| r.components().count())
+                .cloned()
+                .or_else(|| std::env::current_dir().ok())
         };
+        let path_to_check = base
+            .and_then(|base| crate::discovery::path_relative_to(&file_path, &base))
+            .unwrap_or_else(|| file_path.to_string_lossy().to_string());
 
-        // Check if path matches any exclude pattern
-        for pattern in exclude_patterns {
-            if let Ok(glob) = globset::Glob::new(pattern) {
-                let matcher = glob.compile_matcher();
-                if matcher.is_match(&path_to_check) {
-                    log::debug!("Excluding file from LSP linting: {path_to_check}");
-                    return true;
-                }
-            }
+        let matchers = crate::discovery::ExcludeMatchers::new(exclude_patterns);
+        if matchers.is_match(&path_to_check) {
+            log::debug!("Excluding file from LSP linting: {path_to_check}");
+            return true;
         }
 
         false

@@ -1,34 +1,17 @@
 //! File discovery, path utilities, and pattern expansion
 
 use core::error::Error;
-use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use rumdl_config::resolve_rule_names;
 use rumdl_lib::config as rumdl_config;
+use rumdl_lib::discovery::{
+    ExcludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, apply_markdown_walk_options, expand_directory_pattern,
+    has_markdown_extension,
+};
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
 use std::path::Path;
-
-/// Expands directory-style patterns to also match files within them.
-/// Pattern "dir/path" becomes ["dir/path", "dir/path/**"] to match both
-/// the directory itself and all contents recursively.
-///
-/// Patterns containing glob characters (*, ?, [) are returned unchanged.
-fn expand_directory_pattern(pattern: &str) -> Vec<String> {
-    // If pattern already has glob characters, use as-is
-    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        return vec![pattern.to_string()];
-    }
-
-    // Directory-like pattern: no glob chars
-    // Transform to match both the directory and its contents
-    let base = pattern.trim_end_matches('/');
-    vec![
-        base.to_string(),     // Match the directory itself
-        format!("{base}/**"), // Match everything underneath
-    ]
-}
 
 pub fn get_enabled_rules_from_checkargs(args: &crate::CheckArgs, config: &rumdl_config::Config) -> Vec<Box<dyn Rule>> {
     // 1. Initialize all available rules using from_config only
@@ -200,19 +183,6 @@ fn canonicalize_path_safe(path_str: &str) -> String {
         .unwrap_or_else(|_| path_str.to_string())
 }
 
-fn compile_exclude_matchers(patterns: &[String]) -> Vec<(String, GlobMatcher)> {
-    patterns
-        .iter()
-        .filter_map(|pattern| match Glob::new(pattern) {
-            Ok(glob) => Some((pattern.clone(), glob.compile_matcher())),
-            Err(e) => {
-                eprintln!("Warning: Invalid exclude pattern '{pattern}': {e}");
-                None
-            }
-        })
-        .collect()
-}
-
 /// Convert an absolute file path to a relative path for display purposes.
 ///
 /// Tries to make the path relative to project_root first, then falls back to CWD.
@@ -317,15 +287,11 @@ pub fn find_markdown_files(
     if args.include.is_none() {
         let mut types_builder = ignore::types::TypesBuilder::new();
         types_builder.add_defaults();
-        types_builder.add("markdown", "*.md")?;
-        types_builder.add("markdown", "*.markdown")?;
-        types_builder.add("markdown", "*.mdx")?;
-        types_builder.add("markdown", "*.mkd")?;
-        types_builder.add("markdown", "*.mkdn")?;
-        types_builder.add("markdown", "*.mdown")?;
-        types_builder.add("markdown", "*.mdwn")?;
-        types_builder.add("markdown", "*.qmd")?;
-        types_builder.add("markdown", "*.rmd")?;
+        for ext in MARKDOWN_EXTENSIONS {
+            types_builder.add("markdown", &format!("*.{ext}"))?;
+        }
+        // Type globs match case-sensitively; cover the conventional
+        // capitalized R Markdown extension explicitly.
         types_builder.add("markdown", "*.Rmd")?;
         types_builder.select("markdown");
         if has_config_include {
@@ -362,30 +328,33 @@ pub fn find_markdown_files(
     };
 
     // Exclude patterns: CLI > Config (but disabled if --no-exclude is set)
-    // Expand directory-only patterns to also match their contents
-    let final_exclude_patterns: Vec<String> = if args.no_exclude {
+    let raw_exclude_patterns: Vec<String> = if args.no_exclude {
         Vec::new() // Disable all exclusions
     } else if let Some(cli_exclude) = args.exclude.as_deref() {
         cli_exclude
             .split(',')
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
-            .flat_map(|p| expand_directory_pattern(&p))
             .collect()
     } else {
-        config
-            .global
-            .exclude
-            .iter()
-            .flat_map(|p| expand_directory_pattern(p))
-            .collect()
+        config.global.exclude.clone()
     };
+
+    // Expand directory-only patterns to also match their contents (for the
+    // walker overrides; ExcludeMatchers applies the same expansion itself)
+    let final_exclude_patterns: Vec<String> = raw_exclude_patterns
+        .iter()
+        .flat_map(|p| expand_directory_pattern(p))
+        .collect();
 
     // Debug: Log exclude patterns
     if args.verbose {
         eprintln!("Exclude patterns: {final_exclude_patterns:?}");
     }
-    let exclude_matchers = compile_exclude_matchers(&final_exclude_patterns);
+    let exclude_matchers = ExcludeMatchers::new(&raw_exclude_patterns);
+    for (pattern, error) in &exclude_matchers.invalid {
+        eprintln!("Warning: Invalid exclude pattern '{pattern}': {error}");
+    }
     let canonical_project_root = project_root.and_then(|root| root.canonicalize().ok());
     // --- End Pattern Determination ---
 
@@ -431,20 +400,16 @@ pub fn find_markdown_files(
         };
     }
 
-    // Configure gitignore handling *SECOND*
-    // Use config value which merges CLI override with config file setting
-    let use_gitignore = config.global.respect_gitignore;
-
-    walk_builder.ignore(use_gitignore); // Enable/disable .ignore
-    walk_builder.git_ignore(use_gitignore); // Enable/disable .gitignore
-    walk_builder.git_global(use_gitignore); // Enable/disable global gitignore
-    walk_builder.git_exclude(use_gitignore); // Enable/disable .git/info/exclude
-    walk_builder.parents(use_gitignore); // Enable/disable parent ignores
-    walk_builder.hidden(false); // Include hidden files and directories
-    walk_builder.require_git(false); // Process git ignores even if no repo detected
-
-    // Add support for .markdownlintignore file
-    walk_builder.add_custom_ignore_filename(".markdownlintignore");
+    // Configure ignore handling *SECOND*: gitignore family per config,
+    // hidden files included, .markdownlintignore honored. Shared with the
+    // LSP workspace scan so both walk the same files.
+    apply_markdown_walk_options(
+        &mut walk_builder,
+        &MarkdownWalkOptions {
+            respect_gitignore: config.global.respect_gitignore,
+            skip_vendor_dirs: false,
+        },
+    );
 
     // --- Pre-check for explicit file paths ---
     // If not in discovery mode, validate that specified paths exist
@@ -489,7 +454,7 @@ pub fn find_markdown_files(
                 // Check if this file should be excluded based on exclude patterns
                 // This is the default behavior to match user expectations and avoid
                 // duplication between rumdl config and pre-commit config (issue #99)
-                if !final_exclude_patterns.is_empty() {
+                if !exclude_matchers.is_empty() {
                     // Compute path relative to project_root for pattern matching
                     // This ensures patterns like "subdir/file.md" work regardless of cwd
                     let path_for_matching = if let Some(canonical_root) = canonical_project_root.as_deref() {
@@ -507,14 +472,7 @@ pub fn find_markdown_files(
                         cleaned_path.clone()
                     };
 
-                    let mut matching_pattern: Option<&str> = None;
-                    for (pattern, matcher) in &exclude_matchers {
-                        if matcher.is_match(&path_for_matching) {
-                            matching_pattern = Some(pattern.as_str());
-                            break;
-                        }
-                    }
-                    if let Some(pattern) = matching_pattern {
+                    if let Some(pattern) = exclude_matchers.matched_pattern(&path_for_matching) {
                         // Always print a warning when excluding explicitly provided files
                         // This matches ESLint's behavior and helps users understand why the file wasn't linted
                         let display_path = normalize_separators(cleaned_path.clone());
@@ -591,12 +549,7 @@ pub fn find_markdown_files(
             };
 
             // Check if any exclude pattern matches
-            for (_, matcher) in &exclude_matchers {
-                if matcher.is_match(&path_for_matching) {
-                    return false; // Exclude this file
-                }
-            }
-            true // Keep this file
+            !exclude_matchers.is_match(&path_for_matching)
         });
     }
 
@@ -607,14 +560,8 @@ pub fn find_markdown_files(
     if args.include.is_none() {
         file_paths.retain(|path_str| {
             let path = Path::new(path_str);
-            path.extension().is_some_and(|ext| {
-                let is_markdown = matches!(
-                    ext.to_str(),
-                    Some("md" | "markdown" | "mdx" | "mkd" | "mkdn" | "mdown" | "mdwn" | "qmd" | "rmd" | "Rmd")
-                );
-                let is_rust = has_config_include && ext.to_str() == Some("rs");
-                is_markdown || is_rust
-            })
+            let is_rust = has_config_include && path.extension().is_some_and(|ext| ext.to_str() == Some("rs"));
+            has_markdown_extension(path) || is_rust
         });
     }
     // -------------------------------------

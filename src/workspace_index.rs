@@ -97,24 +97,10 @@ static URL_EXTRACT_REGEX: LazyLock<Regex> =
 pub(crate) static PROTOCOL_DOMAIN_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-zA-Z][a-zA-Z0-9+.-]*://|[a-zA-Z][a-zA-Z0-9+.-]*:|www\.)").unwrap());
 
-/// Supported markdown file extensions
-const MARKDOWN_EXTENSIONS: &[&str] = &[
-    ".md",
-    ".markdown",
-    ".mdx",
-    ".mkd",
-    ".mkdn",
-    ".mdown",
-    ".mdwn",
-    ".qmd",
-    ".rmd",
-];
-
-/// Check if a path has a markdown extension (case-insensitive)
+/// Check if a link-target path has a markdown extension (case-insensitive)
 #[inline]
 fn is_markdown_file(path: &str) -> bool {
-    let path_lower = path.to_lowercase();
-    MARKDOWN_EXTENSIONS.iter().any(|ext| path_lower.ends_with(ext))
+    crate::discovery::has_markdown_extension(std::path::Path::new(path))
 }
 
 /// Strip query parameters and fragments from a URL path

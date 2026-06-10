@@ -13,20 +13,25 @@ use tokio::sync::{RwLock, mpsc};
 use tower_lsp::Client;
 use tower_lsp::lsp_types::*;
 
-use crate::config::MarkdownFlavor;
+use crate::config::{Config, MarkdownFlavor};
+use crate::discovery::{ExcludeMatchers, MarkdownWalkOptions, is_markdown_extension, path_relative_to};
 use crate::lint_context::LintContext;
 use crate::lsp::types::{IndexState, IndexUpdate};
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex, extract_cross_file_links};
 
-/// Supported markdown file extensions
-const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
-
-/// Check if a file extension is a markdown extension
-#[inline]
-fn is_markdown_extension(ext: &std::ffi::OsStr) -> bool {
-    ext.to_str()
-        .is_some_and(|s| MARKDOWN_EXTENSIONS.contains(&s.to_lowercase().as_str()))
+/// Walk options for workspace indexing, derived from the resolved config.
+///
+/// Mirrors CLI discovery (gitignore handling driven by
+/// `global.respect_gitignore`, hidden files included, `.markdownlintignore`
+/// honored) with one deliberate divergence: `.git`/`node_modules`/`target`
+/// are always skipped as an editor-performance safety net, even when not
+/// gitignored.
+pub(super) fn index_walk_options(config: &Config) -> MarkdownWalkOptions {
+    MarkdownWalkOptions {
+        respect_gitignore: config.global.respect_gitignore,
+        skip_vendor_dirs: true,
+    }
 }
 
 /// Background worker for managing the workspace index
@@ -50,6 +55,9 @@ pub struct IndexWorker {
     debounce_duration: Duration,
     /// Sender to request re-linting of files (back to server)
     relint_tx: mpsc::Sender<PathBuf>,
+    /// Resolved rumdl configuration; drives walk options and excludes for
+    /// workspace scans so the index covers the same files the CLI lints.
+    rumdl_config: Arc<RwLock<Config>>,
 }
 
 impl IndexWorker {
@@ -61,6 +69,7 @@ impl IndexWorker {
         client: Client,
         workspace_roots: Arc<RwLock<Vec<PathBuf>>>,
         relint_tx: mpsc::Sender<PathBuf>,
+        rumdl_config: Arc<RwLock<Config>>,
     ) -> Self {
         Self {
             rx,
@@ -71,6 +80,7 @@ impl IndexWorker {
             pending: HashMap::new(),
             debounce_duration: Duration::from_millis(100),
             relint_tx,
+            rumdl_config,
         }
     }
 
@@ -232,7 +242,17 @@ impl IndexWorker {
 
         // Find all markdown files in workspace roots
         let roots = self.workspace_roots.read().await.clone();
-        let files = scan_markdown_files(&roots).await;
+        let (options, excludes) = {
+            let config = self.rumdl_config.read().await;
+            (
+                index_walk_options(&config),
+                ExcludeMatchers::new(&config.global.exclude),
+            )
+        };
+        for (pattern, error) in &excludes.invalid {
+            log::warn!("Invalid exclude pattern '{pattern}': {error}");
+        }
+        let files = scan_markdown_files(&roots, options, excludes).await;
         let total = files.len();
 
         if total == 0 {
@@ -341,12 +361,17 @@ impl IndexWorker {
 
 /// Scan workspace roots for markdown files
 ///
-/// Honors `.gitignore`, `.ignore`, git global excludes, and skips hidden
-/// entries so generated/ignored files don't pollute the index. Runs the
-/// (synchronous) filesystem walk on a blocking thread.
-async fn scan_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
+/// Applies the shared discovery semantics (gitignore handling per config,
+/// `.markdownlintignore`, hidden files included, vendor dirs skipped) plus
+/// the config `exclude` patterns. Runs the (synchronous) filesystem walk on
+/// a blocking thread.
+async fn scan_markdown_files(
+    roots: &[PathBuf],
+    options: MarkdownWalkOptions,
+    excludes: ExcludeMatchers,
+) -> Vec<PathBuf> {
     let roots = roots.to_vec();
-    tokio::task::spawn_blocking(move || collect_markdown_files(&roots))
+    tokio::task::spawn_blocking(move || collect_markdown_files(&roots, &options, &excludes))
         .await
         .unwrap_or_else(|e| {
             log::warn!("Workspace scan task failed: {e}");
@@ -354,43 +379,25 @@ async fn scan_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
         })
 }
 
-/// Build a [`WalkBuilder`](ignore::WalkBuilder) rooted at `root` with the ignore
-/// options used for workspace indexing.
-///
-/// Centralizing the configuration keeps the full scan ([`collect_markdown_files`])
-/// and the single-path check ([`path_is_ignored_for_index`]) in exact agreement
-/// about which files belong in the index: same hidden/gitignore/global/exclude
-/// handling, same `node_modules`/`target` exclusion.
-fn index_walk_builder(root: &Path) -> ignore::WalkBuilder {
-    let mut builder = ignore::WalkBuilder::new(root);
-    builder
-        .hidden(true)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .parents(true)
-        // Honor .gitignore / .ignore even outside a git repository.
-        .require_git(false)
-        // Always skip dependency/build output directories even when not gitignored.
-        .filter_entry(|entry| {
-            let name = entry.file_name().to_str().unwrap_or("");
-            name != "node_modules" && name != "target"
-        });
-    builder
-}
-
-/// Collect markdown files from the given roots, respecting ignore files.
-fn collect_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
+/// Collect markdown files from the given roots, respecting ignore files and
+/// config `exclude` patterns (matched relative to each root, like the CLI
+/// matches them relative to the project root).
+fn collect_markdown_files(
+    roots: &[PathBuf],
+    options: &MarkdownWalkOptions,
+    excludes: &ExcludeMatchers,
+) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
     for root in roots {
-        for result in index_walk_builder(root).build() {
+        for result in crate::discovery::markdown_walk_builder(root, options).build() {
             match result {
                 Ok(entry) => {
                     let path = entry.path();
                     if entry.file_type().is_some_and(|t| t.is_file())
                         && let Some(ext) = path.extension()
                         && is_markdown_extension(ext)
+                        && !excluded_relative_to_root(excludes, path, root)
                     {
                         files.push(path.to_path_buf());
                     }
@@ -401,6 +408,15 @@ fn collect_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
     }
 
     files
+}
+
+/// Whether `path` matches the config `exclude` patterns, matched against its
+/// root-relative form. Paths that cannot be relativized are not excluded.
+fn excluded_relative_to_root(excludes: &ExcludeMatchers, path: &Path, root: &Path) -> bool {
+    if excludes.is_empty() {
+        return false;
+    }
+    path_relative_to(path, root).is_some_and(|rel| excludes.is_match(&rel))
 }
 
 /// Whether `path` should be excluded from the workspace index based on the same
@@ -421,7 +437,12 @@ fn collect_markdown_files(roots: &[PathBuf]) -> Vec<PathBuf> {
 /// `node_modules`/`target` are also checked directly so the predicate works even
 /// for paths that do not exist on disk. The file must exist for the walk to
 /// observe it, which holds for the create/change watch events that use this.
-pub(super) fn path_is_ignored_for_index(roots: &[PathBuf], path: &Path) -> bool {
+pub(super) fn path_is_ignored_for_index(
+    roots: &[PathBuf],
+    path: &Path,
+    options: &MarkdownWalkOptions,
+    excludes: &ExcludeMatchers,
+) -> bool {
     // Use the deepest workspace root that contains the file so nested roots
     // resolve their own ignore files. Paths outside every root aren't filtered.
     let Some(root) = roots
@@ -432,20 +453,31 @@ pub(super) fn path_is_ignored_for_index(roots: &[PathBuf], path: &Path) -> bool 
         return false;
     };
 
-    // Check `node_modules`/`target` only below the workspace root, so a workspace
-    // located under a directory of that name is not wholly excluded.
-    if let Ok(rel) = path.strip_prefix(root)
-        && rel
-            .components()
-            .any(|c| matches!(c, std::path::Component::Normal(name) if name == "node_modules" || name == "target"))
+    // Check vendor directories only below the workspace root, so a workspace
+    // located under a directory of that name is not wholly excluded. Checked
+    // directly (not via the walk) so the predicate also works for paths that
+    // do not exist on disk.
+    if options.skip_vendor_dirs
+        && let Ok(rel) = path.strip_prefix(root)
+        && rel.components().any(
+            |c| matches!(c, std::path::Component::Normal(name) if name == ".git" || name == "node_modules" || name == "target"),
+        )
     {
         return true;
     }
 
+    // Config exclude patterns, matched root-relative like the full scan.
+    if excluded_relative_to_root(excludes, path, root) {
+        return true;
+    }
+
     let target = path.to_path_buf();
-    let mut builder = index_walk_builder(root);
+    let mut builder = crate::discovery::markdown_walk_builder(root, options);
     // Only descend into directories that lead to `target`; everything else is
     // pruned. `target.starts_with(entry)` holds for `target` and its ancestors.
+    // Note: this replaces the vendor-dir filter set by the walk options
+    // (`WalkBuilder::filter_entry` overwrites the previous predicate); the
+    // direct component check above covers vendor dirs for this walk.
     builder.filter_entry(move |entry| target.starts_with(entry.path()));
     for entry in builder.build().flatten() {
         if entry.path() == path {
@@ -536,7 +568,11 @@ More text with [link](./other.md#section).
         fs::create_dir(root.join("node_modules")).unwrap();
         fs::write(root.join("node_modules").join("dep.md"), "# Dep\n").unwrap();
 
-        let mut files = collect_markdown_files(&[root.to_path_buf()]);
+        let mut files = collect_markdown_files(
+            &[root.to_path_buf()],
+            &index_walk_options(&Config::default()),
+            &ExcludeMatchers::new(&[]),
+        );
         files.sort();
 
         let names: Vec<String> = files
@@ -545,6 +581,84 @@ More text with [link](./other.md#section).
             .collect();
 
         assert_eq!(names, vec!["README.md".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_applies_config_excludes() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join("README.md"), "# Readme\n").unwrap();
+        fs::create_dir(root.join("drafts")).unwrap();
+        fs::write(root.join("drafts").join("wip.md"), "# WIP\n").unwrap();
+
+        // A bare directory pattern must exclude the directory's contents,
+        // matching CLI behavior.
+        let excludes = ExcludeMatchers::new(&["drafts".to_string()]);
+        let names: Vec<String> = collect_markdown_files(
+            &[root.to_path_buf()],
+            &index_walk_options(&Config::default()),
+            &excludes,
+        )
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+        assert_eq!(names, vec!["README.md".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_can_disable_gitignore() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(root.join(".gitignore"), "ignored.md\n").unwrap();
+        fs::write(root.join("ignored.md"), "# Ignored\n").unwrap();
+
+        let mut config = Config::default();
+        config.global.respect_gitignore = false;
+        let names: Vec<String> = collect_markdown_files(
+            &[root.to_path_buf()],
+            &index_walk_options(&config),
+            &ExcludeMatchers::new(&[]),
+        )
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+        assert_eq!(names, vec!["ignored.md".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_includes_hidden_files() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir(root.join(".github")).unwrap();
+        fs::write(root.join(".github").join("PULL_REQUEST_TEMPLATE.md"), "# PR\n").unwrap();
+        fs::write(root.join("README.md"), "# Readme\n").unwrap();
+
+        let mut names: Vec<String> = collect_markdown_files(
+            &[root.to_path_buf()],
+            &index_walk_options(&Config::default()),
+            &ExcludeMatchers::new(&[]),
+        )
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+        names.sort();
+
+        // Hidden files lint in the CLI, so the index must cover them too.
+        assert_eq!(
+            names,
+            vec!["PULL_REQUEST_TEMPLATE.md".to_string(), "README.md".to_string()]
+        );
     }
 
     #[test]
@@ -559,10 +673,14 @@ More text with [link](./other.md#section).
         fs::write(root.join("docs").join("guide.markdown"), "# Guide\n").unwrap();
         fs::write(root.join("docs").join("notes.txt"), "not markdown\n").unwrap();
 
-        let mut names: Vec<String> = collect_markdown_files(&[root.to_path_buf()])
-            .iter()
-            .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
-            .collect();
+        let mut names: Vec<String> = collect_markdown_files(
+            &[root.to_path_buf()],
+            &index_walk_options(&Config::default()),
+            &ExcludeMatchers::new(&[]),
+        )
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
         names.sort();
 
         assert_eq!(names, vec!["guide.markdown".to_string(), "top.md".to_string()]);
@@ -587,26 +705,78 @@ More text with [link](./other.md#section).
         fs::write(root.join("build").join("out.md"), "").unwrap();
 
         let roots = vec![root.clone()];
+        let options = index_walk_options(&Config::default());
+        let no_excludes = ExcludeMatchers::new(&[]);
 
         // Tracked files are not ignored.
-        assert!(!path_is_ignored_for_index(&roots, &root.join("README.md")));
-        assert!(!path_is_ignored_for_index(&roots, &root.join("docs/guide.md")));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("README.md"),
+            &options,
+            &no_excludes
+        ));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("docs/guide.md"),
+            &options,
+            &no_excludes
+        ));
 
         // Gitignored file and file inside a gitignored directory.
-        assert!(path_is_ignored_for_index(&roots, &root.join("draft.md")));
-        assert!(path_is_ignored_for_index(&roots, &root.join("build/out.md")));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("draft.md"),
+            &options,
+            &no_excludes
+        ));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("build/out.md"),
+            &options,
+            &no_excludes
+        ));
 
-        // Hidden files are excluded, matching the full scan's hidden(true).
-        assert!(path_is_ignored_for_index(&roots, &root.join(".hidden.md")));
+        // Hidden files are indexed, matching the CLI which lints them.
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join(".hidden.md"),
+            &options,
+            &no_excludes
+        ));
 
         // Dependency/output dirs are always skipped, even without a gitignore rule
         // and without the file existing.
-        assert!(path_is_ignored_for_index(&roots, &root.join("node_modules/dep.md")));
-        assert!(path_is_ignored_for_index(&roots, &root.join("target/doc.md")));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("node_modules/dep.md"),
+            &options,
+            &no_excludes
+        ));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("target/doc.md"),
+            &options,
+            &no_excludes
+        ));
+
+        // Config exclude patterns are honored, matched root-relative.
+        let excludes = ExcludeMatchers::new(&["docs".to_string()]);
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("docs/guide.md"),
+            &options,
+            &excludes
+        ));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("README.md"),
+            &options,
+            &excludes
+        ));
 
         // Paths outside every workspace root are not filtered.
         let outside = dir.path().parent().unwrap().join("elsewhere.md");
-        assert!(!path_is_ignored_for_index(&roots, &outside));
+        assert!(!path_is_ignored_for_index(&roots, &outside, &options, &no_excludes));
     }
 
     #[test]
@@ -621,9 +791,21 @@ More text with [link](./other.md#section).
         fs::write(root.join("docs").join("manual.md"), "").unwrap();
 
         let roots = vec![root.clone()];
+        let options = index_walk_options(&Config::default());
+        let no_excludes = ExcludeMatchers::new(&[]);
 
-        assert!(path_is_ignored_for_index(&roots, &root.join("docs/generated.md")));
-        assert!(!path_is_ignored_for_index(&roots, &root.join("docs/manual.md")));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("docs/generated.md"),
+            &options,
+            &no_excludes
+        ));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("docs/manual.md"),
+            &options,
+            &no_excludes
+        ));
     }
 
     #[test]
@@ -640,11 +822,23 @@ More text with [link](./other.md#section).
         fs::write(root.join("target").join("out.md"), "").unwrap();
 
         let roots = vec![root.clone()];
+        let options = index_walk_options(&Config::default());
+        let no_excludes = ExcludeMatchers::new(&[]);
 
         // Files directly under the workspace are indexed despite the `target`
         // ancestor in the absolute path.
-        assert!(!path_is_ignored_for_index(&roots, &root.join("README.md")));
+        assert!(!path_is_ignored_for_index(
+            &roots,
+            &root.join("README.md"),
+            &options,
+            &no_excludes
+        ));
         // A `target` directory *inside* the workspace is still excluded.
-        assert!(path_is_ignored_for_index(&roots, &root.join("target/out.md")));
+        assert!(path_is_ignored_for_index(
+            &roots,
+            &root.join("target/out.md"),
+            &options,
+            &no_excludes
+        ));
     }
 }

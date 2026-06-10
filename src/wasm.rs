@@ -129,19 +129,6 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-/// Expand bare-directory exclude patterns so they also match nested contents.
-/// `foo` -> `["foo", "foo/**"]`; glob-containing patterns pass through.
-///
-/// Mirrors the CLI behavior in `file_processor/discovery.rs` so `.rumdl.toml`
-/// entries like `exclude = [".git"]` work the same way everywhere.
-fn expand_directory_pattern(pattern: &str) -> Vec<String> {
-    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
-        return vec![pattern.to_string()];
-    }
-    let base = pattern.trim_end_matches('/');
-    vec![base.to_string(), format!("{base}/**")]
-}
-
 /// Human-readable name for a TOML value's variant. Used in config warnings.
 fn toml_type_name(value: &toml::Value) -> &'static str {
     match value {
@@ -156,22 +143,16 @@ fn toml_type_name(value: &toml::Value) -> &'static str {
 }
 
 /// Return true if `path` matches any of the exclude patterns.
+///
+/// Uses the shared discovery matcher so `.rumdl.toml` entries like
+/// `exclude = [".git"]` expand and match the same way everywhere.
 fn path_matches_exclude(exclude_patterns: &[String], path: &str) -> bool {
     if exclude_patterns.is_empty() {
         return false;
     }
     // Normalize: drop leading `./` so `./q2/foo.md` matches `q2/**/*.md`
     let normalized = path.strip_prefix("./").unwrap_or(path);
-    for pattern in exclude_patterns {
-        for expanded in expand_directory_pattern(pattern) {
-            if let Ok(glob) = globset::Glob::new(&expanded) {
-                if glob.compile_matcher().is_match(normalized) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+    crate::discovery::ExcludeMatchers::new(exclude_patterns).is_match(normalized)
 }
 
 /// Configuration options for the Linter
