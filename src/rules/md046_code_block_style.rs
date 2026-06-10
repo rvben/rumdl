@@ -36,6 +36,28 @@ struct IndentContext<'a> {
     list_item_baseline: &'a [Option<usize>],
 }
 
+/// Owned backing storage for [`IndentContext`], built once per `check`/`fix`
+/// invocation by [`MD046CodeBlockStyle::build_indent_context`].
+struct OwnedIndentContext {
+    in_list_context: Vec<bool>,
+    in_tab_context: Vec<bool>,
+    in_admonition_context: Vec<bool>,
+    in_comment_or_html: Vec<bool>,
+    list_item_baseline: Vec<Option<usize>>,
+}
+
+impl OwnedIndentContext {
+    fn borrow(&self) -> IndentContext<'_> {
+        IndentContext {
+            in_list_context: &self.in_list_context,
+            in_tab_context: &self.in_tab_context,
+            in_admonition_context: &self.in_admonition_context,
+            in_comment_or_html: &self.in_comment_or_html,
+            list_item_baseline: &self.list_item_baseline,
+        }
+    }
+}
+
 /// Rule MD046: Code block style
 ///
 /// See [docs/md046.md](../../docs/md046.md) for full documentation, configuration, and examples.
@@ -539,6 +561,40 @@ impl MD046CodeBlockStyle {
         in_admonition_context
     }
 
+    /// Build the pre-computed per-line context arrays that indented code
+    /// block detection consults. One call per `check`/`fix` invocation.
+    ///
+    /// The list, tab, and admonition trackers here intentionally differ from
+    /// the `LineInfo` flags (`in_list_block`, `in_content_tab`,
+    /// `in_admonition`) that `LintContext` computes: the admonition tracker
+    /// supports nesting via an indent stack, and the list tracker applies a
+    /// conservative continuation heuristic (a list context survives up to 5
+    /// unindented lines or one blank) tuned to avoid rewriting list
+    /// continuations as code blocks. Only `in_comment_or_html` and the list
+    /// item baselines project straight from `LintContext`.
+    fn build_indent_context(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        lines: &[&str],
+        is_mkdocs: bool,
+    ) -> OwnedIndentContext {
+        OwnedIndentContext {
+            in_list_context: self.precompute_block_continuation_context(lines),
+            in_tab_context: if is_mkdocs {
+                self.precompute_mkdocs_tab_context(lines)
+            } else {
+                vec![false; lines.len()]
+            },
+            in_admonition_context: if is_mkdocs {
+                self.precompute_mkdocs_admonition_context(lines)
+            } else {
+                vec![false; lines.len()]
+            },
+            in_comment_or_html: Self::precompute_comment_or_html_context(ctx, lines.len()),
+            list_item_baseline: self.precompute_list_item_baseline(ctx, lines),
+        }
+    }
+
     /// Categorize indented blocks for fix behavior
     ///
     /// Returns two vectors:
@@ -842,27 +898,8 @@ impl Rule for MD046CodeBlockStyle {
         // Determine the target style
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => {
-                let in_list_context = self.precompute_block_continuation_context(lines);
-                let list_item_baseline = self.precompute_list_item_baseline(ctx, lines);
-                let in_comment_or_html = Self::precompute_comment_or_html_context(ctx, lines.len());
-                let in_tab_context = if is_mkdocs {
-                    self.precompute_mkdocs_tab_context(lines)
-                } else {
-                    vec![false; lines.len()]
-                };
-                let in_admonition_context = if is_mkdocs {
-                    self.precompute_mkdocs_admonition_context(lines)
-                } else {
-                    vec![false; lines.len()]
-                };
-                let ictx = IndentContext {
-                    in_list_context: &in_list_context,
-                    in_tab_context: &in_tab_context,
-                    in_admonition_context: &in_admonition_context,
-                    in_comment_or_html: &in_comment_or_html,
-                    list_item_baseline: &list_item_baseline,
-                };
-                self.detect_style(ctx, lines, is_mkdocs, &ictx)
+                let owned = self.build_indent_context(ctx, lines, is_mkdocs);
+                self.detect_style(ctx, lines, is_mkdocs, &owned.borrow())
                     .unwrap_or(CodeBlockStyle::Fenced)
             }
             _ => self.config.style,
@@ -967,29 +1004,8 @@ impl Rule for MD046CodeBlockStyle {
         // Determine target style
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        let in_comment_or_html = Self::precompute_comment_or_html_context(ctx, lines.len());
-
-        // Pre-compute list, tab, and admonition contexts once
-        let in_list_context = self.precompute_block_continuation_context(lines);
-        let list_item_baseline = self.precompute_list_item_baseline(ctx, lines);
-        let in_tab_context = if is_mkdocs {
-            self.precompute_mkdocs_tab_context(lines)
-        } else {
-            vec![false; lines.len()]
-        };
-        let in_admonition_context = if is_mkdocs {
-            self.precompute_mkdocs_admonition_context(lines)
-        } else {
-            vec![false; lines.len()]
-        };
-
-        let ictx = IndentContext {
-            in_list_context: &in_list_context,
-            in_tab_context: &in_tab_context,
-            in_admonition_context: &in_admonition_context,
-            in_comment_or_html: &in_comment_or_html,
-            list_item_baseline: &list_item_baseline,
-        };
+        let owned = self.build_indent_context(ctx, lines, is_mkdocs);
+        let ictx = owned.borrow();
 
         let target_style = match self.config.style {
             CodeBlockStyle::Consistent => self
@@ -1112,7 +1128,7 @@ impl Rule for MD046CodeBlockStyle {
                     // 2 for `- `), so the new fenced block stays attached
                     // to the bullet. Top-level indented blocks have no
                     // baseline → fences sit at column 0.
-                    let baseline = list_item_baseline.get(i).copied().flatten().unwrap_or(0);
+                    let baseline = ictx.list_item_baseline.get(i).copied().flatten().unwrap_or(0);
                     // Per CommonMark, the indented-code prefix is exactly 4
                     // spaces past the surrounding container's content
                     // column. Strip those 4 spaces (not all leading
