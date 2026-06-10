@@ -111,6 +111,7 @@ pub struct LintContext<'a> {
     myst_directive_ranges: Vec<(usize, usize)>, // Pre-computed MyST colon directive byte ranges (:::{name} ... :::)
     myst_comment_ranges: Vec<(usize, usize)>, // Pre-computed MyST comment byte ranges (% comment)
     myst_role_ranges: Vec<(usize, usize)>, // Pre-computed MyST role byte ranges ({role}`content`)
+    front_matter_end: usize,               // 1-indexed line where front matter ends, 0 if none
 }
 
 impl<'a> LintContext<'a> {
@@ -886,7 +887,16 @@ impl<'a> LintContext<'a> {
             myst_directive_ranges,
             myst_comment_ranges,
             myst_role_ranges,
+            front_matter_end,
         }
+    }
+
+    /// The 1-indexed line number where front matter ends (the closing
+    /// delimiter line), or 0 when the document has no front matter.
+    /// Computed once in `new()`; rules must use this instead of re-scanning
+    /// the content with `FrontMatterUtils`.
+    pub fn front_matter_end_line(&self) -> usize {
+        self.front_matter_end
     }
 
     /// Binary search for whether `pos` falls inside any range in a sorted, non-overlapping

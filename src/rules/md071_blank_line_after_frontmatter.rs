@@ -1,5 +1,4 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
 
 /// Rule MD071: Blank line after frontmatter
 ///
@@ -33,7 +32,7 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             return Ok(warnings);
         }
 
-        let fm_end_line = FrontMatterUtils::get_front_matter_end_line(content);
+        let fm_end_line = ctx.front_matter_end_line();
         if fm_end_line == 0 {
             // No frontmatter
             return Ok(warnings);
@@ -75,7 +74,7 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             return Ok(content.to_string());
         }
 
-        let fm_end_line = FrontMatterUtils::get_front_matter_end_line(content);
+        let fm_end_line = ctx.front_matter_end_line();
         if fm_end_line == 0 {
             return Ok(content.to_string());
         }
