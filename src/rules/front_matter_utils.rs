@@ -306,6 +306,11 @@ impl FrontMatterUtils {
     }
 
     /// Get the line number where front matter ends (or 0 if no front matter)
+    ///
+    /// Re-scans the whole content. `LintContext::new` calls this once per
+    /// document and caches the result; everything downstream of a
+    /// `LintContext` must read `ctx.front_matter_end_line()` instead
+    /// (enforced via `disallowed-methods` in clippy.toml).
     pub fn get_front_matter_end_line(content: &str) -> usize {
         let lines: Vec<&str> = content.lines().collect();
         if lines.len() < 3 {
@@ -534,6 +539,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)] // unit test of the scanner itself
     fn test_get_front_matter_end_line() {
         let content = "---\ntitle: Test\n---\nContent";
         assert_eq!(FrontMatterUtils::get_front_matter_end_line(content), 3);
@@ -568,6 +574,7 @@ Content";
     }
 
     #[test]
+    #[allow(clippy::disallowed_methods)] // unit test of the scanner itself
     fn test_edge_cases() {
         // Empty content
         assert_eq!(FrontMatterUtils::detect_front_matter_type(""), FrontMatterType::None);

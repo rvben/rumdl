@@ -1,0 +1,5 @@
+# Seam enforcement: rules must read pre-computed document structure from
+# LintContext instead of re-scanning content with the raw parsers.
+disallowed-methods = [
+    { path = "rumdl_lib::rules::front_matter_utils::FrontMatterUtils::get_front_matter_end_line", reason = "LintContext::new computes this once per document; use ctx.front_matter_end_line()" },
+]

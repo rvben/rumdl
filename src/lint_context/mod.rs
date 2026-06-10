@@ -132,7 +132,10 @@ impl<'a> LintContext<'a> {
         // Compute content_lines once for all functions that need it
         let content_lines: Vec<&str> = content.lines().collect();
 
-        // Detect front matter boundaries once for all functions that need it
+        // Detect front matter boundaries once for all functions that need it.
+        // This is the single allowed call site; rules read the cached value
+        // via front_matter_end_line().
+        #[allow(clippy::disallowed_methods)]
         let front_matter_end = FrontMatterUtils::get_front_matter_end_line(content);
 
         // Detect code blocks and code spans once and cache them
