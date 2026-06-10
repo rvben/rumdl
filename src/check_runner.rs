@@ -54,7 +54,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         explicit_config,
         isolated,
     } = *ctx;
-    use rumdl_lib::output::{OutputFormat, OutputWriter};
+    use rumdl_lib::output::OutputWriter;
     use rumdl_lib::rule::Severity;
 
     // Create output writer for linting results
@@ -146,14 +146,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     };
 
     // Batch output formats need to collect all warnings before formatting
-    let needs_collection = matches!(
-        output_format,
-        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
-    );
+    let needs_collection = output_format.is_batch();
 
-    // JUnit additionally reports passing files, so it needs every checked file's path,
-    // not just the ones with warnings. Other batch formats are issue-lists and don't.
-    let collect_all_files = matches!(output_format, OutputFormat::Junit);
+    // Some batch formats report passing files too and need every checked
+    // file's path, not just the ones with warnings.
+    let collect_all_files = output_format.needs_all_files();
 
     // Use a silent output writer for batch formats so per-file output is suppressed
     // (warnings are collected and formatted as a batch at the end)
@@ -574,23 +571,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     }
 
     // Emit batch output for collection formats
-    if needs_collection {
-        let duration_ms = start_time.elapsed().as_millis() as u64;
-
-        let output = match output_format {
-            OutputFormat::Json => {
-                rumdl_lib::output::formatters::json::format_all_warnings_as_json(&batch_file_warnings)
-            }
-            OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&batch_file_warnings),
-            OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&batch_file_warnings),
-            OutputFormat::Junit => rumdl_lib::output::formatters::junit::format_junit_report(
-                &batch_file_warnings,
-                &batch_all_files,
-                duration_ms,
-            ),
-            _ => unreachable!("needs_collection check above guarantees only batch formats here"),
-        };
-
+    if let Some(output) = output_format.format_batch(
+        &batch_file_warnings,
+        &batch_all_files,
+        start_time.elapsed().as_millis() as u64,
+    ) {
         output_writer.writeln(&output).unwrap_or_else(|e| {
             eprintln!("Error writing output: {e}");
         });

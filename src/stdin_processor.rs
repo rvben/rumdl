@@ -146,82 +146,68 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, silent);
             if !remaining_warnings.is_empty() {
-                match output_format {
-                    // Batch formats: remaining-only warnings
-                    OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
-                        let file_warnings = vec![(display_filename.to_string(), remaining_warnings.clone())];
-                        let output = match output_format {
-                            OutputFormat::Json => {
-                                rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings)
-                            }
-                            OutputFormat::GitLab => {
-                                rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings)
-                            }
-                            OutputFormat::Sarif => {
-                                rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings)
-                            }
-                            OutputFormat::Junit => {
-                                let all_files = vec![display_filename.to_string()];
-                                rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, &all_files, 0)
-                            }
-                            _ => unreachable!(),
-                        };
-                        fix_writer.writeln(&output).unwrap_or_else(|e| {
-                            eprintln!("Error writing output: {e}");
-                        });
-                    }
-                    // Human-readable text formats: all warnings with [fixed] labels
-                    OutputFormat::Text | OutputFormat::Full => {
-                        let mut output = String::new();
-                        for warning in &all_warnings {
-                            let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                            let was_fixed = file_processor::is_rule_cli_fixable(rules, config, rule_name)
-                                && warning.fix.is_some()
-                                && !remaining_warnings.iter().any(|w| {
-                                    w.line == warning.line
-                                        && w.column == warning.column
-                                        && w.rule_name == warning.rule_name
-                                        && w.message == warning.message
-                                });
+                // Batch formats: remaining-only warnings
+                let batch_file_warnings = vec![(display_filename.to_string(), remaining_warnings.clone())];
+                let batch_all_files = vec![display_filename.to_string()];
+                if let Some(output) = output_format.format_batch(&batch_file_warnings, &batch_all_files, 0) {
+                    fix_writer.writeln(&output).unwrap_or_else(|e| {
+                        eprintln!("Error writing output: {e}");
+                    });
+                } else {
+                    match output_format {
+                        // Human-readable text formats: all warnings with [fixed] labels
+                        OutputFormat::Text | OutputFormat::Full => {
+                            let mut output = String::new();
+                            for warning in &all_warnings {
+                                let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
+                                let was_fixed = file_processor::is_rule_cli_fixable(rules, config, rule_name)
+                                    && warning.fix.is_some()
+                                    && !remaining_warnings.iter().any(|w| {
+                                        w.line == warning.line
+                                            && w.column == warning.column
+                                            && w.rule_name == warning.rule_name
+                                            && w.message == warning.message
+                                    });
 
-                            let fix_indicator = if was_fixed {
-                                " [fixed]".green().to_string()
-                            } else {
-                                String::new()
-                            };
+                                let fix_indicator = if was_fixed {
+                                    " [fixed]".green().to_string()
+                                } else {
+                                    String::new()
+                                };
 
-                            use std::fmt::Write;
-                            writeln!(
-                                output,
-                                "{}:{}:{}: {} {}{}",
-                                display_filename.blue().underline(),
-                                warning.line.to_string().cyan(),
-                                warning.column.to_string().cyan(),
-                                format!("[{rule_name:5}]").yellow(),
-                                warning.message,
-                                fix_indicator
-                            )
-                            .ok();
+                                use std::fmt::Write;
+                                writeln!(
+                                    output,
+                                    "{}:{}:{}: {} {}{}",
+                                    display_filename.blue().underline(),
+                                    warning.line.to_string().cyan(),
+                                    warning.column.to_string().cyan(),
+                                    format!("[{rule_name:5}]").yellow(),
+                                    warning.message,
+                                    fix_indicator
+                                )
+                                .ok();
+                            }
+
+                            if output.ends_with('\n') {
+                                output.pop();
+                            }
+                            fix_writer.writeln(&output).unwrap_or_else(|e| {
+                                eprintln!("Error writing output: {e}");
+                            });
                         }
-
-                        if output.ends_with('\n') {
-                            output.pop();
+                        // Other streaming formats: use their formatter with remaining-only
+                        _ => {
+                            let formatter = output_format.create_formatter();
+                            let formatted = formatter.format_warnings_with_content(
+                                &remaining_warnings,
+                                display_filename,
+                                &fixed_content,
+                            );
+                            fix_writer.writeln(&formatted).unwrap_or_else(|e| {
+                                eprintln!("Error writing output: {e}");
+                            });
                         }
-                        fix_writer.writeln(&output).unwrap_or_else(|e| {
-                            eprintln!("Error writing output: {e}");
-                        });
-                    }
-                    // Other streaming formats: use their formatter with remaining-only
-                    _ => {
-                        let formatter = output_format.create_formatter();
-                        let formatted = formatter.format_warnings_with_content(
-                            &remaining_warnings,
-                            display_filename,
-                            &fixed_content,
-                        );
-                        fix_writer.writeln(&formatted).unwrap_or_else(|e| {
-                            eprintln!("Error writing output: {e}");
-                        });
                     }
                 }
                 if !quiet {
@@ -257,52 +243,40 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
         return;
     }
 
-    // Normal check mode (no fix) - output diagnostics
-    // Batch formats need all warnings collected before formatting
-    match output_format {
-        OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit => {
-            let file_warnings = vec![(display_filename.to_string(), all_warnings)];
-            let output = match output_format {
-                OutputFormat::Json => rumdl_lib::output::formatters::json::format_all_warnings_as_json(&file_warnings),
-                OutputFormat::GitLab => rumdl_lib::output::formatters::gitlab::format_gitlab_report(&file_warnings),
-                OutputFormat::Sarif => rumdl_lib::output::formatters::sarif::format_sarif_report(&file_warnings),
-                OutputFormat::Junit => {
-                    let all_files = vec![display_filename.to_string()];
-                    rumdl_lib::output::formatters::junit::format_junit_report(&file_warnings, &all_files, 0)
-                }
-                _ => unreachable!("Outer match guarantees only batch formats here"),
-            };
-
-            output_writer.writeln(&output).unwrap_or_else(|e| {
+    // Normal check mode (no fix) - output diagnostics.
+    // Batch formats emit one document with all warnings; streaming formats
+    // emit per-warning lines plus a human-readable summary.
+    let batch_file_warnings = vec![(display_filename.to_string(), all_warnings)];
+    let batch_all_files = vec![display_filename.to_string()];
+    if let Some(output) = output_format.format_batch(&batch_file_warnings, &batch_all_files, 0) {
+        output_writer.writeln(&output).unwrap_or_else(|e| {
+            eprintln!("Error writing output: {e}");
+        });
+    } else {
+        let all_warnings = &batch_file_warnings[0].1;
+        // Use formatter for line-by-line output
+        let formatter = output_format.create_formatter();
+        if !all_warnings.is_empty() {
+            let formatted = formatter.format_warnings_with_content(all_warnings, display_filename, &content);
+            output_writer.writeln(&formatted).unwrap_or_else(|e| {
                 eprintln!("Error writing output: {e}");
             });
         }
-        // Streaming formats (Text, Concise, Grouped, JsonLines, GitHub, Pylint, Azure)
-        _ => {
-            // Use formatter for line-by-line output
-            let formatter = output_format.create_formatter();
-            if !all_warnings.is_empty() {
-                let formatted = formatter.format_warnings_with_content(&all_warnings, display_filename, &content);
-                output_writer.writeln(&formatted).unwrap_or_else(|e| {
-                    eprintln!("Error writing output: {e}");
-                });
-            }
 
-            // Print summary if not quiet
-            if !quiet {
-                if has_issues {
-                    output_writer
-                        .writeln(&format!(
-                            "\nFound {} issue(s) in {}",
-                            all_warnings.len(),
-                            display_filename
-                        ))
-                        .ok();
-                } else {
-                    output_writer
-                        .writeln(&format!("No issues found in {display_filename}"))
-                        .ok();
-                }
+        // Print summary if not quiet
+        if !quiet {
+            if has_issues {
+                output_writer
+                    .writeln(&format!(
+                        "\nFound {} issue(s) in {}",
+                        all_warnings.len(),
+                        display_filename
+                    ))
+                    .ok();
+            } else {
+                output_writer
+                    .writeln(&format!("No issues found in {display_filename}"))
+                    .ok();
             }
         }
     }

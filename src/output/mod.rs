@@ -97,6 +97,47 @@ impl OutputFormat {
         )
     }
 
+    /// Whether this format is a batch format: a single document spanning all
+    /// results, which therefore needs every file's warnings collected before
+    /// anything is emitted. Streaming formats emit per file as results arrive.
+    pub fn is_batch(&self) -> bool {
+        matches!(
+            self,
+            OutputFormat::Json | OutputFormat::GitLab | OutputFormat::Sarif | OutputFormat::Junit
+        )
+    }
+
+    /// Whether this batch format also reports passing files and therefore
+    /// needs every checked file's path, not just the warning-bearing ones.
+    pub fn needs_all_files(&self) -> bool {
+        matches!(self, OutputFormat::Junit)
+    }
+
+    /// Format the complete result set for a batch format. Returns `None` for
+    /// streaming formats, so callers can fall through to per-file output
+    /// without matching on the variants themselves.
+    ///
+    /// `all_files` and `duration_ms` are consumed only by formats that report
+    /// passing files and run time (JUnit); issue-list formats ignore them.
+    pub fn format_batch(
+        &self,
+        file_warnings: &[(String, Vec<LintWarning>)],
+        all_files: &[String],
+        duration_ms: u64,
+    ) -> Option<String> {
+        match self {
+            OutputFormat::Json => Some(formatters::json::format_all_warnings_as_json(file_warnings)),
+            OutputFormat::GitLab => Some(formatters::gitlab::format_gitlab_report(file_warnings)),
+            OutputFormat::Sarif => Some(formatters::sarif::format_sarif_report(file_warnings)),
+            OutputFormat::Junit => Some(formatters::junit::format_junit_report(
+                file_warnings,
+                all_files,
+                duration_ms,
+            )),
+            _ => None,
+        }
+    }
+
     /// Create a formatter instance for this format
     pub fn create_formatter(&self) -> Box<dyn OutputFormatter> {
         match self {
@@ -435,6 +476,51 @@ mod tests {
                 "Format {format:?} should handle warnings without rule names"
             );
         }
+    }
+
+    #[test]
+    fn test_batch_seam() {
+        let batch = [
+            OutputFormat::Json,
+            OutputFormat::GitLab,
+            OutputFormat::Sarif,
+            OutputFormat::Junit,
+        ];
+        let streaming = [
+            OutputFormat::Text,
+            OutputFormat::Full,
+            OutputFormat::Concise,
+            OutputFormat::Grouped,
+            OutputFormat::JsonLines,
+            OutputFormat::GitHub,
+            OutputFormat::Pylint,
+            OutputFormat::Azure,
+        ];
+
+        let file_warnings = vec![("dirty.md".to_string(), vec![create_test_warning(1, "w")])];
+        let all_files = vec!["dirty.md".to_string(), "clean.md".to_string()];
+
+        for format in &batch {
+            assert!(format.is_batch(), "{format:?} is a batch format");
+            let output = format
+                .format_batch(&file_warnings, &all_files, 5)
+                .unwrap_or_else(|| panic!("{format:?} must format a batch"));
+            assert!(!output.is_empty());
+        }
+        for format in &streaming {
+            assert!(!format.is_batch(), "{format:?} is a streaming format");
+            assert!(
+                format.format_batch(&file_warnings, &all_files, 5).is_none(),
+                "{format:?} must not claim batch output"
+            );
+        }
+
+        // Only JUnit reports passing files and needs the full file list.
+        for format in batch.iter().chain(&streaming) {
+            assert_eq!(format.needs_all_files(), *format == OutputFormat::Junit);
+        }
+        let junit = OutputFormat::Junit.format_batch(&file_warnings, &all_files, 5).unwrap();
+        assert!(junit.contains("clean.md"), "JUnit batch output reports passing files");
     }
 
     #[test]
