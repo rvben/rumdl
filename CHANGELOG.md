@@ -51,6 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.12](https://github.com/rvben/rumdl/compare/v0.2.11...v0.2.12) - 2026-06-10
+
+### Fixed
+
+- **discovery**: normalize path_relative_to output to forward slashes on Windows ([36c8fd9](https://github.com/rvben/rumdl/commit/36c8fd9aebfb9b8e30e1768e4e6dc60893fb6054))
+- **lsp**: apply document fixes through the FixCoordinator ([a5c5da1](https://github.com/rvben/rumdl/commit/a5c5da16f749b6fa0da67d3a4c02c788bf2cb2f7))
+- **stdin**: lint stdin through the shared engine ([065c4d2](https://github.com/rvben/rumdl/commit/065c4d2bdf3e438b44e580da84f94d99a2f8b2e8))
+
 ## [0.2.11](https://github.com/rvben/rumdl/compare/v0.2.10...v0.2.11) - 2026-06-10
 
 ### Fixed
