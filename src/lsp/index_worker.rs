@@ -255,6 +255,18 @@ impl IndexWorker {
         let files = scan_markdown_files(&roots, options, excludes).await;
         let total = files.len();
 
+        // Evict entries the scan no longer discovers (deleted files, newly
+        // excluded or gitignored ones) so navigation and completions stop
+        // surfacing them. An explicitly opened excluded file is re-indexed on
+        // its next did_open/did_change, which deliberately bypasses discovery.
+        {
+            let current: std::collections::HashSet<PathBuf> = files.iter().cloned().collect();
+            let removed = self.workspace_index.write().await.retain_only(&current);
+            if removed > 0 {
+                log::info!("Workspace rescan evicted {removed} stale index entries");
+            }
+        }
+
         if total == 0 {
             *self.index_state.write().await = IndexState::Ready;
             return;

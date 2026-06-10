@@ -714,6 +714,13 @@ impl LanguageServer for RumdlLanguageServer {
         // misbehaving client isn't draining the LSP message channel.
         if config_applied {
             self.load_configuration(false).await;
+
+            // Rebuild the workspace index under the reloaded config: a new
+            // configPath can change exclude patterns or respect_gitignore,
+            // which the scan reads from the shared config.
+            if self.update_tx.send(IndexUpdate::FullRescan).await.is_err() {
+                log::warn!("Failed to request workspace rescan after configuration change");
+            }
         }
 
         // Collect all open documents first (to avoid holding lock during async operations)
@@ -952,6 +959,13 @@ impl LanguageServer for RumdlLanguageServer {
 
         // Re-lint all open documents if config changed
         if config_changed {
+            // Rebuild the workspace index: discovery-relevant settings
+            // (exclude patterns, respect_gitignore) may have changed, and the
+            // scan reads them from the shared config.
+            if self.update_tx.send(IndexUpdate::FullRescan).await.is_err() {
+                log::warn!("Failed to request workspace rescan after config change");
+            }
+
             let docs_to_update: Vec<(Url, String)> = {
                 let docs = self.documents.read().await;
                 docs.iter()
