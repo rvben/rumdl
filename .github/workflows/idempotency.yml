@@ -32,12 +32,7 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: |
-          for attempt in 1 2 3; do
-            mise install --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
-            sleep 10
-          done
+        run: ./scripts/mise-install.sh
 
       - uses: Swatinem/rust-cache@v2
         with:

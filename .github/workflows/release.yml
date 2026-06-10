@@ -55,16 +55,7 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --yes; then
-              exit 0
-            fi
-            echo "Attempt $attempt failed, retrying in 10s..." >&2
-            sleep 10
-          done
-          echo "All 3 install attempts failed" >&2
-          exit 1
+        run: ./scripts/mise-install.sh
 
       - name: Install Rust components
         run: rustup component add rustfmt clippy
@@ -151,15 +142,7 @@ jobs:
           case "${{ matrix.target }}" in
             *-linux-*) tools+=(cargo:cargo-zigbuild zig) ;;
           esac
-          for attempt in 1 2 3; do
-            if mise install "${tools[@]}" --yes; then
-              exit 0
-            fi
-            echo "Attempt $attempt failed, retrying in 10s..." >&2
-            sleep 10
-          done
-          echo "All 3 install attempts failed" >&2
-          exit 1
+          ./scripts/mise-install.sh "${tools[@]}"
 
       # Verify zig installation on Linux only
       - name: Verify zig installation
@@ -304,16 +287,7 @@ jobs:
           experimental: true
           install: false
       - name: Install mise tools
-        run: |
-          for attempt in 1 2 3; do
-            if mise install rust python "cargo:maturin" --yes; then
-              exit 0
-            fi
-            echo "Attempt $attempt failed, retrying in 10s..." >&2
-            sleep 10
-          done
-          echo "All 3 install attempts failed" >&2
-          exit 1
+        run: ./scripts/mise-install.sh rust python cargo:maturin
       - name: Build source distribution
         run: mise exec -- maturin sdist
       - uses: actions/upload-artifact@v6
@@ -625,12 +599,7 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: |
-          for attempt in 1 2 3; do
-            mise install --yes && break
-            echo "Attempt $attempt failed, retrying in 10s..."
-            sleep 10
-          done
+        run: ./scripts/mise-install.sh
 
       - name: Publish to crates.io
         if: ${{ inputs.dry_run != true && inputs.skip_crates_io != true }}
