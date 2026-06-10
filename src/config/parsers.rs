@@ -1,8 +1,6 @@
-use crate::types::LineLength;
 use indexmap::IndexMap;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::str::FromStr;
 use toml_edit::DocumentMut;
 
 use super::flavor::{MarkdownFlavor, normalize_key, warn_comma_without_brace_in_pattern};
@@ -38,168 +36,43 @@ pub(super) fn parse_pyproject_toml(
     if let Some(rumdl_config) = doc.get("tool").and_then(|t| t.get("rumdl"))
         && let Some(rumdl_table) = rumdl_config.as_table()
     {
-        // Helper function to extract global config from a table
+        // Apply global options from the given table through the shared
+        // global-key dispatch (`global_keys::apply_global_key`). Keys are
+        // normalized first, so snake_case spellings keep working. Rule
+        // sections, `extends`, and other non-global keys fall through as
+        // Unrecognized and are handled by their own parsers.
         let extract_global_config = |fragment: &mut SourcedConfigFragment, table: &toml::value::Table| {
-            // Extract global options from the given table
-            if let Some(enable) = table.get("enable")
-                && let Ok(values) = Vec::<String>::deserialize(enable.clone())
-            {
-                // Resolve rule name aliases (e.g., "ul-style" -> "MD004")
-                let normalized_values: Vec<String> = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .enable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(disable) = table.get("disable")
-                && let Ok(values) = Vec::<String>::deserialize(disable.clone())
-            {
-                // Resolve rule name aliases
-                let normalized_values: Vec<String> = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .disable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(extend_enable) = table.get("extend-enable").or_else(|| table.get("extend_enable"))
-                && let Ok(values) = Vec::<String>::deserialize(extend_enable.clone())
-            {
-                let normalized_values: Vec<String> = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .extend_enable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(extend_disable) = table.get("extend-disable").or_else(|| table.get("extend_disable"))
-                && let Ok(values) = Vec::<String>::deserialize(extend_disable.clone())
-            {
-                let normalized_values: Vec<String> = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .extend_disable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(include) = table.get("include")
-                && let Ok(values) = Vec::<String>::deserialize(include.clone())
-            {
-                fragment.global.include.push_override(values, source, file.clone());
-            }
-
-            if let Some(exclude) = table.get("exclude")
-                && let Ok(values) = Vec::<String>::deserialize(exclude.clone())
-            {
-                fragment.global.exclude.push_override(values, source, file.clone());
-            }
-
-            if let Some(respect_gitignore) = table
-                .get("respect-gitignore")
-                .or_else(|| table.get("respect_gitignore"))
-                && let Ok(value) = bool::deserialize(respect_gitignore.clone())
-            {
-                fragment
-                    .global
-                    .respect_gitignore
-                    .push_override(value, source, file.clone());
-            }
-
-            if let Some(force_exclude) = table.get("force-exclude").or_else(|| table.get("force_exclude"))
-                && let Ok(value) = bool::deserialize(force_exclude.clone())
-            {
-                fragment.global.force_exclude.push_override(value, source, file.clone());
-            }
-
-            if let Some(output_format) = table.get("output-format").or_else(|| table.get("output_format"))
-                && let Ok(value) = String::deserialize(output_format.clone())
-            {
-                if let Some(ref mut sv) = fragment.global.output_format {
-                    sv.push_override(value, source, file.clone());
-                } else {
-                    fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
+            use super::global_keys::{ApplyOutcome, apply_global_key};
+            for (key, value) in table {
+                let norm_key = normalize_key(key);
+                match apply_global_key(
+                    &mut fragment.global,
+                    &norm_key,
+                    value,
+                    source,
+                    file.as_deref(),
+                    registry,
+                ) {
+                    ApplyOutcome::Applied => {
+                        // line-length is mirrored into MD013 for backward
+                        // compatibility with configs that predate the global key.
+                        if norm_key == "line-length" {
+                            let rule_entry = fragment.rules.entry(normalize_key("MD013")).or_default();
+                            let sv = rule_entry
+                                .values
+                                .entry(norm_key.clone())
+                                .or_insert_with(|| SourcedValue::new(value.clone(), ConfigSource::Default));
+                            sv.push_override(value.clone(), source, file.clone());
+                        }
+                    }
+                    ApplyOutcome::TypeMismatch { expected } => {
+                        log::warn!("[WARN] Expected {expected} for global key '{norm_key}' in {display_path}");
+                    }
+                    ApplyOutcome::InvalidValue { message } => {
+                        log::warn!("[WARN] {message} in {display_path}");
+                    }
+                    ApplyOutcome::Unrecognized => {}
                 }
-            }
-
-            if let Some(fixable) = table.get("fixable")
-                && let Ok(values) = Vec::<String>::deserialize(fixable.clone())
-            {
-                let normalized_values = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .fixable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(unfixable) = table.get("unfixable")
-                && let Ok(values) = Vec::<String>::deserialize(unfixable.clone())
-            {
-                let normalized_values = values
-                    .into_iter()
-                    .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                    .collect();
-                fragment
-                    .global
-                    .unfixable
-                    .push_override(normalized_values, source, file.clone());
-            }
-
-            if let Some(flavor) = table.get("flavor")
-                && let Ok(value) = MarkdownFlavor::deserialize(flavor.clone())
-            {
-                fragment.global.flavor.push_override(value, source, file.clone());
-            }
-
-            // Handle line-length special case - this should set the global line_length
-            if let Some(line_length) = table.get("line-length").or_else(|| table.get("line_length"))
-                && let Ok(value) = u64::deserialize(line_length.clone())
-            {
-                fragment
-                    .global
-                    .line_length
-                    .push_override(LineLength::new(value as usize), source, file.clone());
-
-                // Also add to MD013 rule config for backward compatibility
-                let norm_md013_key = normalize_key("MD013");
-                let rule_entry = fragment.rules.entry(norm_md013_key).or_default();
-                let norm_line_length_key = normalize_key("line-length");
-                let sv = rule_entry
-                    .values
-                    .entry(norm_line_length_key)
-                    .or_insert_with(|| SourcedValue::new(line_length.clone(), ConfigSource::Default));
-                sv.push_override(line_length.clone(), source, file.clone());
-            }
-
-            if let Some(cache_dir) = table.get("cache-dir").or_else(|| table.get("cache_dir"))
-                && let Ok(value) = String::deserialize(cache_dir.clone())
-            {
-                if let Some(ref mut sv) = fragment.global.cache_dir {
-                    sv.push_override(value, source, file.clone());
-                } else {
-                    fragment.global.cache_dir = Some(SourcedValue::new(value.clone(), source));
-                }
-            }
-
-            if let Some(cache) = table.get("cache")
-                && let Ok(value) = bool::deserialize(cache.clone())
-            {
-                fragment.global.cache.push_override(value, source, file.clone());
             }
         };
 
@@ -481,37 +354,12 @@ fn apply_rule_table_toml(
     }
 }
 
-/// Set of top-level keys that are global config keys (not rule sections).
-/// When these appear at the top level of rumdl.toml (outside `[global]`),
-/// they should be treated as global config rather than rule names.
-/// Known global config keys in their normalized (kebab-case) form.
-/// Keys are always normalized before lookup via `normalize_key()`.
-const GLOBAL_VALUE_KEYS: &[&str] = &[
-    "enable",
-    "disable",
-    "include",
-    "exclude",
-    "extend-enable",
-    "extend-disable",
-    "respect-gitignore",
-    "force-exclude",
-    "line-length",
-    "output-format",
-    "cache-dir",
-    "cache",
-    "fixable",
-    "unfixable",
-    "flavor",
-];
-
-/// Returns true if the given key is a known global config key.
-pub fn is_global_value_key(key: &str) -> bool {
-    GLOBAL_VALUE_KEYS.contains(&key)
-}
+pub(super) use super::global_keys::is_global_value_key;
 
 /// Parse a single global config key-value pair and store it in the fragment.
 /// Used by both the `[global]` section handler and the top-level key handler.
-#[allow(clippy::too_many_lines)]
+/// Delegates the per-key typing and setting to `global_keys::apply_global_key`,
+/// keeping only the toml_edit bridging and warning phrasing here.
 fn parse_global_key(
     norm_key: &str,
     value_item: &toml_edit::Item,
@@ -521,214 +369,47 @@ fn parse_global_key(
     display_path: &str,
     registry: &super::registry::RuleRegistry,
 ) -> bool {
-    match norm_key {
-        "enable" | "disable" | "include" | "exclude" | "extend-enable" | "extend-disable" => {
-            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                let values: Vec<String> = formatted_array
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .map(std::string::ToString::to_string)
-                    .collect();
+    use super::global_keys::{ApplyOutcome, apply_global_key, toml_edit_value_to_toml};
 
-                let is_rule_list = matches!(norm_key, "enable" | "disable" | "extend-enable" | "extend-disable");
-                let final_values = if is_rule_list {
-                    values
-                        .into_iter()
-                        .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-                        .collect()
-                } else {
-                    values
-                };
-
-                match norm_key {
-                    "enable" => {
-                        fragment.global.enable.push_override(final_values, source, file.clone());
-                    }
-                    "disable" => fragment
-                        .global
-                        .disable
-                        .push_override(final_values, source, file.clone()),
-                    "include" => fragment
-                        .global
-                        .include
-                        .push_override(final_values, source, file.clone()),
-                    "exclude" => fragment
-                        .global
-                        .exclude
-                        .push_override(final_values, source, file.clone()),
-                    "extend-enable" => fragment
-                        .global
-                        .extend_enable
-                        .push_override(final_values, source, file.clone()),
-                    "extend-disable" => {
-                        fragment
-                            .global
-                            .extend_disable
-                            .push_override(final_values, source, file.clone())
-                    }
-                    _ => unreachable!("Outer match guarantees only these keys"),
-                }
-            } else {
-                log::warn!(
-                    "[WARN] Expected array for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "respect-gitignore" => {
-            if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
-                let val = *formatted_bool.value();
-                fragment
-                    .global
-                    .respect_gitignore
-                    .push_override(val, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "force-exclude" => {
-            if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
-                let val = *formatted_bool.value();
-                fragment.global.force_exclude.push_override(val, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "line-length" => {
-            if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
-                let val = LineLength::new(*formatted_int.value() as usize);
-                fragment.global.line_length.push_override(val, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected integer for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "output-format" => {
-            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                let val = formatted_string.value().clone();
-                if let Some(ref mut sv) = fragment.global.output_format {
-                    sv.push_override(val, source, file.clone());
-                } else {
-                    fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
-                }
-            } else {
-                log::warn!(
-                    "[WARN] Expected string for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "cache-dir" => {
-            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                let val = formatted_string.value().clone();
-                if let Some(ref mut sv) = fragment.global.cache_dir {
-                    sv.push_override(val, source, file.clone());
-                } else {
-                    fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
-                }
-            } else {
-                log::warn!(
-                    "[WARN] Expected string for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "cache" => {
-            if let Some(toml_edit::Value::Boolean(b)) = value_item.as_value() {
-                let val = *b.value();
-                fragment.global.cache.push_override(val, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected boolean for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "fixable" => {
-            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                let values: Vec<String> = formatted_array
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
-                    .collect();
-                fragment.global.fixable.push_override(values, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected array for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "unfixable" => {
-            if let Some(toml_edit::Value::Array(formatted_array)) = value_item.as_value() {
-                let values: Vec<String> = formatted_array
-                    .iter()
-                    .filter_map(|item| item.as_str())
-                    .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
-                    .collect();
-                fragment.global.unfixable.push_override(values, source, file.clone());
-            } else {
-                log::warn!(
-                    "[WARN] Expected array for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        "flavor" => {
-            if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
-                let val = formatted_string.value();
-                if let Ok(flavor) = MarkdownFlavor::from_str(val) {
-                    fragment.global.flavor.push_override(flavor, source, file.clone());
-                } else {
-                    log::warn!("[WARN] Unknown markdown flavor '{val}' in {display_path}");
-                }
-            } else {
-                log::warn!(
-                    "[WARN] Expected string for global key '{}' in {}, found {}",
-                    norm_key,
-                    display_path,
-                    value_item.type_name()
-                );
-            }
-            true
-        }
-        _ => false,
+    if !super::global_keys::is_global_value_key(norm_key) {
+        return false;
     }
+
+    let Some(edit_value) = value_item.as_value() else {
+        log::warn!(
+            "[WARN] Expected a value for global key '{}' in {}, found {}",
+            norm_key,
+            display_path,
+            value_item.type_name()
+        );
+        return true;
+    };
+
+    let value = toml_edit_value_to_toml(edit_value);
+    match apply_global_key(
+        &mut fragment.global,
+        norm_key,
+        &value,
+        source,
+        file.as_deref(),
+        registry,
+    ) {
+        ApplyOutcome::Applied => {}
+        ApplyOutcome::TypeMismatch { expected } => {
+            log::warn!(
+                "[WARN] Expected {} for global key '{}' in {}, found {}",
+                expected,
+                norm_key,
+                display_path,
+                value_item.type_name()
+            );
+        }
+        ApplyOutcome::InvalidValue { message } => {
+            log::warn!("[WARN] {message} in {display_path}");
+        }
+        ApplyOutcome::Unrecognized => unreachable!("guarded by is_global_value_key above"),
+    }
+    true
 }
 
 /// Parses rumdl.toml / .rumdl.toml content.

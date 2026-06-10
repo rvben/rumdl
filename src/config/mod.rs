@@ -20,8 +20,10 @@ pub use registry::*;
 pub mod validation;
 pub use validation::*;
 
+pub mod global_keys;
+pub use global_keys::is_global_value_key;
+
 mod parsers;
-pub use parsers::is_global_value_key;
 
 #[cfg(test)]
 mod tests;

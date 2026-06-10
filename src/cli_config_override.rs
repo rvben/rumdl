@@ -15,11 +15,8 @@ use std::path::{Path, PathBuf};
 
 use clap::builder::TypedValueParser;
 use rumdl_lib::config::{
-    ConfigSource, MarkdownFlavor, SourcedConfig, SourcedRuleConfig, SourcedValue, default_registry,
-    is_global_value_key, normalize_key,
+    ConfigSource, SourcedConfig, SourcedRuleConfig, SourcedValue, default_registry, is_global_value_key, normalize_key,
 };
-use rumdl_lib::types::LineLength;
-use std::str::FromStr;
 
 /// Stable name for the variant of a `toml::Value`, used in warning messages.
 fn toml_value_kind(v: &toml::Value) -> &'static str {
@@ -290,158 +287,32 @@ fn apply_rule_override(sourced: &mut SourcedConfig, canonical_rule: &str, opts: 
     }
 }
 
-/// Apply a single global config entry. Mirrors the per-key dispatch in
-/// `parsers::parse_global_key`, but operates on `toml::Value` directly so we
-/// don't need the toml_edit-based fragment loader for inline CLI input.
+/// Apply a single global config entry through the shared global-key
+/// dispatch, recording unrecognized keys for the validator's did-you-mean
+/// warnings.
 fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::Value) {
-    let registry = default_registry();
+    use rumdl_lib::config::global_keys::{ApplyOutcome, apply_global_key};
+
     let normalized = normalize_key(key);
-    let g = &mut sourced.global;
-
-    let mismatched = |expected: &str| {
-        log::warn!(
-            "[--config] expected {expected} for global key '{normalized}', got {}",
-            toml_value_kind(value)
-        );
-    };
-
-    let resolve_rule_list = |arr: &Vec<toml::Value>| -> Vec<String> {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
-            .map(|s| registry.resolve_rule_name(&s).unwrap_or_else(|| normalize_key(&s)))
-            .collect()
-    };
-
-    let to_strings = |arr: &Vec<toml::Value>| -> Vec<String> {
-        arr.iter()
-            .filter_map(|v| v.as_str().map(std::string::ToString::to_string))
-            .collect()
-    };
-
-    match normalized.as_str() {
-        "enable" => {
-            if let toml::Value::Array(a) = value {
-                g.enable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
+    match apply_global_key(
+        &mut sourced.global,
+        &normalized,
+        value,
+        ConfigSource::Cli,
+        None,
+        default_registry(),
+    ) {
+        ApplyOutcome::Applied => {}
+        ApplyOutcome::TypeMismatch { expected } => {
+            log::warn!(
+                "[--config] expected {expected} for global key '{normalized}', got {}",
+                toml_value_kind(value)
+            );
         }
-        "disable" => {
-            if let toml::Value::Array(a) = value {
-                g.disable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
+        ApplyOutcome::InvalidValue { message } => {
+            log::warn!("[--config] {message}");
         }
-        "extend-enable" => {
-            if let toml::Value::Array(a) = value {
-                g.extend_enable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "extend-disable" => {
-            if let toml::Value::Array(a) = value {
-                g.extend_disable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "include" => {
-            if let toml::Value::Array(a) = value {
-                g.include.push_override(to_strings(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "exclude" => {
-            if let toml::Value::Array(a) = value {
-                g.exclude.push_override(to_strings(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "fixable" => {
-            if let toml::Value::Array(a) = value {
-                g.fixable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "unfixable" => {
-            if let toml::Value::Array(a) = value {
-                g.unfixable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
-            } else {
-                mismatched("array");
-            }
-        }
-        "respect-gitignore" => {
-            if let Some(b) = value.as_bool() {
-                g.respect_gitignore.push_override(b, ConfigSource::Cli, None);
-            } else {
-                mismatched("boolean");
-            }
-        }
-        "force-exclude" => {
-            if let Some(b) = value.as_bool() {
-                g.force_exclude.push_override(b, ConfigSource::Cli, None);
-            } else {
-                mismatched("boolean");
-            }
-        }
-        "cache" => {
-            if let Some(b) = value.as_bool() {
-                g.cache.push_override(b, ConfigSource::Cli, None);
-            } else {
-                mismatched("boolean");
-            }
-        }
-        "line-length" => {
-            if let Some(n) = value.as_integer() {
-                g.line_length
-                    .push_override(LineLength::new(n.max(0) as usize), ConfigSource::Cli, None);
-            } else {
-                mismatched("integer");
-            }
-        }
-        "output-format" => {
-            if let Some(s) = value.as_str() {
-                let val = s.to_string();
-                if let Some(sv) = g.output_format.as_mut() {
-                    sv.push_override(val, ConfigSource::Cli, None);
-                } else {
-                    g.output_format = Some(SourcedValue::new(val, ConfigSource::Cli));
-                }
-            } else {
-                mismatched("string");
-            }
-        }
-        "cache-dir" => {
-            if let Some(s) = value.as_str() {
-                let val = s.to_string();
-                if let Some(sv) = g.cache_dir.as_mut() {
-                    sv.push_override(val, ConfigSource::Cli, None);
-                } else {
-                    g.cache_dir = Some(SourcedValue::new(val, ConfigSource::Cli));
-                }
-            } else {
-                mismatched("string");
-            }
-        }
-        "flavor" => {
-            if let Some(s) = value.as_str() {
-                if let Ok(flavor) = MarkdownFlavor::from_str(s) {
-                    g.flavor.push_override(flavor, ConfigSource::Cli, None);
-                } else {
-                    log::warn!("[--config] unknown markdown flavor '{s}'");
-                }
-            } else {
-                mismatched("string");
-            }
-        }
-        _ => {
+        ApplyOutcome::Unrecognized => {
             // Unknown global key — record so the existing validator surfaces a
             // "Unknown global option" warning with did-you-mean suggestions.
             sourced
@@ -454,6 +325,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rumdl_lib::types::LineLength;
 
     fn parse(snippet: &str) -> toml::Table {
         toml::from_str(snippet).expect("test TOML must parse")
