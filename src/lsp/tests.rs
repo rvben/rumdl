@@ -8376,3 +8376,31 @@ fn test_lsp_config_walk_collects_same_dir_fallback_candidates() {
         "both same-directory config files must be collected in precedence order"
     );
 }
+
+#[tokio::test]
+async fn test_apply_all_fixes_matches_cli_fix_engine() {
+    // apply_all_fixes routes through the FixCoordinator, so editor fix-all
+    // must produce byte-identical output to the CLI fix engine for the same
+    // content and config, including cascading fixes that need more than one
+    // pass (a single-pass loop would leave residue here).
+    let server = create_test_server();
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "#Title  \nSome text   \n- item\n-  item2\n## Sub##\nmore text";
+
+    let lsp_fixed = server
+        .apply_all_fixes(&uri, text)
+        .await
+        .unwrap()
+        .expect("content has fixable violations");
+
+    let config = crate::config::Config::default();
+    let all_rules = crate::rules::all_rules(&config);
+    let rules = crate::rules::filter_rules(&all_rules, &config.global);
+    let mut cli_fixed = text.to_string();
+    crate::fix_coordinator::FixCoordinator::new()
+        .apply_fixes_iterative(&rules, &[], &mut cli_fixed, &config, 100, None)
+        .expect("CLI fix engine must converge");
+
+    assert_eq!(lsp_fixed, cli_fixed, "editor fix-all must match the CLI fix engine");
+    assert_ne!(lsp_fixed, text, "the test content must actually change");
+}

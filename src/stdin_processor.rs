@@ -122,15 +122,24 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
 
             // Re-check the fixed content through the same engine to see if
             // any issues remain. Use same per-file flavor as initial lint.
-            let remaining_warnings = rumdl_lib::lint(
+            // The fixed content is already on stdout; an engine error here
+            // must not be reported as "0 remaining", so signal a tool error.
+            let remaining_warnings = match rumdl_lib::lint(
                 &fixed_content,
                 rules,
                 args.verbose,
                 flavor,
                 source_file.clone(),
                 Some(config),
-            )
-            .unwrap_or_default();
+            ) {
+                Ok(warnings) => warnings,
+                Err(e) => {
+                    if !silent {
+                        eprintln!("{}: failed to re-check fixed content: {}", "Error".red().bold(), e);
+                    }
+                    exit::tool_error();
+                }
+            };
             let actual_warnings_fixed =
                 file_processor::count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings);
 
