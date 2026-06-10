@@ -239,48 +239,18 @@ impl SourcedConfig<ConfigLoaded> {
     /// Merges another SourcedConfigFragment into this SourcedConfig.
     /// Uses source precedence to determine which values take effect.
     pub(super) fn merge(&mut self, fragment: SourcedConfigFragment) {
-        // Merge global config
-        // Enable uses replace semantics (project can enforce rules)
-        self.global.enable.merge_override(
-            fragment.global.enable.value,
-            fragment.global.enable.source,
-            fragment.global.enable.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.enable.overrides.first().and_then(|o| o.line),
-        );
-
-        // Disable uses replace semantics (child config overrides parent, matching Ruff's `ignore`)
-        self.global.disable.merge_override(
-            fragment.global.disable.value,
-            fragment.global.disable.source,
-            fragment.global.disable.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.disable.overrides.first().and_then(|o| o.line),
-        );
-
-        // Extend-enable uses union semantics (additive across config levels)
-        self.global.extend_enable.merge_union(
-            fragment.global.extend_enable.value,
-            fragment.global.extend_enable.source,
-            fragment
-                .global
-                .extend_enable
-                .overrides
-                .first()
-                .and_then(|o| o.file.clone()),
-            fragment.global.extend_enable.overrides.first().and_then(|o| o.line),
-        );
-
-        // Extend-disable uses union semantics (additive across config levels)
-        self.global.extend_disable.merge_union(
-            fragment.global.extend_disable.value,
-            fragment.global.extend_disable.source,
-            fragment
-                .global
-                .extend_disable
-                .overrides
-                .first()
-                .and_then(|o| o.file.clone()),
-            fragment.global.extend_disable.overrides.first().and_then(|o| o.line),
-        );
+        // Merge global config. Enable/disable use replace semantics (child
+        // config overrides parent, matching Ruff's `select`/`ignore`);
+        // extend-enable/extend-disable use union semantics (additive across
+        // config levels).
+        self.global.enable.merge_from(fragment.global.enable);
+        self.global.disable.merge_from(fragment.global.disable);
+        self.global
+            .extend_enable
+            .merge_union_from(fragment.global.extend_enable);
+        self.global
+            .extend_disable
+            .merge_union_from(fragment.global.extend_disable);
 
         // Conflict resolution: Enable overrides disable
         // Remove any rules from disable that appear in enable
@@ -288,83 +258,22 @@ impl SourcedConfig<ConfigLoaded> {
             .disable
             .value
             .retain(|rule| !self.global.enable.value.contains(rule));
-        self.global.include.merge_override(
-            fragment.global.include.value,
-            fragment.global.include.source,
-            fragment.global.include.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.include.overrides.first().and_then(|o| o.line),
-        );
-        self.global.exclude.merge_override(
-            fragment.global.exclude.value,
-            fragment.global.exclude.source,
-            fragment.global.exclude.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.exclude.overrides.first().and_then(|o| o.line),
-        );
-        self.global.respect_gitignore.merge_override(
-            fragment.global.respect_gitignore.value,
-            fragment.global.respect_gitignore.source,
-            fragment
-                .global
-                .respect_gitignore
-                .overrides
-                .first()
-                .and_then(|o| o.file.clone()),
-            fragment.global.respect_gitignore.overrides.first().and_then(|o| o.line),
-        );
-        self.global.line_length.merge_override(
-            fragment.global.line_length.value,
-            fragment.global.line_length.source,
-            fragment
-                .global
-                .line_length
-                .overrides
-                .first()
-                .and_then(|o| o.file.clone()),
-            fragment.global.line_length.overrides.first().and_then(|o| o.line),
-        );
-        self.global.fixable.merge_override(
-            fragment.global.fixable.value,
-            fragment.global.fixable.source,
-            fragment.global.fixable.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.fixable.overrides.first().and_then(|o| o.line),
-        );
-        self.global.unfixable.merge_override(
-            fragment.global.unfixable.value,
-            fragment.global.unfixable.source,
-            fragment.global.unfixable.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.unfixable.overrides.first().and_then(|o| o.line),
-        );
 
-        // Merge flavor
-        self.global.flavor.merge_override(
-            fragment.global.flavor.value,
-            fragment.global.flavor.source,
-            fragment.global.flavor.overrides.first().and_then(|o| o.file.clone()),
-            fragment.global.flavor.overrides.first().and_then(|o| o.line),
-        );
-
-        // Merge force_exclude
-        self.global.force_exclude.merge_override(
-            fragment.global.force_exclude.value,
-            fragment.global.force_exclude.source,
-            fragment
-                .global
-                .force_exclude
-                .overrides
-                .first()
-                .and_then(|o| o.file.clone()),
-            fragment.global.force_exclude.overrides.first().and_then(|o| o.line),
-        );
+        self.global.include.merge_from(fragment.global.include);
+        self.global.exclude.merge_from(fragment.global.exclude);
+        self.global
+            .respect_gitignore
+            .merge_from(fragment.global.respect_gitignore);
+        self.global.line_length.merge_from(fragment.global.line_length);
+        self.global.fixable.merge_from(fragment.global.fixable);
+        self.global.unfixable.merge_from(fragment.global.unfixable);
+        self.global.flavor.merge_from(fragment.global.flavor);
+        self.global.force_exclude.merge_from(fragment.global.force_exclude);
 
         // Merge output_format if present
         if let Some(output_format_fragment) = fragment.global.output_format {
             if let Some(ref mut output_format) = self.global.output_format {
-                output_format.merge_override(
-                    output_format_fragment.value,
-                    output_format_fragment.source,
-                    output_format_fragment.overrides.first().and_then(|o| o.file.clone()),
-                    output_format_fragment.overrides.first().and_then(|o| o.line),
-                );
+                output_format.merge_from(output_format_fragment);
             } else {
                 self.global.output_format = Some(output_format_fragment);
             }
@@ -373,12 +282,7 @@ impl SourcedConfig<ConfigLoaded> {
         // Merge cache_dir if present
         if let Some(cache_dir_fragment) = fragment.global.cache_dir {
             if let Some(ref mut cache_dir) = self.global.cache_dir {
-                cache_dir.merge_override(
-                    cache_dir_fragment.value,
-                    cache_dir_fragment.source,
-                    cache_dir_fragment.overrides.first().and_then(|o| o.file.clone()),
-                    cache_dir_fragment.overrides.first().and_then(|o| o.line),
-                );
+                cache_dir.merge_from(cache_dir_fragment);
             } else {
                 self.global.cache_dir = Some(cache_dir_fragment);
             }
@@ -386,37 +290,12 @@ impl SourcedConfig<ConfigLoaded> {
 
         // Merge cache if not default (only override when explicitly set)
         if fragment.global.cache.source != ConfigSource::Default {
-            self.global.cache.merge_override(
-                fragment.global.cache.value,
-                fragment.global.cache.source,
-                fragment.global.cache.overrides.first().and_then(|o| o.file.clone()),
-                fragment.global.cache.overrides.first().and_then(|o| o.line),
-            );
+            self.global.cache.merge_from(fragment.global.cache);
         }
 
-        // Merge per_file_ignores
-        self.per_file_ignores.merge_override(
-            fragment.per_file_ignores.value,
-            fragment.per_file_ignores.source,
-            fragment.per_file_ignores.overrides.first().and_then(|o| o.file.clone()),
-            fragment.per_file_ignores.overrides.first().and_then(|o| o.line),
-        );
-
-        // Merge per_file_flavor
-        self.per_file_flavor.merge_override(
-            fragment.per_file_flavor.value,
-            fragment.per_file_flavor.source,
-            fragment.per_file_flavor.overrides.first().and_then(|o| o.file.clone()),
-            fragment.per_file_flavor.overrides.first().and_then(|o| o.line),
-        );
-
-        // Merge code_block_tools
-        self.code_block_tools.merge_override(
-            fragment.code_block_tools.value,
-            fragment.code_block_tools.source,
-            fragment.code_block_tools.overrides.first().and_then(|o| o.file.clone()),
-            fragment.code_block_tools.overrides.first().and_then(|o| o.line),
-        );
+        self.per_file_ignores.merge_from(fragment.per_file_ignores);
+        self.per_file_flavor.merge_from(fragment.per_file_flavor);
+        self.code_block_tools.merge_from(fragment.code_block_tools);
 
         // Merge rule configs
         for (rule_name, rule_fragment) in fragment.rules {
@@ -426,12 +305,7 @@ impl SourcedConfig<ConfigLoaded> {
             // Merge severity if present in fragment
             if let Some(severity_fragment) = rule_fragment.severity {
                 if let Some(ref mut existing_severity) = rule_entry.severity {
-                    existing_severity.merge_override(
-                        severity_fragment.value,
-                        severity_fragment.source,
-                        severity_fragment.overrides.first().and_then(|o| o.file.clone()),
-                        severity_fragment.overrides.first().and_then(|o| o.line),
-                    );
+                    existing_severity.merge_from(severity_fragment);
                 } else {
                     rule_entry.severity = Some(severity_fragment);
                 }
@@ -443,14 +317,7 @@ impl SourcedConfig<ConfigLoaded> {
                     .values
                     .entry(key.clone())
                     .or_insert_with(|| SourcedValue::new(sourced_value_fragment.value.clone(), ConfigSource::Default));
-                let file_from_fragment = sourced_value_fragment.overrides.first().and_then(|o| o.file.clone());
-                let line_from_fragment = sourced_value_fragment.overrides.first().and_then(|o| o.line);
-                sv_entry.merge_override(
-                    sourced_value_fragment.value,  // Use the value from the fragment
-                    sourced_value_fragment.source, // Use the source from the fragment
-                    file_from_fragment,            // Pass the file path from the fragment override
-                    line_from_fragment,            // Pass the line number from the fragment override
-                );
+                sv_entry.merge_from(sourced_value_fragment);
             }
         }
 
@@ -891,33 +758,32 @@ impl SourcedConfig<ConfigLoaded> {
             sourced_config
                 .global
                 .enable
-                .merge_override(cli.enable.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.enable.value.clone(), ConfigSource::Cli, None);
             sourced_config
                 .global
                 .disable
-                .merge_override(cli.disable.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.disable.value.clone(), ConfigSource::Cli, None);
             sourced_config
                 .global
                 .exclude
-                .merge_override(cli.exclude.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.exclude.value.clone(), ConfigSource::Cli, None);
             sourced_config
                 .global
                 .include
-                .merge_override(cli.include.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.include.value.clone(), ConfigSource::Cli, None);
             sourced_config.global.respect_gitignore.merge_override(
                 cli.respect_gitignore.value,
                 ConfigSource::Cli,
-                None,
                 None,
             );
             sourced_config
                 .global
                 .fixable
-                .merge_override(cli.fixable.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.fixable.value.clone(), ConfigSource::Cli, None);
             sourced_config
                 .global
                 .unfixable
-                .merge_override(cli.unfixable.value.clone(), ConfigSource::Cli, None, None);
+                .merge_override(cli.unfixable.value.clone(), ConfigSource::Cli, None);
             // No rule-specific CLI overrides implemented yet
         }
 

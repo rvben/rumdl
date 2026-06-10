@@ -27,120 +27,83 @@ pub enum ConfigSource {
     Cli,
 }
 
-#[derive(Debug, Clone)]
-pub struct ConfigOverride<T> {
-    pub value: T,
-    pub source: ConfigSource,
-    pub file: Option<String>,
-    pub line: Option<usize>,
+fn source_precedence(src: ConfigSource) -> u8 {
+    match src {
+        ConfigSource::Default => 0,
+        ConfigSource::UserConfig => 1,
+        ConfigSource::PyprojectToml => 2,
+        ConfigSource::ProjectConfig => 3,
+        ConfigSource::Cli => 4,
+    }
 }
 
+/// A config value with its provenance: which kind of source set it, and for
+/// file-based sources, which file. The origin makes `rumdl config` output
+/// file-precise, which matters for `extends` chains where the source kind
+/// alone cannot distinguish the base config from the extending one.
 #[derive(Debug, Clone)]
 pub struct SourcedValue<T> {
     pub value: T,
     pub source: ConfigSource,
-    pub overrides: Vec<ConfigOverride<T>>,
+    /// Path of the config file that supplied the winning value. `None` for
+    /// defaults and CLI flags.
+    pub origin: Option<String>,
 }
 
 impl<T: Clone> SourcedValue<T> {
     pub fn new(value: T, source: ConfigSource) -> Self {
         Self {
-            value: value.clone(),
-            source,
-            overrides: vec![ConfigOverride {
-                value,
-                source,
-                file: None,
-                line: None,
-            }],
-        }
-    }
-
-    /// Merges a new override into this SourcedValue based on source precedence.
-    /// If the new source has higher or equal precedence, the value and source are updated,
-    /// and the new override is added to the history.
-    pub fn merge_override(
-        &mut self,
-        new_value: T,
-        new_source: ConfigSource,
-        new_file: Option<String>,
-        new_line: Option<usize>,
-    ) {
-        // Helper function to get precedence, defined locally or globally
-        fn source_precedence(src: ConfigSource) -> u8 {
-            match src {
-                ConfigSource::Default => 0,
-                ConfigSource::UserConfig => 1,
-                ConfigSource::PyprojectToml => 2,
-                ConfigSource::ProjectConfig => 3,
-                ConfigSource::Cli => 4,
-            }
-        }
-
-        if source_precedence(new_source) >= source_precedence(self.source) {
-            self.value = new_value.clone();
-            self.source = new_source;
-            self.overrides.push(ConfigOverride {
-                value: new_value,
-                source: new_source,
-                file: new_file,
-                line: new_line,
-            });
-        }
-    }
-
-    pub fn push_override(&mut self, value: T, source: ConfigSource, file: Option<String>, line: Option<usize>) {
-        // This is essentially merge_override without the precedence check
-        // We might consolidate these later, but keep separate for now during refactor
-        self.value = value.clone();
-        self.source = source;
-        self.overrides.push(ConfigOverride {
             value,
             source,
-            file,
-            line,
-        });
+            origin: None,
+        }
+    }
+
+    /// Merges a new value into this SourcedValue based on source precedence.
+    /// If the new source has higher or equal precedence, the value, source,
+    /// and origin are replaced.
+    pub fn merge_override(&mut self, new_value: T, new_source: ConfigSource, new_origin: Option<String>) {
+        if source_precedence(new_source) >= source_precedence(self.source) {
+            self.value = new_value;
+            self.source = new_source;
+            self.origin = new_origin;
+        }
+    }
+
+    /// Merge another SourcedValue with replace semantics.
+    pub fn merge_from(&mut self, other: SourcedValue<T>) {
+        self.merge_override(other.value, other.source, other.origin);
+    }
+
+    /// Sets the value unconditionally (no precedence check). Used while
+    /// parsing a single file, where later keys legitimately replace earlier
+    /// ones regardless of source.
+    pub fn push_override(&mut self, value: T, source: ConfigSource, origin: Option<String>) {
+        self.value = value;
+        self.source = source;
+        self.origin = origin;
     }
 }
 
 impl<T: Clone + Eq + std::hash::Hash> SourcedValue<Vec<T>> {
-    /// Merges a new value using union semantics (for arrays like `disable`)
-    /// Values from both sources are combined, with deduplication
-    pub fn merge_union(
-        &mut self,
-        new_value: Vec<T>,
-        new_source: ConfigSource,
-        new_file: Option<String>,
-        new_line: Option<usize>,
-    ) {
-        fn source_precedence(src: ConfigSource) -> u8 {
-            match src {
-                ConfigSource::Default => 0,
-                ConfigSource::UserConfig => 1,
-                ConfigSource::PyprojectToml => 2,
-                ConfigSource::ProjectConfig => 3,
-                ConfigSource::Cli => 4,
-            }
-        }
-
+    /// Merges a new value using union semantics (for arrays like `extend-disable`):
+    /// values from both sources are combined, with deduplication. The origin
+    /// reflects the most recent contributor.
+    pub fn merge_union(&mut self, new_value: Vec<T>, new_source: ConfigSource, new_origin: Option<String>) {
         if source_precedence(new_source) >= source_precedence(self.source) {
-            // Union: combine values from both sources with deduplication
-            let mut combined = self.value.clone();
-            for item in &new_value {
-                if !combined.contains(item) {
-                    combined.push(item.clone());
+            for item in new_value {
+                if !self.value.contains(&item) {
+                    self.value.push(item);
                 }
             }
-
-            self.value = combined;
             self.source = new_source;
-            self.overrides.push(ConfigOverride {
-                value: new_value,
-                source: new_source,
-                file: new_file,
-                line: new_line,
-            });
+            self.origin = new_origin;
         }
+    }
+
+    /// Merge another SourcedValue with union semantics.
+    pub fn merge_union_from(&mut self, other: SourcedValue<Vec<T>>) {
+        self.merge_union(other.value, other.source, other.origin);
     }
 }
 

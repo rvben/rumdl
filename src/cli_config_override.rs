@@ -286,7 +286,7 @@ fn apply_rule_override(sourced: &mut SourcedConfig, canonical_rule: &str, opts: 
             .values
             .entry(canonical_opt.clone())
             .or_insert_with(|| SourcedValue::new(opt_value.clone(), ConfigSource::Default));
-        sv.merge_override(opt_value.clone(), ConfigSource::Cli, None, None);
+        sv.merge_override(opt_value.clone(), ConfigSource::Cli, None);
     }
 }
 
@@ -321,16 +321,14 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
     match normalized.as_str() {
         "enable" => {
             if let toml::Value::Array(a) = value {
-                g.enable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                g.enable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "disable" => {
             if let toml::Value::Array(a) = value {
-                g.disable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                g.disable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
@@ -338,7 +336,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
         "extend-enable" => {
             if let toml::Value::Array(a) = value {
                 g.extend_enable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
@@ -346,58 +344,56 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
         "extend-disable" => {
             if let toml::Value::Array(a) = value {
                 g.extend_disable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "include" => {
             if let toml::Value::Array(a) = value {
-                g.include.push_override(to_strings(a), ConfigSource::Cli, None, None);
+                g.include.push_override(to_strings(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "exclude" => {
             if let toml::Value::Array(a) = value {
-                g.exclude.push_override(to_strings(a), ConfigSource::Cli, None, None);
+                g.exclude.push_override(to_strings(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "fixable" => {
             if let toml::Value::Array(a) = value {
-                g.fixable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                g.fixable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "unfixable" => {
             if let toml::Value::Array(a) = value {
-                g.unfixable
-                    .push_override(resolve_rule_list(a), ConfigSource::Cli, None, None);
+                g.unfixable.push_override(resolve_rule_list(a), ConfigSource::Cli, None);
             } else {
                 mismatched("array");
             }
         }
         "respect-gitignore" => {
             if let Some(b) = value.as_bool() {
-                g.respect_gitignore.push_override(b, ConfigSource::Cli, None, None);
+                g.respect_gitignore.push_override(b, ConfigSource::Cli, None);
             } else {
                 mismatched("boolean");
             }
         }
         "force-exclude" => {
             if let Some(b) = value.as_bool() {
-                g.force_exclude.push_override(b, ConfigSource::Cli, None, None);
+                g.force_exclude.push_override(b, ConfigSource::Cli, None);
             } else {
                 mismatched("boolean");
             }
         }
         "cache" => {
             if let Some(b) = value.as_bool() {
-                g.cache.push_override(b, ConfigSource::Cli, None, None);
+                g.cache.push_override(b, ConfigSource::Cli, None);
             } else {
                 mismatched("boolean");
             }
@@ -405,7 +401,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
         "line-length" => {
             if let Some(n) = value.as_integer() {
                 g.line_length
-                    .push_override(LineLength::new(n.max(0) as usize), ConfigSource::Cli, None, None);
+                    .push_override(LineLength::new(n.max(0) as usize), ConfigSource::Cli, None);
             } else {
                 mismatched("integer");
             }
@@ -414,7 +410,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
             if let Some(s) = value.as_str() {
                 let val = s.to_string();
                 if let Some(sv) = g.output_format.as_mut() {
-                    sv.push_override(val, ConfigSource::Cli, None, None);
+                    sv.push_override(val, ConfigSource::Cli, None);
                 } else {
                     g.output_format = Some(SourcedValue::new(val, ConfigSource::Cli));
                 }
@@ -426,7 +422,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
             if let Some(s) = value.as_str() {
                 let val = s.to_string();
                 if let Some(sv) = g.cache_dir.as_mut() {
-                    sv.push_override(val, ConfigSource::Cli, None, None);
+                    sv.push_override(val, ConfigSource::Cli, None);
                 } else {
                     g.cache_dir = Some(SourcedValue::new(val, ConfigSource::Cli));
                 }
@@ -437,7 +433,7 @@ fn apply_global_override(sourced: &mut SourcedConfig, key: &str, value: &toml::V
         "flavor" => {
             if let Some(s) = value.as_str() {
                 if let Ok(flavor) = MarkdownFlavor::from_str(s) {
-                    g.flavor.push_override(flavor, ConfigSource::Cli, None, None);
+                    g.flavor.push_override(flavor, ConfigSource::Cli, None);
                 } else {
                     log::warn!("[--config] unknown markdown flavor '{s}'");
                 }
@@ -546,7 +542,7 @@ mod tests {
         sourced
             .global
             .line_length
-            .merge_override(LineLength::new(80), ConfigSource::ProjectConfig, None, None);
+            .merge_override(LineLength::new(80), ConfigSource::ProjectConfig, None);
         apply_inline_overrides(&mut sourced, &[parse("line-length = 200")]);
         assert_eq!(sourced.global.line_length.value.get(), 200);
         assert_eq!(sourced.global.line_length.source, ConfigSource::Cli);

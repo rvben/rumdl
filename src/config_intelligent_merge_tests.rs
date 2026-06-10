@@ -39,7 +39,7 @@ mod tests {
         let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Project config disables MD041
-        user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::PyprojectToml, None, None);
+        user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::PyprojectToml, None);
 
         // Result should be union: both disabled
         assert_vec_eq(&user_disable.value, &["MD013", "MD041"]);
@@ -56,7 +56,6 @@ mod tests {
             vec!["MD013".to_string(), "MD047".to_string()],
             ConfigSource::PyprojectToml,
             None,
-            None,
         );
 
         // Result should be deduplicated union
@@ -70,7 +69,7 @@ mod tests {
         let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Project config has empty disable array
-        user_disable.merge_union(vec![], ConfigSource::PyprojectToml, None, None);
+        user_disable.merge_union(vec![], ConfigSource::PyprojectToml, None);
 
         // User disables should be preserved (empty doesn't mean "clear all")
         assert_vec_eq(&user_disable.value, &["MD013"]);
@@ -82,7 +81,7 @@ mod tests {
         let mut user_disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Default config (even lower precedence) shouldn't add
-        user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::Default, None, None);
+        user_disable.merge_union(vec!["MD041".to_string()], ConfigSource::Default, None);
 
         // Should not merge because Default < UserConfig
         assert_vec_eq(&user_disable.value, &["MD013"]);
@@ -95,7 +94,7 @@ mod tests {
         let mut disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
 
         // Another config at same precedence level
-        disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None, None);
+        disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None);
 
         // Should merge because precedence is equal
         assert_vec_eq(&disable.value, &["MD013", "MD041"]);
@@ -107,7 +106,7 @@ mod tests {
         let mut user_enable = make_sourced_vec(&["MD001", "MD002"], ConfigSource::UserConfig);
 
         // Project config enables only MD003 (different set)
-        user_enable.merge_override(vec!["MD003".to_string()], ConfigSource::PyprojectToml, None, None);
+        user_enable.merge_override(vec!["MD003".to_string()], ConfigSource::PyprojectToml, None);
 
         // Result should be REPLACED (not merged) because project has higher precedence
         assert_vec_eq(&user_enable.value, &["MD003"]);
@@ -120,7 +119,7 @@ mod tests {
         let mut enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
         // User config (lower precedence) shouldn't replace
-        enable.merge_override(vec!["MD002".to_string()], ConfigSource::UserConfig, None, None);
+        enable.merge_override(vec!["MD002".to_string()], ConfigSource::UserConfig, None);
 
         // Should not replace because UserConfig < PyprojectToml
         assert_vec_eq(&enable.value, &["MD001"]);
@@ -133,7 +132,7 @@ mod tests {
         let mut line_length = SourcedValue::new(120u64, ConfigSource::UserConfig);
 
         // Project config: line-length = 80
-        line_length.merge_override(80u64, ConfigSource::PyprojectToml, None, None);
+        line_length.merge_override(80u64, ConfigSource::PyprojectToml, None);
 
         // Project value should win
         assert_eq!(line_length.value, 80);
@@ -146,7 +145,7 @@ mod tests {
         let mut line_length = SourcedValue::new(80u64, ConfigSource::PyprojectToml);
 
         // User config: line-length = 120 (lower precedence)
-        line_length.merge_override(120u64, ConfigSource::UserConfig, None, None);
+        line_length.merge_override(120u64, ConfigSource::UserConfig, None);
 
         // Project value should be preserved
         assert_eq!(line_length.value, 80);
@@ -240,7 +239,7 @@ mod tests {
         let mut enable = make_sourced_vec(&["MD001"], ConfigSource::PyprojectToml);
 
         // CLI flag
-        enable.merge_override(vec!["MD002".to_string()], ConfigSource::Cli, None, None);
+        enable.merge_override(vec!["MD002".to_string()], ConfigSource::Cli, None);
 
         // CLI should win
         assert_vec_eq(&enable.value, &["MD002"]);
@@ -299,37 +298,66 @@ mod tests {
         let mut disable = make_sourced_vec(&["MD013"], ConfigSource::Default);
 
         // User config adds MD041
-        disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None, None);
+        disable.merge_union(vec!["MD041".to_string()], ConfigSource::UserConfig, None);
         assert_vec_eq(&disable.value, &["MD013", "MD041"]);
 
         // Project config adds MD047
-        disable.merge_union(vec!["MD047".to_string()], ConfigSource::PyprojectToml, None, None);
+        disable.merge_union(vec!["MD047".to_string()], ConfigSource::PyprojectToml, None);
         assert_vec_eq(&disable.value, &["MD013", "MD041", "MD047"]);
 
         // CLI adds MD001
-        disable.merge_union(vec!["MD001".to_string()], ConfigSource::Cli, None, None);
+        disable.merge_union(vec!["MD001".to_string()], ConfigSource::Cli, None);
         assert_vec_eq(&disable.value, &["MD013", "MD041", "MD047", "MD001"]);
     }
 
     #[test]
-    fn test_history_tracking() {
+    fn test_origin_tracking() {
         let mut disable = make_sourced_vec(&["MD013"], ConfigSource::UserConfig);
+        assert_eq!(disable.origin, None, "values without a file have no origin");
 
-        // Initial state should have one override
-        assert_eq!(disable.overrides.len(), 1);
-
-        // Merge should add to history
+        // A winning merge carries the contributing file along.
         disable.merge_union(
             vec!["MD041".to_string()],
             ConfigSource::PyprojectToml,
             Some("project.toml".to_string()),
-            Some(5),
         );
+        assert_eq!(disable.source, ConfigSource::PyprojectToml);
+        assert_eq!(disable.origin, Some("project.toml".to_string()));
 
-        // Should now have 2 overrides in history
-        assert_eq!(disable.overrides.len(), 2);
-        assert_eq!(disable.overrides[1].source, ConfigSource::PyprojectToml);
-        assert_eq!(disable.overrides[1].file, Some("project.toml".to_string()));
-        assert_eq!(disable.overrides[1].line, Some(5));
+        // A losing merge must not disturb the recorded origin.
+        disable.merge_override(
+            vec!["MD001".to_string()],
+            ConfigSource::UserConfig,
+            Some("user.toml".to_string()),
+        );
+        assert_eq!(disable.origin, Some("project.toml".to_string()));
+    }
+
+    #[test]
+    fn test_origin_survives_extends_style_merge() {
+        use crate::config::{SourcedConfig, SourcedConfigFragment};
+
+        // Base config (extends parent) sets exclude; child config does not.
+        // Both fragments carry ProjectConfig source, like an extends chain.
+        let mut config = SourcedConfig::default();
+        let mut base = SourcedConfigFragment::default();
+        base.global.exclude.push_override(
+            vec!["drafts".to_string()],
+            ConfigSource::ProjectConfig,
+            Some("base.toml".to_string()),
+        );
+        config.merge(base);
+
+        let mut child = SourcedConfigFragment::default();
+        child.global.enable.push_override(
+            vec!["MD001".to_string()],
+            ConfigSource::ProjectConfig,
+            Some(".rumdl.toml".to_string()),
+        );
+        config.merge(child);
+
+        // The exclude still points at the extends parent; the enable at the child.
+        assert_eq!(config.global.exclude.origin, Some("base.toml".to_string()));
+        assert_eq!(config.global.enable.origin, Some(".rumdl.toml".to_string()));
     }
 }

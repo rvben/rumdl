@@ -578,3 +578,53 @@ fn test_extends_per_file_ignores_replaced_by_child() {
         "Base's per_file_ignores should be replaced by child's"
     );
 }
+
+/// Provenance: each value's origin names the file in the extends chain that
+/// actually set it, so `rumdl config` can attribute base-config values to the
+/// base file and overrides to the child.
+#[test]
+fn test_extends_origin_attribution() {
+    let dir = tempdir().unwrap();
+    let base = dir.path().join("base.rumdl.toml");
+    let child = dir.path().join(".rumdl.toml");
+
+    fs::write(
+        &base,
+        r#"exclude = ["drafts"]
+
+[MD013]
+line-length = 100
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &child,
+        r#"extends = "base.rumdl.toml"
+enable = ["MD001", "MD013"]
+
+[MD013]
+line-length = 120
+"#,
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(child.to_str().unwrap()), None, false).unwrap();
+
+    let origin_of = |origin: &Option<String>| -> String {
+        origin
+            .as_deref()
+            .and_then(|f| std::path::Path::new(f).file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default()
+    };
+
+    // Inherited value: attributed to the base file.
+    assert_eq!(origin_of(&sourced.global.exclude.origin), "base.rumdl.toml");
+    // Value only the child sets: attributed to the child.
+    assert_eq!(origin_of(&sourced.global.enable.origin), ".rumdl.toml");
+    // Value the child overrides: the child wins the attribution.
+    let md013 = sourced.rules.get("MD013").expect("MD013 config present");
+    let line_length = md013.values.get("line-length").expect("line-length set");
+    assert_eq!(toml::Value::Integer(120), line_length.value);
+    assert_eq!(origin_of(&line_length.origin), ".rumdl.toml");
+}

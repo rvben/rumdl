@@ -52,7 +52,7 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .enable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(disable) = table.get("disable")
@@ -66,7 +66,7 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .disable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(extend_enable) = table.get("extend-enable").or_else(|| table.get("extend_enable"))
@@ -79,7 +79,7 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .extend_enable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(extend_disable) = table.get("extend-disable").or_else(|| table.get("extend_disable"))
@@ -92,25 +92,19 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .extend_disable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(include) = table.get("include")
                 && let Ok(values) = Vec::<String>::deserialize(include.clone())
             {
-                fragment
-                    .global
-                    .include
-                    .push_override(values, source, file.clone(), None);
+                fragment.global.include.push_override(values, source, file.clone());
             }
 
             if let Some(exclude) = table.get("exclude")
                 && let Ok(values) = Vec::<String>::deserialize(exclude.clone())
             {
-                fragment
-                    .global
-                    .exclude
-                    .push_override(values, source, file.clone(), None);
+                fragment.global.exclude.push_override(values, source, file.clone());
             }
 
             if let Some(respect_gitignore) = table
@@ -121,23 +115,20 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .respect_gitignore
-                    .push_override(value, source, file.clone(), None);
+                    .push_override(value, source, file.clone());
             }
 
             if let Some(force_exclude) = table.get("force-exclude").or_else(|| table.get("force_exclude"))
                 && let Ok(value) = bool::deserialize(force_exclude.clone())
             {
-                fragment
-                    .global
-                    .force_exclude
-                    .push_override(value, source, file.clone(), None);
+                fragment.global.force_exclude.push_override(value, source, file.clone());
             }
 
             if let Some(output_format) = table.get("output-format").or_else(|| table.get("output_format"))
                 && let Ok(value) = String::deserialize(output_format.clone())
             {
                 if let Some(ref mut sv) = fragment.global.output_format {
-                    sv.push_override(value, source, file.clone(), None);
+                    sv.push_override(value, source, file.clone());
                 } else {
                     fragment.global.output_format = Some(SourcedValue::new(value.clone(), source));
                 }
@@ -153,7 +144,7 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .fixable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(unfixable) = table.get("unfixable")
@@ -166,13 +157,13 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .unfixable
-                    .push_override(normalized_values, source, file.clone(), None);
+                    .push_override(normalized_values, source, file.clone());
             }
 
             if let Some(flavor) = table.get("flavor")
                 && let Ok(value) = MarkdownFlavor::deserialize(flavor.clone())
             {
-                fragment.global.flavor.push_override(value, source, file.clone(), None);
+                fragment.global.flavor.push_override(value, source, file.clone());
             }
 
             // Handle line-length special case - this should set the global line_length
@@ -182,7 +173,7 @@ pub(super) fn parse_pyproject_toml(
                 fragment
                     .global
                     .line_length
-                    .push_override(LineLength::new(value as usize), source, file.clone(), None);
+                    .push_override(LineLength::new(value as usize), source, file.clone());
 
                 // Also add to MD013 rule config for backward compatibility
                 let norm_md013_key = normalize_key("MD013");
@@ -192,14 +183,14 @@ pub(super) fn parse_pyproject_toml(
                     .values
                     .entry(norm_line_length_key)
                     .or_insert_with(|| SourcedValue::new(line_length.clone(), ConfigSource::Default));
-                sv.push_override(line_length.clone(), source, file.clone(), None);
+                sv.push_override(line_length.clone(), source, file.clone());
             }
 
             if let Some(cache_dir) = table.get("cache-dir").or_else(|| table.get("cache_dir"))
                 && let Ok(value) = String::deserialize(cache_dir.clone())
             {
                 if let Some(ref mut sv) = fragment.global.cache_dir {
-                    sv.push_override(value, source, file.clone(), None);
+                    sv.push_override(value, source, file.clone());
                 } else {
                     fragment.global.cache_dir = Some(SourcedValue::new(value.clone(), source));
                 }
@@ -208,7 +199,7 @@ pub(super) fn parse_pyproject_toml(
             if let Some(cache) = table.get("cache")
                 && let Ok(value) = bool::deserialize(cache.clone())
             {
-                fragment.global.cache.push_override(value, source, file.clone(), None);
+                fragment.global.cache.push_override(value, source, file.clone());
             }
         };
 
@@ -246,7 +237,7 @@ pub(super) fn parse_pyproject_toml(
             }
             fragment
                 .per_file_ignores
-                .push_override(per_file_map, source, file.clone(), None);
+                .push_override(per_file_map, source, file.clone());
         }
 
         // --- Extract per-file-flavor configurations ---
@@ -270,7 +261,7 @@ pub(super) fn parse_pyproject_toml(
             }
             fragment
                 .per_file_flavor
-                .push_override(per_file_map, source, file.clone(), None);
+                .push_override(per_file_map, source, file.clone());
         }
 
         // --- Extract rule-specific configurations ---
@@ -469,7 +460,7 @@ fn apply_rule_table_toml(
         if norm_rk == "severity" {
             if let Ok(severity) = crate::rule::Severity::deserialize(rv.clone()) {
                 if let Some(ref mut sv) = rule_entry.severity {
-                    sv.push_override(severity, source, file.clone(), None);
+                    sv.push_override(severity, source, file.clone());
                 } else {
                     rule_entry.severity = Some(SourcedValue::new(severity, source));
                 }
@@ -486,7 +477,7 @@ fn apply_rule_table_toml(
             .values
             .entry(norm_rk.clone())
             .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-        sv.push_override(toml_val, source, file.clone(), None);
+        sv.push_override(toml_val, source, file.clone());
     }
 }
 
@@ -551,34 +542,29 @@ fn parse_global_key(
 
                 match norm_key {
                     "enable" => {
-                        fragment
-                            .global
-                            .enable
-                            .push_override(final_values, source, file.clone(), None);
+                        fragment.global.enable.push_override(final_values, source, file.clone());
                     }
                     "disable" => fragment
                         .global
                         .disable
-                        .push_override(final_values, source, file.clone(), None),
+                        .push_override(final_values, source, file.clone()),
                     "include" => fragment
                         .global
                         .include
-                        .push_override(final_values, source, file.clone(), None),
+                        .push_override(final_values, source, file.clone()),
                     "exclude" => fragment
                         .global
                         .exclude
-                        .push_override(final_values, source, file.clone(), None),
-                    "extend-enable" => {
-                        fragment
-                            .global
-                            .extend_enable
-                            .push_override(final_values, source, file.clone(), None)
-                    }
+                        .push_override(final_values, source, file.clone()),
+                    "extend-enable" => fragment
+                        .global
+                        .extend_enable
+                        .push_override(final_values, source, file.clone()),
                     "extend-disable" => {
                         fragment
                             .global
                             .extend_disable
-                            .push_override(final_values, source, file.clone(), None)
+                            .push_override(final_values, source, file.clone())
                     }
                     _ => unreachable!("Outer match guarantees only these keys"),
                 }
@@ -598,7 +584,7 @@ fn parse_global_key(
                 fragment
                     .global
                     .respect_gitignore
-                    .push_override(val, source, file.clone(), None);
+                    .push_override(val, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected boolean for global key '{}' in {}, found {}",
@@ -612,10 +598,7 @@ fn parse_global_key(
         "force-exclude" => {
             if let Some(toml_edit::Value::Boolean(formatted_bool)) = value_item.as_value() {
                 let val = *formatted_bool.value();
-                fragment
-                    .global
-                    .force_exclude
-                    .push_override(val, source, file.clone(), None);
+                fragment.global.force_exclude.push_override(val, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected boolean for global key '{}' in {}, found {}",
@@ -629,10 +612,7 @@ fn parse_global_key(
         "line-length" => {
             if let Some(toml_edit::Value::Integer(formatted_int)) = value_item.as_value() {
                 let val = LineLength::new(*formatted_int.value() as usize);
-                fragment
-                    .global
-                    .line_length
-                    .push_override(val, source, file.clone(), None);
+                fragment.global.line_length.push_override(val, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected integer for global key '{}' in {}, found {}",
@@ -647,7 +627,7 @@ fn parse_global_key(
             if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
                 let val = formatted_string.value().clone();
                 if let Some(ref mut sv) = fragment.global.output_format {
-                    sv.push_override(val, source, file.clone(), None);
+                    sv.push_override(val, source, file.clone());
                 } else {
                     fragment.global.output_format = Some(SourcedValue::new(val.clone(), source));
                 }
@@ -665,7 +645,7 @@ fn parse_global_key(
             if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
                 let val = formatted_string.value().clone();
                 if let Some(ref mut sv) = fragment.global.cache_dir {
-                    sv.push_override(val, source, file.clone(), None);
+                    sv.push_override(val, source, file.clone());
                 } else {
                     fragment.global.cache_dir = Some(SourcedValue::new(val.clone(), source));
                 }
@@ -682,7 +662,7 @@ fn parse_global_key(
         "cache" => {
             if let Some(toml_edit::Value::Boolean(b)) = value_item.as_value() {
                 let val = *b.value();
-                fragment.global.cache.push_override(val, source, file.clone(), None);
+                fragment.global.cache.push_override(val, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected boolean for global key '{}' in {}, found {}",
@@ -700,10 +680,7 @@ fn parse_global_key(
                     .filter_map(|item| item.as_str())
                     .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
                     .collect();
-                fragment
-                    .global
-                    .fixable
-                    .push_override(values, source, file.clone(), None);
+                fragment.global.fixable.push_override(values, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected array for global key '{}' in {}, found {}",
@@ -721,10 +698,7 @@ fn parse_global_key(
                     .filter_map(|item| item.as_str())
                     .map(|s| registry.resolve_rule_name(s).unwrap_or_else(|| normalize_key(s)))
                     .collect();
-                fragment
-                    .global
-                    .unfixable
-                    .push_override(values, source, file.clone(), None);
+                fragment.global.unfixable.push_override(values, source, file.clone());
             } else {
                 log::warn!(
                     "[WARN] Expected array for global key '{}' in {}, found {}",
@@ -739,7 +713,7 @@ fn parse_global_key(
             if let Some(toml_edit::Value::String(formatted_string)) = value_item.as_value() {
                 let val = formatted_string.value();
                 if let Ok(flavor) = MarkdownFlavor::from_str(val) {
-                    fragment.global.flavor.push_override(flavor, source, file.clone(), None);
+                    fragment.global.flavor.push_override(flavor, source, file.clone());
                 } else {
                     log::warn!("[WARN] Unknown markdown flavor '{val}' in {display_path}");
                 }
@@ -845,7 +819,7 @@ pub(super) fn parse_rumdl_toml(
         }
         fragment
             .per_file_ignores
-            .push_override(per_file_map, source, file.clone(), None);
+            .push_override(per_file_map, source, file.clone());
     }
 
     // Handle [per-file-flavor] section
@@ -875,7 +849,7 @@ pub(super) fn parse_rumdl_toml(
         }
         fragment
             .per_file_flavor
-            .push_override(per_file_map, source, file.clone(), None);
+            .push_override(per_file_map, source, file.clone());
     }
 
     // Handle [code-block-tools] section
@@ -893,7 +867,7 @@ pub(super) fn parse_rumdl_toml(
             Ok(cbt_config) => {
                 fragment
                     .code_block_tools
-                    .push_override(cbt_config, source, file.clone(), None);
+                    .push_override(cbt_config, source, file.clone());
             }
             Err(e) => {
                 log::warn!("[WARN] Failed to parse [code-block-tools] section in {display_path}: {e}");
@@ -996,7 +970,7 @@ fn apply_rule_table_toml_edit(
                 match crate::rule::Severity::deserialize(toml::Value::String(severity_str.clone())) {
                     Ok(severity) => {
                         if let Some(ref mut sv) = rule_entry.severity {
-                            sv.push_override(severity, source, file.clone(), None);
+                            sv.push_override(severity, source, file.clone());
                         } else {
                             rule_entry.severity = Some(SourcedValue::new(severity, source));
                         }
@@ -1056,7 +1030,7 @@ fn apply_rule_table_toml_edit(
                 .values
                 .entry(norm_rk.clone())
                 .or_insert_with(|| SourcedValue::new(toml_val.clone(), ConfigSource::Default));
-            sv.push_override(toml_val, source, file.clone(), None);
+            sv.push_override(toml_val, source, file.clone());
         }
     }
 }

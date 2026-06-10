@@ -96,9 +96,72 @@ pub fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
     }
 }
 
+/// Format the `[from ...]` provenance label for a config value.
+///
+/// File-based sources show the originating file (relativized to the project
+/// root), so extends chains attribute each value to the file that actually
+/// set it rather than a generic "project config". Defaults and CLI flags
+/// have no file and fall back to the source-kind name.
+pub fn provenance_label<T>(sv: &rumdl_config::SourcedValue<T>, project_root: Option<&std::path::Path>) -> String {
+    match &sv.origin {
+        Some(file) => format!("[from {}]", origin_display(file, project_root)),
+        None => format!("[from {}]", format_provenance(sv.source)),
+    }
+}
+
+/// Render a config-file origin path for display: canonicalized (extends
+/// resolution can embed `../` segments), relativized to the project root
+/// when inside it, and shown as a short `../`-style path for nearby
+/// out-of-tree files (the common shape for shared extends bases). Distant
+/// files fall back to the canonical absolute path.
+fn origin_display(file: &str, project_root: Option<&std::path::Path>) -> String {
+    use std::path::{Component, Path, PathBuf};
+
+    fn normalize(path: &Path) -> String {
+        let s = path.to_string_lossy();
+        if cfg!(windows) {
+            s.replace('\\', "/")
+        } else {
+            s.to_string()
+        }
+    }
+
+    let canonical = Path::new(file).canonicalize().unwrap_or_else(|_| PathBuf::from(file));
+
+    // Relativize against the project root, falling back to the current
+    // directory when no project root is known (e.g. markdownlint-only
+    // discovery).
+    let base = project_root
+        .and_then(|root| root.canonicalize().ok())
+        .or_else(|| std::env::current_dir().ok().and_then(|cwd| cwd.canonicalize().ok()));
+
+    if let Some(base) = base {
+        if let Ok(rel) = canonical.strip_prefix(&base) {
+            return normalize(rel);
+        }
+        // Out-of-tree file: build a ../-relative path from the base.
+        let path_comps: Vec<Component> = canonical.components().collect();
+        let base_comps: Vec<Component> = base.components().collect();
+        let common = path_comps.iter().zip(&base_comps).take_while(|(a, b)| a == b).count();
+        let ups = base_comps.len() - common;
+        if common > 0 && ups <= 3 {
+            let mut rel = PathBuf::new();
+            for _ in 0..ups {
+                rel.push("..");
+            }
+            for comp in &path_comps[common..] {
+                rel.push(comp);
+            }
+            return normalize(&rel);
+        }
+    }
+    normalize(&canonical)
+}
+
 /// Print configuration with provenance information, excluding default values
 pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedConfig, _all_rules: &[Box<dyn Rule>]) {
     let g = &sourced.global;
+    let root = sourced.project_root.as_deref();
     let mut all_lines = Vec::new();
     let mut has_global_section = false;
 
@@ -107,64 +170,61 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
     if g.enable.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("enable = {:?}", g.enable.value),
-            format!("[from {}]", format_provenance(g.enable.source)),
+            provenance_label(&g.enable, root),
         ));
         has_global_section = true;
     }
     if g.disable.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("disable = {:?}", g.disable.value),
-            format!("[from {}]", format_provenance(g.disable.source)),
+            provenance_label(&g.disable, root),
         ));
         has_global_section = true;
     }
     if g.exclude.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("exclude = {:?}", g.exclude.value),
-            format!("[from {}]", format_provenance(g.exclude.source)),
+            provenance_label(&g.exclude, root),
         ));
         has_global_section = true;
     }
     if g.include.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("include = {:?}", g.include.value),
-            format!("[from {}]", format_provenance(g.include.source)),
+            provenance_label(&g.include, root),
         ));
         has_global_section = true;
     }
     if g.respect_gitignore.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("respect_gitignore = {}", g.respect_gitignore.value),
-            format!("[from {}]", format_provenance(g.respect_gitignore.source)),
+            provenance_label(&g.respect_gitignore, root),
         ));
         has_global_section = true;
     }
     if g.flavor.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("flavor = \"{}\"", g.flavor.value),
-            format!("[from {}]", format_provenance(g.flavor.source)),
+            provenance_label(&g.flavor, root),
         ));
         has_global_section = true;
     }
     if g.line_length.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("line_length = {}", g.line_length.value.get()),
-            format!("[from {}]", format_provenance(g.line_length.source)),
+            provenance_label(&g.line_length, root),
         ));
         has_global_section = true;
     }
     if g.force_exclude.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("force_exclude = {}", g.force_exclude.value),
-            format!("[from {}]", format_provenance(g.force_exclude.source)),
+            provenance_label(&g.force_exclude, root),
         ));
         has_global_section = true;
     }
     if g.cache.source != rumdl_config::ConfigSource::Default {
-        global_lines.push((
-            format!("cache = {}", g.cache.value),
-            format!("[from {}]", format_provenance(g.cache.source)),
-        ));
+        global_lines.push((format!("cache = {}", g.cache.value), provenance_label(&g.cache, root)));
         has_global_section = true;
     }
     if let Some(ref output_format) = g.output_format
@@ -172,7 +232,7 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
     {
         global_lines.push((
             format!("output_format = {:?}", output_format.value),
-            format!("[from {}]", format_provenance(output_format.source)),
+            provenance_label(output_format, root),
         ));
         has_global_section = true;
     }
@@ -181,21 +241,21 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
     {
         global_lines.push((
             format!("cache_dir = {:?}", cache_dir.value),
-            format!("[from {}]", format_provenance(cache_dir.source)),
+            provenance_label(cache_dir, root),
         ));
         has_global_section = true;
     }
     if g.fixable.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("fixable = {:?}", g.fixable.value),
-            format!("[from {}]", format_provenance(g.fixable.source)),
+            provenance_label(&g.fixable, root),
         ));
         has_global_section = true;
     }
     if g.unfixable.source != rumdl_config::ConfigSource::Default {
         global_lines.push((
             format!("unfixable = {:?}", g.unfixable.value),
-            format!("[from {}]", format_provenance(g.unfixable.source)),
+            provenance_label(&g.unfixable, root),
         ));
         has_global_section = true;
     }
@@ -215,7 +275,7 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
             let rules_str = format!("{rules:?}");
             all_lines.push((
                 format!("{pattern:?} = {rules_str}"),
-                format!("[from {}]", format_provenance(sourced.per_file_ignores.source)),
+                provenance_label(&sourced.per_file_ignores, root),
             ));
         }
         all_lines.push((String::new(), String::new()));
@@ -244,10 +304,7 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
                     toml::Value::Float(f) => f.to_string(),
                     _ => sv.value.to_string(),
                 };
-                lines.push((
-                    format!("{key} = {value_str}"),
-                    format!("[from {}]", format_provenance(sv.source)),
-                ));
+                lines.push((format!("{key} = {value_str}"), provenance_label(sv, root)));
             }
         }
         if !lines.is_empty() {
@@ -279,29 +336,30 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
 /// Print configuration with provenance information
 pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_rules: &[Box<dyn Rule>]) {
     let g = &sourced.global;
+    let root = sourced.project_root.as_deref();
     let mut all_lines = Vec::new();
     // [global] section
     let global_lines = vec![
         ("[global]".to_string(), String::new()),
         (
             format!("enable = {:?}", g.enable.value),
-            format!("[from {}]", format_provenance(g.enable.source)),
+            provenance_label(&g.enable, root),
         ),
         (
             format!("disable = {:?}", g.disable.value),
-            format!("[from {}]", format_provenance(g.disable.source)),
+            provenance_label(&g.disable, root),
         ),
         (
             format!("exclude = {:?}", g.exclude.value),
-            format!("[from {}]", format_provenance(g.exclude.source)),
+            provenance_label(&g.exclude, root),
         ),
         (
             format!("include = {:?}", g.include.value),
-            format!("[from {}]", format_provenance(g.include.source)),
+            provenance_label(&g.include, root),
         ),
         (
             format!("respect_gitignore = {}", g.respect_gitignore.value),
-            format!("[from {}]", format_provenance(g.respect_gitignore.source)),
+            provenance_label(&g.respect_gitignore, root),
         ),
     ];
 
@@ -335,10 +393,7 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
                     toml::Value::Float(f) => f.to_string(),
                     _ => sv.value.to_string(),
                 };
-                lines.push((
-                    format!("{key} = {value_str}"),
-                    format!("[from {}]", format_provenance(sv.source)),
-                ));
+                lines.push((format!("{key} = {value_str}"), provenance_label(sv, root)));
             }
         } else {
             // Print default config for this rule, if available

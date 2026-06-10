@@ -116,13 +116,17 @@ fn test_config_command_prints_source_markdownlint_json() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}\n{stderr}");
+    // Provenance is file-precise: values set by the markdownlint config are
+    // attributed to the actual file, not a generic source kind.
     assert!(
-        combined.contains("from project config"),
-        "Expected output to mention 'from project config', got: {combined}"
+        combined.contains("from .markdownlint.json"),
+        "Expected output to attribute values to .markdownlint.json, got: {combined}"
     );
-
-    // In the expected output, update the provenance for global config values to [from default]
-    // Only rule-specific values set by markdownlint config should show [from project config]
+    // Global values remain at their defaults and say so.
+    assert!(
+        combined.contains("[from default]"),
+        "Expected untouched globals to show [from default], got: {combined}"
+    );
 }
 
 #[test]

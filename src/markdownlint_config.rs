@@ -265,24 +265,12 @@ impl MarkdownlintConfig {
                                 .values
                                 .entry(norm_config_key.clone())
                                 .and_modify(|sv| {
-                                    sv.value = v.clone();
-                                    sv.source = ConfigSource::ProjectConfig;
-                                    sv.overrides.push(crate::config::ConfigOverride {
-                                        value: v.clone(),
-                                        source: ConfigSource::ProjectConfig,
-                                        file: file.clone(),
-                                        line: None,
-                                    });
+                                    sv.push_override(v.clone(), ConfigSource::ProjectConfig, file.clone());
                                 })
                                 .or_insert_with(|| SourcedValue {
-                                    value: v.clone(),
+                                    value: v,
                                     source: ConfigSource::ProjectConfig,
-                                    overrides: vec![crate::config::ConfigOverride {
-                                        value: v,
-                                        source: ConfigSource::ProjectConfig,
-                                        file: file.clone(),
-                                        line: None,
-                                    }],
+                                    origin: file.clone(),
                                 });
                         }
                     } else {
@@ -290,24 +278,12 @@ impl MarkdownlintConfig {
                             .values
                             .entry("value".to_string())
                             .and_modify(|sv| {
-                                sv.value = tv.clone();
-                                sv.source = ConfigSource::ProjectConfig;
-                                sv.overrides.push(crate::config::ConfigOverride {
-                                    value: tv.clone(),
-                                    source: ConfigSource::ProjectConfig,
-                                    file: file.clone(),
-                                    line: None,
-                                });
+                                sv.push_override(tv.clone(), ConfigSource::ProjectConfig, file.clone());
                             })
                             .or_insert_with(|| SourcedValue {
-                                value: tv.clone(),
+                                value: tv,
                                 source: ConfigSource::ProjectConfig,
-                                overrides: vec![crate::config::ConfigOverride {
-                                    value: tv,
-                                    source: ConfigSource::ProjectConfig,
-                                    file: file.clone(),
-                                    line: None,
-                                }],
+                                origin: file.clone(),
                             });
 
                         // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
@@ -317,12 +293,7 @@ impl MarkdownlintConfig {
                                 SourcedValue {
                                     value: toml::Value::String("fixed".to_string()),
                                     source: ConfigSource::ProjectConfig,
-                                    overrides: vec![crate::config::ConfigOverride {
-                                        value: toml::Value::String("fixed".to_string()),
-                                        source: ConfigSource::ProjectConfig,
-                                        file: file.clone(),
-                                        line: None,
-                                    }],
+                                    origin: file.clone(),
                                 },
                             );
                         }
@@ -447,31 +418,19 @@ impl MarkdownlintConfig {
                             let sv = rule_config.values.entry(norm_rk.clone()).or_insert_with(|| {
                                 crate::config::SourcedValue::new(rv.clone(), crate::config::ConfigSource::ProjectConfig)
                             });
-                            sv.push_override(rv, crate::config::ConfigSource::ProjectConfig, file.clone(), None);
+                            sv.push_override(rv, crate::config::ConfigSource::ProjectConfig, file.clone());
                         }
                     } else {
                         rule_config
                             .values
                             .entry("value".to_string())
                             .and_modify(|sv| {
-                                sv.value = tv.clone();
-                                sv.source = crate::config::ConfigSource::ProjectConfig;
-                                sv.overrides.push(crate::config::ConfigOverride {
-                                    value: tv.clone(),
-                                    source: crate::config::ConfigSource::ProjectConfig,
-                                    file: file.clone(),
-                                    line: None,
-                                });
+                                sv.push_override(tv.clone(), crate::config::ConfigSource::ProjectConfig, file.clone());
                             })
                             .or_insert_with(|| crate::config::SourcedValue {
-                                value: tv.clone(),
+                                value: tv,
                                 source: crate::config::ConfigSource::ProjectConfig,
-                                overrides: vec![crate::config::ConfigOverride {
-                                    value: tv,
-                                    source: crate::config::ConfigSource::ProjectConfig,
-                                    file: file.clone(),
-                                    line: None,
-                                }],
+                                origin: file.clone(),
                             });
 
                         // Special handling for MD007: Add style = "fixed" for markdownlint compatibility
@@ -481,12 +440,7 @@ impl MarkdownlintConfig {
                                 crate::config::SourcedValue {
                                     value: toml::Value::String("fixed".to_string()),
                                     source: crate::config::ConfigSource::ProjectConfig,
-                                    overrides: vec![crate::config::ConfigOverride {
-                                        value: toml::Value::String("fixed".to_string()),
-                                        source: crate::config::ConfigSource::ProjectConfig,
-                                        file: file.clone(),
-                                        line: None,
-                                    }],
+                                    origin: file.clone(),
                                 },
                             );
                         }
@@ -510,7 +464,6 @@ impl MarkdownlintConfig {
                 disabled_rules,
                 crate::config::ConfigSource::ProjectConfig,
                 file.clone(),
-                None,
             );
         }
 
@@ -523,7 +476,6 @@ impl MarkdownlintConfig {
                 enabled_rules,
                 crate::config::ConfigSource::ProjectConfig,
                 file.clone(),
-                None,
             );
         }
 
