@@ -4,10 +4,8 @@ use crate::file_processor;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::exit_codes::exit;
-use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::{Rule, Severity};
 use std::io::{self, Read};
-use std::str::FromStr;
 
 /// Process markdown content from stdin
 pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &rumdl_config::Config) {
@@ -26,31 +24,11 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // Create output writer for linting results
     let output_writer = OutputWriter::new(use_stderr, silent);
 
-    // Read RUMDL_OUTPUT_FORMAT env var (if set)
-    let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
-
-    // Determine output format with precedence: CLI → env var → config → legacy → default
-    let output_format = if let Some(fmt) = args.output_format {
-        fmt.into()
-    } else {
-        let output_format_str = env_output_format
-            .as_deref()
-            .or(config.global.output_format.as_deref())
-            .or({
-                // Legacy support: map --output json to --output-format json
-                match args.output {
-                    crate::cli_types::Output::Json => Some("json"),
-                    crate::cli_types::Output::Text => None,
-                }
-            })
-            .unwrap_or("text");
-
-        match OutputFormat::from_str(output_format_str) {
-            Ok(fmt) => fmt,
-            Err(e) => {
-                eprintln!("{}: {}", "Error".red().bold(), e);
-                exit::tool_error();
-            }
+    let output_format = match crate::cli_utils::resolve_output_format(args, config) {
+        Ok(fmt) => fmt,
+        Err(e) => {
+            eprintln!("{}: {}", "Error".red().bold(), e);
+            exit::tool_error();
         }
     };
 
@@ -84,78 +62,27 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // Convert stdin-filename to PathBuf for LintContext
     let source_file = args.stdin_filename.as_ref().map(std::path::PathBuf::from);
 
-    // Create a lint context for the stdin content
     // Use per-file flavor if stdin_filename is provided
     let flavor = args
         .stdin_filename
         .as_ref()
         .map(|f| config.get_flavor_for_file(std::path::Path::new(f)))
         .unwrap_or_else(|| config.markdown_flavor());
-    let ctx = LintContext::new(&content, flavor, source_file.clone());
-    let inline_config = ctx.inline_config();
-    let mut all_warnings = Vec::new();
 
-    // Apply inline configure-file overrides by merging them into the config and
-    // recreating affected rules — mirrors the file-based path in lib.rs.
-    let inline_overrides = inline_config.get_all_rule_configs();
-    let merged_config: Option<rumdl_config::Config> = if !inline_overrides.is_empty() {
-        Some(config.merge_with_inline_config(inline_config))
-    } else {
-        None
-    };
-    let effective_config = merged_config.as_ref().unwrap_or(config);
-    let mut recreated_rules: std::collections::HashMap<String, Box<dyn rumdl_lib::rule::Rule>> =
-        std::collections::HashMap::new();
-    for rule_name in inline_overrides.keys() {
-        if let Some(recreated) = rumdl_lib::rules::create_rule_by_name(rule_name, effective_config) {
-            recreated_rules.insert(rule_name.clone(), recreated);
-        }
-    }
-
-    // Run all enabled rules on the content
-    for rule in rules {
-        // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-        if rule.should_skip(&ctx) {
-            continue;
-        }
-
-        // Use recreated rule if inline configure-file overrides exist for this rule
-        let effective_rule: &dyn rumdl_lib::rule::Rule = recreated_rules
-            .get(rule.name())
-            .map(|r| r.as_ref())
-            .unwrap_or(rule.as_ref());
-
-        match effective_rule.check(&ctx) {
-            Ok(rule_warnings) => {
-                // Filter out warnings for rules disabled via inline comments,
-                // and warnings inside kramdown extension blocks.
-                let filtered: Vec<_> = rule_warnings
-                    .into_iter()
-                    .filter(|warning| {
-                        if ctx
-                            .line_info(warning.line)
-                            .is_some_and(|info| info.in_kramdown_extension_block)
-                        {
-                            return false;
-                        }
-                        let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-                        let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
-                            &rule_name_to_check[..dash_pos]
-                        } else {
-                            rule_name_to_check
-                        };
-                        !inline_config.is_rule_disabled(base_rule_name, warning.line)
-                    })
-                    .collect();
-                all_warnings.extend(filtered);
-            }
+    // Lint through the same engine as the file path, so inline config
+    // overrides, kramdown suppression, inline-disable ranges, and severity
+    // overrides behave identically to `rumdl check <file>`.
+    let mut all_warnings =
+        match rumdl_lib::lint(&content, rules, args.verbose, flavor, source_file.clone(), Some(config)) {
+            Ok(warnings) => warnings,
             Err(e) => {
-                if !args.silent {
-                    eprintln!("Error running rule {}: {}", rule.name(), e);
+                if !silent {
+                    eprintln!("{}: {}", "Error".red().bold(), e);
                 }
+                exit::tool_error();
             }
-        }
-    }
+        };
+
     // Sort warnings by line/column
     all_warnings.sort_by(|a, b| {
         if a.line == b.line {
@@ -193,37 +120,17 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             // Output the fixed content to stdout
             print!("{output_content}");
 
-            // Re-check the fixed content to see if any issues remain
-            // Use same per-file flavor as initial lint
-            let fixed_ctx = LintContext::new(&fixed_content, flavor, source_file.clone());
-            let fixed_inline_config = fixed_ctx.inline_config();
-            let mut remaining_warnings = Vec::new();
-            for rule in rules {
-                if rule.should_skip(&fixed_ctx) {
-                    continue;
-                }
-                if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
-                    let filtered: Vec<_> = rule_warnings
-                        .into_iter()
-                        .filter(|warning| {
-                            if fixed_ctx
-                                .line_info(warning.line)
-                                .is_some_and(|info| info.in_kramdown_extension_block)
-                            {
-                                return false;
-                            }
-                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-                            let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
-                                &rule_name_to_check[..dash_pos]
-                            } else {
-                                rule_name_to_check
-                            };
-                            !fixed_inline_config.is_rule_disabled(base_rule_name, warning.line)
-                        })
-                        .collect();
-                    remaining_warnings.extend(filtered);
-                }
-            }
+            // Re-check the fixed content through the same engine to see if
+            // any issues remain. Use same per-file flavor as initial lint.
+            let remaining_warnings = rumdl_lib::lint(
+                &fixed_content,
+                rules,
+                args.verbose,
+                flavor,
+                source_file.clone(),
+                Some(config),
+            )
+            .unwrap_or_default();
             let actual_warnings_fixed =
                 file_processor::count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings);
 

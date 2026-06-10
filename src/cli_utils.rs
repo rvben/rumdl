@@ -47,6 +47,38 @@ pub fn apply_cli_overrides(sourced: &mut rumdl_config::SourcedConfig, args: &Che
     }
 }
 
+/// Resolve the lint output format with the standard precedence:
+/// CLI `--output-format` → `RUMDL_OUTPUT_FORMAT` env var → config
+/// `output_format` → legacy `--output json` → `text`.
+///
+/// Returns the parse error message for an unrecognized format name so each
+/// caller can report it through its own channel.
+pub fn resolve_output_format(
+    args: &CheckArgs,
+    config: &rumdl_config::Config,
+) -> Result<rumdl_lib::output::OutputFormat, String> {
+    use std::str::FromStr;
+
+    if let Some(fmt) = args.output_format {
+        return Ok(fmt.into());
+    }
+
+    let env_output_format = std::env::var("RUMDL_OUTPUT_FORMAT").ok();
+    let output_format_str = env_output_format
+        .as_deref()
+        .or(config.global.output_format.as_deref())
+        .or({
+            // Legacy support: map --output json to --output-format json
+            match args.output {
+                crate::cli_types::Output::Json => Some("json"),
+                crate::cli_types::Output::Text => None,
+            }
+        })
+        .unwrap_or("text");
+
+    rumdl_lib::output::OutputFormat::from_str(output_format_str).map_err(|e| e.to_string())
+}
+
 /// Read file content as a UTF-8 string.
 pub fn read_file_efficiently(path: &Path) -> Result<String, Box<dyn Error>> {
     fs::read_to_string(path).map_err(|e| format!("Failed to read file {}: {}", path.display(), e).into())

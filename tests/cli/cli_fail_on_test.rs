@@ -622,3 +622,61 @@ fn test_fail_on_directory_scan_with_mixed_files() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn test_stdin_applies_config_severity_overrides() {
+    // Severity overrides from config must apply on the stdin path exactly as
+    // they do for files: stdin lints through the same engine. MD009 (trailing
+    // spaces) is Warning by default; the config promotes it to Error, so
+    // --fail-on error must fail.
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join("severity.toml");
+    fs::write(&config_path, "[MD009]\nseverity = \"error\"\n").unwrap();
+
+    // One trailing space: invalid as a hard break, so MD009 always triggers.
+    let content: &[u8] = b"# Test \n";
+
+    let run = |fail_on: &str, config: Option<&std::path::Path>| {
+        let mut cmd = Command::new(rumdl_bin());
+        cmd.args(["check", "--stdin", "--fail-on", fail_on, "--enable", "MD009"]);
+        if let Some(cfg) = config {
+            cmd.args(["--config", cfg.to_str().unwrap()]);
+        } else {
+            cmd.arg("--isolated");
+        }
+        cmd.stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child.stdin.take().unwrap().write_all(content).unwrap();
+                child.wait_with_output()
+            })
+            .expect("Failed to execute command")
+    };
+
+    // Sanity: the content does trigger MD009 (fails at warning threshold).
+    let output = run("warning", None);
+    assert!(
+        !output.status.success(),
+        "MD009 must trigger on the test content\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Without the override, MD009 stays Warning: --fail-on error exits 0.
+    let output = run("error", None);
+    assert!(
+        output.status.success(),
+        "MD009 is Warning by default, --fail-on error should exit 0\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // With severity = "error" in config, the same input must fail.
+    let output = run("error", Some(&config_path));
+    assert!(
+        !output.status.success(),
+        "config severity override to Error must apply on stdin with --fail-on error\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
