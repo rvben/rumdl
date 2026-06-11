@@ -1003,6 +1003,39 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Two releases in quick succession leave the previous version's
+      # winget-pkgs PR open once the new submission makes it obsolete; the
+      # moderation queue never closes superseded PRs on its own. Close our
+      # own older open submissions before submitting the new manifest.
+      - name: Close superseded winget PRs
+        if: ${{ inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if ($env:GITHUB_REF -notmatch '^refs/tags/v\d+\.\d+\.\d+$') {
+            Write-Host "Current ref is not a semver release tag; skipping superseded PR cleanup."
+            exit 0
+          }
+
+          if (-not $env:GH_TOKEN) {
+            Write-Host "WINGET_TOKEN is not configured; skipping superseded PR cleanup."
+            exit 0
+          }
+
+          $newVersion = [version]($env:GITHUB_REF -replace '^refs/tags/v', '')
+          $me = gh api user --jq .login
+          $prs = gh pr list --repo microsoft/winget-pkgs --author $me --state open `
+            --search "rvben.rumdl" --json number,title | ConvertFrom-Json
+
+          foreach ($pr in $prs) {
+            if ($pr.title -match 'rvben\.rumdl version (\d+\.\d+\.\d+)' -and [version]$Matches[1] -lt $newVersion) {
+              gh pr close $pr.number --repo microsoft/winget-pkgs `
+                --comment "Superseded by the rvben.rumdl $newVersion submission."
+              Write-Host "Closed superseded PR #$($pr.number) (version $($Matches[1]))"
+            }
+          }
+
       - name: Submit winget manifest update
         if: ${{ inputs.dry_run != true }}
         shell: pwsh
