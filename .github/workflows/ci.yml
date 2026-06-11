@@ -184,10 +184,33 @@ jobs:
       - name: Run code-block tools execution harness
         run: make test-code-block-tools
 
+  # Validates the container machinery (Dockerfile, make targets, both image
+  # platforms actually run) on every push, so image regressions surface here
+  # instead of mid-release. Stages the latest *released* musl binaries; no
+  # compilation happens, the current code itself is covered by `test`.
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Stage latest released binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make docker-binaries-release
+
+      - name: Register QEMU binfmt handlers
+        run: make docker-binfmt
+
+      - name: Verify image on all platforms
+        run: make docker-verify
+
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test, docs-check, test-windows, code-block-tools]
+    needs: [lint, test, docs-check, test-windows, code-block-tools, docker]
     if: always()
     steps:
       - name: Verify all checks passed

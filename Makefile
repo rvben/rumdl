@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
 
 # Development environment setup
 setup-mise:
@@ -75,6 +75,105 @@ build-static-linux-arm64:
 
 build-static-all: build-static-linux-x64 build-static-linux-arm64
 	@echo "All static Linux binaries built successfully"
+
+# Container image (ghcr.io). The Docker build context is a staging directory
+# holding prebuilt static musl binaries at binaries/<arch>/rumdl. CI populates
+# it from release artifacts; `make docker-binaries` populates it from local
+# cargo-zigbuild builds. VERSION defaults to the Cargo.toml version; CI passes
+# the release tag explicitly.
+DOCKER_IMAGE ?= ghcr.io/rvben/rumdl
+DOCKER_CONTEXT ?= target/docker
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+VERSION ?= $(shell awk -F '"' '/^version/ { print $$2; exit }' Cargo.toml)
+REVISION ?= $(shell git rev-parse HEAD)
+
+docker-binaries: build-static-all
+	mkdir -p $(DOCKER_CONTEXT)/binaries/amd64 $(DOCKER_CONTEXT)/binaries/arm64
+	cp target/x86_64-unknown-linux-musl/release/rumdl $(DOCKER_CONTEXT)/binaries/amd64/rumdl
+	cp target/aarch64-unknown-linux-musl/release/rumdl $(DOCKER_CONTEXT)/binaries/arm64/rumdl
+	@echo "Docker build context staged at: $(DOCKER_CONTEXT)"
+
+# Stage the latest *released* musl binaries into the build context, without
+# compiling anything. Lets CI (and a workstation without a musl toolchain)
+# validate the Dockerfile and make wiring in seconds on every push, so image
+# regressions surface before release time. `gh` needs GH_TOKEN in CI.
+docker-binaries-release:
+	rm -rf $(DOCKER_CONTEXT)/dl
+	mkdir -p $(DOCKER_CONTEXT)/dl $(DOCKER_CONTEXT)/binaries/amd64 $(DOCKER_CONTEXT)/binaries/arm64
+	gh release download --repo rvben/rumdl --pattern 'rumdl-*-unknown-linux-musl.tar.gz' --dir $(DOCKER_CONTEXT)/dl --clobber
+	tar -xzf $(DOCKER_CONTEXT)/dl/rumdl-*-x86_64-unknown-linux-musl.tar.gz -C $(DOCKER_CONTEXT)/binaries/amd64
+	tar -xzf $(DOCKER_CONTEXT)/dl/rumdl-*-aarch64-unknown-linux-musl.tar.gz -C $(DOCKER_CONTEXT)/binaries/arm64
+	@echo "Docker build context staged at: $(DOCKER_CONTEXT) (latest release binaries)"
+
+# Register QEMU binfmt handlers so non-native image platforms can run.
+# Needed on bare-Linux hosts (CI runners); Docker Desktop ships emulation
+# already, where this is a harmless no-op.
+docker-binfmt:
+	docker run --privileged --rm tonistiigi/binfmt --install all
+
+# Multi-platform builds need a docker-container buildx builder; the default
+# `docker` driver cannot assemble a multi-arch manifest. Created on demand,
+# identically on a workstation and in CI.
+docker-builder:
+	docker buildx inspect rumdl-builder >/dev/null 2>&1 || \
+		docker buildx create --name rumdl-builder --driver docker-container
+
+# Build the multi-arch image (stays in the buildx cache; use docker-push to publish).
+docker-build: docker-builder
+	docker buildx build \
+		--builder rumdl-builder \
+		--platform $(DOCKER_PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg REVISION=$(REVISION) \
+		-t $(DOCKER_IMAGE):$(VERSION) \
+		-t $(DOCKER_IMAGE):latest \
+		-f Dockerfile $(DOCKER_CONTEXT)
+
+# Build the image for every target platform and actually run each one:
+# --version must work and a check on a known-clean file must exit 0. The
+# non-native platform runs under QEMU emulation (see docker-binfmt), so a
+# broken ENTRYPOINT, a non-static binary, or a wrong-arch COPY is caught for
+# both architectures before anything is published.
+docker-verify:
+	mkdir -p $(DOCKER_CONTEXT)/verify
+	printf '# Sample\n\nA known-clean document.\n' > $(DOCKER_CONTEXT)/verify/sample.md
+	for platform in $$(echo "$(DOCKER_PLATFORMS)" | tr ',' ' '); do \
+		echo "==> Verifying $$platform" && \
+		docker buildx build \
+			--load \
+			--platform "$$platform" \
+			--build-arg VERSION=$(VERSION) \
+			--build-arg REVISION=$(REVISION) \
+			-t $(DOCKER_IMAGE):verify \
+			-f Dockerfile $(DOCKER_CONTEXT) && \
+		docker run --rm --platform "$$platform" $(DOCKER_IMAGE):verify --version && \
+		docker run --rm --platform "$$platform" \
+			-v "$$(pwd)/$(DOCKER_CONTEXT)/verify:/data" \
+			$(DOCKER_IMAGE):verify check --no-cache --no-config sample.md \
+		|| exit 1; \
+	done
+
+# Build and publish the multi-arch image with version + latest tags, with
+# BuildKit SBOM and provenance attestations attached to the manifest, then
+# assert the pushed manifests really contain every target platform.
+docker-push: docker-builder
+	docker buildx build \
+		--builder rumdl-builder \
+		--platform $(DOCKER_PLATFORMS) \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg REVISION=$(REVISION) \
+		--sbom=true \
+		--provenance=mode=max \
+		-t $(DOCKER_IMAGE):$(VERSION) \
+		-t $(DOCKER_IMAGE):latest \
+		--push \
+		-f Dockerfile $(DOCKER_CONTEXT)
+	for tag in $(VERSION) latest; do \
+		for platform in $$(echo "$(DOCKER_PLATFORMS)" | tr ',' ' '); do \
+			docker buildx imagetools inspect $(DOCKER_IMAGE):$$tag | grep -q "$$platform" \
+				|| { echo "ERROR: $(DOCKER_IMAGE):$$tag is missing $$platform"; exit 1; }; \
+		done; \
+	done
 
 test:
 	cargo nextest run --profile dev

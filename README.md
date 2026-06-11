@@ -254,6 +254,21 @@ Invoke-WebRequest -Uri "https://github.com/rvben/rumdl/releases/latest/download/
 Expand-Archive -Path "rumdl.zip" -DestinationPath "$env:USERPROFILE\.rumdl"
 ```
 
+### Using Docker
+
+Multi-arch images (amd64, arm64) are published to the GitHub Container Registry on every release. Mount your project at `/data` (the working directory inside the container):
+
+```bash
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" ghcr.io/rvben/rumdl:latest check .
+
+# Pin a specific version
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/data" ghcr.io/rvben/rumdl:0.3.0 check .
+```
+
+The image runs as a non-root user by default, so it never writes root-owned files into your project.
+Passing `--user` runs rumdl as your own user, which lets the lint cache (`.rumdl_cache`) be written into the mounted project with your ownership; without it the cache is skipped gracefully.
+The image contains only the static rumdl binary, so there is no shell to enter; pass rumdl arguments directly.
+
 ### Editor Plugins
 
 | Editor                              | Install                                                                                          |
