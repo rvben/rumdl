@@ -52,6 +52,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.13](https://github.com/rvben/rumdl/compare/v0.2.12...v0.2.13) - 2026-06-11
+
+### Added
+
+- **release**: publish multi-arch container image to ghcr.io ([2e3d70b](https://github.com/rvben/rumdl/commit/2e3d70bc2c3d2f23612dff9e4cddbb7f6fb15477))
+- **MD072**: add required-keys option to enforce frontmatter key presence ([7e8c78f](https://github.com/rvben/rumdl/commit/7e8c78f2c6ef104f1d7a748afcc840bc5ce5b237))
+- **config**: file-precise provenance in rumdl config output ([f401004](https://github.com/rvben/rumdl/commit/f4010049b7112e75f456221b0626829cb15b2090))
+
+### Fixed
+
+- **config**: probe the working directory for project config even when it is $HOME ([b49a2f8](https://github.com/rvben/rumdl/commit/b49a2f8507020956ee3d12153d022e9d5017787b))
+
 ## [0.2.12](https://github.com/rvben/rumdl/compare/v0.2.11...v0.2.12) - 2026-06-10
 
 ### Fixed
