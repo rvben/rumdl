@@ -57,6 +57,8 @@ pub struct UpwardWalk {
     exclusive_stop: Option<Boundary>,
     stop_at_git_root: bool,
     inclusive_stop: Option<Boundary>,
+    always_yield_start: bool,
+    started: bool,
 }
 
 impl UpwardWalk {
@@ -70,6 +72,8 @@ impl UpwardWalk {
             exclusive_stop: None,
             stop_at_git_root: false,
             inclusive_stop: None,
+            always_yield_start: false,
+            started: false,
         }
     }
 
@@ -91,6 +95,19 @@ impl UpwardWalk {
         self.inclusive_stop = Some(Boundary::new(root.to_path_buf()));
         self
     }
+
+    /// Yield the start directory even when it is the exclusive boundary; the
+    /// walk still ends there, so ancestors of the boundary are never probed.
+    ///
+    /// The exclusive boundary guards against the walk *escaping into* home
+    /// territory from a project below it. The start directory is different: it
+    /// is an explicitly chosen context (the cwd of a CLI run), so a config
+    /// there is a project config by intent, even when that directory happens to
+    /// be `$HOME` (pre-commit.ci sets `HOME` to the git checkout).
+    pub fn always_yield_start(mut self) -> Self {
+        self.always_yield_start = true;
+        self
+    }
 }
 
 impl Iterator for UpwardWalk {
@@ -104,10 +121,18 @@ impl Iterator for UpwardWalk {
         }
         self.remaining -= 1;
 
+        let is_start = !self.started;
+        self.started = true;
+
         if let Some(boundary) = &self.exclusive_stop
             && boundary.matches(&current)
         {
-            return None;
+            if !(is_start && self.always_yield_start) {
+                return None;
+            }
+            // The start is spared from the boundary, but the walk must still
+            // end here: directories above the boundary are never probed.
+            return Some(current);
         }
 
         let stop_after = (self.stop_at_git_root && current.join(".git").exists())
@@ -246,6 +271,76 @@ mod tests {
             visited.contains(&nested),
             "unrelated ghost boundary must not stop the walk early"
         );
+    }
+
+    #[test]
+    fn start_equal_to_exclusive_boundary_yields_nothing_by_default() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+
+        let visited: Vec<PathBuf> = UpwardWalk::new(&home).stop_below(Some(home.clone())).collect();
+        assert!(
+            visited.is_empty(),
+            "without the start exemption, a walk starting at the boundary must yield nothing"
+        );
+    }
+
+    #[test]
+    fn start_equal_to_exclusive_boundary_is_yielded_with_always_yield_start() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+
+        let visited: Vec<PathBuf> = UpwardWalk::new(&home)
+            .stop_below(Some(home.clone()))
+            .always_yield_start()
+            .collect();
+        assert_eq!(
+            visited,
+            vec![home],
+            "the start directory must be probed even when it is the boundary, and the walk must end there"
+        );
+    }
+
+    #[test]
+    fn always_yield_start_does_not_exempt_ancestors_from_the_boundary() {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        let project = home.join("project");
+        fs::create_dir_all(&project).unwrap();
+
+        let visited: Vec<PathBuf> = UpwardWalk::new(&project)
+            .stop_below(Some(home.clone()))
+            .always_yield_start()
+            .collect();
+        assert_eq!(
+            visited,
+            vec![project],
+            "the exemption applies only to the start directory; the boundary still blocks ancestors"
+        );
+    }
+
+    // Uses Unix symlinks; Windows symlink creation requires elevated privileges.
+    #[cfg(unix)]
+    #[test]
+    fn always_yield_start_matches_boundary_through_differing_path_representations() {
+        let temp = tempdir().unwrap();
+        let real_home = temp.path().join("real-home");
+        fs::create_dir_all(&real_home).unwrap();
+        let link = temp.path().join("link-home");
+        if std::os::unix::fs::symlink(&real_home, &link).is_err() {
+            return;
+        }
+
+        // Start at the real path with the symlink as boundary: the canonical
+        // comparison must recognize them as the same directory, yield the start,
+        // and end the walk there (never probing above the home directory).
+        let visited: Vec<PathBuf> = UpwardWalk::new(&real_home)
+            .stop_below(Some(link))
+            .always_yield_start()
+            .collect();
+        assert_eq!(visited, vec![real_home]);
     }
 
     #[test]

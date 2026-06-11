@@ -919,3 +919,201 @@ fn test_multi_path_inline_config_override_reaches_subdir_groups() {
          subdir group, overriding its line-length of 40. Output: {combined}"
     );
 }
+
+#[test]
+#[cfg(unix)]
+fn test_home_equals_cwd_discovers_pyproject_config() {
+    // pre-commit.ci sets $HOME to the git checkout directory. The home boundary
+    // must not blind discovery to the cwd itself: a `pyproject.toml` with
+    // `[tool.rumdl]` in the directory rumdl runs from is a project config even
+    // when that directory is also $HOME. (Issue #663: there is no user-config
+    // fallback for pyproject.toml, so without the cwd exemption the config is
+    // silently ignored.)
+    let temp_dir = tempdir().unwrap();
+    let home = temp_dir.path();
+    let xdg = home.join("xdg");
+    fs::create_dir_all(&xdg).unwrap(); // empty: no platform user config
+
+    fs::write(
+        home.join("pyproject.toml"),
+        "[tool.rumdl]\ndisable = [\"first-line-heading\"]\n",
+    )
+    .unwrap();
+    fs::write(home.join("TEST.md"), "Test\n").unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "."])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.contains("MD041"),
+        "MD041 must NOT fire: pyproject.toml in the cwd disables it even when cwd == $HOME. Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_home_equals_cwd_discovers_markdownlint_config() {
+    // Same HOME == cwd scenario for a markdownlint-format config, which has no
+    // user-config fallback at all: without the cwd exemption it is dead weight.
+    let temp_dir = tempdir().unwrap();
+    let home = temp_dir.path();
+    let xdg = home.join("xdg");
+    fs::create_dir_all(&xdg).unwrap();
+
+    fs::write(home.join(".markdownlint.yaml"), "MD041: false\n").unwrap();
+    fs::write(home.join("TEST.md"), "Test\n").unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "."])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.contains("MD041"),
+        "MD041 must NOT fire: .markdownlint.yaml in the cwd disables it even when cwd == $HOME. Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_home_equals_cwd_rumdl_dotfile_is_standalone_project_config() {
+    // With cwd == $HOME, a `.rumdl.toml` in the cwd is a *project* config
+    // (standalone, discovered before any user config), not merely the
+    // home-dotfile user fallback. The platform user config exists here and
+    // would otherwise win the user-config precedence race; project discovery
+    // must short-circuit before user config is consulted at all.
+    let temp_dir = tempdir().unwrap();
+    let home = temp_dir.path();
+    let xdg = home.join("xdg");
+    fs::create_dir_all(xdg.join("rumdl")).unwrap();
+
+    // Platform user config does NOT disable MD041; the cwd project config does.
+    fs::write(xdg.join("rumdl").join("rumdl.toml"), "[MD013]\nline-length = 200\n").unwrap();
+    fs::write(home.join(".rumdl.toml"), "[global]\ndisable = [\"MD041\"]\n").unwrap();
+    fs::write(home.join("TEST.md"), "Test\n").unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "."])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.contains("MD041"),
+        "MD041 must NOT fire: .rumdl.toml in the cwd is a standalone project config when cwd == $HOME. Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_home_equals_cwd_config_reaches_subdirectory_files() {
+    // The pre-commit.ci layout linting a whole tree: HOME == cwd == repo root
+    // with the config at the root and files in subdirectories. Per-file
+    // grouping must keep resolving subdir files against the root config.
+    let temp_dir = tempdir().unwrap();
+    let home = temp_dir.path();
+    let xdg = home.join("xdg");
+    let docs = home.join("docs");
+    fs::create_dir_all(&xdg).unwrap();
+    fs::create_dir_all(&docs).unwrap();
+    fs::create_dir_all(home.join(".git")).unwrap();
+
+    fs::write(
+        home.join("pyproject.toml"),
+        "[tool.rumdl]\ndisable = [\"first-line-heading\"]\n",
+    )
+    .unwrap();
+    fs::write(home.join("TEST.md"), "Test\n").unwrap();
+    fs::write(docs.join("GUIDE.md"), "Guide\n").unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "TEST.md", "docs/GUIDE.md"])
+        .current_dir(home)
+        .env("HOME", home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.contains("MD041"),
+        "MD041 must NOT fire for any file: the root config applies to subdirectory files \
+         when cwd == $HOME. Output: {combined}"
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn test_home_as_ancestor_still_excluded_from_project_discovery() {
+    // Regression guard for the original home-boundary fix: when the cwd is a
+    // project *below* $HOME, a `.rumdl.toml` sitting in $HOME itself must stay
+    // user-level. The platform user config keeps precedence over it, so its
+    // settings must win. The cwd exemption applies to the start directory only.
+    let temp_dir = tempdir().unwrap();
+    let root = temp_dir.path();
+    let home = root.join("home");
+    let project = home.join("project");
+    let xdg = root.join("xdg");
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(xdg.join("rumdl")).unwrap();
+
+    // Home dotfile tightens MD013 to 40 (would fire on the line below);
+    // the platform user config disables MD013 and must win.
+    fs::write(home.join(".rumdl.toml"), "[MD013]\nline-length = 40\n").unwrap();
+    fs::write(
+        xdg.join("rumdl").join("rumdl.toml"),
+        "[global]\ndisable = [\"MD013\"]\n",
+    )
+    .unwrap();
+
+    let long_line = "word word word word word word word word word over forty characters now today here.";
+    fs::write(project.join("a.md"), format!("# A\n\n{long_line}\n")).unwrap();
+
+    let rumdl_exe = env!("CARGO_BIN_EXE_rumdl");
+    let output = Command::new(rumdl_exe)
+        .args(["check", "--no-cache", "a.md"])
+        .current_dir(&project)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &xdg)
+        .output()
+        .expect("Failed to execute command");
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let combined = format!("{stdout}{stderr}");
+
+    assert!(
+        !combined.contains("MD013"),
+        "MD013 must NOT fire: ~/.rumdl.toml stays user-level below the platform config \
+         when the cwd is a project under $HOME. Output: {combined}"
+    );
+}

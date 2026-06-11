@@ -377,8 +377,12 @@ impl SourcedConfig<ConfigLoaded> {
     /// The walk stops at the home directory: a config file located in `$HOME`
     /// itself is user-level, not a project config, and must reach the loader only
     /// through the user-config fallback (`load_user_config`) so the platform
-    /// user-config directory keeps precedence over `~/.rumdl.toml`. `home_override`
-    /// supplies the boundary for tests; production resolves the real home directory.
+    /// user-config directory keeps precedence over `~/.rumdl.toml`. The cwd is
+    /// exempt from that boundary: it is an explicitly chosen project context, so
+    /// its configs apply even when the cwd *is* `$HOME` (pre-commit.ci sets `HOME`
+    /// to the git checkout, and `pyproject.toml` has no user-config fallback).
+    /// `home_override` supplies the boundary for tests; production resolves the
+    /// real home directory.
     fn discover_config_upward(
         home_override: Option<&Path>,
     ) -> Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> {
@@ -395,6 +399,7 @@ impl SourcedConfig<ConfigLoaded> {
         // winner and the silently-shadowed siblings are computed identically.
         let (config_path, config_dir, shadow) = UpwardWalk::new(&start_dir)
             .stop_below(Self::resolve_home_boundary(home_override))
+            .always_yield_start()
             .stop_at_git_root()
             .find_map(|dir| {
                 rumdl_configs_in_dir(&dir).into_iter().next().map(|winner| {
@@ -412,7 +417,10 @@ impl SourcedConfig<ConfigLoaded> {
     /// Discover markdownlint configuration file by traversing up the directory tree.
     /// Similar to discover_config_upward but for .markdownlint.yaml/json files, and
     /// bounded at the home directory for the same reason: a markdownlint config in
-    /// `$HOME` is user-level, not a project config.
+    /// `$HOME` is user-level, not a project config. The cwd is exempt from the
+    /// boundary just like rumdl config discovery, and markdownlint files have no
+    /// user-config fallback at all, so without the exemption a config in a
+    /// `HOME == cwd` checkout would be ignored entirely.
     fn discover_markdownlint_config_upward(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
         let start_dir = match std::env::current_dir() {
             Ok(dir) => dir,
@@ -424,6 +432,7 @@ impl SourcedConfig<ConfigLoaded> {
 
         UpwardWalk::new(&start_dir)
             .stop_below(Self::resolve_home_boundary(home_override))
+            .always_yield_start()
             .stop_at_git_root()
             .find_map(|dir| {
                 MARKDOWNLINT_CONFIG_FILES

@@ -47,6 +47,11 @@ your project root.
 - It walks up from the working directory, checking each level for the files above;
   the first match wins.
 - It stops at the project root (a directory containing `.git`) or after 100 levels.
+- It does not walk up into your home directory: a config file sitting in `$HOME`
+  itself is treated as [user-level configuration](#user-level-configuration), not as
+  the project config of everything under your home. The working directory itself is
+  always checked, though - even when it *is* `$HOME` (some CI services, such as
+  pre-commit.ci, run with `HOME` set to the checkout directory).
 - When you lint a tree (for example `rumdl check .`), configuration is resolved
   **per directory** - a subdirectory with its own config uses that config. See
   [Per-Directory Configuration](../global-settings.md#per-directory-configuration).
