@@ -269,6 +269,21 @@ The image runs as a non-root user by default, so it never writes root-owned file
 Passing `--user` runs rumdl as your own user, which lets the lint cache (`.rumdl_cache`) be written into the mounted project with your ownership; without it the cache is skipped gracefully.
 The image contains only the static rumdl binary, so there is no shell to enter; pass rumdl arguments directly.
 
+For environments that need a shell inside the image, such as GitLab CI job containers, an Alpine-based flavour is published as `ghcr.io/rvben/rumdl:alpine` (or pin `:<version>-alpine`).
+It has no rumdl entrypoint; invoke the binary by name:
+
+```bash
+docker run --rm -v "$PWD:/data" ghcr.io/rvben/rumdl:alpine rumdl check .
+```
+
+```yaml
+# .gitlab-ci.yml
+lint-markdown:
+  image: ghcr.io/rvben/rumdl:alpine
+  script:
+    - rumdl check .
+```
+
 ### Editor Plugins
 
 | Editor                              | Install                                                                                          |

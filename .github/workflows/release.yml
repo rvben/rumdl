@@ -1002,7 +1002,7 @@ jobs:
       - name: Test container publish (dry run)
         if: ${{ inputs.dry_run == true }}
         run: |
-          echo "DRY RUN: Would push ghcr.io/rvben/rumdl:${{ steps.version.outputs.version }} and :latest"
+          echo "DRY RUN: Would push ghcr.io/rvben/rumdl:${{ steps.version.outputs.version }}, :latest, :${{ steps.version.outputs.version }}-alpine, and :alpine"
           make docker-build VERSION='${{ steps.version.outputs.version }}'
 
   publish-winget:

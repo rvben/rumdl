@@ -81,9 +81,16 @@ build-static-all: build-static-linux-x64 build-static-linux-arm64
 # it from release artifacts; `make docker-binaries` populates it from local
 # cargo-zigbuild builds. VERSION defaults to the Cargo.toml version; CI passes
 # the release tag explicitly.
+#
+# Two image flavours, both Dockerfile targets: scratch (binary only) owns
+# the bare tags (:VERSION, :latest); alpine (binary on an Alpine base, with
+# a shell for CI runners such as GitLab) gets suffixed tags
+# (:VERSION-alpine, :alpine).
 DOCKER_IMAGE ?= ghcr.io/rvben/rumdl
 DOCKER_CONTEXT ?= target/docker
 DOCKER_PLATFORMS ?= linux/amd64,linux/arm64
+DOCKER_FLAVORS ?= scratch alpine
+ALPINE_VERSION ?= 3.24
 VERSION ?= $(shell awk -F '"' '/^version/ { print $$2; exit }' Cargo.toml)
 REVISION ?= $(shell git rev-parse HEAD)
 
@@ -113,65 +120,106 @@ docker-binfmt:
 
 # Multi-platform builds need a docker-container buildx builder; the default
 # `docker` driver cannot assemble a multi-arch manifest. Created on demand,
-# identically on a workstation and in CI.
+# identically on a workstation and in CI. DOCKER_BUILDER is overridable so a
+# pre-provisioned builder (e.g. one allowed to push to a local registry for
+# an end-to-end docker-push test) can be substituted.
+DOCKER_BUILDER ?= rumdl-builder
+
 docker-builder:
-	docker buildx inspect rumdl-builder >/dev/null 2>&1 || \
-		docker buildx create --name rumdl-builder --driver docker-container
+	docker buildx inspect $(DOCKER_BUILDER) >/dev/null 2>&1 || \
+		docker buildx create --name $(DOCKER_BUILDER) --driver docker-container
 
-# Build the multi-arch image (stays in the buildx cache; use docker-push to publish).
+# Build the multi-arch image for every flavour (stays in the buildx cache;
+# use docker-push to publish).
 docker-build: docker-builder
-	docker buildx build \
-		--builder rumdl-builder \
-		--platform $(DOCKER_PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg REVISION=$(REVISION) \
-		-t $(DOCKER_IMAGE):$(VERSION) \
-		-t $(DOCKER_IMAGE):latest \
-		-f Dockerfile $(DOCKER_CONTEXT)
-
-# Build the image for every target platform and actually run each one:
-# --version must work and a check on a known-clean file must exit 0. The
-# non-native platform runs under QEMU emulation (see docker-binfmt), so a
-# broken ENTRYPOINT, a non-static binary, or a wrong-arch COPY is caught for
-# both architectures before anything is published.
-docker-verify:
-	mkdir -p $(DOCKER_CONTEXT)/verify
-	printf '# Sample\n\nA known-clean document.\n' > $(DOCKER_CONTEXT)/verify/sample.md
-	for platform in $$(echo "$(DOCKER_PLATFORMS)" | tr ',' ' '); do \
-		echo "==> Verifying $$platform" && \
+	for flavor in $(DOCKER_FLAVORS); do \
+		case $$flavor in \
+			scratch) tags="-t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest" ;; \
+			*) tags="-t $(DOCKER_IMAGE):$(VERSION)-$$flavor -t $(DOCKER_IMAGE):$$flavor" ;; \
+		esac && \
+		echo "==> Building flavour $$flavor" && \
 		docker buildx build \
-			--load \
-			--platform "$$platform" \
+			--builder $(DOCKER_BUILDER) \
+			--platform $(DOCKER_PLATFORMS) \
 			--build-arg VERSION=$(VERSION) \
 			--build-arg REVISION=$(REVISION) \
-			-t $(DOCKER_IMAGE):verify \
-			-f Dockerfile $(DOCKER_CONTEXT) && \
-		docker run --rm --platform "$$platform" $(DOCKER_IMAGE):verify --version && \
-		docker run --rm --platform "$$platform" \
-			-v "$$(pwd)/$(DOCKER_CONTEXT)/verify:/data" \
-			$(DOCKER_IMAGE):verify check --no-cache --no-config sample.md \
+			--build-arg ALPINE_VERSION=$(ALPINE_VERSION) \
+			--target $$flavor-image \
+			$$tags \
+			-f Dockerfile $(DOCKER_CONTEXT) \
 		|| exit 1; \
 	done
 
-# Build and publish the multi-arch image with version + latest tags, with
-# BuildKit SBOM and provenance attestations attached to the manifest, then
-# assert the pushed manifests really contain every target platform.
-docker-push: docker-builder
-	docker buildx build \
-		--builder rumdl-builder \
-		--platform $(DOCKER_PLATFORMS) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg REVISION=$(REVISION) \
-		--sbom=true \
-		--provenance=mode=max \
-		-t $(DOCKER_IMAGE):$(VERSION) \
-		-t $(DOCKER_IMAGE):latest \
-		--push \
-		-f Dockerfile $(DOCKER_CONTEXT)
-	for tag in $(VERSION) latest; do \
+# Build every flavour for every target platform and actually run each one:
+# --version must work and a check on a known-clean file must exit 0. The
+# non-native platform runs under QEMU emulation (see docker-binfmt), so a
+# broken ENTRYPOINT, a non-static binary, or a wrong-arch COPY is caught for
+# both architectures before anything is published. The scratch flavour has
+# rumdl as ENTRYPOINT; the alpine flavour invokes it by name and must also
+# start a shell, since a shell in the image is its reason to exist.
+docker-verify:
+	mkdir -p $(DOCKER_CONTEXT)/verify
+	printf '# Sample\n\nA known-clean document.\n' > $(DOCKER_CONTEXT)/verify/sample.md
+	for flavor in $(DOCKER_FLAVORS); do \
+		case $$flavor in scratch) run="" ;; *) run="rumdl" ;; esac && \
 		for platform in $$(echo "$(DOCKER_PLATFORMS)" | tr ',' ' '); do \
-			docker buildx imagetools inspect $(DOCKER_IMAGE):$$tag | grep -q "$$platform" \
-				|| { echo "ERROR: $(DOCKER_IMAGE):$$tag is missing $$platform"; exit 1; }; \
+			echo "==> Verifying flavour $$flavor on $$platform" && \
+			docker buildx build \
+				--load \
+				--platform "$$platform" \
+				--build-arg VERSION=$(VERSION) \
+				--build-arg REVISION=$(REVISION) \
+				--build-arg ALPINE_VERSION=$(ALPINE_VERSION) \
+				--target $$flavor-image \
+				-t $(DOCKER_IMAGE):verify-$$flavor \
+				-f Dockerfile $(DOCKER_CONTEXT) && \
+			docker run --rm --platform "$$platform" $(DOCKER_IMAGE):verify-$$flavor $$run --version && \
+			docker run --rm --platform "$$platform" \
+				-v "$$(pwd)/$(DOCKER_CONTEXT)/verify:/data" \
+				$(DOCKER_IMAGE):verify-$$flavor $$run check --no-cache --no-config sample.md \
+			|| exit 1; \
+			if [ "$$flavor" != "scratch" ]; then \
+				docker run --rm --platform "$$platform" \
+					$(DOCKER_IMAGE):verify-$$flavor /bin/sh -c 'rumdl --version' \
+				|| exit 1; \
+			fi; \
+		done; \
+	done
+
+# Build and publish the multi-arch images for every flavour, with BuildKit
+# SBOM and provenance attestations attached to the manifests, then assert
+# the pushed manifests really contain every target platform.
+docker-push: docker-builder
+	for flavor in $(DOCKER_FLAVORS); do \
+		case $$flavor in \
+			scratch) tags="-t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest" ;; \
+			*) tags="-t $(DOCKER_IMAGE):$(VERSION)-$$flavor -t $(DOCKER_IMAGE):$$flavor" ;; \
+		esac && \
+		echo "==> Pushing flavour $$flavor" && \
+		docker buildx build \
+			--builder $(DOCKER_BUILDER) \
+			--platform $(DOCKER_PLATFORMS) \
+			--build-arg VERSION=$(VERSION) \
+			--build-arg REVISION=$(REVISION) \
+			--build-arg ALPINE_VERSION=$(ALPINE_VERSION) \
+			--sbom=true \
+			--provenance=mode=max \
+			--target $$flavor-image \
+			$$tags \
+			--push \
+			-f Dockerfile $(DOCKER_CONTEXT) \
+		|| exit 1; \
+	done
+	for flavor in $(DOCKER_FLAVORS); do \
+		case $$flavor in \
+			scratch) tags="$(VERSION) latest" ;; \
+			*) tags="$(VERSION)-$$flavor $$flavor" ;; \
+		esac && \
+		for tag in $$tags; do \
+			for platform in $$(echo "$(DOCKER_PLATFORMS)" | tr ',' ' '); do \
+				docker buildx imagetools inspect $(DOCKER_IMAGE):$$tag | grep -q "$$platform" \
+					|| { echo "ERROR: $(DOCKER_IMAGE):$$tag is missing $$platform"; exit 1; }; \
+			done; \
 		done; \
 	done
 
