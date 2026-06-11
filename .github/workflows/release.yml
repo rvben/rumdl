@@ -886,11 +886,39 @@ jobs:
             https://api.github.com/repos/rvben/homebrew-rumdl/dispatches \
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
+      - name: Dry Run Summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "## 🧪 Dry Run Complete!"
+          echo ""
+          echo "The release pipeline executed successfully in dry-run mode."
+          echo "All artifacts were built but nothing was published."
+          echo ""
+          echo "To do an actual release:"
+          echo "1. Uncheck 'Dry run mode' when running manually, OR"
+          echo "2. Create and push a version tag (e.g., v0.0.85)"
+
+  # In its own job so a failure here (a convenience pointer, not a publish)
+  # can never block publish-container / publish-winget, which need: release.
+  # The v0.2.13 release failed exactly this way: the GITHUB_TOKEN ref update
+  # was rejected with 403 and the still-unpublished container and winget jobs
+  # were skipped over a tag nicety.
+  update-major-tag:
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ inputs.dry_run != true }}
+    permissions:
+      contents: write       # Move the major version tag (e.g. v0)
+    steps:
       - name: Update major version tag
-        if: ${{ inputs.dry_run != true }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "Current ref is not a release tag; skipping major tag update."
+            exit 0
+          fi
+
           # Extract major version (e.g., v0 from v0.1.60)
           TAG_NAME=${GITHUB_REF#refs/tags/}
           MAJOR_VERSION=${TAG_NAME%%.*}
@@ -911,25 +939,6 @@ jobs:
           fi
 
           echo "Users can now use: rvben/rumdl@$MAJOR_VERSION"
-
-      - name: Test major version tag update (dry run)
-        if: ${{ inputs.dry_run == true }}
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          MAJOR_VERSION=${TAG_NAME%%.*}
-          echo "DRY RUN: Would update $MAJOR_VERSION tag to point to $TAG_NAME"
-
-      - name: Dry Run Summary
-        if: ${{ inputs.dry_run == true }}
-        run: |
-          echo "## 🧪 Dry Run Complete!"
-          echo ""
-          echo "The release pipeline executed successfully in dry-run mode."
-          echo "All artifacts were built but nothing was published."
-          echo ""
-          echo "To do an actual release:"
-          echo "1. Uncheck 'Dry run mode' when running manually, OR"
-          echo "2. Create and push a version tag (e.g., v0.0.85)"
 
   publish-container:
     runs-on: ubuntu-latest
