@@ -53,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.14](https://github.com/rvben/rumdl/compare/v0.2.13...v0.2.14) - 2026-06-11
+
+### Added
+
+- **release**: publish an alpine container image flavour ([10fc739](https://github.com/rvben/rumdl/commit/10fc7398d1dc450e110c622b2f1d0f7802af02b2))
+
+### Fixed
+
+- **discovery**: honor config include patterns with non-standard extensions ([4436dd7](https://github.com/rvben/rumdl/commit/4436dd773f2803afb5026f3a72f8f54304c6a5fe))
+
 ## [0.2.13](https://github.com/rvben/rumdl/compare/v0.2.12...v0.2.13) - 2026-06-11
 
 ### Added
