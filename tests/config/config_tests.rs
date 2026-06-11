@@ -3124,6 +3124,47 @@ key_order = ["description", "title"]
 }
 
 #[test]
+fn test_md072_required_keys_loads_from_config_and_warns() {
+    // End-to-end through the production config path: `required-keys` parses
+    // from TOML (kebab-case alias), is not flagged as unknown, and the
+    // configured rule reports a missing key on real content.
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let config_path = temp_dir.path().join(".rumdl.toml");
+
+    let config_content = r#"
+[MD072]
+enabled = true
+required-keys = ["title", "date"]
+"#;
+    fs::write(&config_path, config_content).expect("Failed to write config");
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true)
+        .expect("Should load config");
+
+    let config: Config = sourced.into_validated_unchecked().into();
+    let rules = all_rules(&config);
+    let registry = RuleRegistry::from_rules(&rules);
+
+    let valid_keys = registry
+        .config_keys_for("MD072")
+        .expect("MD072 should exist in registry");
+    assert!(
+        valid_keys.contains("required-keys") || valid_keys.contains("required_keys"),
+        "required-keys/required_keys should be a valid config key for MD072, got: {valid_keys:?}",
+    );
+
+    let md072 = rules
+        .iter()
+        .find(|r| r.name() == "MD072")
+        .expect("MD072 should be in the configured rule set");
+    let content = "---\ntitle: Test\n---\n\n# Heading\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let warnings = md072.check(&ctx).expect("check should succeed");
+    assert_eq!(warnings.len(), 1, "exactly the missing 'date' key should be reported");
+    assert!(warnings[0].message.contains("missing required key 'date'"));
+}
+
+#[test]
 fn test_md072_unknown_option_still_detected() {
     // Genuinely unknown options should still be flagged
     let config = Config::default();

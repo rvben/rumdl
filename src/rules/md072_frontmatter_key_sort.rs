@@ -26,6 +26,19 @@ pub struct MD072Config {
     /// Example: `key_order = ["title", "date", "author", "tags"]`
     #[serde(default, alias = "key-order")]
     pub key_order: Option<Vec<String>>,
+
+    /// Keys that must be present in the frontmatter. Each missing key is
+    /// reported, matched case-insensitively against top-level keys (like
+    /// `key_order`). Independent of `key_order`: you can order many keys while
+    /// requiring only a few. These warnings carry no fix because rumdl cannot
+    /// invent meaningful values for missing keys.
+    ///
+    /// Only applies to files that have frontmatter; requiring frontmatter to
+    /// exist at all is out of scope for this rule.
+    ///
+    /// Example: `required_keys = ["title", "date"]`
+    #[serde(default, alias = "required-keys")]
+    pub required_keys: Vec<String>,
 }
 
 impl RuleConfig for MD072Config {
@@ -70,9 +83,11 @@ impl MD072FrontmatterKeySort {
 
         for (idx, line) in frontmatter_lines.iter().enumerate() {
             // Top-level keys have no leading whitespace and contain a colon
+            // (searched outside a leading quoted key, which may itself
+            // contain one, e.g. "og:title").
             if !line.starts_with(' ')
                 && !line.starts_with('\t')
-                && let Some(colon_pos) = line.find(':')
+                && let Some(colon_pos) = Self::separator_pos_outside_quoted_key(line, ':')
             {
                 let raw = line[..colon_pos].trim();
                 if !raw.is_empty() && !raw.starts_with('#') {
@@ -108,12 +123,23 @@ impl MD072FrontmatterKeySort {
                 break;
             }
             // Top-level keys have no leading whitespace and contain =
+            // (searched outside a leading quoted key, which may itself
+            // contain one, e.g. "a=b").
             if !line.starts_with(' ')
                 && !line.starts_with('\t')
-                && let Some(eq_pos) = line.find('=')
+                && let Some(eq_pos) = Self::separator_pos_outside_quoted_key(line, '=')
             {
-                let key = line[..eq_pos].trim();
-                if !key.is_empty() {
+                let raw = line[..eq_pos].trim();
+                if !raw.is_empty() {
+                    // Compare by the key's content, not the surrounding quote
+                    // characters: a TOML basic (`"key"`) or literal (`'key'`)
+                    // quoted key must sort and match like its bare form ('"'
+                    // is ASCII 34 and would sort before any unquoted key).
+                    let key = raw
+                        .strip_prefix('"')
+                        .and_then(|k| k.strip_suffix('"'))
+                        .or_else(|| raw.strip_prefix('\'').and_then(|k| k.strip_suffix('\'')))
+                        .unwrap_or(raw);
                     keys.push((idx, key.to_string()));
                 }
             }
@@ -234,6 +260,139 @@ impl MD072FrontmatterKeySort {
             pos_a.cmp(&pos_b)
         });
     }
+
+    /// Byte position of `separator` outside a leading quoted key: a quoted
+    /// key (`"og:title":`, `"a=b" =`) may contain the separator character,
+    /// so the search starts after the closing quote.
+    fn separator_pos_outside_quoted_key(line: &str, separator: char) -> Option<usize> {
+        let after_quote = if let Some(rest) = line.strip_prefix('"') {
+            rest.find('"').map(|i| i + 2)
+        } else if let Some(rest) = line.strip_prefix('\'') {
+            rest.find('\'').map(|i| i + 2)
+        } else {
+            None
+        };
+        match after_quote {
+            Some(start) => line[start..].find(separator).map(|i| start + i),
+            None => line.find(separator),
+        }
+    }
+
+    /// The top-level key a raw TOML key expression defines. A quoted key is
+    /// atomic (`"a.b"` defines `a.b`); otherwise the root of a dotted path
+    /// (`params.seo` defines `params`).
+    fn toml_root_key(raw: &str) -> &str {
+        if let Some(rest) = raw.strip_prefix('"') {
+            if let Some(end) = rest.find('"') {
+                return &rest[..end];
+            }
+        } else if let Some(rest) = raw.strip_prefix('\'')
+            && let Some(end) = rest.find('\'')
+        {
+            return &rest[..end];
+        }
+        raw.split('.').next().unwrap_or(raw).trim()
+    }
+
+    /// Every top-level key the TOML frontmatter defines, for the presence
+    /// check. Broader than `extract_toml_keys` (which is scoped to what the
+    /// sort check orders): dotted assignments count by their root
+    /// (`params.seo = true` defines `params`), and table headers count too
+    /// (`[taxonomies]`, `[[authors]]`, `[params.seo] # comment`). Assignments
+    /// after the first table header are nested inside that table, not
+    /// top-level.
+    fn extract_toml_presence_keys(frontmatter_lines: &[&str]) -> Vec<String> {
+        let mut keys = Vec::new();
+        let mut in_tables = false;
+
+        for line in frontmatter_lines {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if trimmed.starts_with('[') {
+                in_tables = true;
+                // Take the bracketed expression only: a header may carry an
+                // inline comment after the closing bracket.
+                let inner = trimmed
+                    .strip_prefix("[[")
+                    .and_then(|s| s.split_once("]]").map(|(inner, _)| inner))
+                    .or_else(|| {
+                        trimmed
+                            .strip_prefix('[')
+                            .and_then(|s| s.split_once(']').map(|(inner, _)| inner))
+                    });
+                if let Some(inner) = inner {
+                    let key = Self::toml_root_key(inner.trim());
+                    if !key.is_empty() {
+                        keys.push(key.to_string());
+                    }
+                }
+                continue;
+            }
+            if !in_tables
+                && !line.starts_with(' ')
+                && !line.starts_with('\t')
+                && let Some(eq_pos) = Self::separator_pos_outside_quoted_key(line, '=')
+            {
+                let key = Self::toml_root_key(line[..eq_pos].trim());
+                if !key.is_empty() {
+                    keys.push(key.to_string());
+                }
+            }
+        }
+
+        keys
+    }
+
+    /// Parse the JSON frontmatter and return its top-level keys, in no
+    /// particular order (`serde_json::Map` sorts them). `None` when the JSON
+    /// does not parse as an object.
+    fn parse_json_top_level_keys(frontmatter_lines: &[&str]) -> Option<Vec<String>> {
+        let json_content = format!("{{{}}}", frontmatter_lines.join("\n"));
+        match serde_json::from_str::<serde_json::Value>(&json_content) {
+            Ok(serde_json::Value::Object(map)) => Some(map.keys().cloned().collect()),
+            _ => None,
+        }
+    }
+
+    /// Warnings for configured required keys absent from the frontmatter.
+    ///
+    /// Matching is case-insensitive against top-level keys, consistent with how
+    /// `key_order` matches. The warning spans the whole frontmatter block (the
+    /// opening fence through the closing fence): the absence belongs to the
+    /// block, not to any line in it, and the range lets an inline disable
+    /// comment anywhere inside the frontmatter suppress the warning, like it
+    /// does for the sort warnings. No fix is attached because rumdl cannot
+    /// invent a meaningful value.
+    fn missing_required_key_warnings(
+        &self,
+        present_keys: &[String],
+        format: &str,
+        fence_len: usize,
+        fm_end_line: usize,
+    ) -> Vec<LintWarning> {
+        if self.config.required_keys.is_empty() {
+            return Vec::new();
+        }
+
+        let present: Vec<String> = present_keys.iter().map(|k| k.to_lowercase()).collect();
+        self.config
+            .required_keys
+            .iter()
+            .filter(|required| !present.contains(&required.to_lowercase()))
+            .map(|required| LintWarning {
+                rule_name: Some(self.name().to_string()),
+                message: format!("{format} frontmatter is missing required key '{required}'"),
+                line: 1,
+                column: 1,
+                end_line: fm_end_line.max(1),
+                end_column: fence_len + 1,
+                severity: Severity::Warning,
+                fix: None,
+            })
+            .collect()
+    }
 }
 
 impl Rule for MD072FrontmatterKeySort {
@@ -258,11 +417,15 @@ impl Rule for MD072FrontmatterKeySort {
         match fm_type {
             FrontMatterType::Yaml => {
                 let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
+                let keys = Self::extract_yaml_keys(&frontmatter_lines);
+
+                let key_names: Vec<String> = keys.iter().map(|(_, key)| key.clone()).collect();
+                warnings.extend(self.missing_required_key_warnings(&key_names, "YAML", 3, ctx.front_matter_end_line()));
+
                 if frontmatter_lines.is_empty() {
                     return Ok(warnings);
                 }
 
-                let keys = Self::extract_yaml_keys(&frontmatter_lines);
                 let key_order = self.config.key_order.as_deref();
                 let Some((key_idx, out_of_place, should_come_after)) =
                     Self::find_first_unsorted_indexed_pair(&keys, key_order)
@@ -300,10 +463,11 @@ impl Rule for MD072FrontmatterKeySort {
                 // span the raw key (quotes included) as it appears on the line.
                 let end_column = frontmatter_lines
                     .get(key_idx)
-                    .and_then(|line| line.split_once(':'))
-                    .map_or(out_of_place.chars().count() + 1, |(key, _)| {
-                        key.trim().chars().count() + 1
-                    });
+                    .and_then(|line| {
+                        Self::separator_pos_outside_quoted_key(line, ':')
+                            .map(|pos| line[..pos].trim().chars().count() + 1)
+                    })
+                    .unwrap_or(out_of_place.chars().count() + 1);
 
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -318,11 +482,18 @@ impl Rule for MD072FrontmatterKeySort {
             }
             FrontMatterType::Toml => {
                 let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
+                let keys = Self::extract_toml_keys(&frontmatter_lines);
+
+                // Presence uses a broader extraction than the sort check:
+                // table headers and the roots of dotted assignments define
+                // top-level keys too.
+                let key_names = Self::extract_toml_presence_keys(&frontmatter_lines);
+                warnings.extend(self.missing_required_key_warnings(&key_names, "TOML", 3, ctx.front_matter_end_line()));
+
                 if frontmatter_lines.is_empty() {
                     return Ok(warnings);
                 }
 
-                let keys = Self::extract_toml_keys(&frontmatter_lines);
                 let key_order = self.config.key_order.as_deref();
                 let Some((key_idx, out_of_place, should_come_after)) =
                     Self::find_first_unsorted_indexed_pair(&keys, key_order)
@@ -355,24 +526,49 @@ impl Rule for MD072FrontmatterKeySort {
                     )
                 };
 
+                // out_of_place has surrounding quotes stripped for sorting, so
+                // span the raw key (quotes included) as it appears on the line.
+                let end_column = frontmatter_lines
+                    .get(key_idx)
+                    .and_then(|line| {
+                        Self::separator_pos_outside_quoted_key(line, '=')
+                            .map(|pos| line[..pos].trim().chars().count() + 1)
+                    })
+                    .unwrap_or(out_of_place.chars().count() + 1);
+
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message,
                     line: key_line,
                     column: 1,
                     end_line: key_line,
-                    end_column: out_of_place.len() + 1,
+                    end_column,
                     severity: Severity::Warning,
                     fix,
                 });
             }
             FrontMatterType::Json => {
                 let frontmatter_lines = FrontMatterUtils::extract_front_matter(content);
+                let keys = Self::extract_json_keys(&frontmatter_lines);
+
+                // Presence is checked against a real JSON parse: the line-based
+                // extractor preserves document order for the sort check but
+                // captures only the first key per line, and a key it misses
+                // would be a false "missing required key". Order is irrelevant
+                // for presence, so the parsed object is authoritative; fall
+                // back to the line-based list when the JSON does not parse.
+                let parsed_keys = Self::parse_json_top_level_keys(&frontmatter_lines);
+                warnings.extend(self.missing_required_key_warnings(
+                    parsed_keys.as_deref().unwrap_or(&keys),
+                    "JSON",
+                    1,
+                    ctx.front_matter_end_line(),
+                ));
+
                 if frontmatter_lines.is_empty() {
                     return Ok(warnings);
                 }
 
-                let keys = Self::extract_json_keys(&frontmatter_lines);
                 let key_order = self.config.key_order.as_deref();
                 let Some((out_of_place, should_come_after)) = Self::find_first_unsorted_pair(&keys, key_order) else {
                     return Ok(warnings);
@@ -637,7 +833,7 @@ mod tests {
     fn create_enabled_rule() -> MD072FrontmatterKeySort {
         MD072FrontmatterKeySort::from_config_struct(MD072Config {
             enabled: true,
-            key_order: None,
+            ..Default::default()
         })
     }
 
@@ -646,6 +842,16 @@ mod tests {
         MD072FrontmatterKeySort::from_config_struct(MD072Config {
             enabled: true,
             key_order: Some(keys.into_iter().map(String::from).collect()),
+            ..Default::default()
+        })
+    }
+
+    /// Create an enabled rule with required keys for testing
+    fn create_rule_with_required_keys(keys: Vec<&str>) -> MD072FrontmatterKeySort {
+        MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            required_keys: keys.into_iter().map(String::from).collect(),
+            ..Default::default()
         })
     }
 
@@ -1808,6 +2014,7 @@ mod tests {
         let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
             enabled: true,
             key_order: Some(vec![]),
+            ..Default::default()
         });
         let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1877,6 +2084,7 @@ mod tests {
                 "author".to_string(),
                 "title".to_string(), // duplicate
             ]),
+            ..Default::default()
         });
         let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1940,6 +2148,7 @@ mod tests {
         let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
             enabled: true,
             key_order: Some(vec!["タイトル".to_string(), "著者".to_string()]),
+            ..Default::default()
         });
         let content = "---\nタイトル: テスト\n著者: 山田太郎\n---\n\n# Heading";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -2114,5 +2323,526 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("'zebra' should come before 'aardvark'"));
+    }
+
+    // ==================== Required Keys Tests ====================
+
+    #[test]
+    fn test_required_keys_yaml_missing_key_warns_without_fix() {
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "---\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'date'"));
+        assert!(result[0].message.contains("YAML"));
+        assert!(result[0].fix.is_none(), "missing keys must not be auto-fixable");
+        // The warning spans the opening fence on line 1.
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[0].end_column, 4);
+    }
+
+    #[test]
+    fn test_required_keys_all_present_no_warning() {
+        let rule = create_rule_with_required_keys(vec!["author", "title"]);
+        let content = "---\nauthor: John\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_required_keys_one_warning_per_missing_key() {
+        let rule = create_rule_with_required_keys(vec!["title", "date", "author"]);
+        let content = "---\ntags: [a, b]\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 3);
+        let messages: Vec<&str> = result.iter().map(|w| w.message.as_str()).collect();
+        assert!(messages.iter().any(|m| m.contains("'title'")));
+        assert!(messages.iter().any(|m| m.contains("'date'")));
+        assert!(messages.iter().any(|m| m.contains("'author'")));
+    }
+
+    #[test]
+    fn test_required_keys_case_insensitive_match() {
+        // Matching is case-insensitive, consistent with key_order matching.
+        let rule = create_rule_with_required_keys(vec!["Title"]);
+        let content = "---\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_required_keys_missing_and_unsorted_both_reported() {
+        let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            required_keys: vec!["date".to_string()],
+            ..Default::default()
+        });
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result[0].message.contains("missing required key 'date'"));
+        assert!(result[1].message.contains("'author' should come before 'title'"));
+    }
+
+    #[test]
+    fn test_required_keys_toml_missing_key() {
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "+++\ntitle = \"Test\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0]
+                .message
+                .contains("TOML frontmatter is missing required key 'date'")
+        );
+        assert!(result[0].fix.is_none());
+    }
+
+    #[test]
+    fn test_required_keys_json_missing_key() {
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "{\n\"title\": \"Test\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0]
+                .message
+                .contains("JSON frontmatter is missing required key 'date'")
+        );
+        // JSON's opening fence is `{`, so the span is a single character.
+        assert_eq!(result[0].end_column, 2);
+    }
+
+    #[test]
+    fn test_required_keys_no_frontmatter_no_warning() {
+        // Whether frontmatter must exist at all is out of scope for MD072;
+        // required keys only apply to files that have frontmatter.
+        let rule = create_rule_with_required_keys(vec!["title"]);
+        let content = "# Heading\n\nContent.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_required_keys_empty_frontmatter_warns() {
+        // An empty (but present) frontmatter block is missing every required key.
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "---\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|w| w.message.contains("missing required key")));
+    }
+
+    #[test]
+    fn test_required_keys_nested_key_does_not_satisfy() {
+        // Only top-level keys count, consistent with the sorting checks.
+        let rule = create_rule_with_required_keys(vec!["title"]);
+        let content = "---\nmeta:\n  title: Nested\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'title'"));
+    }
+
+    #[test]
+    fn test_required_keys_quoted_yaml_key_satisfies() {
+        // Quoted keys are matched by their content, like the sorting checks.
+        let rule = create_rule_with_required_keys(vec!["title"]);
+        let content = "---\n\"title\": Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_required_keys_fix_does_not_insert_keys() {
+        // fix() must leave content unchanged when the only issue is a missing
+        // required key: there is no meaningful value to insert.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "---\nauthor: John\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(fixed, content);
+    }
+
+    #[test]
+    fn test_required_keys_with_key_order_subset() {
+        // required_keys can be a subset of key_order: ordering covers many
+        // keys, existence is enforced for a few.
+        let rule = MD072FrontmatterKeySort::from_config_struct(MD072Config {
+            enabled: true,
+            key_order: Some(vec![
+                "title".to_string(),
+                "date".to_string(),
+                "author".to_string(),
+                "tags".to_string(),
+            ]),
+            required_keys: vec!["title".to_string(), "date".to_string()],
+        });
+
+        // Ordered correctly but missing 'date': exactly one warning.
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'date'"));
+
+        // All required keys present and ordered: clean.
+        let content = "---\ntitle: Test\ndate: 2024-01-01\ntags: [a]\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_required_keys_unsorted_fix_still_applies_without_inserting() {
+        // When keys are both unsorted and one is missing, the sort fix applies
+        // and the missing key stays missing (and keeps warning afterwards).
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "---\ntitle: Test\nauthor: John\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        let author_pos = fixed.find("author:").unwrap();
+        let title_pos = fixed.find("title:").unwrap();
+        assert!(author_pos < title_pos, "sort fix must still apply");
+        assert!(!fixed.contains("date"), "fix must not insert the missing key");
+
+        let ctx2 = LintContext::new(&fixed, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx2).unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'date'"));
+    }
+
+    #[test]
+    fn test_required_keys_warning_spans_the_frontmatter_block() {
+        // The absence belongs to the block, so the warning covers line 1
+        // through the closing fence. The range also makes an inline disable
+        // comment anywhere inside the frontmatter suppress the warning.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "---\ntitle: Test\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 1);
+        assert_eq!(result[0].column, 1);
+        assert_eq!(result[0].end_line, 3, "span must reach the closing fence line");
+        assert_eq!(result[0].end_column, 4);
+    }
+
+    #[test]
+    fn test_required_keys_suppressed_by_inline_disable_in_frontmatter() {
+        // A `# <!-- rumdl-disable MD072 -->` comment inside the frontmatter
+        // suppresses sort warnings; missing-key warnings must honor it too.
+        // Goes through the production `lint` path, where inline-config
+        // filtering happens.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "---\n# <!-- rumdl-disable MD072 -->\ntitle: Test\n---\n\n# Heading\n";
+        let warnings = crate::lint(
+            content,
+            &[Box::new(rule) as Box<dyn Rule>],
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert!(
+            warnings.is_empty(),
+            "inline disable inside the frontmatter must suppress missing-key warnings, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_reported_through_lint_without_disable() {
+        // Counterpart to the suppression test: the same content without the
+        // disable comment must report through the production `lint` path.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "---\ntitle: Test\n---\n\n# Heading\n";
+        let warnings = crate::lint(
+            content,
+            &[Box::new(rule) as Box<dyn Rule>],
+            false,
+            crate::config::MarkdownFlavor::Standard,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("missing required key 'date'"));
+    }
+
+    #[test]
+    fn test_required_keys_quoted_toml_key_satisfies() {
+        // TOML basic and literal quoted keys are matched by their content.
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "+++\n\"date\" = \"2024-01-01\"\n'title' = \"Test\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "quoted TOML keys must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_toml_quoted_keys_sort_by_content() {
+        // A quoted TOML key must sort by its unquoted content, not by the
+        // leading quote char ('"' is ASCII 34 and would sort before any
+        // unquoted key). Mirrors the YAML behavior.
+        let rule = create_enabled_rule();
+        let content = "+++\n\"zebra\" = 1\napple = 2\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "quoted TOML key out of order must be flagged");
+        assert!(result[0].message.contains("'apple' should come before 'zebra'"));
+    }
+
+    #[test]
+    fn test_toml_quoted_key_warning_span_covers_quotes() {
+        // "apple" is out of order. Its quotes are stripped for sorting, but
+        // the diagnostic span must still cover the raw key as written.
+        let rule = create_enabled_rule();
+        let content = "+++\nbanana = 1\n\"apple\" = 2\n+++\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        let w = &result[0];
+        assert_eq!(w.line, 3);
+        assert_eq!(w.column, 1);
+        // Raw key `"apple"` is 7 chars, so end_column is 8 (not 6 for `apple`).
+        assert_eq!(w.end_column, 8, "diagnostic span must cover the quoted key");
+    }
+
+    #[test]
+    fn test_required_keys_json_multiple_keys_on_one_line() {
+        // The line-based extractor captures only the first key per line (it
+        // exists for the order check); presence must see every key, so it is
+        // checked against a real JSON parse.
+        let rule = create_rule_with_required_keys(vec!["title", "date"]);
+        let content = "{\n\"title\": \"Test\", \"date\": \"2024-01-01\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "all keys on one JSON line must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_json_multiple_keys_on_one_line_missing_still_reported() {
+        // Same-line keys must not mask a genuinely missing key.
+        let rule = create_rule_with_required_keys(vec!["title", "date", "author"]);
+        let content = "{\n\"title\": \"Test\", \"date\": \"2024-01-01\"\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'author'"));
+    }
+
+    #[test]
+    fn test_required_keys_json_invalid_falls_back_to_line_based_keys() {
+        // Unparseable JSON falls back to the line-based extraction so a key
+        // that is visibly present is not reported missing.
+        let rule = create_rule_with_required_keys(vec!["title"]);
+        let content = "{\n\"title\": unquoted-invalid\n}\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "invalid JSON must fall back to line-based key extraction, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_table_header_satisfies() {
+        // A TOML table header defines a top-level key: required `taxonomies`
+        // is satisfied by a `[taxonomies]` section. The sort check ignores
+        // tables, but presence must see them.
+        let rule = create_rule_with_required_keys(vec!["title", "taxonomies"]);
+        let content = "+++\ntitle = \"Test\"\n\n[taxonomies]\ntags = [\"a\"]\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a TOML table header must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_array_of_tables_satisfies() {
+        // `[[authors]]` defines the top-level key `authors`.
+        let rule = create_rule_with_required_keys(vec!["authors"]);
+        let content = "+++\ntitle = \"Test\"\n\n[[authors]]\nname = \"John\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a TOML array-of-tables header must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_dotted_table_header_satisfies_root() {
+        // `[params.seo]` defines the top-level key `params`.
+        let rule = create_rule_with_required_keys(vec!["params"]);
+        let content = "+++\ntitle = \"Test\"\n\n[params.seo]\nnoindex = true\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a dotted TOML table header must satisfy its root key, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_missing_despite_other_tables() {
+        // Table headers must not mask a genuinely missing key.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "+++\ntitle = \"Test\"\n\n[taxonomies]\ntags = [\"a\"]\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'date'"));
+    }
+
+    #[test]
+    fn test_required_keys_toml_dotted_assignment_satisfies_root() {
+        // `params.seo = true` defines the top-level key `params`.
+        let rule = create_rule_with_required_keys(vec!["params"]);
+        let content = "+++\nparams.seo = true\ntitle = \"Test\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a dotted TOML assignment must satisfy its root key, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_quoted_dotted_key_is_atomic() {
+        // `"a.b" = 1` defines the literal top-level key `a.b`, not `a`.
+        let rule = create_rule_with_required_keys(vec!["a.b"]);
+        let content = "+++\n\"a.b\" = 1\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "quoted dotted key must match literally, got: {result:?}"
+        );
+
+        let rule = create_rule_with_required_keys(vec!["a"]);
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "quoted dotted key must NOT satisfy its first segment");
+        assert!(result[0].message.contains("missing required key 'a'"));
+    }
+
+    #[test]
+    fn test_required_keys_toml_table_header_with_inline_comment() {
+        // A valid TOML header can carry an inline comment.
+        let rule = create_rule_with_required_keys(vec!["taxonomies"]);
+        let content = "+++\ntitle = \"Test\"\n\n[taxonomies] # used by Hugo\ntags = [\"a\"]\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a table header with an inline comment must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_assignment_inside_table_does_not_satisfy() {
+        // An assignment under a table header is nested, not top-level.
+        let rule = create_rule_with_required_keys(vec!["date"]);
+        let content = "+++\ntitle = \"Test\"\n\n[params]\ndate = \"2024-01-01\"\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("missing required key 'date'"));
+    }
+
+    #[test]
+    fn test_required_keys_yaml_quoted_key_with_colon_satisfies() {
+        // A quoted YAML key may contain ':' (e.g. OpenGraph names); the
+        // key/value separator is the colon outside the quotes.
+        let rule = create_rule_with_required_keys(vec!["og:title"]);
+        let content = "---\n\"og:title\": My post\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a quoted YAML key containing a colon must satisfy required-keys, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_yaml_quoted_key_with_colon_sorts_by_full_content() {
+        // The sort check must also see `og:title`, not a truncated `"og`.
+        let rule = create_enabled_rule();
+        let content = "---\n\"og:title\": My post\nalpha: 1\n---\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].message.contains("'alpha' should come before 'og:title'"),
+            "sorting must use the full quoted key, got: {}",
+            result[0].message
+        );
+    }
+
+    #[test]
+    fn test_required_keys_toml_quoted_key_with_equals_satisfies() {
+        // A quoted TOML key may contain '='; the assignment separator is the
+        // '=' outside the quotes.
+        let rule = create_rule_with_required_keys(vec!["a=b"]);
+        let content = "+++\n\"a=b\" = 1\n+++\n\n# Heading";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "a quoted TOML key containing '=' must satisfy required-keys, got: {result:?}"
+        );
     }
 }
