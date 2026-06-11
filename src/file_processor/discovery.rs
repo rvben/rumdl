@@ -6,8 +6,8 @@ use ignore::overrides::OverrideBuilder;
 use rumdl_config::resolve_rule_names;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
-    ExcludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, apply_markdown_walk_options, expand_directory_pattern,
-    has_markdown_extension,
+    ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, apply_markdown_walk_options,
+    expand_directory_pattern, has_markdown_extension, path_relative_to,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -280,9 +280,20 @@ pub fn find_markdown_files(
     // Track whether config-based include patterns are active in discovery mode
     let has_config_include = is_discovery_mode && !config.global.include.is_empty();
 
+    // Config include patterns that explicitly name files beyond the standard
+    // markdown extensions (e.g. `**/*.md.jinja`). These widen both the
+    // walker's type filter and the final lintable-file filter below, so that
+    // config include reaches the same files the equivalent CLI --include does.
+    let explicit_includes = if has_config_include {
+        ExplicitIncludeMatchers::new(&config.global.include)
+    } else {
+        ExplicitIncludeMatchers::new(&[])
+    };
+
     // --- Add Lintable File Type Filter ---
     // CLI --include: no type filter (user controls which files to process)
-    // Config include: expanded filter (markdown + rust, since rumdl can lint both)
+    // Config include: expanded filter (markdown + rust + explicitly named
+    // files, since the user spelled those out)
     // Default: markdown-only filter
     if args.include.is_none() {
         let mut types_builder = ignore::types::TypesBuilder::new();
@@ -298,6 +309,13 @@ pub fn find_markdown_files(
             // Config include is active: also allow Rust files for doc comment linting
             types_builder.add("rustdoc", "*.rs")?;
             types_builder.select("rustdoc");
+        }
+        if !explicit_includes.is_empty() {
+            // Type names must be purely alphanumeric in the ignore crate.
+            for glob in explicit_includes.file_name_globs() {
+                types_builder.add("configinclude", glob)?;
+            }
+            types_builder.select("configinclude");
         }
         let types = types_builder.build()?;
         walk_builder.types(types);
@@ -555,13 +573,32 @@ pub fn find_markdown_files(
 
     // --- Final Lintable File Filter ---
     // CLI --include: no extension filter (user controls which files to process)
-    // Config include: allow markdown + rust extensions
+    // Config include: allow markdown + rust extensions + explicitly named files
     // Default: markdown-only extensions
     if args.include.is_none() {
+        // Explicit include patterns are matched against the same base the
+        // walker overrides use, so the full pattern path applies: a broad
+        // sibling pattern must not inherit another pattern's allowance for
+        // files that merely share its name.
+        let explicit_include_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
         file_paths.retain(|path_str| {
             let path = Path::new(path_str);
             let is_rust = has_config_include && path.extension().is_some_and(|ext| ext.to_str() == Some("rs"));
-            has_markdown_extension(path) || is_rust
+            if has_markdown_extension(path) || is_rust {
+                return true;
+            }
+            if explicit_includes.is_empty() {
+                return false;
+            }
+            match explicit_include_base
+                .as_deref()
+                .and_then(|base| path_relative_to(path, base))
+            {
+                Some(relative) => explicit_includes.matches_relative_path(&relative),
+                // Outside the pattern base only unanchored patterns can
+                // still apply; matching the full path covers those.
+                None => explicit_includes.matches_relative_path(path_str),
+            }
         });
     }
     // -------------------------------------

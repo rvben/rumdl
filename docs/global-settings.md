@@ -653,6 +653,7 @@ include = [
     "**/*.markdown",         # Include all .markdown files
     "CHANGELOG.md",          # Include specific files
     "src/**/*.md",           # Include documentation in source
+    "**/*.md.jinja",         # Include templates with a non-standard extension
 ]
 ```
 
@@ -662,6 +663,10 @@ include = [
 - When `include` is specified, only matching files are processed
 - Combine with `exclude` for fine-grained control
 - Useful for limiting linting to specific documentation areas
+- Patterns that explicitly name an extension (`**/*.md.jinja`) or a literal file name
+  (`templates/NOTES.tmpl`) also pull in files beyond the standard Markdown extensions,
+  matching `--include` behavior. Directory and bare wildcard patterns (`docs/**`, `**/*`)
+  keep the standard extension filter.
 
 **Example CLI usage**:
 

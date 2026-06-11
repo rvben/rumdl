@@ -18,6 +18,115 @@ use globset::{Glob, GlobMatcher};
 use std::ffi::OsStr;
 use std::path::Path;
 
+/// Glob metacharacters recognized when deciding whether an include pattern
+/// names files explicitly.
+const GLOB_METACHARS: &[char] = &['*', '?', '[', ']', '{', '}'];
+
+/// The file-name glob of an `include` pattern that explicitly names files,
+/// if it does.
+///
+/// A pattern names files explicitly when its final path component pins a
+/// literal dotted suffix: a wildcard stem ending in a literal extension
+/// chain (`**/*.md.jinja` yields `*.md.jinja`) or a fully literal file name
+/// with an extension (`templates/NOTES.tmpl` yields `NOTES.tmpl`). Such
+/// patterns widen the lintable-file filter beyond the standard markdown
+/// extensions: the user has spelled out exactly which files to process.
+///
+/// Directory patterns (`docs/`, `docs/**`), bare wildcards (`*`, `**/*`),
+/// patterns whose extension itself contains wildcards (`*.md*`,
+/// `*.{md,jinja}`), and negations (`!drafts/*.md.jinja`) yield `None`; they
+/// express "look here" or "not this", not "this exact kind of file", so the
+/// markdown-only filter stays in force for them.
+pub fn explicit_file_name_glob(pattern: &str) -> Option<&str> {
+    if pattern.starts_with('!') {
+        return None;
+    }
+    let file_name = pattern.rsplit('/').next().unwrap_or(pattern);
+    if file_name.is_empty() {
+        return None;
+    }
+    // The literal tail after the last glob metacharacter (the whole
+    // component when there is none) must end in a non-empty extension.
+    let literal_tail = match file_name.rfind(GLOB_METACHARS) {
+        Some(idx) => &file_name[idx + 1..],
+        None => file_name,
+    };
+    match literal_tail.rsplit_once('.') {
+        Some((_, ext)) if !ext.is_empty() => Some(file_name),
+        _ => None,
+    }
+}
+
+/// Compiled matchers for the explicitly-named files in a set of config
+/// `include` patterns (see [`explicit_file_name_glob`]).
+///
+/// The CLI walker consults this in two places that otherwise restrict
+/// discovery to markdown extensions: the walker's file-type filter and the
+/// final lintable-file filter. The type filter can only match file names,
+/// so it uses the (over-inclusive) file-name globs; the final filter is
+/// the precise gate and matches the full pattern against the root-relative
+/// path. Without the path check, a broad sibling pattern like `docs/**`
+/// would inherit the non-standard-extension allowance of an explicit
+/// pattern like `templates/NOTES.tmpl` for every file sharing its name.
+///
+/// Path matching follows gitignore anchoring: patterns without a `/` match
+/// at any depth, patterns with one are anchored to the root the relative
+/// path was computed against. `*` does not cross directory separators.
+///
+/// Invalid globs are skipped silently; the caller's override handling
+/// already warns about unparseable include patterns.
+pub struct ExplicitIncludeMatchers {
+    matchers: Vec<ExplicitInclude>,
+}
+
+struct ExplicitInclude {
+    file_name_glob: String,
+    path_matcher: GlobMatcher,
+}
+
+impl ExplicitIncludeMatchers {
+    pub fn new(patterns: &[String]) -> Self {
+        let matchers = patterns
+            .iter()
+            .filter_map(|pattern| {
+                let file_name_glob = explicit_file_name_glob(pattern)?;
+                let path_glob = if let Some(anchored) = pattern.strip_prefix('/') {
+                    anchored.to_string()
+                } else if pattern.contains('/') {
+                    pattern.clone()
+                } else {
+                    format!("**/{pattern}")
+                };
+                let path_matcher = globset::GlobBuilder::new(&path_glob)
+                    .literal_separator(true)
+                    .build()
+                    .ok()?
+                    .compile_matcher();
+                Some(ExplicitInclude {
+                    file_name_glob: file_name_glob.to_string(),
+                    path_matcher,
+                })
+            })
+            .collect();
+        Self { matchers }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.matchers.is_empty()
+    }
+
+    /// The file-name globs, e.g. for registering on a walker type filter.
+    pub fn file_name_globs(&self) -> impl Iterator<Item = &str> {
+        self.matchers.iter().map(|m| m.file_name_glob.as_str())
+    }
+
+    /// Whether the root-relative `path` matches any explicit include
+    /// pattern in full.
+    pub fn matches_relative_path(&self, path: &str) -> bool {
+        self.matchers.iter().any(|m| m.path_matcher.is_match(path))
+    }
+}
+
 /// File extensions rumdl treats as markdown, lowercase.
 pub const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx", "mkd", "mkdn", "mdown", "mdwn", "qmd", "rmd"];
 
@@ -284,6 +393,97 @@ mod tests {
 
         let unskipped = walk(false);
         assert!(unskipped.iter().any(|p| p.to_string_lossy().contains("node_modules")));
+    }
+
+    #[test]
+    fn explicit_file_name_glob_extracts_literal_extensions() {
+        assert_eq!(explicit_file_name_glob("**/*.md.jinja"), Some("*.md.jinja"));
+        assert_eq!(explicit_file_name_glob("*.md.jinja"), Some("*.md.jinja"));
+        assert_eq!(explicit_file_name_glob("docs/*.txt"), Some("*.txt"));
+        assert_eq!(explicit_file_name_glob("templates/NOTES.tmpl"), Some("NOTES.tmpl"));
+        assert_eq!(explicit_file_name_glob("*.md"), Some("*.md"));
+        assert_eq!(explicit_file_name_glob("a/b/c/*.md.tmpl"), Some("*.md.tmpl"));
+    }
+
+    #[test]
+    fn explicit_file_name_glob_rejects_unpinned_patterns() {
+        for pattern in [
+            "docs/",
+            "docs/**",
+            "docs",
+            "*",
+            "**",
+            "**/*",
+            "*.*",
+            "*.md*",
+            "*.{md,jinja}",
+            "*.md?",
+            "data.[ch]",
+            "!drafts/*.md.jinja",
+            "",
+            "**/Makefile",
+            "*.",
+        ] {
+            assert_eq!(explicit_file_name_glob(pattern), None, "{pattern:?} should not qualify");
+        }
+    }
+
+    #[test]
+    fn explicit_include_matchers_match_full_relative_paths() {
+        let matchers = ExplicitIncludeMatchers::new(&[
+            "**/*.md.jinja".to_string(),
+            "docs/**".to_string(),
+            "templates/NOTES.tmpl".to_string(),
+        ]);
+        assert!(!matchers.is_empty());
+        assert!(matchers.matches_relative_path("test.md.jinja"));
+        assert!(matchers.matches_relative_path("a/b/test.md.jinja"));
+        assert!(matchers.matches_relative_path("templates/NOTES.tmpl"));
+        // The directory pattern must not widen the filter to arbitrary files.
+        assert!(!matchers.matches_relative_path("docs/anything.txt"));
+        assert!(!matchers.matches_relative_path("test.jinja"));
+        // A broad sibling pattern must not inherit the literal pattern's
+        // allowance for files that merely share its name.
+        assert!(!matchers.matches_relative_path("docs/NOTES.tmpl"));
+        assert!(!matchers.matches_relative_path("x/templates/NOTES.tmpl"));
+
+        let globs: Vec<_> = matchers.file_name_globs().collect();
+        assert_eq!(globs, vec!["*.md.jinja", "NOTES.tmpl"]);
+    }
+
+    #[test]
+    fn explicit_include_matchers_follow_gitignore_anchoring() {
+        // No slash: matches at any depth.
+        let unanchored = ExplicitIncludeMatchers::new(&["*.md.jinja".to_string()]);
+        assert!(unanchored.matches_relative_path("test.md.jinja"));
+        assert!(unanchored.matches_relative_path("a/b/test.md.jinja"));
+
+        // Slash: anchored to the root, and `*` does not cross separators.
+        let anchored = ExplicitIncludeMatchers::new(&["docs/*.txt".to_string()]);
+        assert!(anchored.matches_relative_path("docs/a.txt"));
+        assert!(!anchored.matches_relative_path("docs/sub/a.txt"));
+        assert!(!anchored.matches_relative_path("other/docs/a.txt"));
+
+        // Leading slash: anchored, slash stripped for matching.
+        let rooted = ExplicitIncludeMatchers::new(&["/NOTES.tmpl".to_string()]);
+        assert!(rooted.matches_relative_path("NOTES.tmpl"));
+        assert!(!rooted.matches_relative_path("docs/NOTES.tmpl"));
+    }
+
+    #[test]
+    fn explicit_include_matchers_empty_for_directory_and_wildcard_patterns() {
+        let matchers = ExplicitIncludeMatchers::new(&["docs/".to_string(), "**/*".to_string()]);
+        assert!(matchers.is_empty());
+        assert!(!matchers.matches_relative_path("x.md.jinja"));
+    }
+
+    #[test]
+    fn explicit_include_matchers_skip_invalid_globs() {
+        // The unclosed bracket pins a literal `.tmpl` suffix but fails glob
+        // compilation; it must be skipped without poisoning valid patterns.
+        let matchers = ExplicitIncludeMatchers::new(&["bad[.tmpl".to_string(), "**/*.md.jinja".to_string()]);
+        assert!(matchers.matches_relative_path("ok.md.jinja"));
+        assert_eq!(matchers.file_name_globs().collect::<Vec<_>>(), vec!["*.md.jinja"]);
     }
 
     #[test]

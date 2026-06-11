@@ -2474,6 +2474,202 @@ fn test_include_multiple_nonstandard_extensions() -> Result<(), Box<dyn std::err
     Ok(())
 }
 
+/// Config-file `include` patterns that explicitly name a non-standard
+/// extension must reach the same files as the equivalent CLI --include
+/// (issue #127: the original fix only covered the CLI flag).
+mod config_include_nonstandard_extensions {
+    use super::*;
+
+    #[test]
+    fn config_include_finds_explicitly_named_extension() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md.jinja\"]\n");
+        fs::write(dir.join("template.md.jinja"), "#Heading\n").unwrap();
+        fs::write(dir.join("config.yml.j2"), "#Not markdown\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("template.md.jinja"))
+            .stdout(predicates::str::contains("MD018"))
+            .stdout(predicates::str::contains("config.yml.j2").not());
+    }
+
+    #[test]
+    fn config_include_finds_nested_files() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md.jinja\"]\n");
+        fs::create_dir_all(dir.join("docs/sub")).unwrap();
+        fs::write(dir.join("docs/sub/page.md.jinja"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("docs/sub/page.md.jinja"));
+    }
+
+    #[test]
+    fn config_include_mixes_markdown_and_explicit_patterns() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md\", \"**/*.md.jinja\"]\n");
+        fs::write(dir.join("regular.md"), "#Heading\n").unwrap();
+        fs::write(dir.join("template.md.jinja"), "#Heading\n").unwrap();
+        fs::write(dir.join("notes.txt"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("regular.md"))
+            .stdout(predicates::str::contains("template.md.jinja"))
+            .stdout(predicates::str::contains("notes.txt").not());
+    }
+
+    #[test]
+    fn config_include_directory_pattern_stays_markdown_only() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"docs/**\"]\n");
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::write(dir.join("docs/guide.md"), "#Heading\n").unwrap();
+        fs::write(dir.join("docs/notes.txt"), "#Heading\n").unwrap();
+        fs::write(dir.join("docs/data.json"), "{}\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("docs/guide.md"))
+            .stdout(predicates::str::contains("notes.txt").not())
+            .stdout(predicates::str::contains("data.json").not());
+    }
+
+    #[test]
+    fn config_include_bare_wildcard_stays_markdown_only() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*\"]\n");
+        fs::write(dir.join("guide.md"), "#Heading\n").unwrap();
+        fs::write(dir.join("notes.txt"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("guide.md"))
+            .stdout(predicates::str::contains("notes.txt").not());
+    }
+
+    #[test]
+    fn config_include_literal_file_name_lints_exactly_that_file() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"templates/NOTES.tmpl\"]\n");
+        fs::create_dir_all(dir.join("templates")).unwrap();
+        fs::write(dir.join("templates/NOTES.tmpl"), "#Heading\n").unwrap();
+        fs::write(dir.join("templates/OTHER.tmpl"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("templates/NOTES.tmpl"))
+            .stdout(predicates::str::contains("OTHER.tmpl").not());
+    }
+
+    #[test]
+    fn directory_include_does_not_inherit_sibling_explicit_file_names() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"docs/**\", \"templates/NOTES.tmpl\"]\n");
+        fs::create_dir_all(dir.join("docs")).unwrap();
+        fs::create_dir_all(dir.join("templates")).unwrap();
+        fs::write(dir.join("docs/guide.md"), "#Heading\n").unwrap();
+        fs::write(dir.join("docs/NOTES.tmpl"), "#Heading\n").unwrap();
+        fs::write(dir.join("templates/NOTES.tmpl"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("docs/guide.md"))
+            .stdout(predicates::str::contains("templates/NOTES.tmpl"))
+            .stdout(predicates::str::contains("docs/NOTES.tmpl").not());
+    }
+
+    #[test]
+    fn config_exclude_still_wins_over_explicit_include() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md.jinja\"]\nexclude = [\"drafts\"]\n");
+        fs::create_dir_all(dir.join("drafts")).unwrap();
+        fs::write(dir.join("keep.md.jinja"), "#Heading\n").unwrap();
+        fs::write(dir.join("drafts/skip.md.jinja"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("keep.md.jinja"))
+            .stdout(predicates::str::contains("skip.md.jinja").not());
+    }
+
+    #[test]
+    fn cli_include_still_overrides_config_include() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md.jinja\"]\n");
+        fs::write(dir.join("template.md.jinja"), "#Heading\n").unwrap();
+        fs::write(dir.join("regular.md"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache", "--include", "**/*.md"])
+            .current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("regular.md"))
+            .stdout(predicates::str::contains("template.md.jinja").not());
+    }
+
+    #[test]
+    fn pyproject_include_finds_explicitly_named_extension() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        fs::write(
+            dir.join("pyproject.toml"),
+            "[tool.rumdl]\ninclude = [\"**/*.md.jinja\"]\n",
+        )
+        .unwrap();
+        fs::write(dir.join("template.md.jinja"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["check", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert()
+            .failure()
+            .stdout(predicates::str::contains("template.md.jinja"));
+    }
+
+    #[test]
+    fn fmt_fixes_config_included_nonstandard_extension() {
+        let temp_dir = tempdir().unwrap();
+        let dir = temp_dir.path();
+        create_config(dir, "[global]\ninclude = [\"**/*.md.jinja\"]\n");
+        fs::write(dir.join("template.md.jinja"), "#Heading\n").unwrap();
+
+        let mut cmd = cargo_bin_cmd!("rumdl");
+        cmd.args(["fmt", ".", "--no-cache"]).current_dir(dir);
+        cmd.assert().success();
+
+        let fixed = fs::read_to_string(dir.join("template.md.jinja")).unwrap();
+        assert_eq!(fixed, "# Heading\n", "fmt should fix the config-included file");
+    }
+}
+
 // Tests for Issue #197: Exit code behavior with --fix
 // These tests verify that rumdl check --fix returns the correct exit code
 mod issue197_exit_code {
