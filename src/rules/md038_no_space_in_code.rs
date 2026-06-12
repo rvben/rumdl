@@ -288,6 +288,15 @@ impl Rule for MD038NoSpaceInCode {
 
             let trimmed = code_content.trim();
 
+            // CommonMark keeps a code span that consists entirely of whitespace
+            // verbatim: the single-space stripping rule only applies when the
+            // content is NOT all spaces. Flagging it would "fix" it to an empty
+            // code span (``), which reopens an unterminated span and changes the
+            // document's meaning. See https://spec.commonmark.org/0.31.2/#code-spans
+            if trimmed.is_empty() {
+                continue;
+            }
+
             // Check if there are leading or trailing spaces
             if code_content != trimmed {
                 // CommonMark behavior: if there is exactly ONE space at start AND ONE at end,
@@ -301,7 +310,9 @@ impl Rule for MD038NoSpaceInCode {
                 // ` text  ` → "text " (extra trailing space remains, FLAGGED)
                 // ` text` → " text" (no trailing space to balance, FLAGGED)
                 // `text ` → "text " (no leading space to balance, FLAGGED)
-                if has_leading_space && has_trailing_space && !trimmed.is_empty() {
+                // (trimmed is guaranteed non-empty here: all-whitespace spans
+                // were already skipped above.)
+                if has_leading_space && has_trailing_space {
                     let leading_spaces = code_content.len() - code_content.trim_start().len();
                     let trailing_spaces = code_content.len() - code_content.trim_end().len();
 
@@ -537,6 +548,51 @@ mod tests {
             assert!(
                 result.is_empty(),
                 "Single space on each side should not be flagged (CommonMark strips them): {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_md038_whitespace_only_span_not_flagged() {
+        // CommonMark keeps a code span made up entirely of spaces verbatim: the
+        // single-space stripping rule only applies when the content is NOT all
+        // spaces (https://spec.commonmark.org/0.31.2/#code-spans). Flagging it
+        // would "fix" it to an empty code span (``), which reopens an
+        // unterminated span and changes the document's meaning.
+        let rule = MD038NoSpaceInCode::new();
+        let whitespace_only_cases = vec![
+            "A single-space span `\u{0020}` is intentional.",
+            "A two-space span `\u{0020}\u{0020}` is intentional.",
+            "A three-space span `\u{0020}\u{0020}\u{0020}` is intentional.",
+            "A tab span `\t` is intentional.",
+            "Just the span: ` `",
+        ];
+        for case in whitespace_only_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "Whitespace-only code span should not be flagged (kept verbatim per CommonMark): {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_md038_whitespace_only_span_fix_preserves_verbatim() {
+        // The fix must never collapse a whitespace-only span to `` (which is
+        // invalid Markdown). Each input is left untouched.
+        let rule = MD038NoSpaceInCode::new();
+        let unchanged_cases = vec![
+            "A single-space span `\u{0020}` is intentional.",
+            "A two-space span `\u{0020}\u{0020}` is intentional.",
+            "Just the span: ` `",
+        ];
+        for case in unchanged_cases {
+            let ctx = crate::lint_context::LintContext::new(case, crate::config::MarkdownFlavor::Standard, None);
+            let result = rule.fix(&ctx).unwrap();
+            assert_eq!(
+                result, case,
+                "Whitespace-only code span must be left verbatim by fix, not collapsed to ``"
             );
         }
     }
