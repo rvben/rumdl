@@ -438,14 +438,14 @@ repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
     rev: v0.2.14
     hooks:
-      - id: rumdl      # Lint only (fails on issues)
-      - id: rumdl-fmt  # Auto-format and fail if issues remain
+      - id: rumdl      # Lint + auto-fix, fails if unfixable issues remain
+      - id: rumdl-fmt  # Pure format, always exits 0
 ```
 
 Two hooks are available:
 
-- **`rumdl`** — Lints files and fails if any issues are found
-- **`rumdl-fmt`** — Auto-formats files and fails if unfixable violations remain (recommended for CI)
+- **`rumdl`** - Lints and auto-fixes files; exits 1 if unfixable violations remain (recommended as the primary hook)
+- **`rumdl-fmt`** - Formats files in place and always exits 0; relies on pre-commit's file-change detection
 
 When you run `pre-commit install` or `pre-commit run`, pre-commit will automatically install `rumdl` in an isolated Python environment using pip. You do **not** need to install rumdl manually.
 
