@@ -54,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.15](https://github.com/rvben/rumdl/compare/v0.2.14...v0.2.15) - 2026-06-12
+
+### Fixed
+
+- **md038**: keep whitespace-only code spans verbatim ([afe5b43](https://github.com/rvben/rumdl/commit/afe5b43022bab4bb19bc44184cd4b040567de592))
+
 ## [0.2.14](https://github.com/rvben/rumdl/compare/v0.2.13...v0.2.14) - 2026-06-11
 
 ### Added
