@@ -30,33 +30,142 @@ fn pyproject_declares_rumdl_config(content: &str) -> bool {
     content.contains("[tool.rumdl]") || content.contains("[tool.rumdl.")
 }
 
+/// True if `b` may start a `$VAR` identifier (`[A-Za-z_]`).
+fn is_var_name_start(b: u8) -> bool {
+    b == b'_' || b.is_ascii_alphabetic()
+}
+
+/// True if `b` may continue a `$VAR` identifier (`[A-Za-z0-9_]`).
+fn is_var_name_continue(b: u8) -> bool {
+    b == b'_' || b.is_ascii_alphanumeric()
+}
+
+/// True if `name` is a non-empty valid environment-variable identifier.
+fn is_valid_var_name(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    !bytes.is_empty() && is_var_name_start(bytes[0]) && bytes[1..].iter().all(|&b| is_var_name_continue(b))
+}
+
+/// Expand `$VAR` and `${VAR}` references in `input` using `lookup`.
+///
+/// Grammar (frozen; documented in `docs/global-settings.md`):
+/// - `$NAME` / `${NAME}` with `NAME = [A-Za-z_][A-Za-z0-9_]*` expands to the variable's
+///   value; the longest valid identifier is matched (`$FOO_BAR` is one name).
+/// - `$$` is a literal `$` (escape), so `$$VAR` -> `$VAR` and `$${VAR}` -> `${VAR}` (no
+///   expansion of the escaped form).
+/// - Any other `$` is left literal: `$` before a non-identifier char (`$5`, trailing `$`),
+///   an empty `${}`, an unterminated `${VAR`, or a `${...}` whose body is not a valid
+///   identifier (e.g. nested `${A${B}}`) - the whole `${...}` span up to the first `}` is
+///   emitted literally.
+/// - Replacement values are inserted literally and are NOT re-scanned (single left-to-right
+///   pass): if `A="$B"`, then `$A` expands to the literal string `$B`.
+///
+/// Returns `Err(name)` on the first well-formed reference to an undefined variable. All
+/// special characters (`$`, `{`, `}`, identifier chars) are ASCII, so byte scanning never
+/// splits a multibyte UTF-8 sequence; non-ASCII bytes are copied verbatim as literals.
+fn expand_env_vars(input: &str, lookup: impl Fn(&str) -> Option<String>) -> Result<String, String> {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != b'$' {
+            // Copy the maximal run of non-`$` bytes as a slice (preserves UTF-8).
+            let start = i;
+            while i < bytes.len() && bytes[i] != b'$' {
+                i += 1;
+            }
+            out.push_str(&input[start..i]);
+            continue;
+        }
+
+        match bytes.get(i + 1).copied() {
+            // `$$` -> literal `$`.
+            Some(b'$') => {
+                out.push('$');
+                i += 2;
+            }
+            // `${...}` braced form.
+            Some(b'{') => {
+                if let Some(rel) = input[i + 2..].find('}') {
+                    let close = i + 2 + rel;
+                    let name = &input[i + 2..close];
+                    if is_valid_var_name(name) {
+                        match lookup(name) {
+                            Some(value) => out.push_str(&value),
+                            None => return Err(name.to_string()),
+                        }
+                    } else {
+                        // Empty / invalid / nested body -> whole `${...}` span is literal.
+                        out.push_str(&input[i..=close]);
+                    }
+                    i = close + 1;
+                } else {
+                    // No closing `}` -> leave the `$` literal and resume at `{`.
+                    out.push('$');
+                    i += 1;
+                }
+            }
+            // `$NAME` bare form.
+            Some(b) if is_var_name_start(b) => {
+                let start = i + 1;
+                let mut j = start;
+                while j < bytes.len() && is_var_name_continue(bytes[j]) {
+                    j += 1;
+                }
+                let name = &input[start..j];
+                match lookup(name) {
+                    Some(value) => out.push_str(&value),
+                    None => return Err(name.to_string()),
+                }
+                i = j;
+            }
+            // `$` before a non-identifier char or at end of input -> literal `$`.
+            _ => {
+                out.push('$');
+                i += 1;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 /// Resolve an `extends` path relative to the config file that contains it.
 ///
+/// - `$VAR` / `${VAR}`: expanded from the environment first (see [`expand_env_vars`])
 /// - `~/` prefix: expanded to home directory
 /// - Relative paths: resolved against the config file's parent directory
 /// - Absolute paths: used as-is
-fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> PathBuf {
-    if let Some(suffix) = extends_value.strip_prefix("~/") {
+fn resolve_extends_path(extends_value: &str, config_file_path: &Path) -> Result<PathBuf, ConfigError> {
+    let expanded = expand_env_vars(extends_value, |key| std::env::var(key).ok()).map_err(|var| {
+        ConfigError::ExtendsUndefinedVar {
+            var,
+            from: config_file_path.display().to_string(),
+        }
+    })?;
+
+    if let Some(suffix) = expanded.strip_prefix("~/") {
         // Expand tilde to home directory
         #[cfg(feature = "native")]
         {
             use etcetera::{BaseStrategy, choose_base_strategy};
             let home = choose_base_strategy().map_or_else(|_| PathBuf::from("~"), |s| s.home_dir().to_path_buf());
-            home.join(suffix)
+            Ok(home.join(suffix))
         }
         #[cfg(not(feature = "native"))]
         {
             let _ = suffix;
-            PathBuf::from(extends_value)
+            Ok(PathBuf::from(expanded))
         }
     } else {
-        let path = PathBuf::from(extends_value);
+        let path = PathBuf::from(&expanded);
         if path.is_absolute() {
-            path
+            Ok(path)
         } else {
             // Resolve relative to config file's directory
             let config_dir = config_file_path.parent().unwrap_or(Path::new("."));
-            config_dir.join(extends_value)
+            Ok(config_dir.join(&expanded))
         }
     }
 }
@@ -206,7 +315,7 @@ fn load_config_with_extends(
 
     // If this fragment has `extends`, load the base config first
     if let Some(ref extends_value) = fragment.extends {
-        let base_path = resolve_extends_path(extends_value, config_file_path);
+        let base_path = resolve_extends_path(extends_value, config_file_path)?;
 
         if !base_path.exists() {
             return Err(ConfigError::ExtendsNotFound {
@@ -1070,6 +1179,110 @@ mod tests {
             "[project]\ndependencies = [\"tool.rumdl-helper\"]\n"
         ));
         assert!(!pyproject_declares_rumdl_config("[tool.black]\nline-length = 88\n"));
+    }
+
+    /// Pure tests for the `$VAR` / `${VAR}` expander used by `extends` resolution.
+    /// The injected `lookup` keeps these independent of the real process environment.
+    mod expand_env_vars {
+        use super::super::expand_env_vars;
+        use std::collections::HashMap;
+
+        /// Build a lookup closure from `(name, value)` pairs.
+        fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+            let map: HashMap<String, String> = pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect();
+            move |k: &str| map.get(k).cloned()
+        }
+
+        #[test]
+        fn expands_bare_and_braced_forms() {
+            let e = env(&[("VAR", "val"), ("FOO_BAR", "fb")]);
+            assert_eq!(expand_env_vars("$VAR", &e).unwrap(), "val");
+            assert_eq!(expand_env_vars("${VAR}", &e).unwrap(), "val");
+            // Longest-match identifier: `$FOO_BAR` is one name, not `$FOO` + `_BAR`.
+            assert_eq!(expand_env_vars("$FOO_BAR", &e).unwrap(), "fb");
+        }
+
+        #[test]
+        fn expands_within_paths() {
+            let e = env(&[("BASE", "/opt/cfg"), ("A", "x"), ("B", "y")]);
+            assert_eq!(expand_env_vars("$BASE/x/y.toml", &e).unwrap(), "/opt/cfg/x/y.toml");
+            assert_eq!(expand_env_vars("$A/$B", &e).unwrap(), "x/y");
+            assert_eq!(expand_env_vars("${A}suffix", &e).unwrap(), "xsuffix");
+        }
+
+        #[test]
+        fn dollar_dollar_is_a_literal_dollar() {
+            let e = env(&[("VAR", "val")]);
+            assert_eq!(expand_env_vars("$$", &e).unwrap(), "$");
+            // The escaped `$` is consumed; what follows is literal (not expanded).
+            assert_eq!(expand_env_vars("$$VAR", &e).unwrap(), "$VAR");
+            assert_eq!(expand_env_vars("$${VAR}", &e).unwrap(), "${VAR}");
+            // `$$` is how a literal `$` in a path is written once this feature exists.
+            assert_eq!(expand_env_vars("file-$$name.toml", &e).unwrap(), "file-$name.toml");
+        }
+
+        #[test]
+        fn bare_dollar_name_in_path_is_a_variable_reference() {
+            // Documented behavior change: an unescaped `$name` in a path is a variable,
+            // not a literal. `$$` writes a literal `$` (see dollar_dollar test above).
+            let e = env(&[("name", "core")]);
+            assert_eq!(expand_env_vars("file-$name.toml", &e).unwrap(), "file-core.toml");
+        }
+
+        #[test]
+        fn incidental_dollar_stays_literal() {
+            let e = env(&[]);
+            // `$` before a non-identifier-start char (or end of input) is literal.
+            assert_eq!(expand_env_vars("$5", &e).unwrap(), "$5");
+            assert_eq!(expand_env_vars("cost$", &e).unwrap(), "cost$");
+            assert_eq!(expand_env_vars("a$/b", &e).unwrap(), "a$/b");
+        }
+
+        #[test]
+        fn malformed_braces_stay_literal() {
+            let e = env(&[("B", "x")]);
+            assert_eq!(expand_env_vars("${}", &e).unwrap(), "${}");
+            assert_eq!(expand_env_vars("${VAR", &e).unwrap(), "${VAR");
+            // Nested `${...}` is not supported: the whole span is literal, no partial expand.
+            assert_eq!(expand_env_vars("${A${B}}", &e).unwrap(), "${A${B}}");
+        }
+
+        #[test]
+        fn undefined_variable_is_an_error() {
+            let e = env(&[]);
+            assert_eq!(expand_env_vars("$NOPE", &e).unwrap_err(), "NOPE");
+            assert_eq!(expand_env_vars("${NOPE}", &e).unwrap_err(), "NOPE");
+            assert_eq!(expand_env_vars("prefix/$NOPE/x", &e).unwrap_err(), "NOPE");
+        }
+
+        #[test]
+        fn replacement_is_not_rescanned() {
+            // If `A` expands to "$B", the result is the literal "$B"; `B` is NOT expanded.
+            let e = env(&[("A", "$B"), ("B", "should-not-appear")]);
+            assert_eq!(expand_env_vars("$A", &e).unwrap(), "$B");
+            assert_eq!(expand_env_vars("${A}", &e).unwrap(), "$B");
+        }
+
+        #[test]
+        fn identifiers_are_ascii_only_unicode_stays_literal() {
+            let e = env(&[("VAR", "v")]);
+            // Non-ASCII inside braces is not a valid identifier -> whole span literal.
+            assert_eq!(expand_env_vars("${föö}", &e).unwrap(), "${föö}");
+            // A name ends at the first non-identifier byte; trailing unicode is preserved.
+            assert_eq!(expand_env_vars("$VARö", &e).unwrap(), "vö");
+            // Literal runs preserve multibyte content around an expansion.
+            assert_eq!(expand_env_vars("café/$VAR", &e).unwrap(), "café/v");
+        }
+
+        #[test]
+        fn passthrough_for_plain_input() {
+            let e = env(&[]);
+            assert_eq!(expand_env_vars("", &e).unwrap(), "");
+            assert_eq!(expand_env_vars("/plain/path.toml", &e).unwrap(), "/plain/path.toml");
+        }
     }
 
     /// Discovery must stop at the project root even when the root is supplied in

@@ -882,6 +882,11 @@ extends = "../.rumdl.toml"
 line-length = 120
 ```
 
+`extends` paths support `~/`, absolute, and relative paths, plus `$VAR` / `${VAR}`
+environment-variable expansion (e.g. `extends = "$GEM_PATH/gems/my-style/.rumdl.toml"`)
+for a base config delivered at a machine-dependent location. See
+[Config inheritance](docs/global-settings.md#extends) for details.
+
 Per-directory resolution is disabled when `--config` or `--no-config` is used (`--isolated` is still accepted as a compatibility alias).
 
 To disable all configuration discovery and use only built-in defaults, use the `--no-config` flag:

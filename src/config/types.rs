@@ -38,8 +38,9 @@ fn arbitrary_value_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Sch
 )]
 pub struct Config {
     /// Path to a base config file to inherit settings from.
-    /// Supports relative paths, absolute paths, and `~/` for home directory.
-    /// Example: `extends = "../base.rumdl.toml"`
+    /// Supports relative paths, absolute paths, `~/` for the home directory, and
+    /// `$VAR` / `${VAR}` environment-variable expansion (a literal `$` is written `$$`).
+    /// Example: `extends = "../base.rumdl.toml"` or `extends = "$GEM_PATH/base.rumdl.toml"`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<String>,
 
@@ -941,6 +942,10 @@ pub enum ConfigError {
     /// Extends target file not found
     #[error("extends target not found: {path} (referenced from {from})")]
     ExtendsNotFound { path: String, from: String },
+
+    /// An `extends` path referenced an environment variable that is not set
+    #[error("extends path references undefined environment variable ${var} (referenced from {from})")]
+    ExtendsUndefinedVar { var: String, from: String },
 
     /// Unknown preset name
     #[error("Unknown preset: {name}. Valid presets: default, google, relaxed")]

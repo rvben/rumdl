@@ -284,10 +284,38 @@ disable = ["MD013"]
 
 **Path Resolution**:
 
+- Environment variables (`$VAR` / `${VAR}`) are expanded first (see [Environment variables](#environment-variables-in-extends) below)
 - Relative paths are resolved relative to the config file's directory (not the working directory)
 - `~/` prefix expands to the user's home directory
 - Absolute paths are used as-is
 - The extended file can be `.rumdl.toml`, `rumdl.toml`, or `pyproject.toml`
+
+#### Environment variables in `extends`
+
+The `extends` path may reference environment variables, which are expanded at config-load
+time before path resolution. This makes a base config that lives at a machine-dependent
+location (for example one delivered by a package manager) portable across machines and CI:
+
+```toml
+# .rumdl.toml in each repo - the base ships inside a package, so its path varies per machine
+extends = "$GEM_PATH/gems/my-style/.rumdl.toml"
+```
+
+Grammar:
+
+- `$VAR` and `${VAR}` expand to the variable's value, where the name matches
+  `[A-Za-z_][A-Za-z0-9_]*`. A bare `$VAR` ends at the first character that is not a letter,
+  digit, or underscore (so `$BASE/base.toml` works); use the `${VAR}` form when the name is
+  immediately followed by an identifier character, e.g. `${BASE}config.toml`.
+- Referencing a variable that is **not set** is a hard error (rumdl will not silently resolve to a different path). The error names the missing variable and the config file.
+- `$$` is a literal `$`. Write `$$` if a real dollar sign is part of the path (e.g. `extends = "weird$$dir/base.toml"`).
+- Replacement values are inserted literally and are not re-scanned for further variables.
+- Use the portable `$VAR` / `${VAR}` syntax on every platform, including Windows (the Windows `%VAR%` syntax is **not** recognized).
+
+> **Note**: rumdl makes no network requests. `extends` resolves to a local file only; there
+> is no remote-URL fetching. To centralize a base config across many repositories, deliver it
+> as a package, git submodule, or shared path and point `extends` at the resulting local file
+> (an environment variable is a convenient way to locate it).
 
 **Merge Behavior**:
 

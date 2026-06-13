@@ -628,3 +628,147 @@ line-length = 120
     assert_eq!(toml::Value::Integer(120), line_length.value);
     assert_eq!(origin_of(&line_length.origin), ".rumdl.toml");
 }
+
+// --- Env-var expansion in `extends` paths (issue #667) ----------------------
+//
+// These tests mutate the real process environment, so they carry
+// `#[serial_test::serial]` (the codebase convention for global-state tests) and
+// clean up via an RAII guard. They drive the production loader (`load_config`
+// -> `SourcedConfig::load_with_discovery`), not a re-implementation of the
+// resolver, so the full parse -> expand -> resolve -> merge path is exercised.
+
+/// Sets an env var for the duration of a test and removes it on drop.
+struct EnvVarGuard {
+    key: String,
+}
+
+impl EnvVarGuard {
+    fn set(key: &str, value: &std::path::Path) -> Self {
+        // SAFETY: rumdl's test runner is nextest (`make test` / CI), which executes
+        // each test in its own process, so this `set_var` cannot race a concurrent
+        // `std::env::var` in another test. `#[serial_test::serial]` additionally
+        // serializes this against the other global-state (env/cwd) tests, which
+        // covers shared-process runners that serialize on the same lock. The guard
+        // restores the environment on drop.
+        unsafe { std::env::set_var(key, value) };
+        Self { key: key.to_string() }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        // SAFETY: see `EnvVarGuard::set`.
+        unsafe { std::env::remove_var(&self.key) };
+    }
+}
+
+/// Bare `$VAR` form: a child references its base through an environment variable
+/// and inherits the base while keeping its own override.
+#[test]
+#[serial_test::serial]
+fn test_extends_env_var_expansion() {
+    let dir = tempdir().unwrap();
+
+    let base = dir.path().join("base.rumdl.toml");
+    fs::write(
+        &base,
+        r#"
+[global]
+disable = ["MD033"]
+
+[MD013]
+line-length = 80
+"#,
+    )
+    .unwrap();
+
+    let _guard = EnvVarGuard::set("RUMDL_TEST_EXTENDS_BASE_DIR", dir.path());
+
+    // `extends` written as a TOML literal string ('...') so Windows backslashes
+    // in the expanded path are not treated as escapes.
+    let child = dir.path().join("child.rumdl.toml");
+    fs::write(
+        &child,
+        "extends = '$RUMDL_TEST_EXTENDS_BASE_DIR/base.rumdl.toml'\n\n[MD013]\nline-length = 120\n",
+    )
+    .unwrap();
+
+    let config = load_config(&child).unwrap();
+
+    assert!(
+        config.global.disable.contains(&"MD033".to_string()),
+        "child should inherit the base via an env-var-expanded extends path"
+    );
+    let line_length = rumdl_lib::config::get_rule_config_value::<i64>(&config, "MD013", "line-length");
+    assert_eq!(line_length, Some(120), "child override should still apply");
+}
+
+/// Braced `${VAR}` form resolves the same way.
+#[test]
+#[serial_test::serial]
+fn test_extends_env_var_braced_form() {
+    let dir = tempdir().unwrap();
+
+    let base = dir.path().join("base.rumdl.toml");
+    fs::write(&base, "[global]\ndisable = [\"MD041\"]\n").unwrap();
+
+    let _guard = EnvVarGuard::set("RUMDL_TEST_EXTENDS_BRACED_DIR", dir.path());
+
+    let child = dir.path().join("child.rumdl.toml");
+    fs::write(&child, "extends = '${RUMDL_TEST_EXTENDS_BRACED_DIR}/base.rumdl.toml'\n").unwrap();
+
+    let config = load_config(&child).unwrap();
+    assert!(
+        config.global.disable.contains(&"MD041".to_string()),
+        "braced ${{VAR}} form should resolve and inherit the base"
+    );
+}
+
+/// An `extends` path that references an unset variable fails with a clear,
+/// dedicated error (not a confusing "file not found" on a half-expanded path).
+#[test]
+#[serial_test::serial]
+fn test_extends_undefined_env_var_gives_clear_error() {
+    let dir = tempdir().unwrap();
+
+    // Make sure the variable really is unset.
+    // SAFETY: per-test-process isolation under nextest + `#[serial_test::serial]`;
+    // see `EnvVarGuard::set`.
+    unsafe { std::env::remove_var("RUMDL_TEST_DEFINITELY_UNSET_667") };
+
+    let child = dir.path().join("child.rumdl.toml");
+    fs::write(&child, "extends = '$RUMDL_TEST_DEFINITELY_UNSET_667/base.rumdl.toml'\n").unwrap();
+
+    match load_config(&child).unwrap_err() {
+        ConfigError::ExtendsUndefinedVar { var, from } => {
+            assert_eq!(
+                var, "RUMDL_TEST_DEFINITELY_UNSET_667",
+                "error should name the missing variable"
+            );
+            assert!(
+                from.contains("child.rumdl.toml"),
+                "error should name the referencing file, got from: {from}"
+            );
+        }
+        other => panic!("Expected ExtendsUndefinedVar error, got: {other:?}"),
+    }
+}
+
+/// Cycle detection still fires when the cycle is formed through an env-expanded
+/// path: the expanded path must canonicalize into the visited set.
+#[test]
+#[serial_test::serial]
+fn test_extends_env_var_cycle_is_detected() {
+    let dir = tempdir().unwrap();
+
+    let _guard = EnvVarGuard::set("RUMDL_TEST_EXTENDS_SELF_DIR", dir.path());
+
+    // The config extends itself via an env-var-expanded path.
+    let cfg = dir.path().join("self.rumdl.toml");
+    fs::write(&cfg, "extends = '$RUMDL_TEST_EXTENDS_SELF_DIR/self.rumdl.toml'\n").unwrap();
+
+    match load_config(&cfg).unwrap_err() {
+        ConfigError::CircularExtends { .. } => {} // expected: env-expanded path hit the cycle guard
+        other => panic!("Expected CircularExtends via env-expanded path, got: {other:?}"),
+    }
+}
