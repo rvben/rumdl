@@ -411,9 +411,14 @@ impl RumdlLanguageServer {
                 let mut actions = Vec::new();
 
                 for warning in &warnings {
-                    // Check if warning is within the requested range
-                    let warning_line = (warning.line.saturating_sub(1)) as u32;
-                    if warning_line >= range.start.line && warning_line <= range.end.line {
+                    // Offer a warning's quick fixes whenever the requested range overlaps the
+                    // warning's full span, not just its anchor line. A diagnostic can cover
+                    // several lines (e.g. a reflowed paragraph), and editors request code
+                    // actions for the cursor's line; matching only the anchor line left the
+                    // light-bulb popup empty when the cursor sat on a later line of the span.
+                    let warning_start = warning.line.saturating_sub(1) as u32;
+                    let warning_end = warning.end_line.saturating_sub(1).max(warning.line.saturating_sub(1)) as u32;
+                    if warning_start <= range.end.line && warning_end >= range.start.line {
                         // Get all code actions for this warning (fix + ignore actions)
                         let mut warning_actions =
                             warning_to_code_actions_with_md013_config(warning, uri, text, Some(&md013_config));

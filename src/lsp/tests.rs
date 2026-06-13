@@ -8404,3 +8404,69 @@ async fn test_apply_all_fixes_matches_cli_fix_engine() {
     assert_eq!(lsp_fixed, cli_fixed, "editor fix-all must match the CLI fix engine");
     assert_ne!(lsp_fixed, text, "the test content must actually change");
 }
+
+/// Regression test for rumdl-intellij#2: a multi-line diagnostic's quick fixes
+/// must be offered on every line the diagnostic spans, not only the warning's
+/// anchor (first) line. IntelliJ requests code actions for the cursor's line, so
+/// with the bug a user whose cursor sat on a later line of a flagged paragraph
+/// saw an empty light-bulb popup even though the squiggle covered that line.
+#[tokio::test]
+async fn test_code_action_offered_across_multiline_diagnostic_span() {
+    use tempfile::tempdir;
+
+    let server = create_test_server();
+
+    let temp_dir = tempdir().expect("Failed to create temp dir");
+    std::fs::write(
+        temp_dir.path().join("pyproject.toml"),
+        r#"
+[tool.rumdl]
+flavor = "mkdocs"
+line_length = 120
+
+[tool.rumdl.MD013]
+reflow = true
+reflow-mode = "semantic-line-breaks"
+"#,
+    )
+    .unwrap();
+
+    // One paragraph across three physical lines holding two sentences; in
+    // semantic-line-breaks mode rumdl flags the whole paragraph (0-indexed
+    // lines 2..=4) with a single MD013 warning anchored at line 2.
+    let content = "# Title\n\nBefore creating a task and sending it to the background, validate that all\nrequired resources exist. We want to fail early if we now, that e.g a\nworkbook with a passed `workbook_id` does not exist.\n";
+    let test_md_path = temp_dir.path().join("test.md");
+    std::fs::write(&test_md_path, content).unwrap();
+
+    let canonical_temp = temp_dir
+        .path()
+        .canonicalize()
+        .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+    server.workspace_roots.write().await.push(canonical_temp);
+
+    let canonical_test_path = test_md_path.canonicalize().unwrap_or_else(|_| test_md_path.clone());
+    let uri = Url::from_file_path(&canonical_test_path).unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    // Cursor on the LAST line of the flagged paragraph (0-indexed line 4) must
+    // still surface the MD013 reflow quick fix, not just the document-wide
+    // "Fix all" source action.
+    let range = Range {
+        start: Position { line: 4, character: 0 },
+        end: Position { line: 4, character: 0 },
+    };
+    let actions = server.get_code_actions(&uri, content, range).await.unwrap();
+
+    assert!(
+        actions.iter().any(|a| a.title.contains("semantic line breaks")),
+        "MD013 reflow quick fix must be offered on the last line of the flagged paragraph, got: {:?}",
+        actions.iter().map(|a| &a.title).collect::<Vec<_>>()
+    );
+}
