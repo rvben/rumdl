@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.16](https://github.com/rvben/rumdl/compare/v0.2.15...v0.2.16) - 2026-06-13
+
+### Added
+
+- **config**: expand environment variables in extends paths ([ee98810](https://github.com/rvben/rumdl/commit/ee9881050dedaa2dc4235583dd71a0077a4382cf))
+
 ## [0.2.15](https://github.com/rvben/rumdl/compare/v0.2.14...v0.2.15) - 2026-06-12
 
 ### Fixed
