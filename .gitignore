@@ -18,6 +18,8 @@ issues/
 .archive
 .cursorrules
 CLAUDE.md
+GEMINI.md
+AGENTS.md
 uv.lock
 .vscode/
 .cursor/
