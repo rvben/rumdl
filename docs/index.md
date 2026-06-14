@@ -52,7 +52,7 @@ cargo install rumdl
 pip install rumdl
 
 # Or using Homebrew
-brew install rvben/tap/rumdl
+brew install rumdl
 
 # Lint Markdown files
 rumdl check .

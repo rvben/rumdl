@@ -17,7 +17,7 @@ Choose the installation method that works best for your workflow.
 === "Homebrew"
 
     ```bash
-    brew install rvben/tap/rumdl
+    brew install rumdl
     ```
 
 === "Cargo"
