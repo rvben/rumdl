@@ -4,7 +4,7 @@
 #
 # Usage: mise-install.sh [tool ...]
 #   No arguments installs everything from .mise.toml; arguments are passed
-#   to `mise install` verbatim (e.g. rust python cargo:maturin).
+#   to `mise install` verbatim (e.g. rust python uv pipx:maturin).
 #
 # Why this exists: plain `mise install` in CI has failed two distinct ways.
 # A corrupted partial download in ~/.rustup/downloads makes every retry fail
