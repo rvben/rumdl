@@ -56,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.17](https://github.com/rvben/rumdl/compare/v0.2.16...v0.2.17) - 2026-06-15
+
+### Fixed
+
+- **md077**: skip footnote definition bodies in list continuation check (#669) ([388b63f](https://github.com/rvben/rumdl/commit/388b63f939fbea45b53b02d6d892360f9c710b17)) - thanks @vEnhance
+- **lsp**: offer quick fixes across a diagnostic's full line span ([c533b75](https://github.com/rvben/rumdl/commit/c533b75b3a1be33ae170524d422292687282fbbd))
+
 ## [0.2.16](https://github.com/rvben/rumdl/compare/v0.2.15...v0.2.16) - 2026-06-13
 
 ### Added
