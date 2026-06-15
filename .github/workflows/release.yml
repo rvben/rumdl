@@ -201,8 +201,10 @@ jobs:
         run: |
           case "${{ matrix.target }}" in
             *-linux-*)
-              # Use cargo-zigbuild for all Linux builds (both musl and gnu)
-              cargo install cargo-zigbuild --locked
+              # Use cargo-zigbuild for all Linux builds (both musl and gnu).
+              # cargo-zigbuild is already installed via mise above, so there is
+              # no separate `cargo install` here (which would recompile it from
+              # source on every job).
               mise exec -- cargo zigbuild --release --target ${{ matrix.target }} --bin rumdl
               ;;
             *)
