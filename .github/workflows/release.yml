@@ -655,7 +655,6 @@ jobs:
             artifacts/release-*/rumdl-*.zip
 
       - name: Publish to PyPI
-        id: publish-pypi
         if: ${{ inputs.dry_run != true && inputs.skip_pypi != true }}
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
@@ -700,7 +699,6 @@ jobs:
           echo "npm version: $(npm --version)"
 
       - name: Publish WASM to npm
-        id: publish-wasm-npm
         if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
         run: |
           cd wasm-pkg
@@ -775,34 +773,6 @@ jobs:
         if: ${{ inputs.skip_npm == true }}
         run: echo "⏭️ Skipping npm publishing as requested"
 
-      - name: Notify obsidian-rumdl
-        if: ${{ steps.publish-wasm-npm.outcome == 'success' && inputs.dry_run != true }}
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.OBSIDIAN_DISPATCH_TOKEN }}
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG_NAME#v}
-          curl --fail -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            https://api.github.com/repos/rvben/obsidian-rumdl/dispatches \
-            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
-
-      - name: Notify rumdl-chrome-extension
-        if: ${{ steps.publish-wasm-npm.outcome == 'success' && inputs.dry_run != true }}
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.CHROME_EXT_DISPATCH_TOKEN }}
-        run: |
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          VERSION=${TAG_NAME#v}
-          curl --fail -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            https://api.github.com/repos/rvben/rumdl-chrome-extension/dispatches \
-            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
-
       - name: Extract release notes
         run: |
           TAG_NAME=${GITHUB_REF#refs/tags/}
@@ -824,7 +794,6 @@ jobs:
           fi
 
       - name: Create Release
-        id: create-release
         if: ${{ inputs.dry_run != true }}
         uses: softprops/action-gh-release@v2
         env:
@@ -845,8 +814,60 @@ jobs:
           echo "- Archives:"
           find artifacts/release-* \( -name "*.tar.gz*" -o -name "*.zip*" \) -type f 2>/dev/null | sort
 
+      - name: Dry Run Summary
+        if: ${{ inputs.dry_run == true }}
+        run: |
+          echo "## 🧪 Dry Run Complete!"
+          echo ""
+          echo "The release pipeline executed successfully in dry-run mode."
+          echo "All artifacts were built but nothing was published."
+          echo ""
+          echo "To do an actual release:"
+          echo "1. Uncheck 'Dry run mode' when running manually, OR"
+          echo "2. Create and push a version tag (e.g., v0.0.85)"
+
+  # Fan out repository_dispatch notifications to the downstream repos in a
+  # dedicated job. Kept out of `release` so the asset-propagation sleeps these
+  # notifications carry never sit on the publish critical path: like
+  # update-major-tag, a failure or slow notify here cannot block or delay the
+  # container/winget publishes, which only need `release`. Each notify is
+  # best-effort (continue-on-error); `release` succeeding already implies every
+  # publish step succeeded, so the per-publish gating reduces to the skip flags.
+  notify-downstream:
+    runs-on: ubuntu-latest
+    needs: release
+    if: ${{ inputs.dry_run != true }}
+    steps:
+      - name: Notify obsidian-rumdl
+        if: ${{ inputs.skip_npm != true }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.OBSIDIAN_DISPATCH_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          curl --fail -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/rvben/obsidian-rumdl/dispatches \
+            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
+
+      - name: Notify rumdl-chrome-extension
+        if: ${{ inputs.skip_npm != true }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.CHROME_EXT_DISPATCH_TOKEN }}
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG_NAME#v}
+          curl --fail -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/rvben/rumdl-chrome-extension/dispatches \
+            -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
+
       - name: Notify rumdl-pre-commit
-        if: ${{ steps.publish-pypi.outcome == 'success' && inputs.dry_run != true }}
+        if: ${{ inputs.skip_pypi != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.PRECOMMIT_DISPATCH_TOKEN }}
@@ -860,20 +881,19 @@ jobs:
             -d "{\"event_type\": \"pypi_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify rumdl-vscode
-        if: ${{ steps.create-release.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.VSCODE_DISPATCH_TOKEN }}
         run: |
-          # Extract version from tag
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
 
-          # Wait for GitHub release assets to be fully available
-          echo "Waiting for GitHub release to be available..."
+          # The release (and its uploaded assets) is already created by the time
+          # this job starts; give GitHub a brief grace period to make the assets
+          # downloadable before the vscode build pulls them.
+          echo "Waiting for GitHub release assets to be available..."
           sleep 90
 
-          # Send dispatch with version info
           curl --fail -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -881,37 +901,21 @@ jobs:
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
 
       - name: Notify homebrew-rumdl
-        if: ${{ steps.create-release.outcome == 'success' && inputs.dry_run != true }}
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
         run: |
-          # Extract version from tag
           TAG_NAME=${GITHUB_REF#refs/tags/}
           VERSION=${TAG_NAME#v}
 
-          # Wait a bit for archives to be available
           echo "Waiting for release archives to be available..."
           sleep 10
 
-          # Send dispatch with version info
           curl --fail -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             https://api.github.com/repos/rvben/homebrew-rumdl/dispatches \
             -d "{\"event_type\": \"rumdl_release\", \"client_payload\": {\"version\": \"$VERSION\"}}"
-
-      - name: Dry Run Summary
-        if: ${{ inputs.dry_run == true }}
-        run: |
-          echo "## 🧪 Dry Run Complete!"
-          echo ""
-          echo "The release pipeline executed successfully in dry-run mode."
-          echo "All artifacts were built but nothing was published."
-          echo ""
-          echo "To do an actual release:"
-          echo "1. Uncheck 'Dry run mode' when running manually, OR"
-          echo "2. Create and push a version tag (e.g., v0.0.85)"
 
   # In its own job so a failure here (a convenience pointer, not a publish)
   # can never block publish-container / publish-winget, which need: release.
