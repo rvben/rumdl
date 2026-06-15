@@ -609,8 +609,8 @@ jobs:
 
       - name: Install mise tools
         # The publish job only needs the Rust toolchain (`cargo publish`) and uv
-        # (twine, for the PyPI upload). Installing the full dev toolchain here
-        # spent ~4 minutes compiling cargo tools (nextest, watch, zigbuild,
+        # (`uv publish`, for the PyPI upload). Installing the full dev toolchain
+        # here spent ~4 minutes compiling cargo tools (nextest, watch, zigbuild,
         # git-cliff, ...) that this job never invokes, so install only what it
         # uses. node comes from setup-node below, not mise.
         run: ./scripts/mise-install.sh rust python uv
@@ -658,12 +658,13 @@ jobs:
         id: publish-pypi
         if: ${{ inputs.dry_run != true && inputs.skip_pypi != true }}
         env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          # Upload only Python packages (wheels and sdist), not Homebrew archives
-          # Use --skip-existing so re-runs don't fail on already-published wheels
-          uv tool run twine upload --skip-existing artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
+          # Upload only Python packages (wheels and sdist), not Homebrew archives.
+          # --check-url skips files already present on PyPI so re-runs stay
+          # idempotent (the equivalent of twine's --skip-existing).
+          uv publish --check-url https://pypi.org/simple/rumdl/ \
+            artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
 
       - name: Test PyPI upload (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
@@ -672,8 +673,8 @@ jobs:
           find artifacts/wheel-* -name "*.whl" -type f | sort
           find artifacts/sdist -name "*.tar.gz" -type f | sort
           echo ""
-          echo "Checking packages:"
-          uv tool run twine check artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
+          echo "Validating upload (no files are uploaded):"
+          uv publish --dry-run artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
 
       - name: Skip PyPI publishing
         if: ${{ inputs.skip_pypi == true }}
