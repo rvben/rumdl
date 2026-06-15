@@ -608,7 +608,12 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # The publish job only needs the Rust toolchain (`cargo publish`) and uv
+        # (twine, for the PyPI upload). Installing the full dev toolchain here
+        # spent ~4 minutes compiling cargo tools (nextest, watch, zigbuild,
+        # git-cliff, ...) that this job never invokes, so install only what it
+        # uses. node comes from setup-node below, not mise.
+        run: ./scripts/mise-install.sh rust python uv
 
       - name: Publish to crates.io
         if: ${{ inputs.dry_run != true && inputs.skip_crates_io != true }}
