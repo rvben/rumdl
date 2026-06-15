@@ -83,7 +83,11 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: test
+    # No `needs: test` on purpose: the build matrix runs concurrently with the
+    # test job instead of waiting for it, keeping the ~12m suite off the
+    # critical path. Publishing is still gated on tests via the `release` job's
+    # `needs`, so untested code can never be published. A failing test at most
+    # wastes already-spent build minutes.
     permissions:
       contents: read
     strategy:
@@ -275,7 +279,7 @@ jobs:
 
   sdist:
     runs-on: ubuntu-latest
-    needs: test
+    # Runs concurrently with `test`; publishing stays gated on `test` via `release`.
     permissions:
       contents: read
     steps:
@@ -297,7 +301,7 @@ jobs:
 
   build-wasm:
     name: Build WASM
-    needs: test
+    # Runs concurrently with `test`; publishing stays gated on `test` via `release`.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -584,7 +588,10 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    needs: [build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
+    # `test` is a dependency here (rather than a gate on the build jobs) so the
+    # suite runs in parallel with the build matrix while still blocking every
+    # publish step below.
+    needs: [test, build, sdist, test-python-package, build-wasm, test-npm-cli, test-npm-cli-musl]
     permissions:
       contents: write       # Create GitHub release + update major version tag
       id-token: write       # npm OIDC trusted publishing + Sigstore attestations
