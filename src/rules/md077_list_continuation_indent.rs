@@ -338,11 +338,18 @@ impl MD077ListContinuationIndent {
     ///
     /// Code block *content* is skipped, but fence opener/closer lines are not —
     /// their indentation matters for list continuation in MkDocs.
+    ///
+    /// Footnote-definition lines (the `[^id]:` line and its indented body) are
+    /// skipped too: a footnote body that follows a list is its own block, not
+    /// list continuation, so its indentation is MD068's concern, not MD077's.
+    /// Treating it as continuation produced false over-indent warnings and a
+    /// damaging auto-fix that reindented the body and then tripped MD068.
     fn should_skip_line(info: &crate::lint_context::LineInfo, trimmed: &str) -> bool {
         if info.in_code_block && !Self::is_code_fence(trimmed) {
             return true;
         }
         info.in_front_matter
+            || info.in_footnote_definition
             || info.in_html_block
             || info.in_html_comment
             || info.in_mdx_comment
@@ -1230,6 +1237,67 @@ mod tests {
     fn footnote_def_not_flagged() {
         let content = "- Item\n\n [^1]: footnote text\n";
         assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn footnote_multiline_body_after_list_not_flagged() {
+        // A footnote definition whose indented body follows a list must not be
+        // read as over-indented list continuation. The 4-space body lines
+        // belong to the footnote, not to `- This is a list.` (content col 2).
+        let content = "# A list followed by a footnote\n\n\
+                       Here is a paragraph.[^fn]\n\n\
+                       - This is a list.\n\n\
+                       [^fn]:\n\
+                       \x20\x20\x20\x20Here is a footnote that spans multiple lines.\n\
+                       \x20\x20\x20\x20It should thus be indented by at least four spaces.\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn fix_footnote_multiline_body_after_list_is_noop() {
+        // The false positive also produced a damaging auto-fix: reindenting the
+        // footnote body from 4 spaces to 2 broke the footnote (then tripped
+        // MD068). The fix must leave the footnote untouched.
+        let content = "# A list followed by a footnote\n\n\
+                       Here is a paragraph.[^fn]\n\n\
+                       - This is a list.\n\n\
+                       [^fn]:\n\
+                       \x20\x20\x20\x20Here is a footnote that spans multiple lines.\n\
+                       \x20\x20\x20\x20It should thus be indented by at least four spaces.\n";
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn footnote_body_indented_past_list_content_col_not_flagged() {
+        // Footnote body indented well past the list's content column (here a
+        // single-space list marker would put content col at 2, body at 4) is
+        // footnote content, not over-indented continuation.
+        let content = "- Item\n\n[^fn]:\n    Body line one.\n    Body line two.\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn list_inside_footnote_body_continuation_not_flagged() {
+        // Accepted trade-off: a list living *inside* a footnote body is skipped
+        // wholesale, so MD077 does not police its continuation indentation.
+        // Consistent with MD007, which also skips footnote-internal content.
+        let content = "Text.[^fn]\n\n[^fn]:\n\
+                       \x20\x20\x20\x20- nested item\n\
+                       \x20\x20\x20\x20\x20\x20\x20over-indented continuation\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn footnote_multiline_body_after_list_not_flagged_mkdocs() {
+        // Same protection under the MkDocs flavor. The body sits at 6 spaces,
+        // past MkDocs's required indent of 4 for `- `, so without skipping
+        // footnote content it would be flagged as over-indented continuation.
+        let content = "Here is a paragraph.[^fn]\n\n\
+                       - This is a list.\n\n\
+                       [^fn]:\n\
+                       \x20\x20\x20\x20\x20\x20Footnote body that spans\n\
+                       \x20\x20\x20\x20\x20\x20multiple indented lines.\n";
+        assert!(check_mkdocs(content).is_empty());
     }
 
     // ── Fix preserves correct content ─────────────────────────────────
