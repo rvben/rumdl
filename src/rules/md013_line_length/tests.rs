@@ -7472,3 +7472,141 @@ fn test_issue_125_tables_false_exempts_table_after_two_crlf_code_blocks() {
         result.iter().map(|w| w.line).collect::<Vec<_>>()
     );
 }
+
+// ---------------------------------------------------------------------------
+// MyST directive reflow (issues #672, #673)
+// ---------------------------------------------------------------------------
+
+/// Issue #673: a `{figure}` directive whose body is only options (`:key: value`)
+/// must not have its option lines or closing fence reflowed/joined. `figure` is a
+/// content-bearing directive (its caption is prose), but the option lines and fences
+/// are structural and must be preserved verbatim.
+#[test]
+fn test_myst_figure_directive_options_only_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "```{figure} my-figure.svg\n:align: center\n:width: 75%\n:class: only-light\n```\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "options-only `{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
+    );
+}
+
+/// Issue #673 (companion): the fix must preserve the content-directive feature.
+/// A `{figure}` caption is markdown prose and should still reflow under
+/// semantic-line-breaks, while the option lines and fences stay verbatim.
+#[test]
+fn test_myst_figure_directive_caption_still_reflows() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "```{figure} my-figure.svg\n:align: center\n\nFirst sentence of the caption. Second sentence is here.\n```\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    // Structural lines preserved verbatim.
+    assert!(
+        fixed.contains("```{figure} my-figure.svg\n:align: center\n"),
+        "opener and option line must be preserved, got:\n{fixed}"
+    );
+    assert!(
+        fixed.ends_with("```\n"),
+        "closing fence must be preserved, got:\n{fixed}"
+    );
+    // Caption prose reflowed onto separate sentence lines.
+    assert!(
+        fixed.contains("First sentence of the caption.\nSecond sentence is here."),
+        "caption prose should reflow to semantic line breaks, got:\n{fixed}"
+    );
+}
+
+/// Issue #672: a MyST inline role (`` {cite:p}`ref` ``) must not be broken at the
+/// colon inside the role name. The whole `` {role}`content` `` unit is atomic; the
+/// reflow break must land at the space before it.
+#[test]
+fn test_myst_role_not_broken_at_colon() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "This is a line that is longer then 80 characters {cite:p}`aReferenceToAnArticleThatProvesThatThisLineIsLongerThan80Characters`.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        !fixed.contains("{cite:\n") && !fixed.contains("\np}"),
+        "role `{{cite:p}}` must not be split at the colon, got:\n{fixed}"
+    );
+    // The role unit stays intact on its own line.
+    assert!(
+        fixed.contains("{cite:p}`aReferenceToAnArticleThatProvesThatThisLineIsLongerThan80Characters`."),
+        "the `{{role}}`content`` unit must remain intact, got:\n{fixed}"
+    );
+}
+
+/// Issue #672 (edge): a `{...}` that is NOT a role (no trailing code span) must be
+/// treated as ordinary text, not absorbed as an atomic unit. A non-MyST flavor must
+/// be unaffected by role handling entirely.
+#[test]
+fn test_myst_role_only_when_followed_by_code_span() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    // `{cite:p}` with no backtick content is not a role; it is plain text and may
+    // wrap normally. Just assert content words are preserved (no corruption).
+    let content = "A sentence mentioning {cite:p} without any backticks here at all today.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let fixed_words: Vec<&str> = fixed.split_whitespace().collect();
+    let orig_words: Vec<&str> = content.split_whitespace().collect();
+    assert_eq!(fixed_words, orig_words, "words must be preserved, got:\n{fixed}");
+}
+
+/// Issue #673 (colon-fence variant): the `:::{figure}` directive form must also
+/// preserve its option lines. MyST supports both ```` ```{figure} ```` and
+/// `:::{figure}`; reflow must not join the option lines in either.
+#[test]
+fn test_myst_colon_figure_directive_options_only_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SemanticLineBreaks,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = ":::{figure} my-figure.svg\n:align: center\n:width: 75%\n:class: only-light\n:::\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MyST, None);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, content,
+        "options-only `:::{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
+    );
+}

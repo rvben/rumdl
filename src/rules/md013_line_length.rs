@@ -801,6 +801,7 @@ impl MD013LineLength {
             abbreviations: config.abbreviations_for_reflow(),
             length_mode: self.reflow_length_mode(),
             attr_lists: ctx.flavor.supports_attr_lists(),
+            myst_roles: ctx.flavor.supports_myst_roles(),
             require_sentence_capital: config.require_sentence_capital,
             max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
                 Some(4)
@@ -1259,6 +1260,7 @@ impl MD013LineLength {
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
+                    myst_roles: ctx.flavor.supports_myst_roles(),
                     require_sentence_capital: config.require_sentence_capital,
                     max_list_continuation_indent: None,
                 };
@@ -1488,6 +1490,7 @@ impl MD013LineLength {
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
+                    myst_roles: ctx.flavor.supports_myst_roles(),
                     require_sentence_capital: config.require_sentence_capital,
                     max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
                         Some(4)
@@ -2003,6 +2006,7 @@ impl MD013LineLength {
                         abbreviations: config.abbreviations_for_reflow(),
                         length_mode: self.reflow_length_mode(),
                         attr_lists: ctx.flavor.supports_attr_lists(),
+                        myst_roles: ctx.flavor.supports_myst_roles(),
                         require_sentence_capital: config.require_sentence_capital,
                         max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
                             Some(4)
@@ -2409,6 +2413,7 @@ impl MD013LineLength {
                                     abbreviations: config.abbreviations_for_reflow(),
                                     length_mode: self.reflow_length_mode(),
                                     attr_lists: ctx.flavor.supports_attr_lists(),
+                                    myst_roles: ctx.flavor.supports_myst_roles(),
                                     require_sentence_capital: config.require_sentence_capital,
                                     max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
                                         Some(4)
@@ -2829,6 +2834,7 @@ impl MD013LineLength {
                     abbreviations: config.abbreviations_for_reflow(),
                     length_mode: self.reflow_length_mode(),
                     attr_lists: ctx.flavor.supports_attr_lists(),
+                    myst_roles: ctx.flavor.supports_myst_roles(),
                     require_sentence_capital: config.require_sentence_capital,
                     max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
                         Some(4)

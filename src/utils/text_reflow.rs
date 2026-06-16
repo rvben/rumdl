@@ -64,6 +64,10 @@ pub struct ReflowOptions {
     /// Whether to treat {#id .class key="value"} as atomic (unsplittable) elements.
     /// Enabled for MkDocs and Kramdown flavors.
     pub attr_lists: bool,
+    /// Whether to treat MyST inline roles (`` {role}`content` ``) as atomic
+    /// (unsplittable) elements. Enabled for the MyST flavor so the colon inside
+    /// `{domain:role}` is never used as a clause-break point.
+    pub myst_roles: bool,
     /// Whether to require uppercase after periods for sentence detection.
     /// When true (default), only "word. Capital" is a sentence boundary.
     /// When false, "word. lowercase" is also treated as a sentence boundary.
@@ -86,6 +90,7 @@ impl Default for ReflowOptions {
             abbreviations: None,
             length_mode: ReflowLengthMode::default(),
             attr_lists: false,
+            myst_roles: false,
             require_sentence_capital: true,
             max_list_continuation_indent: None,
         }
@@ -519,11 +524,7 @@ fn trim_preserving_hard_break(s: &str) -> String {
 
 /// Parse markdown elements using the appropriate parser based on options.
 fn parse_elements(text: &str, options: &ReflowOptions) -> Vec<Element> {
-    if options.attr_lists {
-        parse_markdown_elements_with_attr_lists(text)
-    } else {
-        parse_markdown_elements(text)
-    }
+    parse_markdown_elements_inner(text, options.attr_lists, options.myst_roles)
 }
 
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
@@ -621,6 +622,10 @@ enum Element {
     HugoShortcode(String),
     /// MkDocs/kramdown attribute list {#id .class key="value"}
     AttrList(String),
+    /// MyST inline role `` {role}`content` `` (or `` {domain:role}`content` ``).
+    /// Stored as the raw matched text and rendered verbatim so it round-trips
+    /// exactly; treated as atomic so it is never split mid-role.
+    MystRole(String),
     /// Inline code `code`
     Code(String),
     /// Bold text **text** or __text__
@@ -675,6 +680,7 @@ impl std::fmt::Display for Element {
             Element::HtmlEntity(s) => write!(f, "{s}"),
             Element::HugoShortcode(s) => write!(f, "{s}"),
             Element::AttrList(s) => write!(f, "{s}"),
+            Element::MystRole(s) => write!(f, "{s}"),
             Element::Code(s) => write!(f, "`{s}`"),
             Element::Bold { content, underscore } => {
                 if *underscore {
@@ -813,7 +819,64 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
     spans
 }
 
-/// Parse markdown elements from text preserving the raw syntax
+/// If `text` starts with a MyST inline role (`` {name}`content` `` or
+/// `` {domain:role}`content` ``), return the byte length of the whole role unit.
+///
+/// Mirrors the grammar in `lint_context::flavor_detection::detect_myst_role_ranges`:
+/// a `{`, a name starting with an ASCII letter or `_` and continuing with
+/// alphanumerics / `-` / `_` / `:` / `.`, a closing `}`, then a balanced inline
+/// code span using one or more backticks. Returns `None` when any part is missing.
+fn myst_role_len_at(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+
+    // Role name.
+    let mut j = 1;
+    match bytes.get(j) {
+        Some(&b) if b.is_ascii_alphabetic() || b == b'_' => {}
+        _ => return None,
+    }
+    while let Some(&b) = bytes.get(j) {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b':' | b'.') {
+            j += 1;
+        } else {
+            break;
+        }
+    }
+    if bytes.get(j) != Some(&b'}') {
+        return None;
+    }
+    j += 1; // past '}'
+
+    // Must be immediately followed by an inline code span.
+    if bytes.get(j) != Some(&b'`') {
+        return None;
+    }
+    let backtick_start = j;
+    while bytes.get(j) == Some(&b'`') {
+        j += 1;
+    }
+    let backtick_count = j - backtick_start;
+
+    // Find the matching run of `backtick_count` backticks.
+    while j + backtick_count <= bytes.len() {
+        if bytes[j] == b'`' {
+            let close_count = bytes[j..].iter().take_while(|&&b| b == b'`').count();
+            if close_count == backtick_count {
+                return Some(j + close_count);
+            }
+            j += close_count;
+        } else {
+            j += 1;
+        }
+    }
+
+    None
+}
+
+/// Parse markdown elements from text preserving the raw syntax.
 ///
 /// Detection order is critical:
 /// 1. Linked images [![alt](img)](link) - must be detected first as atomic units
@@ -822,16 +885,8 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
 /// 4. Inline links [text](url) - before reference links
 /// 5. Reference links [text][ref] - before shortcut references
 /// 6. Shortcut reference links [ref] - detected last to avoid false positives
-/// 7. Other elements (code, bold, italic, etc.) - processed normally
-fn parse_markdown_elements(text: &str) -> Vec<Element> {
-    parse_markdown_elements_inner(text, false)
-}
-
-fn parse_markdown_elements_with_attr_lists(text: &str) -> Vec<Element> {
-    parse_markdown_elements_inner(text, true)
-}
-
-fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
+/// 7. Other elements (code, bold, italic, MyST roles, etc.) - processed normally
+fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool) -> Vec<Element> {
     let mut elements = Vec::new();
     let mut remaining = text;
 
@@ -999,6 +1054,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         let mut special_type = "";
         let mut pulldown_emphasis: Option<&EmphasisSpan> = None;
         let mut attr_list_len: usize = 0;
+        let mut myst_role_len: usize = 0;
 
         // Check for code spans (not handled by pulldown-cmark in this context)
         if let Some(pos) = remaining.find('`')
@@ -1006,6 +1062,20 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
         {
             next_special = pos;
             special_type = "code";
+        }
+
+        // Check for MyST inline roles - {role}`content` (e.g. {cite:p}`ref`).
+        // Checked before the bare code-span handling so the role's trailing code
+        // span is absorbed into the atomic role rather than split off, and before
+        // attr lists since a role's `{` would otherwise be probed as an attr list.
+        if myst_roles
+            && let Some(pos) = remaining.find('{')
+            && pos < next_special
+            && let Some(role_len) = myst_role_len_at(&remaining[pos..])
+        {
+            next_special = pos;
+            special_type = "myst_role";
+            myst_role_len = role_len;
         }
 
         // Check for MkDocs/kramdown attr lists - {#id .class key="value"}
@@ -1306,6 +1376,10 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool) -> Vec<Element> {
                     elements.push(Element::AttrList(remaining[..attr_list_len].to_string()));
                     remaining = &remaining[attr_list_len..];
                 }
+                "myst_role" => {
+                    elements.push(Element::MystRole(remaining[..myst_role_len].to_string()));
+                    remaining = &remaining[myst_role_len..];
+                }
                 "pulldown_emphasis" => {
                     // Use pre-extracted emphasis/strikethrough span from pulldown-cmark
                     if let Some(span) = pulldown_emphasis {
@@ -1604,6 +1678,23 @@ fn is_clause_punctuation(c: char) -> bool {
     matches!(c, ',' | ';' | ':' | '\u{2014}') // comma, semicolon, colon, em dash
 }
 
+/// Whether a clause-punctuation char at `chars[i]` is a legitimate break point.
+///
+/// A real clause boundary is followed by whitespace (or ends the text): `,;:`
+/// with no following space sit *inside* a token (`16:9`, `key:value`, a MyST role
+/// like `{cite:p}`) and must not be split there. The em dash (`—`) is exempt:
+/// it commonly joins words with no surrounding spaces and breaking after it reads
+/// naturally.
+fn clause_break_allowed_after(chars: &[char], i: usize) -> bool {
+    if chars[i] == '\u{2014}' {
+        return true;
+    }
+    match chars.get(i + 1) {
+        None => true,
+        Some(next) => next.is_whitespace(),
+    }
+}
+
 /// Find the closing `)` that balances the `(` at the start of `slice`.
 ///
 /// `offset` is the byte position of the `(` in the original full-line string;
@@ -1810,7 +1901,11 @@ fn split_at_clause_punctuation(
             }
         }
 
-        if paren_depth == 0 && is_clause_punctuation(chars[i]) && !is_inside_element(byte_after, element_spans) {
+        if paren_depth == 0
+            && is_clause_punctuation(chars[i])
+            && clause_break_allowed_after(&chars, i)
+            && !is_inside_element(byte_after, element_spans)
+        {
             best_pos = Some(i);
             break;
         }
@@ -1970,12 +2065,13 @@ fn cascade_split_line(
     abbreviations: &Option<Vec<String>>,
     length_mode: ReflowLengthMode,
     attr_lists: bool,
+    myst_roles: bool,
 ) -> Vec<String> {
     if line_length == 0 || display_len(text, length_mode) <= line_length {
         return vec![text.to_string()];
     }
 
-    let elements = parse_markdown_elements_inner(text, attr_lists);
+    let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles);
     let element_spans = compute_element_spans(&elements);
 
     // Try parenthetical boundary split (before clause punctuation so that
@@ -1988,6 +2084,7 @@ fn cascade_split_line(
             abbreviations,
             length_mode,
             attr_lists,
+            myst_roles,
         ));
         return result;
     }
@@ -2001,6 +2098,7 @@ fn cascade_split_line(
             abbreviations,
             length_mode,
             attr_lists,
+            myst_roles,
         ));
         return result;
     }
@@ -2014,6 +2112,7 @@ fn cascade_split_line(
             abbreviations,
             length_mode,
             attr_lists,
+            myst_roles,
         ));
         return result;
     }
@@ -2028,6 +2127,7 @@ fn cascade_split_line(
         abbreviations: abbreviations.clone(),
         length_mode,
         attr_lists,
+        myst_roles,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
@@ -2060,6 +2160,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
                 &options.abbreviations,
                 length_mode,
                 options.attr_lists,
+                options.myst_roles,
             ));
         }
     }

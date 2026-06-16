@@ -1056,6 +1056,11 @@ pub(super) fn detect_myst_colon_directives(
     let mut ranges: Vec<(usize, usize)> = Vec::new();
     // Stack of (colon_count, byte_start) for nested directives
     let mut stack: Vec<(usize, usize)> = Vec::new();
+    // True while the lines immediately following an opener are still the directive's
+    // option block (`:key: value`), before any prose body. Mirrors the backtick path:
+    // option lines are structural metadata, not prose, so they are flagged
+    // `in_code_block` to keep reflow (MD013) from joining them.
+    let mut in_option_region = false;
 
     for line in lines.iter_mut() {
         if line.in_front_matter || line.in_html_comment || line.in_code_block {
@@ -1067,6 +1072,7 @@ pub(super) fn detect_myst_colon_directives(
         if let Some(colon_count) = myst_colon_directive_opener(line_content) {
             stack.push((colon_count, line.byte_offset));
             line.in_myst_directive = true;
+            in_option_region = true;
         } else if !stack.is_empty() {
             // Check if this is a closer for any level in the stack
             // Closers match the innermost directive with <= colon count
@@ -1076,6 +1082,7 @@ pub(super) fn detect_myst_colon_directives(
             let is_bare_colons = colon_count >= 3 && rest[colon_count..].trim().is_empty();
 
             if is_bare_colons {
+                in_option_region = false;
                 // Find the innermost directive this closer matches
                 // A closer with N colons closes the innermost directive with <= N colons
                 if let Some(pos) = stack.iter().rposition(|&(c, _)| c <= colon_count) {
@@ -1090,8 +1097,17 @@ pub(super) fn detect_myst_colon_directives(
                     line.in_myst_directive = true;
                 }
             } else {
-                // Regular content inside a directive
+                // Regular content inside a directive.
                 line.in_myst_directive = true;
+                let trimmed = line_content.trim();
+                let is_option_line = trimmed.starts_with(':') && trimmed.len() > 1 && trimmed[1..].contains(':');
+                if in_option_region && is_option_line {
+                    // Structural option line: keep verbatim, do not reflow.
+                    line.in_code_block = true;
+                } else {
+                    // First prose/blank line ends the option block; the body reflows.
+                    in_option_region = false;
+                }
             }
         }
     }
@@ -1246,25 +1262,27 @@ pub(super) fn detect_myst_backtick_directives(
                 let line_content = lines[i].content(content);
                 let trimmed = line_content.trim();
 
-                // Check if this is the closing fence line
+                // Check if this is the closing fence line. The fence is structural,
+                // not prose: keep its `in_code_block` flag (set by the base fenced-block
+                // detection) so reflow rules like MD013 leave it verbatim and never join
+                // it into the directive body.
                 let is_closer =
                     trimmed.starts_with("```") && trimmed.chars().skip(3).all(|c| c == '`' || c.is_whitespace());
                 if is_closer {
                     lines[i].in_myst_directive = true;
-                    lines[i].in_code_block = false;
                     break;
                 }
 
-                // Detect option lines (:key: value) at the start of the body
+                // Option lines (`:key: value`) and the YAML options delimiter (`---`)
+                // are structural directive metadata, not markdown prose. Keep their
+                // `in_code_block` flag so reflow leaves them on their own lines; only
+                // the directive's content body (a `{figure}` caption, a `{note}` body)
+                // is cleared below so it reflows as markdown.
                 if !past_options {
-                    if trimmed.starts_with(':') && trimmed.len() > 1 && trimmed[1..].contains(':') {
+                    let is_option_line = trimmed.starts_with(':') && trimmed.len() > 1 && trimmed[1..].contains(':');
+                    let is_yaml_delimiter = trimmed.starts_with("---");
+                    if is_option_line || is_yaml_delimiter {
                         lines[i].in_myst_directive = true;
-                        lines[i].in_code_block = false;
-                        continue;
-                    } else if trimmed.starts_with("---") {
-                        // YAML options block delimiter
-                        lines[i].in_myst_directive = true;
-                        lines[i].in_code_block = false;
                         continue;
                     }
                     past_options = true;

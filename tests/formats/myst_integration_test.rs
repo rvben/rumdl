@@ -221,12 +221,29 @@ fn test_myst_nested_colon_directives() {
 // ==================== Directive options ====================
 
 #[test]
-fn test_myst_directive_options_not_in_code_block() {
+fn test_myst_directive_options_are_structural_caption_is_prose() {
     let content = "```{figure} image.png\n:alt: An image\n:width: 80%\n\nCaption text\n```\n";
     let ctx = myst_ctx(content);
-    // Option lines should be in_myst_directive but not in_code_block
+
+    // Option lines (`:key: value`) are structural directive metadata, not markdown
+    // prose. They are marked `in_myst_directive` and stay `in_code_block` so reflow
+    // (MD013) leaves them verbatim instead of joining them into a paragraph (#673).
     assert!(ctx.lines[1].in_myst_directive);
-    assert!(!ctx.lines[1].in_code_block);
+    assert!(
+        ctx.lines[1].in_code_block,
+        "option line `:alt:` must stay in_code_block"
+    );
     assert!(ctx.lines[2].in_myst_directive);
-    assert!(!ctx.lines[2].in_code_block);
+    assert!(
+        ctx.lines[2].in_code_block,
+        "option line `:width:` must stay in_code_block"
+    );
+
+    // The caption is markdown prose: in the directive but NOT in_code_block, so it
+    // still reflows. This is why `figure` is a content-bearing directive.
+    assert!(ctx.lines[4].in_myst_directive);
+    assert!(
+        !ctx.lines[4].in_code_block,
+        "caption prose must be reflowable (not code)"
+    );
 }

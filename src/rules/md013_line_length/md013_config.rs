@@ -250,6 +250,7 @@ impl MD013Config {
             abbreviations: self.abbreviations_for_reflow(),
             length_mode,
             attr_lists: false,
+            myst_roles: false,
             require_sentence_capital: self.require_sentence_capital,
             max_list_continuation_indent: None,
         }

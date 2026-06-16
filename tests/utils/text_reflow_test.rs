@@ -16,6 +16,7 @@ fn test_list_item_trailing_whitespace_removal() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
@@ -225,6 +226,7 @@ fn test_sentence_per_line_reflow() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
@@ -556,6 +558,7 @@ fn test_ie_abbreviation_split_debug() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
@@ -580,6 +583,7 @@ fn test_ie_abbreviation_paragraph() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
@@ -659,6 +663,7 @@ fn test_definition_list_with_paragraphs() {
         abbreviations: None,
         length_mode: ReflowLengthMode::default(),
         attr_lists: false,
+        myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
     };
