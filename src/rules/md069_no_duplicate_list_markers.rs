@@ -25,6 +25,7 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::is_horizontal_rule_line;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::range_utils::byte_to_char_count;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -117,9 +118,9 @@ impl Rule for MD069NoDuplicateListMarkers {
                         "Duplicate list marker '{first_marker} {second_marker}' - likely copy-paste error"
                     ),
                     line: line_num,
-                    column: indent.len() + 1,
+                    column: byte_to_char_count(line, indent.len()),
                     end_line: line_num,
-                    end_column: match_len + 1,
+                    end_column: byte_to_char_count(line, match_len),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(line_start..line_end, replacement)),
                 });

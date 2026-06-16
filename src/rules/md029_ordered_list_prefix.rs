@@ -2,6 +2,7 @@
 ///
 /// See [docs/md029.md](../../docs/md029.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX;
 use std::collections::HashMap;
 use toml;
@@ -177,7 +178,7 @@ impl MD029OrderedListPrefix {
     /// expects items 11, 12, 13... - no violation there).
     fn check_commonmark_list_group(
         &self,
-        _ctx: &crate::lint_context::LintContext,
+        ctx: &crate::lint_context::LintContext,
         group: &[(
             usize,
             &crate::lint_context::LineInfo,
@@ -268,15 +269,19 @@ impl MD029OrderedListPrefix {
                         let should_provide_fix =
                             start_value == 1 || matches!(self.config.style, ListStyle::One | ListStyle::OneOne);
 
+                        // marker_column is a byte offset within the line; convert to a
+                        // character column for the diagnostic.
+                        let line_text = line_info.content(ctx.content);
+
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             message: format!(
                                 "Ordered list item number {actual_num} does not match {style_context} (expected {expected_num})"
                             ),
                             line: *line_num,
-                            column: list_item.marker_column + 1,
+                            column: byte_to_char_count(line_text, list_item.marker_column),
                             end_line: *line_num,
-                            end_column: list_item.marker_column + number_len + 1,
+                            end_column: byte_to_char_count(line_text, list_item.marker_column + number_len),
                             severity: Severity::Warning,
                             fix: if should_provide_fix {
                                 Some(Fix::new(marker_start..marker_start + number_len, expected_num.to_string()))

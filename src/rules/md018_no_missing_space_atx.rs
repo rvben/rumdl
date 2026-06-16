@@ -7,7 +7,7 @@ pub(super) use md018_config::MD018Config;
 
 use crate::config::MarkdownFlavor;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::calculate_single_line_range;
+use crate::utils::range_utils::{byte_to_char_count, calculate_single_line_range};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -235,8 +235,9 @@ impl Rule for MD018NoMissingSpaceAtx {
                         let after_marker = &trimmed[heading.marker.len()..];
                         if !after_marker.is_empty() && !after_marker.starts_with(' ') && !after_marker.starts_with('\t')
                         {
-                            // Missing space after ATX marker
-                            let hash_end_col = line_info.indent + heading.marker.len() + 1; // 1-indexed
+                            // Missing space after ATX marker. The indent and '#' markers
+                            // are ASCII, so convert the byte offset to a character column.
+                            let hash_end_col = byte_to_char_count(line, line_info.indent + heading.marker.len());
                             let (start_line, start_col, end_line, end_col) = calculate_single_line_range(
                                 line_num + 1, // Convert to 1-indexed
                                 hash_end_col,
