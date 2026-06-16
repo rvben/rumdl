@@ -8,6 +8,7 @@ use crate::utils::emphasis_utils::{
     replace_inline_math,
 };
 use crate::utils::kramdown_utils::has_span_ial;
+use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{
     is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
@@ -153,6 +154,10 @@ impl Rule for MD037NoSpaceInEmphasis {
                         && !ctx.is_position_in_obsidian_comment(line_num, warning.column)
                     {
                         let mut adjusted_warning = warning.clone();
+                        // The skip checks above consumed the byte-based columns; the
+                        // emitted columns are character offsets within the line.
+                        adjusted_warning.column = byte_to_char_count(line, warning.column - 1);
+                        adjusted_warning.end_column = byte_to_char_count(line, warning.end_column - 1);
                         if let Some(fix) = &mut adjusted_warning.fix {
                             // Convert line-relative range to absolute range
                             let abs_start = line_start_pos + fix.range.start;
@@ -335,8 +340,11 @@ impl MD037NoSpaceInEmphasis {
                 let warning = LintWarning {
                     rule_name: Some(self.name().to_string()),
                     message: format!("Spaces inside emphasis markers: {display_text:?}"),
+                    // Byte-based columns within the line. The filter pass below relies
+                    // on `column` being a byte offset for its skip checks, then converts
+                    // the emitted columns to character offsets.
                     line: line_num,
-                    column: offset + full_start + 1, // +1 because columns are 1-indexed
+                    column: offset + full_start + 1,
                     end_line: line_num,
                     end_column: offset + full_end + 1,
                     severity: Severity::Warning,

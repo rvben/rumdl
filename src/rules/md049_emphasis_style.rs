@@ -234,17 +234,20 @@ impl Rule for MD049EmphasisStyle {
                 let target_marker = if asterisk_count >= underscore_count { '*' } else { '_' };
 
                 // Check all emphasis nodes for consistency with the prevalent style
-                for (line_num, col, abs_pos, marker, content) in &emphasis_info {
+                for (line_num, _col, abs_pos, marker, content) in &emphasis_info {
                     if *marker != target_marker {
-                        // Calculate emphasis length (marker + content + marker)
+                        // Calculate emphasis length (marker + content + marker).
+                        // The byte length drives the Fix range; the character length
+                        // drives the displayed end column.
                         let emphasis_len = 1 + content.len() + 1;
+                        let (_, char_col) = ctx.offset_to_line_col(*abs_pos);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: *line_num,
-                            column: *col,
+                            column: char_col,
                             end_line: *line_num,
-                            end_column: col + emphasis_len,
+                            end_column: char_col + content.chars().count() + 2,
                             message: format!("Emphasis should use {target_marker} instead of {marker}"),
                             fix: Some(Fix::new(
                                 *abs_pos..*abs_pos + emphasis_len,
@@ -266,17 +269,20 @@ impl Rule for MD049EmphasisStyle {
                     }
                 };
 
-                for (line_num, col, abs_pos, marker, content) in &emphasis_info {
+                for (line_num, _col, abs_pos, marker, content) in &emphasis_info {
                     if *marker == wrong_marker {
-                        // Calculate emphasis length (marker + content + marker)
+                        // Calculate emphasis length (marker + content + marker).
+                        // The byte length drives the Fix range; the character length
+                        // drives the displayed end column.
                         let emphasis_len = 1 + content.len() + 1;
+                        let (_, char_col) = ctx.offset_to_line_col(*abs_pos);
 
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: *line_num,
-                            column: *col,
+                            column: char_col,
                             end_line: *line_num,
-                            end_column: col + emphasis_len,
+                            end_column: char_col + content.chars().count() + 2,
                             message: format!("Emphasis should use {correct_marker} instead of {wrong_marker}"),
                             fix: Some(Fix::new(
                                 *abs_pos..*abs_pos + emphasis_len,

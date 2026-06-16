@@ -2,6 +2,7 @@ use crate::filtered_lines::FilteredLinesExt;
 use regex::{Regex, RegexBuilder};
 
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::range_utils::byte_to_char_count;
 
 mod md061_config;
 pub(super) use md061_config::MD061Config;
@@ -98,8 +99,8 @@ impl Rule for MD061ForbiddenTerms {
 
             // Find all matches in this line
             for mat in pattern.find_iter(content) {
-                // Skip if inside inline code (col is 1-indexed)
-                if ctx.is_in_code_span(line.line_num, mat.start() + 1) {
+                // Skip if inside inline code (col is a 1-indexed character column)
+                if ctx.is_in_code_span(line.line_num, byte_to_char_count(content, mat.start())) {
                     continue;
                 }
 
@@ -120,9 +121,9 @@ impl Rule for MD061ForbiddenTerms {
                     severity: Severity::Warning,
                     message: format!("Found forbidden term '{display_term}'"),
                     line: line.line_num,
-                    column: mat.start() + 1,
+                    column: byte_to_char_count(content, mat.start()),
                     end_line: line.line_num,
-                    end_column: mat.end() + 1,
+                    end_column: byte_to_char_count(content, mat.end()),
                     fix: None, // No auto-fix for warning comments
                 });
             }

@@ -10,6 +10,7 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::quarto_chunks::{is_executable_chunk, parse_hashpipe_labels, parse_inline_chunk_header};
+use crate::utils::range_utils::byte_to_char_count;
 
 #[derive(Debug, Clone, Default)]
 pub struct MD078MissingChunkLabels;
@@ -121,7 +122,8 @@ fn info_string_span(ctx: &LintContext, block_start: usize, info_string: &str) ->
 
     let (start_col, end_col) = match line_text.find(info_string.trim()) {
         Some(off) => {
-            let start = off + 1;
+            // `off` is a byte offset within the line; the column is a character offset.
+            let start = byte_to_char_count(line_text, off);
             let end = start + info_string.trim().chars().count();
             (start, end)
         }

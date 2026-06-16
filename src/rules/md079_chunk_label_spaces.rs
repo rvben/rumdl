@@ -18,6 +18,7 @@ use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleC
 use crate::utils::quarto_chunks::{
     ChunkLabelSource, is_executable_chunk, parse_hashpipe_labels, parse_inline_chunk_header,
 };
+use crate::utils::range_utils::byte_to_char_count;
 
 #[derive(Debug, Clone, Default)]
 pub struct MD079ChunkLabelSpaces;
@@ -165,7 +166,8 @@ fn make_warning(
     let trimmed = info_string.trim();
     let (start_col, end_col) = match line_text.find(trimmed) {
         Some(off) => {
-            let start = off + 1;
+            // `off` is a byte offset within the line; the column is a character offset.
+            let start = byte_to_char_count(line_text, off);
             let end = start + trimmed.chars().count();
             (start, end)
         }

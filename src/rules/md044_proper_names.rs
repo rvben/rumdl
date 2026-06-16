@@ -2,6 +2,7 @@ use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::utils::range_utils::byte_to_char_count;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
@@ -955,12 +956,16 @@ impl Rule for MD044ProperNames {
                     let line_start = line_index.get_line_start_byte(line).unwrap_or(0);
                     let byte_start = line_start + (column - 1);
                     let byte_end = byte_start + found_name.len();
+                    // The displayed columns are character offsets; convert from the byte
+                    // offset within the line so they are correct on multi-byte lines.
+                    let line_text = ctx.line_info(line).map_or("", |li| li.content(ctx.content));
+                    let char_col = byte_to_char_count(line_text, column - 1);
                     LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line,
-                        column,
+                        column: char_col,
                         end_line: line,
-                        end_column: column + found_name.len(),
+                        end_column: char_col + found_name.chars().count(),
                         message: format!("Proper name '{found_name}' should be '{proper_name}'"),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(byte_start..byte_end, proper_name)),
