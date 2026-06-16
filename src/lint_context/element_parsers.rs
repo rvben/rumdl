@@ -2,6 +2,7 @@ use crate::config::MarkdownFlavor;
 use crate::utils::code_block_utils::CodeBlockUtils;
 use crate::utils::mkdocs_admonitions;
 use crate::utils::mkdocs_tabs;
+use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::URL_SIMPLE_REGEX;
 use crate::utils::rumdl_parser_options;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -292,21 +293,13 @@ pub(super) fn build_code_spans_from_ranges(
             .saturating_sub(1);
         let byte_col_end = end_pos - lines[end_line_idx].byte_offset;
 
-        // Convert byte offsets to character positions for correct Unicode handling
-        // This ensures consistency with warning.column which uses character positions
+        // Convert byte offsets to 0-indexed character positions (boundary-safe) for
+        // correct Unicode handling; consistent with warning.column being char-based.
         let line_content = lines[line_idx].content(content);
-        let col_start = if byte_col_start <= line_content.len() {
-            line_content[..byte_col_start].chars().count()
-        } else {
-            line_content.chars().count()
-        };
+        let col_start = byte_to_char_count(line_content, byte_col_start) - 1;
 
         let end_line_content = lines[end_line_idx].content(content);
-        let col_end = if byte_col_end <= end_line_content.len() {
-            end_line_content[..byte_col_end].chars().count()
-        } else {
-            end_line_content.chars().count()
-        };
+        let col_end = byte_to_char_count(end_line_content, byte_col_end) - 1;
 
         code_spans.push(CodeSpan {
             line: line_num,
@@ -466,25 +459,17 @@ pub(super) fn parse_html_tags(
             let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
             let line_idx = line_idx.saturating_sub(1);
             let line_num = line_idx + 1;
-            // Columns are character offsets (rumdl's diagnostic convention), so
-            // convert the byte offsets within the line to character counts.
+            // Columns are 0-indexed character offsets (rumdl's diagnostic convention);
+            // byte_to_char_count is boundary-safe.
             let line_content = lines[line_idx].content(content);
             let byte_col_start = match_start - lines[line_idx].byte_offset;
-            let col_start = if byte_col_start <= line_content.len() {
-                line_content[..byte_col_start].chars().count()
-            } else {
-                line_content.chars().count()
-            };
+            let col_start = byte_to_char_count(line_content, byte_col_start) - 1;
             let byte_col_end = if match_end <= lines[line_idx].byte_offset + lines[line_idx].byte_len {
                 match_end - lines[line_idx].byte_offset
             } else {
                 lines[line_idx].byte_len
             };
-            let col_end = if byte_col_end <= line_content.len() {
-                line_content[..byte_col_end].chars().count()
-            } else {
-                line_content.chars().count()
-            };
+            let col_end = byte_to_char_count(line_content, byte_col_end) - 1;
 
             let tag = HtmlTag {
                 line: line_num,

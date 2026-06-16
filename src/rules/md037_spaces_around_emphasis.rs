@@ -128,10 +128,13 @@ impl Rule for MD037NoSpaceInEmphasis {
             // Find warnings for this line
             for warning in &warnings {
                 if warning.line == line_num {
-                    // Calculate byte position of the warning
+                    // `warning.column` is a byte offset within the line at this stage.
+                    // Derive the byte position (for byte-based skip checks) and the
+                    // character column (for char-based checks and the emitted warning).
                     let byte_pos = line_start_pos + (warning.column - 1);
-                    // Calculate position within the line (0-indexed)
+                    // Calculate byte position within the line (0-indexed)
                     let line_pos = warning.column - 1;
+                    let char_col = byte_to_char_count(line, warning.column - 1);
 
                     // Skip if inside links, HTML comments, math contexts, tables, code spans, MDX constructs, or MkDocs markup
                     // Note: is_in_code_span uses pulldown-cmark and correctly handles multi-line spans
@@ -145,18 +148,17 @@ impl Rule for MD037NoSpaceInEmphasis {
                         && !self.is_in_link(ctx, byte_pos)
                         && !ctx.is_in_html_comment(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
-                        && !is_in_table_cell(ctx, line_num, warning.column)
-                        && !ctx.is_in_code_span(line_num, warning.column)
+                        && !is_in_table_cell(ctx, line_num, char_col)
+                        && !ctx.is_in_code_span(line_num, char_col)
                         && !is_in_inline_html_code(line, line_pos)
                         && !is_in_jsx_expression(ctx, byte_pos)
                         && !is_in_mdx_comment(ctx, byte_pos)
                         && !is_in_mkdocs_markup(line, line_pos, ctx.flavor)
-                        && !ctx.is_position_in_obsidian_comment(line_num, warning.column)
+                        && !ctx.is_position_in_obsidian_comment(line_num, char_col)
                     {
                         let mut adjusted_warning = warning.clone();
-                        // The skip checks above consumed the byte-based columns; the
-                        // emitted columns are character offsets within the line.
-                        adjusted_warning.column = byte_to_char_count(line, warning.column - 1);
+                        // Emit character-based columns (byte-based skip checks done above).
+                        adjusted_warning.column = char_col;
                         adjusted_warning.end_column = byte_to_char_count(line, warning.end_column - 1);
                         if let Some(fix) = &mut adjusted_warning.fix {
                             // Convert line-relative range to absolute range

@@ -12,7 +12,7 @@
 /// style = "title_case"
 /// ```
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::range_utils::LineIndex;
+use crate::utils::range_utils::{LineIndex, byte_to_char_count};
 use regex::Regex;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -1024,9 +1024,9 @@ impl Rule for MD063HeadingCapitalization {
                     warnings.push(LintWarning {
                         rule_name: Some(self.name().to_string()),
                         line: line_num + 1,
-                        column: heading.content_column + 1,
+                        column: byte_to_char_count(line, heading.content_column),
                         end_line: line_num + 1,
-                        end_column: heading.content_column + 1 + original_text.chars().count(),
+                        end_column: byte_to_char_count(line, heading.content_column) + original_text.chars().count(),
                         message: format!("Heading should use {style_name}: '{original_text}' -> '{fixed_text}'"),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
