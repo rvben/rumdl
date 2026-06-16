@@ -427,10 +427,13 @@ pub fn calculate_single_line_range(line: usize, start_col: usize, length: usize)
     (line, start_col, line, start_col + length)
 }
 
-/// Calculate range for entire line
+/// Calculate range for entire line.
+///
+/// The end column is a character count (rumdl's diagnostic convention), not a
+/// byte length, so the range is correct on lines containing multi-byte UTF-8.
 pub fn calculate_line_range(line: usize, line_content: &str) -> (usize, usize, usize, usize) {
-    let trimmed_len = line_content.trim_end().len();
-    (line, 1, line, trimmed_len + 1)
+    let trimmed_char_len = line_content.trim_end().chars().count();
+    (line, 1, line, trimmed_char_len + 1)
 }
 
 /// Calculate range from regex match on a line
@@ -562,6 +565,17 @@ mod tests {
         assert_eq!(start_col, 1);
         assert_eq!(end_line, 1);
         assert_eq!(end_col, 20); // Trimmed length + 1
+    }
+
+    #[test]
+    fn test_line_range_non_ascii() {
+        // Issue #670: end column is a character count, not a byte length.
+        // "你好 heading" is 10 characters, so end_column is 11 (the byte length
+        // would be 16).
+        let content = "你好 heading  ";
+        let (_, start_col, _, end_col) = calculate_line_range(1, content);
+        assert_eq!(start_col, 1);
+        assert_eq!(end_col, 11);
     }
 
     #[test]

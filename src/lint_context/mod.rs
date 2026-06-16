@@ -1205,13 +1205,19 @@ impl<'a> LintContext<'a> {
         false
     }
 
-    /// Map a byte offset to (line, column)
+    /// Map a byte offset to (line, column).
+    ///
+    /// The column is a 1-indexed *character* offset within the line (rumdl's
+    /// diagnostic convention), not a byte offset, so it is correct on lines
+    /// containing multi-byte UTF-8 characters.
     pub fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
         match self.line_offsets.binary_search(&offset) {
             Ok(line) => (line + 1, 1),
             Err(line) => {
                 let line_start = self.line_offsets.get(line.wrapping_sub(1)).copied().unwrap_or(0);
-                (line, offset - line_start + 1)
+                // Convert the byte offset within the line to a character column.
+                let col = byte_to_char_count(&self.content[line_start..], offset.saturating_sub(line_start));
+                (line, col)
             }
         }
     }

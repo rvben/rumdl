@@ -115,6 +115,17 @@ fn test_offset_to_line_col_edge_cases() {
 }
 
 #[test]
+fn test_offset_to_line_col_non_ascii() {
+    // Issue #670: the column is a character offset, not a byte offset.
+    // "你好x": 你=bytes 0-2, 好=bytes 3-5, x=byte 6.
+    let content = "你好x";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.offset_to_line_col(0), (1, 1)); // 你 -> char column 1
+    assert_eq!(ctx.offset_to_line_col(3), (1, 2)); // 好 -> char column 2
+    assert_eq!(ctx.offset_to_line_col(6), (1, 3)); // x  -> char column 3 (not byte 7)
+}
+
+#[test]
 fn test_mdx_esm_blocks() {
     let content = r##"import {Chart} from './snowfall.js'
 export const year = 2023
