@@ -57,6 +57,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.18](https://github.com/rvben/rumdl/compare/v0.2.17...v0.2.18) - 2026-06-16
+
+### Fixed
+
+- **md013**: preserve MyST directives and roles during reflow ([a31a602](https://github.com/rvben/rumdl/commit/a31a602e26e0b0b074f0fa90a80b66513fc7fc72))
+- **positions**: char-based marker columns in MD018, MD029, MD069 ([97212f3](https://github.com/rvben/rumdl/commit/97212f34172cb8c8fa60d4e1665f5a0e1323f918))
+- **positions**: address review - MD037 filter, boundary-safe parser conversions, MD063 column ([6fd43f7](https://github.com/rvben/rumdl/commit/6fd43f76c12b9db4776000f974131c6b8e734275))
+- **positions**: char-based end column in MD070; document the column convention ([039a334](https://github.com/rvben/rumdl/commit/039a33485f03fe8e819183490adb95290fb89055))
+- **positions**: use character-based end columns across remaining rules ([efc29da](https://github.com/rvben/rumdl/commit/efc29da2b10c8eba28118500d9617c194bf3d322))
+- **positions**: report character-based columns in inline-content rules ([e7fd2ee](https://github.com/rvben/rumdl/commit/e7fd2eea9ef1413b54327c44a64df14577ae6958))
+- **positions**: make shared column helpers character-based ([5ca4814](https://github.com/rvben/rumdl/commit/5ca48141750b3b067817d34a6b3aa63221b603c4))
+- **md057**: report character-based columns for non-ASCII lines ([d8d07eb](https://github.com/rvben/rumdl/commit/d8d07eb4d86e2d7226ef47849d441262ace5d3db))
+
 ## [0.2.17](https://github.com/rvben/rumdl/compare/v0.2.16...v0.2.17) - 2026-06-15
 
 ### Fixed
