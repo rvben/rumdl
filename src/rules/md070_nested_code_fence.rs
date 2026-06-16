@@ -360,7 +360,7 @@ impl Rule for MD070NestedCodeFence {
                                 line: block_start + 1,
                                 column: 1,
                                 end_line: intended_close + 1,
-                                end_column: lines[intended_close].len() + 1,
+                                end_column: lines[intended_close].chars().count() + 1,
                                 severity: Severity::Warning,
                                 fix: Some(Fix::new(open_byte_start..close_byte_end, replacement)),
                             });

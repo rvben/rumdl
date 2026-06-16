@@ -37,10 +37,17 @@ pub type LintResult = Result<Vec<LintWarning>, LintError>;
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct LintWarning {
     pub message: String,
-    pub line: usize,       // 1-indexed start line
-    pub column: usize,     // 1-indexed start column
-    pub end_line: usize,   // 1-indexed end line
-    pub end_column: usize, // 1-indexed end column
+    pub line: usize, // 1-indexed start line
+    /// 1-indexed start column, measured in **characters** (not bytes).
+    /// When deriving a column from a byte offset (regex match, `str::find`,
+    /// parser byte offset), convert with `range_utils::byte_to_char_count` or a
+    /// character-based range helper. A raw byte offset mis-positions the
+    /// highlight on lines containing multi-byte UTF-8.
+    pub column: usize,
+    pub end_line: usize, // 1-indexed end line
+    /// 1-indexed end column, measured in **characters** (see `column`). Use
+    /// `str::chars().count()`, not `str::len()`, when computing a span width.
+    pub end_column: usize,
     pub severity: Severity,
     pub fix: Option<Fix>,
     pub rule_name: Option<String>,
