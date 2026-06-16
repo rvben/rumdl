@@ -637,7 +637,7 @@ impl Rule for MD075OrphanedTableRows {
                 line: first_orphan + 1,
                 column: 1,
                 end_line: last_orphan + 1,
-                end_column: content_lines[last_orphan].len() + 1,
+                end_column: content_lines[last_orphan].chars().count() + 1,
                 severity: Severity::Warning,
                 fix: group_fix.clone(),
             });
@@ -662,7 +662,7 @@ impl Rule for MD075OrphanedTableRows {
                 line: start + 1,
                 column: 1,
                 end_line: end + 1,
-                end_column: content_lines[end].len() + 1,
+                end_column: content_lines[end].chars().count() + 1,
                 severity: Severity::Warning,
                 fix: None,
             });

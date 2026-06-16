@@ -876,7 +876,7 @@ impl MD013LineLength {
             line: warning_line,
             column: 1,
             end_line: warning_end_line,
-            end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
+            end_column: lines[warning_end_line.saturating_sub(1)].chars().count() + 1,
             severity: Severity::Warning,
             fix: Some(crate::rule::Fix::new(byte_range, replacement)),
         };
@@ -1358,7 +1358,7 @@ impl MD013LineLength {
                         line: footnote_start + 1,
                         column: 1,
                         end_line: last_consumed + 1,
-                        end_column: lines[last_consumed].len() + 1,
+                        end_column: lines[last_consumed].chars().count() + 1,
                         severity: Severity::Warning,
                         fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });
@@ -1522,7 +1522,7 @@ impl MD013LineLength {
                         line: container_start + 1,
                         column: 1,
                         end_line: end_line + 1,
-                        end_column: lines[end_line].len() + 1,
+                        end_column: lines[end_line].chars().count() + 1,
                         severity: Severity::Warning,
                         fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });
@@ -2612,7 +2612,7 @@ impl MD013LineLength {
                             line: list_start + 1,
                             column: 1,
                             end_line: end_line + 1,
-                            end_column: lines[end_line].len() + 1,
+                            end_column: lines[end_line].chars().count() + 1,
                             severity: Severity::Warning,
                             fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                         });
@@ -2925,7 +2925,7 @@ impl MD013LineLength {
                         line: warning_line,
                         column: 1,
                         end_line: warning_end_line,
-                        end_column: lines[warning_end_line.saturating_sub(1)].len() + 1,
+                        end_column: lines[warning_end_line.saturating_sub(1)].chars().count() + 1,
                         severity: Severity::Warning,
                         fix: Some(crate::rule::Fix::new(byte_range, replacement)),
                     });

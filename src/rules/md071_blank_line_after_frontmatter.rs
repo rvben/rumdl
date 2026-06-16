@@ -45,7 +45,7 @@ impl Rule for MD071BlankLineAfterFrontmatter {
             && !next_line.trim().is_empty()
         {
             // Missing blank line after frontmatter
-            let end_col = lines.get(fm_end_line - 1).map_or(1, |l| l.len() + 1);
+            let end_col = lines.get(fm_end_line - 1).map_or(1, |l| l.chars().count() + 1);
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
                 message: "Missing blank line after frontmatter".to_string(),

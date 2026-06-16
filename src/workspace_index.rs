@@ -25,6 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use crate::lint_context::LintContext;
+use crate::utils::range_utils::byte_to_char_count;
 
 // =============================================================================
 // URL Decoding Helper
@@ -214,7 +215,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                                 target_path: stripped.to_string(),
                                 fragment: fragment.to_string(),
                                 line: link.line,
-                                column: url_group.start() + 1,
+                                column: byte_to_char_count(line, url_group.start()),
                             });
                         }
                     }
@@ -248,7 +249,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
                         target_path: file_path.to_string(),
                         fragment: fragment.to_string(),
                         line: link.line,
-                        column: url_group.start() + 1,
+                        column: byte_to_char_count(line, url_group.start()),
                     });
                 }
             }

@@ -46,12 +46,9 @@ impl Rule for MD047SingleTrailingNewline {
 
             // Calculate precise character range for the end of file
             // For missing newline, highlight the end of the last line
-            let (start_line, start_col, end_line, end_col) = (
-                last_line_num,
-                last_line_content.len() + 1,
-                last_line_num,
-                last_line_content.len() + 1,
-            );
+            let last_line_chars = last_line_content.chars().count();
+            let (start_line, start_col, end_line, end_col) =
+                (last_line_num, last_line_chars + 1, last_line_num, last_line_chars + 1);
 
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),

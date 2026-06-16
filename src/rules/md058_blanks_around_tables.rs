@@ -182,9 +182,9 @@ impl Rule for MD058BlanksAroundTables {
                             rule_name: Some(self.name().to_string()),
                             message,
                             line: table_block.end_line + 1,
-                            column: lines[table_block.end_line].len() + 1,
+                            column: lines[table_block.end_line].chars().count() + 1,
                             end_line: table_block.end_line + 1,
-                            end_column: lines[table_block.end_line].len() + 2,
+                            end_column: lines[table_block.end_line].chars().count() + 2,
                             severity: Severity::Warning,
                             fix: Some(Fix::new(
                                 line_index.line_col_to_byte_range(

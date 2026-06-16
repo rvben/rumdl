@@ -386,7 +386,7 @@ impl MD077ListContinuationIndent {
             line: line.line_num,
             column: 1,
             end_line: line.line_num,
-            end_column: line_content.len() + 1,
+            end_column: line_content.chars().count() + 1,
             message,
             severity: Severity::Warning,
             fix: Some(Fix::new(fix_start..fix_end, " ".repeat(fix_target))),
@@ -420,14 +420,16 @@ impl MD077ListContinuationIndent {
             let fix = Self::build_compound_fence_fix(ctx, line.line_num, closer_line, line.actual, required);
             let end_column = ctx
                 .line_info(closer_line)
-                .map_or(line_content.len() + 1, |ci| ci.content(ctx.content).len() + 1);
+                .map_or(line_content.chars().count() + 1, |ci| {
+                    ci.content(ctx.content).chars().count() + 1
+                });
             let extra_flag = (closer_line != line.line_num).then_some(closer_line);
             (fix, closer_line, end_column, extra_flag)
         } else {
             let fix_start = line.info.byte_offset;
             let fix_end = fix_start + line.info.indent;
             let fix = Some(Fix::new(fix_start..fix_end, " ".repeat(required)));
-            (fix, line.line_num, line_content.len() + 1, None)
+            (fix, line.line_num, line_content.chars().count() + 1, None)
         };
 
         UnderIndentOutcome {

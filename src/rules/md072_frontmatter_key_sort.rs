@@ -592,7 +592,7 @@ impl Rule for MD072FrontmatterKeySort {
                     line: 2,
                     column: 1,
                     end_line: 2,
-                    end_column: out_of_place.len() + 1,
+                    end_column: out_of_place.chars().count() + 1,
                     severity: Severity::Warning,
                     fix,
                 });

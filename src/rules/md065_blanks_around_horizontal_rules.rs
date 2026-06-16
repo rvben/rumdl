@@ -154,9 +154,9 @@ impl Rule for MD065BlanksAroundHorizontalRules {
                     rule_name: Some(self.name().to_string()),
                     message: "Missing blank line after horizontal rule".to_string(),
                     line: i + 1,
-                    column: lines[i].len() + 1,
+                    column: lines[i].chars().count() + 1,
                     end_line: i + 1,
-                    end_column: lines[i].len() + 2,
+                    end_column: lines[i].chars().count() + 2,
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
                         line_index.line_col_to_byte_range(i + 1, lines[i].len() + 1),

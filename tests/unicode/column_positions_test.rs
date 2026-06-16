@@ -77,4 +77,35 @@ mod tests {
         assert_eq!(result[0].column, 4, "MD049 column must be a character offset");
         assert_eq!(result[0].end_column, 10, "MD049 end_column must be character-based");
     }
+
+    #[test]
+    fn md013_line_length_end_column() {
+        use rumdl_lib::rules::MD013LineLength;
+        // A long, breakable line ending in multi-byte text. The end column is the
+        // line's character count + 1, not its byte count + 1.
+        let rule = MD013LineLength::new(80, true, true, true, false);
+        let content = format!("{}你好", "word ".repeat(20));
+        let expected = content.chars().count() + 1;
+        let byte_based = content.len() + 1;
+        assert_ne!(expected, byte_based, "test content must contain multi-byte chars");
+        let result = rule.check(&ctx(&content)).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].end_column, expected,
+            "MD013 end_column must be a character offset"
+        );
+    }
+
+    #[test]
+    fn md058_table_end_column() {
+        use rumdl_lib::rules::MD058BlanksAroundTables;
+        let rule = MD058BlanksAroundTables::default();
+        // The final table row "| 你好 | x |" is 10 characters (14 bytes); the table
+        // is not followed by a blank line, so MD058 flags it at the row's end.
+        let content = "| a | b |\n|---|---|\n| 你好 | x |\ntext\n";
+        let result = rule.check(&ctx(content)).unwrap();
+        assert!(!result.is_empty());
+        assert_eq!(result[0].column, 11, "MD058 column must be a character offset");
+        assert_eq!(result[0].end_column, 12, "MD058 end_column must be a character offset");
+    }
 }

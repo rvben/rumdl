@@ -999,7 +999,10 @@ impl Rule for MD051LinkFragments {
                         line: cross_link.line,
                         column: cross_link.column,
                         end_line: cross_link.line,
-                        end_column: cross_link.column + cross_link.target_path.len() + 1 + cross_link.fragment.len(),
+                        end_column: cross_link.column
+                            + cross_link.target_path.chars().count()
+                            + 1
+                            + cross_link.fragment.chars().count(),
                         message: format!(
                             "Link fragment '{}' not found in '{}'",
                             cross_link.fragment, cross_link.target_path

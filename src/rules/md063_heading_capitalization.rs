@@ -1026,7 +1026,7 @@ impl Rule for MD063HeadingCapitalization {
                         line: line_num + 1,
                         column: heading.content_column + 1,
                         end_line: line_num + 1,
-                        end_column: heading.content_column + 1 + original_text.len(),
+                        end_column: heading.content_column + 1 + original_text.chars().count(),
                         message: format!("Heading should use {style_name}: '{original_text}' -> '{fixed_text}'"),
                         severity: Severity::Warning,
                         fix: Some(Fix::new(
