@@ -193,14 +193,16 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         continue;
                     }
 
-                    let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, start_pos);
+                    let (line_idx, line_num, col_start) =
+                        super::LintContext::find_line_for_offset(lines, content, start_pos);
 
                     if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
                         link_text_chunks.clear();
                         continue;
                     }
 
-                    let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, span_end);
+                    let (_, _end_line_num, col_end) =
+                        super::LintContext::find_line_for_offset(lines, content, span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -318,8 +320,9 @@ pub(super) fn parse_links_images_pulldown<'a>(
                         continue;
                     }
 
-                    let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, start_pos);
-                    let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, span_end);
+                    let (_, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, start_pos);
+                    let (_, _end_line_num, col_end) =
+                        super::LintContext::find_line_for_offset(lines, content, span_end);
 
                     let is_reference = matches!(
                         link_type,
@@ -429,7 +432,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
                     continue;
                 }
 
-                let (_, line_num, _) = super::LintContext::find_line_for_offset(lines, range.start);
+                let (_, line_num, _) = super::LintContext::find_line_for_offset(lines, content, range.start);
                 footnote_refs.push(FootnoteRef {
                     id: footnote_id.to_string(),
                     line: line_num,
@@ -504,13 +507,13 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, match_start);
+        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
 
         if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
             continue;
         }
 
-        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, match_end);
+        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
 
         let text = cap.get(1).map_or("", |m| m.as_str());
 
@@ -590,8 +593,8 @@ pub(super) fn finalize_links_and_images<'a>(
             continue;
         }
 
-        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, match_start);
-        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, match_end);
+        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, match_start);
+        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, match_end);
         let alt_text = cap.get(1).map_or("", |m| m.as_str());
 
         if let Some(ref_id) = cap.get(7) {

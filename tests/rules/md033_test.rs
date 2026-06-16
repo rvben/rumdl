@@ -24,6 +24,22 @@ fn test_simple_html_tag() {
 }
 
 #[test]
+fn test_html_tag_column_non_ascii_prefix() {
+    // Issue #670: HTML-tag columns are character offsets, not byte offsets.
+    let rule = MD033NoInlineHtml::default();
+    // Character columns: 1:你 2:好 3:< ...  The '<b>' tag starts at column 3.
+    let content = "你好<b>bold</b>";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "Only the opening <b> tag is reported");
+    assert_eq!(result[0].line, 1);
+    assert_eq!(
+        result[0].column, 3,
+        "Column must be a character offset, not a byte offset"
+    );
+}
+
+#[test]
 fn test_self_closing_tag() {
     let rule = MD033NoInlineHtml::default();
     let content = "An image: <img src=\"test.png\" />";

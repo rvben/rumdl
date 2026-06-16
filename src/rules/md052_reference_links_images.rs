@@ -424,7 +424,15 @@ impl MD052ReferenceLinkImages {
                     }
 
                     let match_len = link.byte_end - link.byte_offset;
-                    undefined.push((link.line - 1, link.start_col, match_len, ref_id.to_string()));
+                    // calculate_match_range expects a byte offset within the line;
+                    // start_col is a character column, so derive the byte offset.
+                    let line_start = ctx.line_index.get_line_start_byte(link.line).unwrap_or(0);
+                    undefined.push((
+                        link.line - 1,
+                        link.byte_offset - line_start,
+                        match_len,
+                        ref_id.to_string(),
+                    ));
                     reported_refs.insert(reference_lower, true);
                 }
             }
@@ -519,7 +527,15 @@ impl MD052ReferenceLinkImages {
                     }
 
                     let match_len = image.byte_end - image.byte_offset;
-                    undefined.push((image.line - 1, image.start_col, match_len, ref_id.to_string()));
+                    // calculate_match_range expects a byte offset within the line;
+                    // start_col is a character column, so derive the byte offset.
+                    let line_start = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
+                    undefined.push((
+                        image.line - 1,
+                        image.byte_offset - line_start,
+                        match_len,
+                        ref_id.to_string(),
+                    ));
                     reported_refs.insert(reference_lower, true);
                 }
             }
@@ -936,6 +952,24 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
+    }
+
+    #[test]
+    fn test_undefined_reference_column_non_ascii_prefix() {
+        // Issue #670: columns are character offsets. A multi-byte prefix must not
+        // shift the reported column (the reference span is located via a char-based
+        // start_col fed into a byte-expecting range helper).
+        let rule = MD052ReferenceLinkImages::new();
+        // Character columns: 1:你 2:好 3:[ ...  The reference link starts at column 3.
+        let content = "你好[text][undefined]";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].column, 3,
+            "Column must be a character offset, not a byte offset"
+        );
     }
 
     #[test]

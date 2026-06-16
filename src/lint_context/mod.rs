@@ -14,6 +14,7 @@ use crate::config::MarkdownFlavor;
 use crate::inline_config::InlineConfig;
 use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::code_block_utils::{CodeBlockDetail, CodeBlockUtils};
+use crate::utils::range_utils::byte_to_char_count;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -1611,9 +1612,14 @@ impl<'a> LintContext<'a> {
     /// Returns (line_index, line_number, column) where:
     /// - line_index is the 0-based index in the lines array
     /// - line_number is the 1-based line number
-    /// - column is the byte offset within that line
+    /// - column is the 0-based *character* offset within that line
+    ///
+    /// The column is a character offset rather than a byte offset so that the
+    /// `start_col`/`end_col` it feeds into match rumdl's diagnostic convention
+    /// (columns are character positions). On lines with multi-byte UTF-8
+    /// characters the two differ; reporting bytes would mis-position highlights.
     #[inline]
-    fn find_line_for_offset(lines: &[LineInfo], byte_offset: usize) -> (usize, usize, usize) {
+    fn find_line_for_offset(lines: &[LineInfo], content: &str, byte_offset: usize) -> (usize, usize, usize) {
         // Binary search to find the line containing this byte offset
         let idx = match lines.binary_search_by(|line| {
             if byte_offset < line.byte_offset {
@@ -1630,7 +1636,10 @@ impl<'a> LintContext<'a> {
 
         let line = &lines[idx];
         let line_num = idx + 1;
-        let col = byte_offset.saturating_sub(line.byte_offset);
+        let byte_col = byte_offset.saturating_sub(line.byte_offset);
+        // Convert the byte offset within the line to a 0-based character column.
+        // `byte_to_char_count` returns a 1-based value, so subtract 1.
+        let col = byte_to_char_count(line.content(content), byte_col) - 1;
 
         (idx, line_num, col)
     }

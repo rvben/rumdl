@@ -2001,6 +2001,36 @@ fn test_compact_paths_dot_prefix() {
 }
 
 #[test]
+fn test_compact_paths_image_non_ascii_column() {
+    // Issue #670: the compact-paths suggestion for an image must report a
+    // character-based column even when a multi-byte prefix precedes the image.
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    fs::write(base_path.join("file.png"), "x").unwrap();
+
+    // Character columns: 1:你 2:好 3:! 4:[ 5:你 6:好 7:] 8:( 9:. ...
+    // The URL "./file.png" starts at 1-indexed character column 9.
+    let content = "你好![你好](./file.png)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let compact_warnings: Vec<_> = result.iter().filter(|w| w.message.contains("simplified")).collect();
+    assert_eq!(
+        compact_warnings.len(),
+        1,
+        "Expected 1 compact-paths warning, got: {compact_warnings:?}"
+    );
+    assert_eq!(
+        compact_warnings[0].column, 9,
+        "Column must be a character offset, not a byte offset"
+    );
+}
+
+#[test]
 fn test_compact_paths_deep_traversal() {
     let temp_dir = tempdir().unwrap();
     let base_path = temp_dir.path();

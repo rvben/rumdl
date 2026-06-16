@@ -466,11 +466,24 @@ pub(super) fn parse_html_tags(
             let line_idx = lines.partition_point(|info| info.byte_offset <= match_start);
             let line_idx = line_idx.saturating_sub(1);
             let line_num = line_idx + 1;
-            let col_start = match_start - lines[line_idx].byte_offset;
-            let col_end = if match_end <= lines[line_idx].byte_offset + lines[line_idx].byte_len {
+            // Columns are character offsets (rumdl's diagnostic convention), so
+            // convert the byte offsets within the line to character counts.
+            let line_content = lines[line_idx].content(content);
+            let byte_col_start = match_start - lines[line_idx].byte_offset;
+            let col_start = if byte_col_start <= line_content.len() {
+                line_content[..byte_col_start].chars().count()
+            } else {
+                line_content.chars().count()
+            };
+            let byte_col_end = if match_end <= lines[line_idx].byte_offset + lines[line_idx].byte_len {
                 match_end - lines[line_idx].byte_offset
             } else {
                 lines[line_idx].byte_len
+            };
+            let col_end = if byte_col_end <= line_content.len() {
+                line_content[..byte_col_end].chars().count()
+            } else {
+                line_content.chars().count()
             };
 
             let tag = HtmlTag {

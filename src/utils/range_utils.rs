@@ -29,9 +29,14 @@ fn find_char_boundary(s: &str, byte_idx: usize) -> usize {
     pos
 }
 
-/// Convert a byte index to a character count (1-indexed).
-/// This safely handles multi-byte UTF-8 characters by finding the nearest character boundary.
-fn byte_to_char_count(s: &str, byte_idx: usize) -> usize {
+/// Convert a byte index within a line into a 1-indexed character column.
+///
+/// rumdl reports diagnostic columns as character offsets, not byte offsets, so
+/// any position derived from a byte index (regex match, `str::find`, parser byte
+/// offset) must pass through this before being stored in a `LintWarning`.
+/// Multi-byte UTF-8 characters are handled by snapping to the nearest character
+/// boundary at or before `byte_idx`.
+pub(crate) fn byte_to_char_count(s: &str, byte_idx: usize) -> usize {
     let safe_byte_idx = find_char_boundary(s, byte_idx);
     s[..safe_byte_idx].chars().count() + 1 // 1-indexed
 }

@@ -6,6 +6,7 @@
 use crate::rule::{
     CrossFileScope, Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity,
 };
+use crate::utils::range_utils::byte_to_char_count;
 use crate::workspace_index::{FileIndex, extract_cross_file_links};
 use regex::Regex;
 use std::collections::HashMap;
@@ -720,9 +721,9 @@ impl Rule for MD057ExistingRelativeLinks {
                                     warnings.push(LintWarning {
                                         rule_name: Some(self.name().to_string()),
                                         line: link.line,
-                                        column: url_start + 1,
+                                        column: byte_to_char_count(line, url_start),
                                         end_line: link.line,
-                                        end_column: url_end + 1,
+                                        end_column: byte_to_char_count(line, url_end),
                                         message: format!("Absolute link '{url}' cannot be validated locally"),
                                         severity: Severity::Warning,
                                         fix: None,
@@ -735,9 +736,9 @@ impl Rule for MD057ExistingRelativeLinks {
                                         warnings.push(LintWarning {
                                             rule_name: Some(self.name().to_string()),
                                             line: link.line,
-                                            column: url_start + 1,
+                                            column: byte_to_char_count(line, url_start),
                                             end_line: link.line,
-                                            end_column: url_end + 1,
+                                            end_column: byte_to_char_count(line, url_end),
                                             message: msg,
                                             severity: Severity::Warning,
                                             fix: None,
@@ -753,9 +754,9 @@ impl Rule for MD057ExistingRelativeLinks {
                                         warnings.push(LintWarning {
                                             rule_name: Some(self.name().to_string()),
                                             line: link.line,
-                                            column: url_start + 1,
+                                            column: byte_to_char_count(line, url_start),
                                             end_line: link.line,
-                                            end_column: url_end + 1,
+                                            end_column: byte_to_char_count(line, url_end),
                                             message: msg,
                                             severity: Severity::Warning,
                                             fix: None,
@@ -783,9 +784,9 @@ impl Rule for MD057ExistingRelativeLinks {
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
                                 line: link.line,
-                                column: url_start + 1,
+                                column: byte_to_char_count(line, url_start),
                                 end_line: link.line,
-                                end_column: url_end + 1,
+                                end_column: byte_to_char_count(line, url_end),
                                 message: format!(
                                     "Relative link '{full_url_for_compact}' can be simplified to '{suggestion}'"
                                 ),
@@ -841,9 +842,9 @@ impl Rule for MD057ExistingRelativeLinks {
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: link.line,
-                            column: url_start + 1, // 1-indexed
+                            column: byte_to_char_count(line, url_start),
                             end_line: link.line,
-                            end_column: url_end + 1, // 1-indexed
+                            end_column: byte_to_char_count(line, url_end),
                             message: format!("Relative link '{url}' does not exist"),
                             severity: Severity::Error,
                             fix: None,
@@ -881,7 +882,7 @@ impl Rule for MD057ExistingRelativeLinks {
                             line: image.line,
                             column: image.start_col + 1,
                             end_line: image.line,
-                            end_column: image.start_col + 1 + url.len(),
+                            end_column: image.start_col + 1 + url.chars().count(),
                             message: format!("Absolute link '{url}' cannot be validated locally"),
                             severity: Severity::Warning,
                             fix: None,
@@ -894,7 +895,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                 line: image.line,
                                 column: image.start_col + 1,
                                 end_line: image.line,
-                                end_column: image.start_col + 1 + url.len(),
+                                end_column: image.start_col + 1 + url.chars().count(),
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -910,7 +911,7 @@ impl Rule for MD057ExistingRelativeLinks {
                                 line: image.line,
                                 column: image.start_col + 1,
                                 end_line: image.line,
-                                end_column: image.start_col + 1 + url.len(),
+                                end_column: image.start_col + 1 + url.chars().count(),
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -932,16 +933,19 @@ impl Rule for MD057ExistingRelativeLinks {
                     Fix::new(fix_byte_start..fix_byte_end, suggestion.clone())
                 });
 
+                let image_line = ctx.raw_lines().get(image.line - 1).copied().unwrap_or("");
                 let img_line_start_byte = ctx.line_index.get_line_start_byte(image.line).unwrap_or(0);
-                let url_col = fix
-                    .as_ref()
-                    .map_or(image.start_col + 1, |f| f.range.start - img_line_start_byte + 1);
+                // The fix range is a document byte offset; the displayed column is
+                // the corresponding character offset within the line.
+                let url_col = fix.as_ref().map_or(image.start_col + 1, |f| {
+                    byte_to_char_count(image_line, f.range.start - img_line_start_byte)
+                });
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: image.line,
                     column: url_col,
                     end_line: image.line,
-                    end_column: url_col + url.len(),
+                    end_column: url_col + url.chars().count(),
                     message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
                     fix,
@@ -993,7 +997,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 line: image.line,
                 column: image.start_col + 1,
                 end_line: image.line,
-                end_column: image.start_col + 1 + url.len(),
+                end_column: image.start_col + 1 + url.chars().count(),
                 message: format!("Relative link '{url}' does not exist"),
                 severity: Severity::Error,
                 fix: None,
@@ -1020,14 +1024,16 @@ impl Rule for MD057ExistingRelativeLinks {
                     AbsoluteLinksOption::Warn => {
                         let line_idx = ref_def.line - 1;
                         let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                            line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                            line_content
+                                .find(url.as_str())
+                                .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
                         });
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
                             line: ref_def.line,
                             column,
                             end_line: ref_def.line,
-                            end_column: column + url.len(),
+                            end_column: column + url.chars().count(),
                             message: format!("Absolute link '{url}' cannot be validated locally"),
                             severity: Severity::Warning,
                             fix: None,
@@ -1037,14 +1043,16 @@ impl Rule for MD057ExistingRelativeLinks {
                         if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
                             let line_idx = ref_def.line - 1;
                             let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                                line_content
+                                    .find(url.as_str())
+                                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
                             });
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
                                 line: ref_def.line,
                                 column,
                                 end_line: ref_def.line,
-                                end_column: column + url.len(),
+                                end_column: column + url.chars().count(),
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -1057,14 +1065,16 @@ impl Rule for MD057ExistingRelativeLinks {
                         {
                             let line_idx = ref_def.line - 1;
                             let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                                line_content
+                                    .find(url.as_str())
+                                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
                             });
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
                                 line: ref_def.line,
                                 column,
                                 end_line: ref_def.line,
-                                end_column: column + url.len(),
+                                end_column: column + url.chars().count(),
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -1079,18 +1089,20 @@ impl Rule for MD057ExistingRelativeLinks {
             // Check for unnecessary path traversal (compact-paths)
             if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
                 let ref_line_idx = ref_def.line - 1;
-                let col = ctx.raw_lines().get(ref_line_idx).copied().map_or(1, |line_content| {
-                    line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
-                });
+                let line_content = ctx.raw_lines().get(ref_line_idx).copied().unwrap_or("");
+                // Byte offset of the URL within the line drives the fix range;
+                // the displayed column is the corresponding character offset.
+                let url_byte = line_content.find(url.as_str());
+                let col = url_byte.map_or(1, |b| byte_to_char_count(line_content, b));
                 let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
-                let fix_byte_start = ref_line_start_byte + col - 1;
+                let fix_byte_start = ref_line_start_byte + url_byte.unwrap_or(0);
                 let fix_byte_end = fix_byte_start + url.len();
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
                     line: ref_def.line,
                     column: col,
                     end_line: ref_def.line,
-                    end_column: col + url.len(),
+                    end_column: col + url.chars().count(),
                     message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
                     fix: Some(Fix::new(fix_byte_start..fix_byte_end, suggestion)),
@@ -1140,7 +1152,9 @@ impl Rule for MD057ExistingRelativeLinks {
             let line_idx = ref_def.line - 1;
             let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
                 // Find URL position in line (after ]: )
-                line_content.find(url.as_str()).map_or(1, |url_pos| url_pos + 1)
+                line_content
+                    .find(url.as_str())
+                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
             });
 
             warnings.push(LintWarning {
@@ -1148,7 +1162,7 @@ impl Rule for MD057ExistingRelativeLinks {
                 line: ref_def.line,
                 column,
                 end_line: ref_def.line,
-                end_column: column + url.len(),
+                end_column: column + url.chars().count(),
                 message: format!("Relative link '{url}' does not exist"),
                 severity: Severity::Error,
                 fix: None,
@@ -2496,6 +2510,31 @@ Some more text with `inline code [Link](yet-another-missing.md) embedded`.
     }
 
     #[test]
+    fn test_diagnostic_position_non_ascii_link() {
+        // Issue #670: columns are character offsets, not byte offsets. The CJK
+        // prefix is multi-byte in UTF-8, so a byte offset over-counts the column.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Character columns: 1:你 2:好 3:你 4:好 5:[ 6:你 7:好 8:] 9:( 10:n ...
+        // The URL "not-exist.md" (12 chars) starts at 1-indexed character column 10
+        // and ends past character column 21, i.e. end_column 22.
+        let content = "你好你好[你好](not-exist.md) bar";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(
+            result[0].column, 10,
+            "Column must be a character offset, not a byte offset"
+        );
+        assert_eq!(result[0].end_column, 22, "End column must be character-based");
+    }
+
+    #[test]
     fn test_diagnostic_position_angle_brackets() {
         // Test position accuracy with angle bracket links
         let temp_dir = tempdir().unwrap();
@@ -2579,6 +2618,54 @@ More text
         // Images use start_col from the parser, which should point to the URL
         assert!(result[0].column > 0, "Should have valid column position");
         assert!(result[0].message.contains("missing.jpg"));
+    }
+
+    #[test]
+    fn test_diagnostic_position_non_ascii_image() {
+        // Issue #670: image columns are character offsets, not byte offsets.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Character columns: 1:你 2:好 3:你 4:好 5:! 6:[ 7:你 8:好 9:] 10:( 11:n ...
+        // The image syntax starts at the '!' which is 1-indexed character column 5.
+        let content = "你好你好![你好](not-exist.png)";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning for image");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(
+            result[0].column, 5,
+            "Column must be a character offset, not a byte offset"
+        );
+        assert!(result[0].message.contains("not-exist.png"));
+    }
+
+    #[test]
+    fn test_diagnostic_position_non_ascii_reference_def() {
+        // Issue #670: reference-definition columns are character offsets. A
+        // multi-byte label shifts the URL's byte offset away from its character
+        // column.
+        let temp_dir = tempdir().unwrap();
+        let base_path = temp_dir.path();
+
+        // Character columns: 1:[ 2:你 3:好 4:] 5:: 6:space 7:n ...
+        // The URL "not-exist.md" (12 chars) starts at 1-indexed character column 7.
+        let content = "[你好]: not-exist.md";
+
+        let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "Should have exactly one warning for reference def");
+        assert_eq!(result[0].line, 1, "Should be on line 1");
+        assert_eq!(
+            result[0].column, 7,
+            "Column must be a character offset, not a byte offset"
+        );
+        assert_eq!(result[0].end_column, 19, "End column must be character-based");
     }
 
     #[test]
