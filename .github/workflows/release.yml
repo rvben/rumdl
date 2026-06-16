@@ -478,13 +478,12 @@ jobs:
           # Windows
           unzip -o archives/release-x86_64-pc-windows-msvc/rumdl-*.zip -d npm/cli-win32-x64/
 
-          # Make binaries executable (artifacts don't preserve permissions)
-          chmod +x npm/cli-darwin-x64/rumdl
-          chmod +x npm/cli-darwin-arm64/rumdl
-          chmod +x npm/cli-linux-x64/rumdl
-          chmod +x npm/cli-linux-arm64/rumdl
-          chmod +x npm/cli-linux-x64-musl/rumdl
-          chmod +x npm/cli-linux-arm64-musl/rumdl
+          # The executable bit is intentionally NOT set here: actions/upload-artifact
+          # strips Unix permission bits, so any chmod in this job is lost on download.
+          # The binaries are made executable in the publish job, after the artifact is
+          # fetched and immediately before `npm publish` (see "Make CLI binaries
+          # executable"). npm publish preserves file modes, so a 0644 binary would ship
+          # non-executable and fail to spawn with EACCES on fresh installs (rumdl-vscode#135).
 
           # List package contents for verification
           echo "Package contents:"
@@ -728,6 +727,18 @@ jobs:
         with:
           name: npm-cli-packages
           path: npm-cli
+
+      - name: Make CLI binaries executable
+        if: ${{ inputs.skip_npm != true }}
+        run: |
+          # actions/upload-artifact strips Unix permission bits, so the platform
+          # binaries arrive here as 0644. npm publish preserves file modes, so the
+          # execute bit must be (re)applied now, after download and before publish,
+          # or the published @rumdl/cli-* binaries spawn with EACCES on fresh
+          # installs (rumdl-vscode#135). The win32 package ships rumdl.exe (no Unix
+          # bit) and is intentionally not matched by this glob.
+          chmod +x npm-cli/cli-*/rumdl
+          ls -la npm-cli/cli-*/rumdl
 
       - name: Publish CLI platform packages to npm
         if: ${{ inputs.dry_run != true && inputs.skip_npm != true }}
