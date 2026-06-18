@@ -578,6 +578,68 @@ reflow = true
 }
 
 #[test]
+fn test_md013_issue_676_blockquote_list_item_reflow() {
+    // A long list item inside a blockquote should reflow exactly like the same
+    // item at the top level, instead of being left over-long.
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("issue_676.md");
+
+    let content = "- asdfkasjdhfla ksdjfhla ksdfhalksd jfhlaksdjf halksjdf akljsdh flkasjdhflkasjdhflka jshflk ajshf lkajsflkajsd flkaj dflkaj sdflkaj hdsfklja hsdlfkj ahsdfkhj\n\n> - asdfkasjdhfla ksdjfhla ksdfhalksd jfhlaksdjf halksjdf akljsdh flkasjdhflkasjdhflka jshflk ajshf lkajsflkajsd flkaj dflkaj sdflkaj hdsfklja hsdlfkj ahsdfkh\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    let config_content = r#"
+[MD013]
+line-length = 90
+reflow = true
+reflow-mode = "normalize"
+"#;
+    fs::write(&config_path, config_content).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt");
+    let exit_code = output.status.code().unwrap_or(-1);
+    assert!(exit_code == 0 || exit_code == 1, "Unexpected exit code: {exit_code}");
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+    let quote_lines: Vec<&str> = fixed.lines().filter(|line| line.starts_with('>')).collect();
+
+    assert_eq!(
+        quote_lines.len(),
+        2,
+        "Issue #676: the blockquote list item should wrap to two quoted lines: {fixed}"
+    );
+    assert!(
+        quote_lines[0].starts_with("> - "),
+        "First quoted line keeps the list marker: {fixed}"
+    );
+    assert!(
+        quote_lines[1].starts_with(">   "),
+        "Continuation aligns under the list content: {fixed}"
+    );
+    assert!(
+        quote_lines.iter().all(|line| line.chars().count() <= 90),
+        "Reflowed blockquote list lines should respect the limit: {fixed}"
+    );
+
+    // Idempotence: a second pass changes nothing.
+    let _ = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt on second pass");
+    let after_second = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(fixed, after_second, "Issue #676 reflow should be idempotent");
+}
+
+#[test]
 fn test_md013_issue_566_normalize_single_line_reflow_regression() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("issue_566.md");

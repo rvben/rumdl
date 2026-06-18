@@ -3737,6 +3737,510 @@ fn test_blockquote_reflow_preserves_hard_break_markers() {
     }
 }
 
+/// Issue #676: a long list item inside a blockquote should reflow the same way
+/// a top-level list item does, instead of being silently left over-long.
+#[test]
+fn test_blockquote_list_item_reflows_in_normalize_mode() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(90),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - asdfkasjdhfla ksdjfhla ksdfhalksd jfhlaksdjf halksjdf akljsdh flkasjdhflkasjdhflka jshflk ajshf lkajsflkajsd flkaj dflkaj sdflkaj hdsfklja hsdlfkj ahsdfkh";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "Expected a single reflow warning: {warnings:?}");
+    assert!(
+        warnings[0].fix.is_some(),
+        "Blockquote list item should get a reflow fix"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "Expected the long list item to wrap to two lines: {fixed:?}"
+    );
+    assert!(
+        lines[0].starts_with("> - "),
+        "First line keeps the list marker: {fixed:?}"
+    );
+    assert_eq!(
+        &lines[1][..4],
+        ">   ",
+        "Continuation aligns under the list content: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 90),
+        "Wrapped lines should respect the limit: {fixed:?}"
+    );
+}
+
+/// An ordered list item in a blockquote wraps with the marker width (`1. ` = 3)
+/// reflected in the continuation indent.
+#[test]
+fn test_blockquote_ordered_list_item_reflows() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> 1. This ordered blockquote list item is long enough that it must wrap across multiple lines.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "Expected wrapping: {fixed:?}");
+    assert!(
+        lines[0].starts_with("> 1. "),
+        "First line keeps ordered marker: {fixed:?}"
+    );
+    assert!(
+        lines.iter().skip(1).all(|line| line.starts_with(">    ")),
+        "Continuation aligns under ordered content (3-space indent): {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 50),
+        "Wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
+/// Multiple sibling list items in one blockquote each reflow independently.
+#[test]
+fn test_blockquote_multiple_list_items_each_reflow() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(60),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - First sibling item that is quite long and needs to be wrapped onto a second line here.\n> - Second sibling item that is also long enough to require wrapping across two lines as well.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(
+        warnings.len(),
+        2,
+        "Each sibling item should produce its own fix: {warnings:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert_eq!(lines.len(), 4, "Two items, each wrapped to two lines: {fixed:?}");
+    assert!(lines[0].starts_with("> - "), "Item 1 marker preserved: {fixed:?}");
+    assert!(lines[1].starts_with(">   "), "Item 1 continuation indented: {fixed:?}");
+    assert!(lines[2].starts_with("> - "), "Item 2 marker preserved: {fixed:?}");
+    assert!(lines[3].starts_with(">   "), "Item 2 continuation indented: {fixed:?}");
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 60),
+        "All wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
+/// An already-wrapped blockquote list item is re-collected across its continuation
+/// line and the fix is idempotent (running it again is a no-op).
+#[test]
+fn test_blockquote_list_item_reflow_is_idempotent() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - This blockquote list item already spans two lines\n>   but should normalize cleanly to the configured width.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let lines: Vec<&str> = fixed.lines().collect();
+    assert!(lines[0].starts_with("> - "), "Marker preserved: {fixed:?}");
+    assert!(
+        lines.iter().skip(1).all(|line| line.starts_with(">   ")),
+        "Continuations stay indented under content: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 50),
+        "All lines respect the limit: {fixed:?}"
+    );
+
+    // Second pass must be a no-op.
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let fixed2 = rule.fix(&ctx2).unwrap();
+    assert_eq!(fixed, fixed2, "Reflow should be idempotent");
+}
+
+/// A blockquote list item that embeds a fenced code block is left untouched: the
+/// fence and code must never be reflowed as prose.
+#[test]
+fn test_blockquote_list_item_with_code_block_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - Item intro that is long enough to exceed the configured limit by a good margin here.\n>   ```\n>   some code line that is also intentionally very long but must be preserved verbatim\n>   ```";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(
+        fixed, content,
+        "Item with embedded code block must be preserved verbatim"
+    );
+}
+
+/// A blockquote list item with a lazy continuation line (no `>` marker) is left
+/// untouched as a whole, rather than partially reflowing only the continuation
+/// and leaving the marker line over-long.
+#[test]
+fn test_blockquote_list_item_with_lazy_continuation_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - This is a long blockquote list item that exceeds the limit aaaa bbbb cccc\n  lazy continuation line for the item dddd eeee ffff gggg hhhh";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "A lazy-continuation list item must be preserved as a whole, not partially reflowed"
+    );
+}
+
+/// A link reference definition inside a blockquote list item cannot be wrapped,
+/// so it must be preserved verbatim rather than split after the colon/URL.
+#[test]
+fn test_blockquote_list_item_link_reference_definition_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(60),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - [foo]: https://example.com/some/really/long/url/that/exceeds/limit \"A long enough title here\"";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.iter().all(|w| w.fix.is_none()),
+        "A link reference definition must not get a reflow fix: {warnings:?}"
+    );
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "Link reference definition item must be preserved verbatim"
+    );
+}
+
+/// An over-long standalone link inside a blockquote list item cannot be shortened,
+/// so it is left untouched (no spurious reflow fix) in non-strict mode.
+#[test]
+fn test_blockquote_list_item_standalone_link_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - [a link with text](https://example.com/some/very/long/path/that/exceeds/the/limit/abc)";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.iter().all(|w| w.fix.is_none()),
+        "An unshortenable standalone link must not get a reflow fix: {warnings:?}"
+    );
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "Standalone link item must be unchanged"
+    );
+}
+
+/// A line that looks like a blockquote list item but lives inside a fenced code
+/// block must never be reflowed: code content is literal.
+#[test]
+fn test_blockquote_list_item_inside_code_block_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        code_blocks: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "```\n> - first long line inside the code block aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa cccc\n> - second long line inside the code block bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb dddd\n```";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "Blockquote-looking list lines inside a code block must be preserved verbatim"
+    );
+}
+
+/// A blockquote list item that embeds a GFM table is left untouched: the table
+/// rows must never be reflowed as prose.
+#[test]
+fn test_blockquote_list_item_with_table_preserved() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - Intro text long enough to exceed the configured limit by a fair margin.\n>   | Column A | Column B |\n>   | -------- | -------- |\n>   | value aa | value bb |";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "Item with an embedded table must be preserved verbatim"
+    );
+}
+
+/// A nested blockquote list item (`> > - ...`) reflows with the spaced nested
+/// prefix preserved on both the marker and continuation lines.
+#[test]
+fn test_nested_blockquote_list_item_reflows() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> > - This doubly nested blockquote list item is long enough to require wrapping here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "Expected wrapping: {fixed:?}");
+    assert!(lines[0].starts_with("> > - "), "Nested marker preserved: {fixed:?}");
+    assert!(
+        lines.iter().skip(1).all(|line| line.starts_with("> >   ")),
+        "Continuation keeps nested prefix and list indent: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 50),
+        "Wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
+/// A GFM task-list checkbox item in a blockquote wraps with continuation lines
+/// aligned under the content (the checkbox is part of the marker, not the body).
+#[test]
+fn test_blockquote_task_list_item_reflows() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - [ ] This task list item inside a blockquote is long enough to need wrapping.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "Expected wrapping: {fixed:?}");
+    assert!(lines[0].starts_with("> - [ ] "), "Checkbox marker preserved: {fixed:?}");
+
+    let prefix_len = "> - [ ] ".len();
+    for cont in lines.iter().skip(1) {
+        assert_eq!(&cont[..2], "> ", "Continuation keeps blockquote marker: {fixed:?}");
+        assert!(
+            cont[2..prefix_len].chars().all(|c| c == ' '),
+            "Continuation indent fills under the checkbox marker: {fixed:?}"
+        );
+        assert!(
+            !cont[prefix_len..].starts_with(' '),
+            "Continuation content aligns under the item content: {fixed:?}"
+        );
+    }
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 50),
+        "Wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
+/// A parent item with a nested list item in a blockquote: each list item reflows
+/// independently, the nested item keeping its deeper indentation.
+#[test]
+fn test_blockquote_nested_list_items_each_reflow() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - Parent item text that is long enough to wrap across two display lines.\n>   - Nested item text that is also long enough to wrap across two display lines.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines[0].starts_with("> - "), "Parent marker preserved: {fixed:?}");
+    assert!(
+        lines.iter().any(|line| line.starts_with(">   - ")),
+        "Nested marker keeps its deeper indent: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|line| line.chars().count() <= 50),
+        "All wrapped lines respect the limit: {fixed:?}"
+    );
+
+    // Idempotent across the nested structure.
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(fixed, rule.fix(&ctx2).unwrap(), "Nested reflow should be idempotent");
+}
+
+/// In Default mode, a multi-line blockquote list item that already fits the limit
+/// is left as-is (line breaks are only changed when a line is too long).
+#[test]
+fn test_blockquote_list_item_default_mode_preserves_fitting_item() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Default,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - short first line\n>   short continuation line";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(
+        warnings.is_empty(),
+        "No reflow expected when nothing exceeds the limit: {warnings:?}"
+    );
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "Fitting item must be preserved in Default mode"
+    );
+}
+
+/// A short single-line blockquote list item under the limit produces no warning.
+#[test]
+fn test_blockquote_list_item_under_limit_no_warning() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - a short item";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert!(warnings.is_empty(), "Short item should not warn: {warnings:?}");
+    assert_eq!(rule.fix(&ctx).unwrap(), content, "Short item must be unchanged");
+}
+
+/// In Normalize mode, a multi-line blockquote list item whose content fits on one
+/// line is collapsed back to a single line.
+#[test]
+fn test_blockquote_list_item_normalize_collapses_to_single_line() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - short bit\n>   more text";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(
+        fixed, "> - short bit more text",
+        "Fitting content should collapse: {fixed:?}"
+    );
+}
+
+/// With `blockquotes = false`, blockquote list items are not reflowed at all.
+#[test]
+fn test_blockquote_list_item_not_reflowed_when_blockquotes_disabled() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(50),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        blockquotes: false,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - This blockquote list item is long enough that it would otherwise be wrapped here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "blockquotes=false must leave the item untouched"
+    );
+}
+
+/// Sentence-per-line mode splits a multi-sentence blockquote list item, with each
+/// continuation sentence aligned under the list content.
+#[test]
+fn test_blockquote_list_item_sentence_per_line() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::SentencePerLine,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "> - First sentence inside the item. Second sentence inside the item.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 2, "Two sentences should land on two lines: {fixed:?}");
+    assert_eq!(
+        lines[0], "> - First sentence inside the item.",
+        "First sentence keeps marker: {fixed:?}"
+    );
+    assert_eq!(
+        lines[1], ">   Second sentence inside the item.",
+        "Second sentence aligns under content: {fixed:?}"
+    );
+}
+
 /// Verify that reflow does not introduce double blank lines between blocks.
 /// Tests the dedup guard on all block types (Paragraph, Html, SemanticLine).
 #[test]

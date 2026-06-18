@@ -628,6 +628,27 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
+    /// True when `line_num` (1-based) sits inside a structure whose lines must be
+    /// preserved verbatim (code block, front matter, HTML/JSX/MDX block, MkDocs
+    /// container, div marker, ...). Used to keep blockquote reflow from touching
+    /// quoted-looking text embedded in such structures.
+    fn line_in_verbatim_context(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.line_info(line_num).is_some_and(|info| {
+            info.in_code_block
+                || info.in_front_matter
+                || info.in_html_block
+                || info.in_html_comment
+                || info.in_esm_block
+                || info.in_jsx_expression
+                || info.in_jsx_block
+                || info.in_mdx_comment
+                || info.in_mkdocstrings
+                || info.in_pymdown_block
+                || info.in_mkdocs_container()
+                || info.is_div_marker
+        })
+    }
+
     fn is_blockquote_content_boundary(
         &self,
         content: &str,
@@ -637,20 +658,7 @@ impl MD013LineLength {
         let trimmed = content.trim();
 
         trimmed.is_empty()
-            || ctx.line_info(line_num).is_some_and(|info| {
-                info.in_code_block
-                    || info.in_front_matter
-                    || info.in_html_block
-                    || info.in_html_comment
-                    || info.in_esm_block
-                    || info.in_jsx_expression
-                    || info.in_jsx_block
-                    || info.in_mdx_comment
-                    || info.in_mkdocstrings
-                    || info.in_pymdown_block
-                    || info.in_mkdocs_container()
-                    || info.is_div_marker
-            })
+            || self.line_in_verbatim_context(line_num, ctx)
             || trimmed.starts_with('#')
             || trimmed.starts_with("```")
             || trimmed.starts_with("~~~")
@@ -885,6 +893,254 @@ impl MD013LineLength {
         (Some(warning), next_idx)
     }
 
+    /// Reflow a single list item that lives inside a blockquote.
+    ///
+    /// The blockquote paragraph reflow treats a list marker as a content boundary,
+    /// so `> - long item ...` is never wrapped even though the identical top-level
+    /// item is. This handles that case: it collects one tight, prose-only list item
+    /// at the starting blockquote level, reflows the item body to the configured
+    /// width, and re-emits it with the blockquote prefix preserved and continuation
+    /// lines aligned under the list content.
+    ///
+    /// Sibling and nested list items end collection and are reflowed independently
+    /// by the caller's outer loop (a nested item carries its indent folded into the
+    /// blockquote prefix, so it reflows correctly on its own). Items that are not
+    /// simple tight prose - those embedding a code block, table, fence, or hard
+    /// break - are left untouched (`None`) and the cursor still advances past the
+    /// whole item so its inner lines are never reprocessed as loose prose.
+    fn generate_blockquote_list_item_fix(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+        lines: &[&str],
+        line_index: &LineIndex,
+        start_idx: usize,
+        line_ending: &str,
+    ) -> (Option<LintWarning>, usize) {
+        use crate::utils::blockquote::effective_indent_in_blockquote;
+
+        let Some(start_bq) = ctx.lines.get(start_idx).and_then(|line| line.blockquote.as_deref()) else {
+            return (None, start_idx + 1);
+        };
+
+        // A `>`-prefixed line can be marked as a blockquote even inside a fenced code
+        // block (or other verbatim structure); such content must never be reflowed.
+        if self.line_in_verbatim_context(start_idx + 1, ctx) {
+            return (None, start_idx + 1);
+        }
+
+        let target_level = start_bq.nesting_level;
+
+        // The marker line carries the canonical blockquote prefix: its content begins
+        // with the list marker, so no list indent has been folded into the prefix.
+        let bq_prefix = start_bq.prefix.clone();
+
+        let (marker, first_body) = extract_list_marker_and_content(&start_bq.content);
+        if marker.is_empty() {
+            return (None, start_idx + 1);
+        }
+        let marker_width = marker.chars().count();
+
+        // Continuation lines of a checkbox item align under the bullet+checkbox, but
+        // are recognized from the bullet width, matching the top-level list reflow.
+        let base_marker_width = ["[ ] ", "[x] ", "[X] "]
+            .iter()
+            .find_map(|cb| marker.find(*cb))
+            .unwrap_or(marker_width);
+
+        // Collect the item: the marker line plus its tight prose continuation lines.
+        // `end_idx` always tracks the last consumed line so the cursor advances past
+        // the entire item, even when it turns out to be too complex to reflow safely.
+        let first_piece = trim_preserving_hard_break(&first_body);
+        let mut simple = !has_hard_break(&first_piece);
+        let mut body_pieces: Vec<String> = vec![first_piece];
+        let mut end_idx = start_idx;
+        let mut i = start_idx + 1;
+
+        while i < lines.len() {
+            let Some(bq) = ctx.lines[i].blockquote.as_deref() else {
+                // A blank line ends the item.
+                if lines[i].trim().is_empty() {
+                    break;
+                }
+                // A lazy continuation (no `>` marker) is too ambiguous to reflow
+                // safely. Consume the whole lazy run into this item's span and leave
+                // the item untouched, so the caller does not reflow the continuation
+                // in isolation and leave the marker line partially fixed.
+                simple = false;
+                while i < lines.len() && ctx.lines[i].blockquote.is_none() && !lines[i].trim().is_empty() {
+                    end_idx = i;
+                    i += 1;
+                }
+                break;
+            };
+            if bq.nesting_level != target_level {
+                break;
+            }
+
+            let content = bq.content.as_str();
+            if content.trim().is_empty() {
+                // Blank quoted line ends the tight paragraph. A following indented
+                // paragraph (loose item) is reflowed on its own by the prose path.
+                break;
+            }
+
+            let eff_indent = effective_indent_in_blockquote(lines[i], target_level, 0);
+            if eff_indent < base_marker_width {
+                // Dedented: a sibling list item or text outside this item. Stop here
+                // and let the outer loop classify it.
+                break;
+            }
+            if is_list_item(content) {
+                // A nested list item: its own item, handled independently.
+                break;
+            }
+
+            // An embedded structure (code block, table, fence, nested quote, ...)
+            // means the item is not simple prose: keep consuming so the cursor clears
+            // the whole structure, but do not produce a fix.
+            if self.is_blockquote_content_boundary(content, i + 1, ctx) {
+                simple = false;
+            }
+
+            let piece = trim_preserving_hard_break(content);
+            if has_hard_break(&piece) {
+                simple = false;
+            }
+            body_pieces.push(piece);
+            end_idx = i;
+            i += 1;
+        }
+
+        let next_idx = end_idx + 1;
+
+        if !simple {
+            return (None, next_idx);
+        }
+
+        let exceeds_limit =
+            || (start_idx..=end_idx).any(|idx| self.calculate_effective_length(lines[idx]) > config.line_length.get());
+        let body_text = body_pieces.join(" ");
+        let body_text = body_text.trim();
+
+        // Some bodies cannot be shortened and must stay verbatim, matching the
+        // exemptions the top-level list reflow applies: link reference definitions
+        // always, and (in non-strict mode) standalone links/images and HTML-only
+        // lines. Reflowing a link reference definition would split it after the
+        // colon/URL and break the definition.
+        let is_link_ref_def =
+            body_text.starts_with('[') && body_text.contains("]:") && LINK_REF_PATTERN.is_match(body_text);
+        let raw_marker_line = lines[start_idx];
+        let body_is_unwrappable = is_link_ref_def
+            || (!config.strict && is_standalone_link_or_image_line(raw_marker_line))
+            || (!config.strict && is_html_only_line(raw_marker_line));
+        if body_is_unwrappable {
+            return (None, next_idx);
+        }
+
+        let needs_reflow = match config.reflow_mode {
+            ReflowMode::Normalize => body_pieces.len() > 1 || exceeds_limit(),
+            ReflowMode::Default => exceeds_limit(),
+            ReflowMode::SentencePerLine => split_into_sentences(body_text).len() > 1 || body_pieces.len() > 1,
+            ReflowMode::SemanticLineBreaks => split_into_sentences(body_text).len() > 1 || exceeds_limit(),
+        };
+        if !needs_reflow {
+            return (None, next_idx);
+        }
+
+        let prefix_width = self.calculate_string_length(&bq_prefix) + self.calculate_string_length(&marker);
+        let reflow_line_length = if config.line_length.is_unlimited() {
+            usize::MAX
+        } else {
+            config.line_length.get().saturating_sub(prefix_width).max(1)
+        };
+
+        let reflow_options = crate::utils::text_reflow::ReflowOptions {
+            line_length: reflow_line_length,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+            semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
+            abbreviations: config.abbreviations_for_reflow(),
+            length_mode: self.reflow_length_mode(),
+            attr_lists: ctx.flavor.supports_attr_lists(),
+            myst_roles: ctx.flavor.supports_myst_roles(),
+            require_sentence_capital: config.require_sentence_capital,
+            max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                Some(4)
+            } else {
+                None
+            },
+        };
+
+        let reflowed = crate::utils::text_reflow::reflow_line(body_text, &reflow_options);
+        if reflowed.is_empty() {
+            return (None, next_idx);
+        }
+
+        let continuation_indent = " ".repeat(marker_width);
+        let reflowed_text = reflowed
+            .iter()
+            .enumerate()
+            .map(|(idx, line)| {
+                if idx == 0 {
+                    format!("{bq_prefix}{marker}{line}")
+                } else {
+                    format!("{bq_prefix}{continuation_indent}{line}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(line_ending);
+
+        let start_range = line_index.whole_line_range(start_idx + 1);
+        let end_range = if end_idx == lines.len() - 1 && !ctx.content.ends_with('\n') {
+            line_index.line_text_range(end_idx + 1, 1, lines[end_idx].len() + 1)
+        } else {
+            line_index.whole_line_range(end_idx + 1)
+        };
+        let byte_range = start_range.start..end_range.end;
+
+        let replacement = if end_idx < lines.len() - 1 || ctx.content.ends_with('\n') {
+            format!("{reflowed_text}{line_ending}")
+        } else {
+            reflowed_text
+        };
+
+        let original_text = &ctx.content[byte_range.clone()];
+        if original_text == replacement {
+            return (None, next_idx);
+        }
+
+        let message = match config.reflow_mode {
+            ReflowMode::Normalize => format!(
+                "Paragraph could be normalized to use line length of {} characters",
+                config.line_length.get()
+            ),
+            ReflowMode::SentencePerLine => {
+                let num_sentences = split_into_sentences(body_text).len();
+                format!("List item should have one sentence per line (found {num_sentences} sentences)")
+            }
+            ReflowMode::SemanticLineBreaks => {
+                let num_sentences = split_into_sentences(body_text).len();
+                format!("List item should use semantic line breaks ({num_sentences} sentences)")
+            }
+            ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
+        };
+
+        let warning = LintWarning {
+            rule_name: Some(self.name().to_string()),
+            message,
+            line: start_idx + 1,
+            column: 1,
+            end_line: end_idx + 1,
+            end_column: lines[end_idx].chars().count() + 1,
+            severity: Severity::Warning,
+            fix: Some(crate::rule::Fix::new(byte_range, replacement)),
+        };
+
+        (Some(warning), next_idx)
+    }
+
     /// Generate paragraph-based fixes
     fn generate_paragraph_fixes(
         &self,
@@ -929,8 +1185,17 @@ impl MD013LineLength {
                     }
                     continue;
                 }
-                let (warning, next_idx) =
-                    self.generate_blockquote_paragraph_fix(ctx, config, lines, &line_index, i, line_ending);
+                // A list item inside the blockquote needs list-aware reflow (marker +
+                // continuation indent); plain prose goes through the paragraph path.
+                let is_bq_list_item = ctx.lines[i]
+                    .blockquote
+                    .as_deref()
+                    .is_some_and(|bq| is_list_item(&bq.content));
+                let (warning, next_idx) = if is_bq_list_item {
+                    self.generate_blockquote_list_item_fix(ctx, config, lines, &line_index, i, line_ending)
+                } else {
+                    self.generate_blockquote_paragraph_fix(ctx, config, lines, &line_index, i, line_ending)
+                };
                 if let Some(warning) = warning {
                     warnings.push(warning);
                 }
