@@ -578,6 +578,60 @@ reflow = true
 }
 
 #[test]
+fn test_md013_issue_677_code_spans_exempt_after_reflow() {
+    // With `code-spans = false`, a paragraph still reflows under `rumdl fmt`, but the
+    // resulting line that is one unbreakable inline code span is not reported by check.
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("issue_677.md");
+
+    let content = "asdflkajsdl kfjhaksdlj fhalkjsdhf akljsdhf klajsdhk akdsjfha sldkjfh alksdjfh aklsdjfh alksdjfh alkjsdhf aklsdjhf laksdjf alkjsdf adkshf `a slkdjfhal ksdhflka sdhf alksdjh falksdjhf alksjdhf alksdj fhalksdj falksdj flaksdjh flaksdjh flaksdjf` asdfhlkajs dhflkajd shflkajsdf lakjsdf klajdsf klasdj flaksjd flakjdsf lakjsdfh laksdjf lkjh\n";
+    fs::write(&file_path, content).unwrap();
+
+    let config_path = dir.path().join(".rumdl.toml");
+    fs::write(
+        &config_path,
+        "[MD013]\nline-length = 90\nreflow = true\nreflow-mode = \"normalize\"\ncode-spans = false\n",
+    )
+    .unwrap();
+
+    // Format: the paragraph reflows.
+    let fmt = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("fmt")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("Failed to execute rumdl fmt");
+    assert!(matches!(fmt.status.code(), Some(0) | Some(1)));
+
+    let fixed = fs::read_to_string(&file_path).unwrap();
+    assert!(
+        fixed.lines().count() > 1,
+        "paragraph should have been reflowed: {fixed}"
+    );
+    assert!(
+        fixed.contains("`a slkdjfhal ksdhflka"),
+        "the inline code span is preserved verbatim: {fixed}"
+    );
+
+    // Check: no MD013 violation despite a line longer than 90 (the code span).
+    let check = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .arg("check")
+        .arg(&file_path)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--disable")
+        .arg("MD041")
+        .output()
+        .expect("Failed to execute rumdl check");
+    let stdout = String::from_utf8_lossy(&check.stdout);
+    assert!(
+        !stdout.contains("MD013"),
+        "the unbreakable code span line must not be flagged: {stdout}"
+    );
+}
+
+#[test]
 fn test_md013_issue_676_blockquote_list_item_reflow() {
     // A long list item inside a blockquote should reflow exactly like the same
     // item at the top level, instead of being left over-long.

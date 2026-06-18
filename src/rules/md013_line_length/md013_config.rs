@@ -52,6 +52,16 @@ pub struct MD013Config {
     #[serde(default = "default_code_blocks", alias = "code_blocks")]
     pub code_blocks: bool,
 
+    /// Check lines whose length comes from an inline code span (default: true).
+    ///
+    /// Inline code spans (`` `like this` ``) cannot be wrapped, so reflow cannot
+    /// shorten a line whose excess length is one of them. When `false`, a line is
+    /// not reported if it would fit within the limit once its inline code spans are
+    /// excluded - useful with `reflow` so an otherwise-clean file is not failed by
+    /// an unbreakable code incantation.
+    #[serde(default = "default_code_spans", alias = "code_spans")]
+    pub code_spans: bool,
+
     /// Check tables for line length (default: false)
     ///
     /// Note: markdownlint defaults to true, but rumdl defaults to false to avoid
@@ -145,6 +155,10 @@ fn default_code_blocks() -> bool {
     true
 }
 
+fn default_code_spans() -> bool {
+    true
+}
+
 fn default_tables() -> bool {
     false
 }
@@ -170,6 +184,7 @@ impl Default for MD013Config {
         Self {
             line_length: default_line_length(),
             code_blocks: default_code_blocks(),
+            code_spans: default_code_spans(),
             tables: default_tables(),
             headings: default_headings(),
             paragraphs: default_paragraphs(),
@@ -343,6 +358,7 @@ mod tests {
         let config = MD013Config {
             line_length: LineLength::from_const(80),
             code_blocks: true,
+            code_spans: true,
             tables: true,
             headings: true,
             paragraphs: true,
@@ -401,6 +417,17 @@ mod tests {
         assert!(config.strict);
         assert!(config.reflow);
         assert_eq!(config.reflow_mode, ReflowMode::SentencePerLine);
+    }
+
+    #[test]
+    fn test_code_spans_default_true_and_parses() {
+        assert!(MD013Config::default().code_spans, "code-spans defaults to true");
+
+        let config: MD013Config = toml::from_str("code-spans = false").unwrap();
+        assert!(!config.code_spans);
+        // snake_case alias also works.
+        let config: MD013Config = toml::from_str("code_spans = false").unwrap();
+        assert!(!config.code_spans);
     }
 
     #[test]

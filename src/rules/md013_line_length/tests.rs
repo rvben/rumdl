@@ -3,6 +3,55 @@ use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
 
 #[test]
+fn test_code_spans_false_exempts_unbreakable_inline_code() {
+    use crate::types::LineLength;
+
+    // Issue #677: after reflow, a paragraph can leave a line that is a single long
+    // inline code span (which cannot be wrapped). With code-spans = false it is not
+    // reported; by default (true) it still is.
+    let span =
+        "a slkdjfhal ksdhflka sdhf alksdjh falksdjhf alksjdhf alksdj fhalksdj falksdj flaksdjh flaksdjh flaksdjf";
+    let content = format!("`{span}`"); // single inline code span, with internal spaces
+    assert!(content.chars().count() > 90);
+
+    let checked = MD013Config {
+        line_length: LineLength::new(90),
+        code_spans: true,
+        ..Default::default()
+    };
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let warnings = MD013LineLength::from_config_struct(checked).check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "flagged by default: {warnings:?}");
+
+    let exempt = MD013Config {
+        line_length: LineLength::new(90),
+        code_spans: false,
+        ..Default::default()
+    };
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let warnings = MD013LineLength::from_config_struct(exempt).check(&ctx).unwrap();
+    assert!(warnings.is_empty(), "exempt when code-spans = false: {warnings:?}");
+}
+
+#[test]
+fn test_code_spans_false_still_flags_long_prose() {
+    use crate::types::LineLength;
+
+    // A line that is too long because of prose (not just a code span) is still
+    // flagged even with code-spans = false.
+    let content = "This is ordinary prose that runs well past the configured line length limit `x` here.";
+    assert!(content.chars().count() > 80);
+    let config = MD013Config {
+        line_length: LineLength::new(80),
+        code_spans: false,
+        ..Default::default()
+    };
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = MD013LineLength::from_config_struct(config).check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "prose overflow is still flagged: {warnings:?}");
+}
+
+#[test]
 fn test_default_config() {
     let rule = MD013LineLength::default();
     assert_eq!(rule.config.line_length.get(), 80);
@@ -2636,6 +2685,7 @@ fn test_paragraphs_false_skips_regular_text() {
         paragraphs: false, // Don't check paragraphs
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2671,6 +2721,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
         paragraphs: false, // Don't check paragraphs
         blockquotes: true,
         code_blocks: true, // But DO check code blocks
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2707,6 +2758,7 @@ fn test_paragraphs_false_still_checks_headings() {
         paragraphs: false, // Don't check paragraphs
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true, // But DO check headings
         strict: false,
@@ -2741,6 +2793,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
         paragraphs: false,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: false,
         strict: false,
@@ -2775,6 +2828,7 @@ fn test_paragraphs_true_checks_regular_text() {
         paragraphs: true, // Default: DO check paragraphs
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2809,6 +2863,7 @@ fn test_line_length_zero_disables_all_checks() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2843,6 +2898,7 @@ fn test_line_length_zero_with_headings() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true, // Even with headings enabled
         strict: false,
@@ -2877,6 +2933,7 @@ fn test_line_length_zero_with_code_blocks() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true, // Even with code_blocks enabled
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2911,6 +2968,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -2971,6 +3029,7 @@ Final paragraph.
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(80),
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         paragraphs: true,
@@ -3039,6 +3098,7 @@ fn test_reflow_preserves_mkdocstrings_autodoc_block() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -3071,6 +3131,7 @@ fn test_reflow_preserves_mkdocstrings_with_identifier() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -3104,6 +3165,7 @@ fn test_reflow_preserves_mkdocstrings_surrounded_by_paragraphs() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -3140,6 +3202,7 @@ fn test_reflow_mkdocstrings_not_detected_in_standard_flavor() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -3169,6 +3232,7 @@ fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -3988,6 +4052,7 @@ fn test_blockquote_list_item_inside_code_block_preserved() {
         reflow: true,
         reflow_mode: ReflowMode::Normalize,
         code_blocks: true,
+        code_spans: true,
         ..Default::default()
     };
     let rule = MD013LineLength::from_config_struct(config);
@@ -4930,6 +4995,7 @@ fn test_reflow_admonition_in_list_item_basic() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -4992,6 +5058,7 @@ fn test_reflow_collapsible_admonition_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5046,6 +5113,7 @@ fn test_reflow_multiple_admonitions_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5122,6 +5190,7 @@ fn test_reflow_admonition_short_content_preserved() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5167,6 +5236,7 @@ fn test_reflow_admonition_with_multiple_paragraphs() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5234,6 +5304,7 @@ fn test_reflow_admonition_not_in_standard_flavor() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5281,6 +5352,7 @@ fn test_reflow_admonition_idempotent() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5333,6 +5405,7 @@ fn test_reflow_admonition_only_in_list_no_long_text() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5390,6 +5463,7 @@ fn test_reflow_content_after_admonition_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5452,6 +5526,7 @@ fn test_reflow_content_after_admonition_short_lines() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5498,6 +5573,7 @@ fn test_reflow_multiple_blocks_after_admonition() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5552,6 +5628,7 @@ fn test_reflow_admonition_empty_body() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5600,6 +5677,7 @@ fn test_reflow_admonition_no_blank_line_before_body() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5652,6 +5730,7 @@ fn test_reflow_admonition_body_indent_preserved() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5710,6 +5789,7 @@ fn test_reflow_admonition_with_code_block_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5773,6 +5853,7 @@ fn test_reflow_admonition_with_tilde_fence_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5830,6 +5911,7 @@ fn test_reflow_admonition_with_multiple_code_blocks_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5895,6 +5977,7 @@ fn test_reflow_admonition_code_block_idempotent() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -5945,6 +6028,7 @@ fn test_reflow_tab_container_in_list_item() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6588,6 +6672,7 @@ fn test_paragraphs_false_skips_blockquote_content() {
         paragraphs: false,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6622,6 +6707,7 @@ fn test_blockquotes_false_skips_blockquote_content() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6656,6 +6742,7 @@ fn test_blockquotes_true_paragraphs_true_checks_blockquotes() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6689,6 +6776,7 @@ fn test_blockquotes_false_still_checks_regular_paragraphs() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6722,6 +6810,7 @@ fn test_blockquotes_false_paragraphs_false_skips_blockquotes() {
         paragraphs: false,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6771,6 +6860,7 @@ fn test_nested_blockquote_skipped_when_blockquotes_false() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6804,6 +6894,7 @@ fn test_paragraphs_false_skips_nested_blockquote() {
         paragraphs: false,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6838,6 +6929,7 @@ fn test_blockquotes_false_skips_reflow_warnings() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6872,6 +6964,7 @@ fn test_paragraphs_false_skips_blockquote_reflow_warnings() {
         paragraphs: false,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6906,6 +6999,7 @@ fn test_blockquotes_true_with_reflow_still_warns() {
         paragraphs: true,
         blockquotes: true,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6939,6 +7033,7 @@ fn test_blockquotes_false_skips_lazy_continuation() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -6972,6 +7067,7 @@ fn test_blockquotes_false_reflow_skips_lazy_continuation() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,
@@ -7006,6 +7102,7 @@ fn test_blockquotes_false_paragraph_after_blockquote_still_warns() {
         paragraphs: true,
         blockquotes: false,
         code_blocks: true,
+        code_spans: true,
         tables: true,
         headings: true,
         strict: false,

@@ -634,6 +634,35 @@ This is an extremely long line that exceeds even 120 characters and should trigg
 }
 
 #[test]
+fn test_configure_file_md013_code_spans() {
+    // The `code_spans` option must be honored via inline configure-file too.
+    let content = r#"<!-- markdownlint-configure-file { "MD013": { "line_length": 90, "code_spans": false } } -->
+
+`a slkdjfhal ksdhflka sdhf alksdjh falksdjhf alksjdhf alksdj fhalksdj falksdj flaksdjh flaksdjh flaksdjf`
+"#;
+
+    let rules = all_rules(&Config::default());
+    let warnings = lint(
+        content,
+        &rules,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let md013: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.rule_name.as_deref() == Some("MD013"))
+        .collect();
+    assert!(
+        md013.is_empty(),
+        "inline code_spans=false should exempt the unbreakable code span line: {md013:?}"
+    );
+}
+
+#[test]
 fn test_configure_file_multiple_rules() {
     let content = r#"# Test Document
 

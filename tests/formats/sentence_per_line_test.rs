@@ -8,6 +8,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
     MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(80),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true, // Default: check paragraphs
@@ -224,6 +225,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0), // No line-length constraint
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -289,6 +291,7 @@ fn test_custom_abbreviations_recognized() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0), // No line-length constraint
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -322,6 +325,7 @@ fn test_custom_abbreviations_merged_with_builtin() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -355,6 +359,7 @@ fn test_custom_abbreviation_with_period_in_config() {
     let rule_without_period = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -373,6 +378,7 @@ fn test_custom_abbreviation_with_period_in_config() {
     let rule_with_period = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -413,6 +419,7 @@ fn test_issue_335_abbreviations_config_empty_vec_uses_defaults() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,
@@ -467,6 +474,7 @@ fn test_issue_335_custom_abbreviations_extend_defaults() {
     let rule = MD013LineLength::from_config_struct(MD013Config {
         line_length: LineLength::from_const(0),
         code_blocks: false,
+        code_spans: true,
         tables: false,
         headings: false,
         paragraphs: true,

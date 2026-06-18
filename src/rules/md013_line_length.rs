@@ -52,6 +52,7 @@ impl MD013LineLength {
             config: MD013Config {
                 line_length: crate::types::LineLength::new(line_length),
                 code_blocks,
+                code_spans: true,
                 tables,
                 headings,
                 paragraphs: true,  // Default to true for backwards compatibility
@@ -204,6 +205,9 @@ impl Rule for MD013LineLength {
                 }
                 if let Some(code_blocks) = obj.get("code_blocks").and_then(serde_json::Value::as_bool) {
                     config.code_blocks = code_blocks;
+                }
+                if let Some(code_spans) = obj.get("code_spans").and_then(serde_json::Value::as_bool) {
+                    config.code_spans = code_spans;
                 }
                 if let Some(tables) = obj.get("tables").and_then(serde_json::Value::as_bool) {
                     config.tables = tables;
@@ -371,6 +375,21 @@ impl Rule for MD013LineLength {
             if !effective_config.strict {
                 let text_only_length = self.calculate_text_only_length(effective_length, line_number, ctx);
                 if text_only_length <= line_limit {
+                    continue;
+                }
+            }
+
+            // Inline code spans cannot be wrapped, so reflow cannot shorten a line
+            // whose excess length is one. When code-span checking is disabled,
+            // suppress a violation that would fit once inline code spans are excluded.
+            if !effective_config.code_spans {
+                let code_span_width: usize = ctx
+                    .code_spans()
+                    .iter()
+                    .filter(|span| span.line == line_number && span.end_line == line_number)
+                    .map(|span| self.calculate_string_length(&ctx.content[span.byte_offset..span.byte_end]))
+                    .sum();
+                if effective_length.saturating_sub(code_span_width) <= line_limit {
                     continue;
                 }
             }
