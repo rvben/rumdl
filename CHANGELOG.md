@@ -58,6 +58,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.19](https://github.com/rvben/rumdl/compare/v0.2.18...v0.2.19) - 2026-06-18
+
+### Added
+
+- **md013**: add code-spans option to exempt unbreakable inline code ([78896f5](https://github.com/rvben/rumdl/commit/78896f5f21892eabf64a759b21c16019d374028d))
+- **lsp**: document and workspace symbols for headings ([2cef95b](https://github.com/rvben/rumdl/commit/2cef95bfe4dac0194c961506747314bd93ff72df))
+
+### Fixed
+
+- **parser**: recognize reference definitions inside blockquotes ([82f4567](https://github.com/rvben/rumdl/commit/82f45677951cec1a40f479e3cafbbba9e5339be3))
+- **md034**: don't flag reference definitions inside blockquotes ([faf0fa4](https://github.com/rvben/rumdl/commit/faf0fa4dbbe797e9736789d4f9cfa6c7c6c6502f))
+- **md013**: reflow list items inside blockquotes ([362b5a6](https://github.com/rvben/rumdl/commit/362b5a657b30418344485da08666aa59a8db27d1))
+
 ## [0.2.18](https://github.com/rvben/rumdl/compare/v0.2.17...v0.2.18) - 2026-06-16
 
 ### Fixed
