@@ -955,6 +955,71 @@ fn test_reference_definitions_with_titles_not_flagged() {
 }
 
 #[test]
+fn test_reference_definitions_in_blockquotes_not_flagged() {
+    // Issue #674: a link reference definition inside a blockquote is valid
+    // CommonMark and must not be flagged as a bare URL.
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        "> [example]: https://example.com",
+        "> [example]: https://example.com \"Title here\"",
+        "> [example]: <https://example.com>",
+        // Nested blockquote, both compact and spaced syntaxes
+        ">> [example]: https://example.com",
+        "> > [example]: https://example.com \"Title\"",
+        // Indented before the marker
+        "  > [example]: https://example.com",
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference definition in a blockquote should NOT be flagged:\n{content}\nGot: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_reference_definition_with_escaped_title_delimiter_not_flagged() {
+    // A reference-definition title may contain an escaped delimiter; such a line
+    // is still a valid definition and must not be flagged.
+    let rule = MD034NoBareUrls;
+
+    let test_cases = [
+        r#"[x]: https://example.com "a \" quote""#,
+        r#"[x]: https://example.com 'a \' quote'"#,
+        r#"> [x]: https://example.com "a \" quote""#,
+    ];
+
+    for content in test_cases {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Reference definition with an escaped title delimiter should NOT be flagged:\n{content}\nGot: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_bare_url_in_blockquote_still_flagged() {
+    // The blockquote ref-def exemption must not suppress a genuine bare URL
+    // that merely sits inside a blockquote.
+    let rule = MD034NoBareUrls;
+
+    let content = "> See https://bare.example.com for details";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "A bare URL inside a blockquote should still be flagged:\nGot: {result:?}"
+    );
+}
+
+#[test]
 fn test_bare_urls_still_flagged_with_reference_definitions() {
     let rule = MD034NoBareUrls;
 

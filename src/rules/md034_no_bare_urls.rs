@@ -35,8 +35,12 @@ static BADGE_LINK_LINE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap());
 static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap());
+// Allow an optional blockquote prefix (`>`, `>>`, `> >`, ...) before the label so
+// a reference definition inside a blockquote is recognized and not flagged. This
+// matches the same lenient `[label]: URL` prefix the non-blockquote path already
+// uses, keeping MD034 consistent with rumdl's reference-definition parsing.
 static REFERENCE_DEF_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)").unwrap());
+    LazyLock::new(|| Regex::new(r"^\s*(?:>\s*)*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)").unwrap());
 static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
 static SHORTCUT_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[([^\[\]]+)\]"#).unwrap());
 
