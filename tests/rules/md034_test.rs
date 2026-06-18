@@ -955,6 +955,27 @@ fn test_reference_definitions_with_titles_not_flagged() {
 }
 
 #[test]
+fn test_ref_like_paragraph_with_trailing_prose_still_flags_urls() {
+    // A line that only *starts* like a reference definition but has trailing prose
+    // is paragraph text in CommonMark, not a definition, so rumdl's parser does not
+    // treat it as one and its bare URLs are flagged - inside and outside a blockquote.
+    let rule = MD034NoBareUrls;
+
+    for content in [
+        "[x]: https://a.example.com and https://b.example.com",
+        "> [x]: https://a.example.com and https://b.example.com",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "ref-like paragraph with trailing prose should flag its bare URLs:\n{content}\nGot: {result:?}"
+        );
+    }
+}
+
+#[test]
 fn test_reference_definitions_in_blockquotes_not_flagged() {
     // Issue #674: a link reference definition inside a blockquote is valid
     // CommonMark and must not be flagged as a bare URL.

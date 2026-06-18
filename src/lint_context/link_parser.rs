@@ -804,8 +804,15 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
             continue;
         }
 
-        let line = line_info.content(content);
         let line_num = line_idx + 1;
+
+        // Reference definitions are document-global per CommonMark even inside a
+        // blockquote (`> [id]: url`). Match the quoted content and offset the byte
+        // positions past the blockquote prefix; plain lines are matched verbatim.
+        let (line, base_offset) = match line_info.blockquote.as_deref() {
+            Some(bq) => (bq.content.as_str(), line_info.byte_offset + bq.prefix.len()),
+            None => (line_info.content(content), line_info.byte_offset),
+        };
 
         if let Some(cap) = REF_DEF_PATTERN.captures(line) {
             let id_raw = cap.get(1).unwrap().as_str();
@@ -831,12 +838,12 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
             let title = title_match.map(|m| unescape_commonmark_punctuation(m.as_str()));
 
             let match_obj = cap.get(0).unwrap();
-            let byte_offset = line_info.byte_offset + match_obj.start();
-            let byte_end = line_info.byte_offset + match_obj.end();
+            let byte_offset = base_offset + match_obj.start();
+            let byte_end = base_offset + match_obj.end();
 
             let (title_byte_start, title_byte_end) = if let Some(m) = title_match {
-                let start = line_info.byte_offset + m.start().saturating_sub(1);
-                let end = line_info.byte_offset + m.end() + 1;
+                let start = base_offset + m.start().saturating_sub(1);
+                let end = base_offset + m.end() + 1;
                 (Some(start), Some(end))
             } else {
                 (None, None)

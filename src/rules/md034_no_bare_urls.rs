@@ -35,12 +35,6 @@ static BADGE_LINK_LINE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^\s*\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)\s*$"#).unwrap());
 static MARKDOWN_IMAGE_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"!\s*\[([^\]]*)\]\s*\(([^)\s]+)(?:\s+(?:\"[^\"]*\"|\'[^\']*\'))?\)"#).unwrap());
-// Allow an optional blockquote prefix (`>`, `>>`, `> >`, ...) before the label so
-// a reference definition inside a blockquote is recognized and not flagged. This
-// matches the same lenient `[label]: URL` prefix the non-blockquote path already
-// uses, keeping MD034 consistent with rumdl's reference-definition parsing.
-static REFERENCE_DEF_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*(?:>\s*)*\[[^\]]+\]:\s*(?:<|(?:https?|ftps?)://)").unwrap());
 static MULTILINE_LINK_CONTINUATION_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"^[^\[]*\]\(.*\)"#).unwrap());
 static SHORTCUT_REF_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\[([^\[\]]+)\]"#).unwrap());
 
@@ -114,11 +108,6 @@ impl MD034NoBareUrls {
         trimmed
     }
 
-    /// Check if line is inside a reference definition
-    fn is_reference_definition(&self, line: &str) -> bool {
-        REFERENCE_DEF_REGEX.is_match(line)
-    }
-
     fn check_line(
         &self,
         line: &str,
@@ -129,11 +118,6 @@ impl MD034NoBareUrls {
         line_index: &LineIndex,
     ) -> Vec<LintWarning> {
         let mut warnings = Vec::new();
-
-        // Skip reference definitions
-        if self.is_reference_definition(line) {
-            return warnings;
-        }
 
         // Skip lines inside HTML blocks - URLs in HTML attributes should not be linted
         if ctx.line_info(line_number).is_some_and(|info| info.in_html_block) {
@@ -500,6 +484,11 @@ impl Rule for MD034NoBareUrls {
         // Get code spans for exclusion
         let code_spans = ctx.code_spans();
 
+        // Reference-definition lines are detected by rumdl's shared parser (which
+        // understands blockquote-prefixed definitions and the full CommonMark
+        // grammar), so their destination URLs are not flagged as bare URLs.
+        let ref_def_lines: std::collections::HashSet<usize> = ctx.reference_defs.iter().map(|def| def.line).collect();
+
         // Allocate reusable buffers once instead of per-line to reduce allocations
         let mut buffers = LineCheckBuffers::default();
 
@@ -520,6 +509,11 @@ impl Rule for MD034NoBareUrls {
             // brackets. Directive body lines are not openers, so they fall through to
             // `check_line` and are linted as usual.
             if ctx.is_myst_colon_directive_opener_line(line.line_num) {
+                continue;
+            }
+
+            // Skip reference-definition lines (`[id]: url`, including inside blockquotes).
+            if ref_def_lines.contains(&line.line_num) {
                 continue;
             }
 

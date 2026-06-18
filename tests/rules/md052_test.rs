@@ -848,3 +848,17 @@ fn test_actual_reference_in_quote_outside_code() {
         "Shortcut references are not checked by default, and code block content should be ignored. Got: {result:?}"
     );
 }
+
+// A reference definition inside a blockquote is document-global per CommonMark
+// (matches markdownlint), so a reference using it resolves and is not flagged.
+#[test]
+fn test_reference_defined_in_blockquote_resolves() {
+    let rule = MD052ReferenceLinkImages::new();
+    let content = "See [the docs][ref] for details.\n\n> Quoted text.\n>\n> [ref]: https://example.com\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "a blockquote-defined reference should resolve: {result:?}"
+    );
+}

@@ -306,6 +306,13 @@ impl MD052ReferenceLinkImages {
             }
         }
 
+        // Include definitions found by rumdl's shared parser, which recognizes
+        // blockquote-prefixed definitions (`> [id]: url`) that the line scan above
+        // does not. IDs are already lowercased.
+        for def in &ctx.reference_defs {
+            references.insert(def.id.clone());
+        }
+
         references
     }
 
