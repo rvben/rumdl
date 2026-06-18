@@ -12,6 +12,7 @@ pub mod index_worker;
 mod linting;
 mod navigation;
 pub mod server;
+mod symbols;
 pub mod types;
 
 pub use server::RumdlLanguageServer;

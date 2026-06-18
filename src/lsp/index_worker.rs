@@ -136,8 +136,10 @@ impl IndexWorker {
 
     /// Update a single file in the index
     async fn update_single_file(&self, path: &Path, content: &str) {
-        // Build FileIndex using LintContext
-        let Ok(file_index) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::build_file_index(content)))
+        // Build FileIndex using LintContext, parsed with the file's flavor.
+        let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
+        let Ok(file_index) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::build_file_index(content, flavor)))
         else {
             log::error!("Panic while indexing {}: skipping", path.display());
             return;
@@ -172,9 +174,11 @@ impl IndexWorker {
         }
     }
 
-    /// Build a FileIndex from content
-    pub(super) fn build_file_index(content: &str) -> FileIndex {
-        let ctx = LintContext::new(content, MarkdownFlavor::default(), None);
+    /// Build a FileIndex from content, parsing with the file's Markdown flavor so
+    /// the index (anchors, cross-file links, and the symbols built from it) matches
+    /// what diagnostics and the document outline see.
+    pub(super) fn build_file_index(content: &str, flavor: MarkdownFlavor) -> FileIndex {
+        let ctx = LintContext::new(content, flavor, None);
         let mut file_index = FileIndex::new();
 
         // Extract headings from the content
@@ -285,7 +289,8 @@ impl IndexWorker {
         // Index each file
         for (i, path) in files.iter().enumerate() {
             if let Ok(content) = tokio::fs::read_to_string(path).await {
-                let file_index = Self::build_file_index(&content);
+                let flavor = self.rumdl_config.read().await.get_flavor_for_file(path);
+                let file_index = Self::build_file_index(&content, flavor);
 
                 let mut index = self.workspace_index.write().await;
                 index.update_file(path, file_index);
@@ -515,7 +520,7 @@ Some text.
 More text with [link](./other.md#section).
 "#;
 
-        let index = IndexWorker::build_file_index(content);
+        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
 
         assert_eq!(index.headings.len(), 2);
         assert_eq!(index.headings[0].text, "Main Heading");
@@ -531,11 +536,30 @@ More text with [link](./other.md#section).
     }
 
     #[test]
+    fn test_build_file_index_respects_flavor() {
+        // `# -8<- [start:x]` is a heading in Standard markdown but a MkDocs snippet
+        // marker. The index must parse with the file's flavor so anchors, cross-file
+        // navigation, and workspace symbols all agree with the document outline.
+        let content = "# Real\n\n# -8<- [start:section]\n";
+
+        let standard = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::Standard);
+        assert_eq!(
+            standard.headings.len(),
+            2,
+            "Standard treats the snippet line as a heading"
+        );
+
+        let mkdocs = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::MkDocs);
+        assert_eq!(mkdocs.headings.len(), 1, "MkDocs excludes the snippet marker");
+        assert_eq!(mkdocs.headings[0].text, "Real");
+    }
+
+    #[test]
     fn test_build_file_index_column_positions() {
         // Verify that column positions are correct (fix for issue #234)
         let content = "See [link](./file.md) here.\n";
 
-        let index = IndexWorker::build_file_index(content);
+        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
 
         assert_eq!(index.cross_file_links.len(), 1);
         assert_eq!(index.cross_file_links[0].target_path, "./file.md");
@@ -548,7 +572,7 @@ More text with [link](./other.md#section).
     fn test_build_file_index_multiple_links() {
         let content = "First [a](./a.md) and [b](./b.md#section) links.\n";
 
-        let index = IndexWorker::build_file_index(content);
+        let index = IndexWorker::build_file_index(content, crate::config::MarkdownFlavor::default());
 
         assert_eq!(index.cross_file_links.len(), 2);
 

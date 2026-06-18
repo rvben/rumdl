@@ -858,7 +858,8 @@ impl RumdlLanguageServer {
             Some(line) => line,
             None => {
                 let content = tokio::fs::read_to_string(file_path).await.ok()?;
-                let file_index = crate::lsp::index_worker::IndexWorker::build_file_index(&content);
+                let flavor = self.rumdl_config.read().await.get_flavor_for_file(file_path);
+                let file_index = crate::lsp::index_worker::IndexWorker::build_file_index(&content, flavor);
                 file_index.get_heading_by_anchor(anchor)?.line
             }
         };
@@ -969,17 +970,7 @@ impl RumdlLanguageServer {
         let lines: Vec<&str> = text.lines().collect();
         let line_text = lines.get(position.line as usize)?;
 
-        let (text_start, text_end) = if heading_info.is_setext {
-            // Setext heading: the entire line is the heading text
-            let trimmed_start = line_text.len() - line_text.trim_start().len();
-            let trimmed_end = line_text.trim_end().len();
-            (trimmed_start, trimmed_end)
-        } else {
-            let start = find_heading_text_start(line_text)?;
-            let end = find_heading_text_end(line_text, start);
-            (start, end)
-        };
-
+        let (text_start, text_end) = heading_text_byte_range(line_text, heading_info.is_setext)?;
         if text_start >= text_end {
             return None;
         }
@@ -1222,32 +1213,56 @@ fn find_heading_text_start(line: &str) -> Option<usize> {
 /// - Closing ATX markers (`## Heading ##`)
 fn find_heading_text_end(line: &str, text_start: usize) -> usize {
     let text_portion = &line[text_start..];
+    // Strip a trailing `{#custom-id}` first, then a closing ATX sequence, so a
+    // heading that uses both (`## Title ## {#id}`) yields just `Title`.
+    let without_id = strip_trailing_custom_id(text_portion);
+    text_start + strip_closing_atx(without_id).len()
+}
 
-    // Check for custom anchor syntax {#id} at end
-    if let Some(brace_pos) = text_portion.rfind("{#") {
-        // Verify the brace pair is at the end (after trimming)
-        if let Some(close_pos) = text_portion[brace_pos..].find('}') {
-            let after_brace = text_portion[brace_pos + close_pos + 1..].trim();
-            if after_brace.is_empty() {
-                let before_brace = text_portion[..brace_pos].trim_end();
-                return text_start + before_brace.len();
-            }
+/// `text` without a trailing closing ATX sequence (` ###`).
+///
+/// The hash run must be preceded by a space to count as a closing sequence, so a
+/// heading whose text legitimately ends in `#` (e.g. `C#`) is preserved.
+fn strip_closing_atx(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    if let Some(last_non_hash) = trimmed.rfind(|c: char| c != '#') {
+        let tail = &trimmed[last_non_hash..];
+        if tail.starts_with(' ') && tail.len() > 1 {
+            return &trimmed[..last_non_hash];
         }
     }
+    trimmed
+}
 
-    // Check for closing ATX markers (trailing ###)
-    let trimmed_end = text_portion.trim_end();
-    if let Some(last_non_hash_pos) = trimmed_end.rfind(|c: char| c != '#') {
-        let after_last = &trimmed_end[last_non_hash_pos..];
-        // The character at last_non_hash_pos must be a space for this to be a closing sequence
-        let last_char = trimmed_end[last_non_hash_pos..].chars().next().unwrap();
-        if last_char == ' ' && after_last.len() > 1 {
-            // Closing ATX: trim the space and trailing hashes
-            return text_start + last_non_hash_pos;
-        }
+/// Byte offsets `(start, end)` of the heading *text* within `line`.
+///
+/// For ATX headings the markers, any closing `###` sequence, and a trailing
+/// `{#custom-id}` are excluded. For Setext headings the whole trimmed line is the
+/// text. Returns `None` when the line is not a heading; the returned range may be
+/// empty (`start == end`) for an empty ATX heading like `##`.
+pub(super) fn heading_text_byte_range(line: &str, is_setext: bool) -> Option<(usize, usize)> {
+    if is_setext {
+        let start = line.len() - line.trim_start().len();
+        let end = strip_trailing_custom_id(&line[..line.trim_end().len()])
+            .len()
+            .max(start);
+        Some((start, end))
+    } else {
+        let start = find_heading_text_start(line)?;
+        Some((start, find_heading_text_end(line, start)))
     }
+}
 
-    text_start + trimmed_end.len()
+/// `text` with a trailing `{#custom-id}` removed (and the whitespace before it
+/// trimmed). Returns `text` unchanged when there is no such suffix.
+fn strip_trailing_custom_id(text: &str) -> &str {
+    if let Some(brace_pos) = text.rfind("{#")
+        && let Some(close_rel) = text[brace_pos..].find('}')
+        && text[brace_pos + close_rel + 1..].trim().is_empty()
+    {
+        return text[..brace_pos].trim_end();
+    }
+    text
 }
 
 /// Find ALL `#anchor` occurrences inside links on a given line and create TextEdits.

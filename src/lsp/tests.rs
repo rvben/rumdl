@@ -462,6 +462,149 @@ async fn test_document_formatting() {
     assert_eq!(edit.new_text, expected);
 }
 
+#[tokio::test]
+async fn test_document_symbol_outline() {
+    let server = create_test_server();
+    *server.client_supports_hierarchical_symbols.write().await = true;
+    let uri = Url::parse("file:///outline.md").unwrap();
+    let text = "# Top\n\n## Child A\n\nbody\n\n## Child B\n\n### Grandchild\n";
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: text.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let result = server.document_symbol(params).await.unwrap();
+    let Some(DocumentSymbolResponse::Nested(symbols)) = result else {
+        panic!("expected nested document symbols, got {result:?}");
+    };
+
+    assert_eq!(symbols.len(), 1, "single H1 root");
+    assert_eq!(symbols[0].name, "Top");
+    let children = symbols[0].children.as_ref().expect("Top has children");
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].name, "Child A");
+    assert_eq!(children[1].name, "Child B");
+    let grandchildren = children[1].children.as_ref().expect("Child B has a child");
+    assert_eq!(grandchildren[0].name, "Grandchild");
+}
+
+#[tokio::test]
+async fn test_document_symbol_flat_for_non_hierarchical_client() {
+    // A client that does not advertise hierarchical support gets the legacy flat
+    // form, with each heading's parent recorded as its container.
+    let server = create_test_server();
+    assert!(
+        !*server.client_supports_hierarchical_symbols.read().await,
+        "default is the flat form"
+    );
+    let uri = Url::parse("file:///flat.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "# Top\n\n## Child\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let result = server.document_symbol(params).await.unwrap();
+    let Some(DocumentSymbolResponse::Flat(symbols)) = result else {
+        panic!("expected flat document symbols, got {result:?}");
+    };
+
+    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[0].name, "Top");
+    assert_eq!(symbols[0].container_name, None, "the top heading has no container");
+    assert_eq!(symbols[1].name, "Child");
+    assert_eq!(
+        symbols[1].container_name.as_deref(),
+        Some("Top"),
+        "Child is contained by Top"
+    );
+}
+
+#[tokio::test]
+async fn test_document_symbol_none_without_headings() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///plain.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "just paragraphs\n\nno headings here\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    assert!(
+        server.document_symbol(params).await.unwrap().is_none(),
+        "no symbols for a document without headings"
+    );
+}
+
+#[tokio::test]
+async fn test_workspace_symbol_search() {
+    use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+
+    let server = create_test_server();
+    let doc_path = std::env::temp_dir().join("rumdl-ws-symbol").join("doc.md");
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        let mut fi = FileIndex::default();
+        fi.headings.push(HeadingIndex {
+            text: "Configuration".to_string(),
+            auto_anchor: "configuration".to_string(),
+            custom_anchor: None,
+            line: 3,
+            is_setext: false,
+        });
+        fi.headings.push(HeadingIndex {
+            text: "Usage".to_string(),
+            auto_anchor: "usage".to_string(),
+            custom_anchor: None,
+            line: 10,
+            is_setext: false,
+        });
+        index.insert_file(doc_path.clone(), fi);
+    }
+
+    let params = WorkspaceSymbolParams {
+        query: "config".to_string(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let symbols = server
+        .symbol(params)
+        .await
+        .unwrap()
+        .expect("expected workspace symbols");
+    assert_eq!(symbols.len(), 1, "only the matching heading is returned");
+    assert_eq!(symbols[0].name, "Configuration");
+    // Heading on line 3 (1-based) maps to LSP line 2 (0-based).
+    assert_eq!(symbols[0].location.range.start.line, 2);
+    assert!(symbols[0].location.uri.as_str().ends_with("doc.md"));
+}
+
 /// Test that Unfixable rules are excluded from formatting/Fix All but available for Quick Fix
 /// Regression test for issue #158: formatting deleted HTML img tags
 #[tokio::test]
@@ -7614,6 +7757,29 @@ async fn test_initialize_advertises_nav_capabilities_when_enabled() {
     assert!(
         caps.rename_provider.is_some(),
         "rename_provider must be advertised by default"
+    );
+}
+
+#[tokio::test]
+async fn test_initialize_advertises_symbol_capabilities() {
+    // Symbol providers are a standalone feature, advertised regardless of the
+    // link-navigation flag.
+    let server = create_test_server();
+    let params = InitializeParams {
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+    let caps = LanguageServer::initialize(&server, params).await.unwrap().capabilities;
+
+    assert!(
+        matches!(caps.document_symbol_provider, Some(OneOf::Left(true))),
+        "document_symbol_provider must be advertised: {:?}",
+        caps.document_symbol_provider
+    );
+    assert!(
+        matches!(caps.workspace_symbol_provider, Some(OneOf::Left(true))),
+        "workspace_symbol_provider must be advertised: {:?}",
+        caps.workspace_symbol_provider
     );
 }
 

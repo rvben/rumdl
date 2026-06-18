@@ -629,7 +629,10 @@ impl RumdlLanguageServer {
         let headings = match indexed_headings {
             Some(headings) => headings,
             None if allow_disk_fallback => match tokio::fs::read_to_string(&target).await {
-                Ok(content) => crate::lsp::index_worker::IndexWorker::build_file_index(&content).headings,
+                Ok(content) => {
+                    let flavor = self.rumdl_config.read().await.get_flavor_for_file(&target);
+                    crate::lsp::index_worker::IndexWorker::build_file_index(&content, flavor).headings
+                }
                 Err(_) => return Vec::new(),
             },
             None => return Vec::new(),

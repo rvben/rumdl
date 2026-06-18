@@ -81,6 +81,10 @@ pub struct RumdlLanguageServer {
     /// Whether the client supports pull diagnostics (textDocument/diagnostic)
     /// When true, we skip pushing diagnostics to avoid duplicates
     pub(crate) client_supports_pull_diagnostics: Arc<RwLock<bool>>,
+    /// Whether the client supports hierarchical (nested) document symbols.
+    /// When false, `textDocument/documentSymbol` must return the flat
+    /// `SymbolInformation[]` form instead of a `DocumentSymbol` tree.
+    pub(crate) client_supports_hierarchical_symbols: Arc<RwLock<bool>>,
     /// Config path supplied via `rumdl server --config <path>`.
     ///
     /// Held in an immutable field (not in `self.config`) so that client-driven
@@ -129,6 +133,7 @@ impl RumdlLanguageServer {
             index_state,
             update_tx,
             client_supports_pull_diagnostics: Arc::new(RwLock::new(false)),
+            client_supports_hierarchical_symbols: Arc::new(RwLock::new(false)),
             cli_config_path,
         }
     }
@@ -180,6 +185,15 @@ impl RumdlLanguageServer {
         docs.get(uri)
             .and_then(|entry| (!entry.from_disk).then(|| entry.content.clone()))
     }
+
+    /// Resolve the Markdown flavor for a document, mirroring the per-file flavor
+    /// resolution used by diagnostics and formatting so symbol parsing matches.
+    pub(super) async fn resolve_flavor_for_uri(&self, uri: &Url) -> crate::config::MarkdownFlavor {
+        match uri.to_file_path() {
+            Ok(path) => self.resolve_config_for_file(&path).await.get_flavor_for_file(&path),
+            Err(_) => self.rumdl_config.read().await.markdown_flavor(),
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -209,6 +223,17 @@ impl LanguageServer for RumdlLanguageServer {
         } else {
             log::info!("Client does not support pull diagnostics - using push model");
         }
+
+        // Detect hierarchical document symbol support; without it the client expects
+        // the legacy flat `SymbolInformation[]` form.
+        let supports_hierarchical_symbols = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.document_symbol.as_ref())
+            .and_then(|ds| ds.hierarchical_document_symbol_support)
+            .unwrap_or(false);
+        *self.client_supports_hierarchical_symbols.write().await = supports_hierarchical_symbols;
 
         // Extract and store workspace roots
         let mut roots = Vec::new();
@@ -256,6 +281,8 @@ impl LanguageServer for RumdlLanguageServer {
                 })),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
                     inter_file_dependencies: true,
@@ -1264,6 +1291,31 @@ impl LanguageServer for RumdlLanguageServer {
                 },
             )))
         }
+    }
+
+    async fn document_symbol(&self, params: DocumentSymbolParams) -> JsonRpcResult<Option<DocumentSymbolResponse>> {
+        let uri = params.text_document.uri;
+        let Some(text) = self.get_document_content(&uri).await else {
+            return Ok(None);
+        };
+
+        let flavor = self.resolve_flavor_for_uri(&uri).await;
+        let ctx = crate::lint_context::LintContext::new(&text, flavor, None);
+
+        if *self.client_supports_hierarchical_symbols.read().await {
+            let symbols = super::symbols::document_symbols(&ctx);
+            Ok((!symbols.is_empty()).then_some(DocumentSymbolResponse::Nested(symbols)))
+        } else {
+            let symbols = super::symbols::document_symbols_flat(&ctx, &uri);
+            Ok((!symbols.is_empty()).then_some(DocumentSymbolResponse::Flat(symbols)))
+        }
+    }
+
+    async fn symbol(&self, params: WorkspaceSymbolParams) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        let query = params.query.to_lowercase();
+        let index = self.workspace_index.read().await;
+        let symbols = super::symbols::workspace_symbols(&index, &query);
+        Ok(if symbols.is_empty() { None } else { Some(symbols) })
     }
 }
 
