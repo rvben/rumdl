@@ -606,7 +606,6 @@ Lint Markdown files and print warnings/errors (main subcommand)
 - `-f, --fix`: Automatically fix issues where possible
 - `--diff`: Show diff of what would be fixed instead of fixing files
 - `-w, --watch`: Run in watch mode by re-running whenever files change
-- `-l, --list-rules`: List all available rules
 - `-d, --disable <rules>`: Disable specific rules (comma-separated)
 - `-e, --enable <rules>`: Enable only specific rules (comma-separated)
 - `--exclude <patterns>`: Exclude specific files or directories (comma-separated glob patterns)

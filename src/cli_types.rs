@@ -134,8 +134,9 @@ pub struct CheckArgs {
     )]
     pub check: bool,
 
-    /// List all available rules
-    #[arg(short, long, default_value = "false")]
+    /// Deprecated and hidden: rule listing moved to `rumdl rule`. When passed,
+    /// `run_check` prints guidance to the canonical commands and exits.
+    #[arg(short = 'l', long, hide = true, default_value = "false")]
     pub list_rules: bool,
 
     #[command(flatten)]
@@ -224,8 +225,9 @@ pub struct FmtArgs {
     #[arg(long, help = "Exit with code 1 if any formatting changes would be made (for CI)")]
     pub check: bool,
 
-    /// Hidden compatibility flag from check
-    #[arg(short, long, hide = true, default_value = "false")]
+    /// Deprecated and hidden compatibility flag from check; routed to the same
+    /// guidance path as `check --list-rules`.
+    #[arg(short = 'l', long, hide = true, default_value = "false")]
     pub list_rules: bool,
 
     #[command(flatten)]

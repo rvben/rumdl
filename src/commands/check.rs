@@ -13,6 +13,19 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     let quiet = args.quiet;
     let silent = args.silent;
 
+    // `--list-rules` / `-l` was removed: rule listing lives in dedicated commands.
+    // Rather than a bare "unexpected argument" error, point users (especially those
+    // migrating from other linters who reach for `-l`) at the right commands, and
+    // exit non-zero so a script relying on it fails loudly instead of silently
+    // skipping the lint.
+    if args.list_rules {
+        eprintln!("{}: `--list-rules` has been removed", "Error".red().bold());
+        eprintln!("  To list all rules:                   rumdl rule");
+        eprintln!("  Rules active for your config:        rumdl check --verbose");
+        eprintln!("  Inspect your effective config:       rumdl config");
+        exit::tool_error();
+    }
+
     // Validate mutually exclusive options
     if args.diff && args.fix {
         eprintln!("{}: --diff and --fix cannot be used together", "Error".red().bold());
