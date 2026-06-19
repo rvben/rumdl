@@ -152,11 +152,26 @@ impl<'a> LintContext<'a> {
         let line_to_list = parse_result.line_to_list;
         let list_start_values = parse_result.list_start_values;
 
-        // Pre-compute HTML comment ranges ONCE for all operations
+        // Pre-compute HTML comment ranges ONCE for all operations.
+        // Code-span and fenced-code-block ranges are passed so `<!--`/`-->`
+        // inside code are treated as literal text, not comment delimiters that
+        // could pair across code regions on different lines. Only *fenced* blocks
+        // are used: pulldown-cmark misclassifies 4-space-indented content inside
+        // containers (MkDocs admonitions, etc.) as indented code blocks, and a
+        // real comment indented there must still be recognized as a comment.
+        let fenced_code_block_ranges: Vec<(usize, usize)> = code_block_details
+            .iter()
+            .filter(|detail| detail.is_fenced)
+            .map(|detail| (detail.start, detail.end))
+            .collect();
         let html_comment_ranges = profile_section!(
             "HTML comment ranges",
             profile,
-            crate::utils::skip_context::compute_html_comment_ranges(content)
+            crate::utils::skip_context::compute_html_comment_ranges_filtered(
+                content,
+                &code_span_ranges,
+                &fenced_code_block_ranges
+            )
         );
 
         // Pre-compute autodoc block ranges (avoids O(n^2) scaling)
@@ -367,6 +382,33 @@ impl<'a> LintContext<'a> {
                 }
             }
             code_blocks = new_code_blocks;
+
+            // Add byte ranges for fenced code blocks nested inside a JSX component.
+            // pulldown-cmark classifies the whole component as one HTML block and
+            // emits no code-block range for the fence, so the split loop above
+            // (which can only narrow existing ranges) never adds it. Derive the
+            // ranges from the per-line in_code_block flags detect_jsx_blocks set,
+            // so byte-range consumers (e.g. MD011, MD044) skip the fence content.
+            let mut jsx_fence_ranges: Vec<(usize, usize)> = Vec::new();
+            let mut run: Option<(usize, usize)> = None;
+            for line in &lines {
+                if line.in_jsx_block && line.in_code_block {
+                    let line_end = line.byte_offset + line.byte_len;
+                    match &mut run {
+                        Some((_, end)) => *end = line_end,
+                        None => run = Some((line.byte_offset, line_end)),
+                    }
+                } else if let Some(r) = run.take() {
+                    jsx_fence_ranges.push(r);
+                }
+            }
+            if let Some(r) = run.take() {
+                jsx_fence_ranges.push(r);
+            }
+            if !jsx_fence_ranges.is_empty() {
+                code_blocks.extend(jsx_fence_ranges);
+                code_blocks.sort_by_key(|&(start, _)| start);
+            }
         }
 
         // Detect Azure DevOps colon code fences and extend code_blocks so that

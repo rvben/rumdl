@@ -427,9 +427,6 @@ pub static HTML_ENTITY_REGEX: LazyLock<Regex> =
 // Handles multi-line content with embedded quotes and newlines
 pub static HUGO_SHORTCODE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{\{[<%][\s\S]*?[%>]\}\}").unwrap());
 
-// HTML comment pattern
-pub static HTML_COMMENT_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<!--[\s\S]*?-->").unwrap());
-
 // HTML heading pattern (matches <h1> through <h6> tags)
 // Uses FancyRegex because the pattern requires a backreference (\1)
 pub static HTML_HEADING_PATTERN: LazyLock<FancyRegex> =

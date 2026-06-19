@@ -12,7 +12,6 @@ use crate::utils::mkdocs_footnotes;
 use crate::utils::mkdocs_icons;
 use crate::utils::mkdocs_snippets;
 use crate::utils::mkdocs_tabs;
-use crate::utils::regex_cache::HTML_COMMENT_PATTERN;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -33,16 +32,74 @@ pub struct ByteRange {
     pub end: usize,
 }
 
-/// Pre-compute all HTML comment ranges in the content
-/// Returns a sorted vector of byte ranges for efficient lookup
+/// Pre-compute all HTML comment ranges in the content.
+/// Returns a sorted vector of byte ranges for efficient lookup.
 pub fn compute_html_comment_ranges(content: &str) -> Vec<ByteRange> {
-    HTML_COMMENT_PATTERN
-        .find_iter(content)
-        .map(|m| ByteRange {
-            start: m.start(),
-            end: m.end(),
-        })
-        .collect()
+    compute_html_comment_ranges_filtered(content, &[], &[])
+}
+
+/// Pre-compute HTML comment ranges, treating `<!--`/`-->` inside inline code
+/// spans or fenced/indented code blocks as literal text rather than comment
+/// delimiters.
+///
+/// Inside code (a backtick code span or a code block), `<!--` and `-->` are
+/// literal. A naive `<!--[\s\S]*?-->` scan would pair a `<!--` in one code
+/// region with a `-->` in a later region, spuriously marking every line between
+/// them as "inside an HTML comment". That made content invisible to rules that
+/// skip comment lines: MD032's blank-line check produced false positives and a
+/// non-converging `--fix` loop, and MD034 silently dropped a real bare URL that
+/// fell between a code-block `<!--` and a later `-->`.
+///
+/// To stay correct even when a literal delimiter precedes a genuine comment
+/// (`` `<!--` <!-- real --> ``), this scans for the next `<!--` opener that is
+/// not in code, then the next `-->` closer that is not in code - it does not
+/// filter completed regex matches. `code_span_ranges` and `code_block_ranges`
+/// are the parser's half-open `[start, end)` byte ranges (`ParseResult`). With
+/// no code ranges this is equivalent to the lazy regex: an opener pairs with the
+/// first following closer, and an opener with no closer yields no range.
+pub fn compute_html_comment_ranges_filtered(
+    content: &str,
+    code_span_ranges: &[(usize, usize)],
+    code_block_ranges: &[(usize, usize)],
+) -> Vec<ByteRange> {
+    let in_code = |pos: usize| {
+        code_span_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
+            || code_block_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
+    };
+
+    let mut ranges = Vec::new();
+    let mut search_from = 0;
+    while let Some(rel) = content[search_from..].find("<!--") {
+        let open = search_from + rel;
+        if in_code(open) {
+            // Literal `<!--` inside code: not a comment opener.
+            search_from = open + "<!--".len();
+            continue;
+        }
+        // Find the next `-->` that is not itself inside code.
+        let mut close_from = open + "<!--".len();
+        let end = loop {
+            let Some(crel) = content[close_from..].find("-->") else {
+                break None;
+            };
+            let close = close_from + crel;
+            if in_code(close) {
+                close_from = close + "-->".len();
+                continue;
+            }
+            break Some(close + "-->".len());
+        };
+        match end {
+            Some(end) => {
+                ranges.push(ByteRange { start: open, end });
+                search_from = end;
+            }
+            // Unterminated comment (no closer anywhere): the regex would not
+            // match either, so emit nothing and stop.
+            None => break,
+        }
+    }
+    ranges
 }
 
 /// Check if a byte position is within any of the pre-computed HTML comment ranges
@@ -109,16 +166,6 @@ pub fn is_mkdocs_tab_line(line: &str, flavor: MarkdownFlavor) -> bool {
 /// Check if a line contains MkDocs Critic Markup
 pub fn is_mkdocs_critic_line(line: &str, flavor: MarkdownFlavor) -> bool {
     flavor == MarkdownFlavor::MkDocs && mkdocs_critic::contains_critic_markup(line)
-}
-
-/// Check if a byte position is within an HTML comment
-pub fn is_in_html_comment(content: &str, byte_pos: usize) -> bool {
-    for m in HTML_COMMENT_PATTERN.find_iter(content) {
-        if m.start() <= byte_pos && byte_pos < m.end() {
-            return true;
-        }
-    }
-    false
 }
 
 /// Check if a byte position is within an HTML tag
@@ -530,9 +577,104 @@ mod tests {
     #[test]
     fn test_html_comment_detection() {
         let content = "Text <!-- comment --> more text";
-        assert!(is_in_html_comment(content, 10)); // Inside comment
-        assert!(!is_in_html_comment(content, 0)); // Before comment
-        assert!(!is_in_html_comment(content, 25)); // After comment
+        let ranges = compute_html_comment_ranges(content);
+        assert!(is_in_html_comment_ranges(&ranges, 10)); // Inside comment
+        assert!(!is_in_html_comment_ranges(&ranges, 0)); // Before comment
+        assert!(!is_in_html_comment_ranges(&ranges, 25)); // After comment
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_ignores_code_span_delimiters() {
+        // `<!--` and `-->` inside inline code spans on different lines must not
+        // pair into a multi-line HTML comment (issue #679).
+        let content = "a `<!--` b\n\nc `-->` d";
+        let open = content.find("<!--").unwrap();
+        let close = content.find("-->").unwrap();
+        // Code spans covering the two backtick-delimited tokens.
+        let code_spans = [
+            (content.find('`').unwrap(), open + "<!--".len() + 1),
+            (content.rfind("` d").unwrap() - "-->".len(), close + "-->".len() + 1),
+        ];
+
+        // Without code-span awareness the pattern spans open..close (the bug).
+        assert!(
+            !compute_html_comment_ranges(content).is_empty(),
+            "sanity: raw pattern matches across the code spans"
+        );
+        // With code-span awareness the spurious match is dropped.
+        assert!(
+            compute_html_comment_ranges_filtered(content, &code_spans, &[]).is_empty(),
+            "a `<!--`/`-->` pair inside code spans must not be treated as a comment"
+        );
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_ignores_code_block_delimiters() {
+        // A `<!--` inside a code block must not pair with a later `-->` outside it
+        // (the code-block counterpart of the code-span case).
+        let content = "```\n<!-- literal\n```\n\nhttps://example.com\n\n-->\n";
+        let block_end = content.find("```\n\n").unwrap() + "```".len();
+        let code_blocks = [(0usize, block_end)];
+        assert!(
+            compute_html_comment_ranges_filtered(content, &[], &code_blocks).is_empty(),
+            "a `<!--` inside a code block must not open a comment that spans to a later `-->`"
+        );
+        // A real comment whose opener is outside the block is still detected.
+        let real = "```\n<!-- literal\n```\n\n<!-- real --> tail";
+        let real_block_end = real.find("```\n\n").unwrap() + "```".len();
+        let ranges = compute_html_comment_ranges_filtered(real, &[], &[(0usize, real_block_end)]);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, real.find("<!-- real").unwrap());
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_keeps_real_comments() {
+        // A genuine comment whose `<!--` is not inside a code span is still
+        // detected, even when an unrelated code span exists elsewhere.
+        let content = "text `code` <!-- real comment --> more";
+        let code_spans = [(content.find('`').unwrap(), content.find("` ").unwrap() + 1)];
+        let ranges = compute_html_comment_ranges_filtered(content, &code_spans, &[]);
+        assert_eq!(ranges.len(), 1, "the real comment must still be detected");
+        let comment_start = content.find("<!--").unwrap();
+        assert_eq!(ranges[0].start, comment_start);
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_real_comment_after_code_span_opener() {
+        // A code span containing `<!--` must not consume a real comment that
+        // follows it: skipping the literal opener, the scan must still discover
+        // the genuine `<!-- ... -->` and mark its content as a comment.
+        let content = "a `<!--` then <!-- real --> end";
+        let code_spans = [(content.find('`').unwrap(), content.find("` then").unwrap() + 1)];
+        let ranges = compute_html_comment_ranges_filtered(content, &code_spans, &[]);
+        assert_eq!(
+            ranges.len(),
+            1,
+            "the real comment after a code-span opener must be detected"
+        );
+        let real_open = content.find("<!-- real").unwrap();
+        assert_eq!(
+            ranges[0].start, real_open,
+            "range must start at the real comment, not the code-span opener"
+        );
+        assert_eq!(ranges[0].end, content.find("--> end").unwrap() + "-->".len());
+    }
+
+    #[test]
+    fn test_compute_html_comment_ranges_closer_inside_code_span_is_not_a_closer() {
+        // A real comment's closing `-->` that lands inside a code span is literal;
+        // the scan must continue to the next real `-->`.
+        let content = "<!-- open `-->` still open --> done";
+        let first_close = content.find("`-->`").unwrap() + 1;
+        let code_spans = [(content.find('`').unwrap(), content.find("` still").unwrap() + 1)];
+        let ranges = compute_html_comment_ranges_filtered(content, &code_spans, &[]);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 0);
+        let real_close_end = content.find("--> done").unwrap() + "-->".len();
+        assert_eq!(
+            ranges[0].end, real_close_end,
+            "must close at the real --> ({real_close_end}), not the one in the code span ({first_close})"
+        );
     }
 
     #[test]

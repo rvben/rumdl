@@ -2956,6 +2956,36 @@ More text.
     }
 
     #[test]
+    fn test_code_span_html_comment_delimiters_no_false_positive() {
+        // Issue #679: `<!--` and `-->` inside inline code spans on different lines
+        // must not be parsed as a single multi-line HTML comment. When they were,
+        // the blank lines between them were treated as "inside a comment"
+        // (transparent), so MD032 saw the list as lacking surrounding blanks and
+        // emitted false "list should be followed/preceded by blank line" warnings.
+        let content = "Text before list.\n\n1. A list item with `<!--` in a code span\n\n### Heading After\n\n1. Another item with `-->` in it\n";
+        let warnings = lint(content);
+        assert_eq!(
+            warnings.len(),
+            0,
+            "code-span HTML comment delimiters must not cause MD032 false positives, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_code_span_html_comment_delimiters_fix_is_idempotent() {
+        // Issue #679: the false positives above drove a non-converging `--fix`
+        // loop - each pass inserted a blank line, shifting bytes so the spurious
+        // comment range re-matched and the rule "found" the missing blank again.
+        // The correct fix is a no-op because the content is already well-formed.
+        let content = "Text before list.\n\n1. A list item with `<!--` in a code span\n\n### Heading After\n\n1. Another item with `-->` in it\n";
+        let fixed = fix(content);
+        assert_eq!(
+            fixed, content,
+            "MD032 fix must be a no-op for content whose only `<!--`/`-->` are inside code spans"
+        );
+    }
+
+    #[test]
     fn test_blockquote_list_at_document_end() {
         // List at end of document (no trailing content)
         let content = "> Some text\n>\n> - item 1\n> - item 2";

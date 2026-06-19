@@ -405,6 +405,24 @@ mod tests {
     }
 
     #[test]
+    fn test_md011_reversed_link_in_jsx_nested_fence_not_flagged() {
+        // A reversed link inside a fenced code block nested in a JSX component is
+        // code, not prose. pulldown-cmark classifies the component as one HTML
+        // block and emits no code-block range for the fence, so MD011's
+        // byte-range code check would flag it (and `fmt` would corrupt the code)
+        // unless the JSX fence range is added to ctx.code_blocks.
+        let rule = MD011NoReversedLinks;
+        let content =
+            "<Steps>\n  <Step>\n```text\nsee (this)[https://example.com] reversed\n```\n  </Step>\n</Steps>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "reversed link inside a JSX-nested fence must not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
     fn test_md011_dataview_bracket_syntax_obsidian() {
         let rule = MD011NoReversedLinks;
 

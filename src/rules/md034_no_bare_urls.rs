@@ -682,6 +682,83 @@ mod tests {
         );
     }
 
+    /// Issue #678: a URL inside a fenced code block that is nested within a JSX/MDX
+    /// component (e.g. `<Steps><Step>`) is code, not bare prose. It must not be
+    /// flagged, and `fix` must not rewrite it (which would corrupt the command).
+    #[test]
+    fn test_url_in_fenced_code_block_inside_jsx_not_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL in a fenced code block nested in a JSX component must not be flagged: {result:?}"
+        );
+    }
+
+    /// The same code block must be left byte-for-byte intact by `fix` (no
+    /// `<https://...>` rewrite that breaks a copy-pasteable command).
+    #[test]
+    fn test_fix_does_not_rewrite_url_in_fenced_code_block_inside_jsx() {
+        let rule = MD034NoBareUrls;
+        let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n```bash\ncurl https://example.com/api\n```\n  </Step>\n</Steps>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "fix must not rewrite a URL inside a JSX-nested fenced code block"
+        );
+    }
+
+    /// Control: a bare URL in the JSX *body* (outside any fence) is genuine prose
+    /// and must still be flagged, so the fence exemption is not over-broad.
+    #[test]
+    fn test_bare_url_in_jsx_body_outside_fence_still_flagged() {
+        let rule = MD034NoBareUrls;
+        let content = "# Title\n\n<Steps>\n  <Step title=\"Send a request\">\n  Visit https://example.com/api now.\n  </Step>\n</Steps>\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MDX, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "A bare URL in the JSX body (not in a fence) must still be flagged: {result:?}"
+        );
+    }
+
+    /// A `<!--` inside a fenced code block is literal, not a comment opener, so it
+    /// must not pair with a later `-->` to form a comment range that masks a real
+    /// bare URL between them (the code-block counterpart to the code-span fix).
+    #[test]
+    fn test_bare_url_not_masked_by_comment_delimiter_in_code_block() {
+        let rule = MD034NoBareUrls;
+        let content =
+            "# T\n\n```text\n<!-- literal opener, not a comment\n```\n\nhttps://example.com should be flagged\n\n-->\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "the bare URL must still be flagged: {result:?}");
+        assert!(
+            result[0].message.contains("example.com"),
+            "the flagged URL must be the bare one: {result:?}"
+        );
+    }
+
+    /// Only *fenced* code blocks suppress `<!--`/`-->` as literal. A real HTML
+    /// comment indented inside a MkDocs admonition (which pulldown-cmark
+    /// misclassifies as an indented code block) must still be recognized as a
+    /// comment, so its bare URL stays skipped.
+    #[test]
+    fn test_bare_url_in_indented_comment_in_admonition_still_skipped() {
+        let rule = MD034NoBareUrls;
+        let content = "# T\n\n!!! note\n    Some text.\n\n    <!--\n    https://example.com\n    -->\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "URL inside an indented HTML comment in an admonition must not be flagged: {result:?}"
+        );
+    }
+
     /// Issue #649: a URL that is a JSX component attribute value (e.g. `href="..."`)
     /// is a string prop, not bare prose. Wrapping it in angle brackets produces
     /// invalid JSX, so MD034 must not flag it under the MDX flavor.

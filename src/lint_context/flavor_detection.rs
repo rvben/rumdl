@@ -190,16 +190,17 @@ pub(super) fn detect_jsx_blocks(content: &str, lines: &mut [LineInfo], flavor: M
         }
     }
 
-    // Clear false in_code_block for indented content inside JSX blocks.
-    // Preserve real fenced code blocks by tracking fence markers.
+    // Reconcile `in_code_block` for content inside JSX blocks. pulldown-cmark
+    // classifies the whole component as one HTML block, so it neither marks a
+    // nested fenced code block as code (a false negative that let MD034 rewrite
+    // URLs inside ```bash``` fences - issue #678) nor is reliable about 4-space
+    // indented content (a false positive). Re-derive the flag from the fence
+    // markers: lines inside a fence are code, everything else is not.
     let mut fenced_code = FencedCodeTracker::new();
     for line in lines.iter_mut() {
         if line.in_jsx_block {
             let trimmed = line.content(content).trim();
-            let in_fenced = fenced_code.process_line(trimmed);
-            if !in_fenced {
-                line.in_code_block = false;
-            }
+            line.in_code_block = fenced_code.process_line(trimmed);
         } else {
             fenced_code.reset();
         }
