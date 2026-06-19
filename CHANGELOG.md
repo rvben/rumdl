@@ -59,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.20](https://github.com/rvben/rumdl/compare/v0.2.19...v0.2.20) - 2026-06-19
+
+### Fixed
+
+- **cli**: redirect removed --list-rules to the canonical commands ([7a3842d](https://github.com/rvben/rumdl/commit/7a3842d2f58d305e5bbd81e6f2cea3b996c4f410))
+- **parser**: correct code-region detection for comments and JSX fences ([17f975c](https://github.com/rvben/rumdl/commit/17f975ced497177f798ea4d23ba209a7e8bcd223))
+
 ## [0.2.19](https://github.com/rvben/rumdl/compare/v0.2.18...v0.2.19) - 2026-06-18
 
 ### Added
