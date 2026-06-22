@@ -1306,8 +1306,11 @@ rumdl is used by these notable open source projects:
 | [chrisgrieser/shimmering-focus](https://github.com/chrisgrieser/shimmering-focus)           | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-focus?style=flat-square)      |
 | [chrisgrieser/shimmering-obsidian](https://github.com/chrisgrieser/shimmering-obsidian)     | ![stars](https://img.shields.io/github/stars/chrisgrieser/shimmering-obsidian?style=flat-square)   |
 | [copier-org/copier](https://github.com/copier-org/copier)                                   | ![stars](https://img.shields.io/github/stars/copier-org/copier?style=flat-square)                  |
+| [DeterminateSystems/zero-to-nix](https://github.com/DeterminateSystems/zero-to-nix)         | ![stars](https://img.shields.io/github/stars/DeterminateSystems/zero-to-nix?style=flat-square)     |
 | [Hexlet/ru-test-assignments](https://github.com/Hexlet/ru-test-assignments)                 | ![stars](https://img.shields.io/github/stars/Hexlet/ru-test-assignments?style=flat-square)         |
 | [kreuzberg-dev/html-to-markdown](https://github.com/kreuzberg-dev/html-to-markdown)         | ![stars](https://img.shields.io/github/stars/kreuzberg-dev/html-to-markdown?style=flat-square)     |
+| [kreuzberg-dev/kreuzberg](https://github.com/kreuzberg-dev/kreuzberg)                       | ![stars](https://img.shields.io/github/stars/kreuzberg-dev/kreuzberg?style=flat-square)            |
+| [lra/mackup](https://github.com/lra/mackup)                                                 | ![stars](https://img.shields.io/github/stars/lra/mackup?style=flat-square)                         |
 | [matrix-org/matrix-rust-sdk](https://github.com/matrix-org/matrix-rust-sdk)                 | ![stars](https://img.shields.io/github/stars/matrix-org/matrix-rust-sdk?style=flat-square)         |
 | [matrix-org/matrix.org](https://github.com/matrix-org/matrix.org)                           | ![stars](https://img.shields.io/github/stars/matrix-org/matrix.org?style=flat-square)              |
 | [mikavilpas/yazi.nvim](https://github.com/mikavilpas/yazi.nvim)                             | ![stars](https://img.shields.io/github/stars/mikavilpas/yazi.nvim?style=flat-square)               |
