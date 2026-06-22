@@ -391,7 +391,7 @@ impl PerformanceBenchmark {
 
             // Show top 10 slowest rules
             let mut sorted_rules = result.rule_results.clone();
-            sorted_rules.sort_by(|a, b| b.execution_time.cmp(&a.execution_time));
+            sorted_rules.sort_by_key(|r| std::cmp::Reverse(r.execution_time));
 
             println!("   Top 10 slowest rules:");
             for (i, rule_result) in sorted_rules.iter().take(10).enumerate() {

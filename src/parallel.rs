@@ -110,9 +110,7 @@ impl FileParallelProcessor {
         }
 
         // Check if we have enough CPU cores
-        let cpu_cores = std::thread::available_parallelism()
-            .map(std::num::NonZero::get)
-            .unwrap_or(1);
+        let cpu_cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
         if cpu_cores < 2 {
             return false;
         }
@@ -393,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_performance_comparison() {
-        let seq_time = std::time::Duration::from_millis(1000);
+        let seq_time = std::time::Duration::from_secs(1);
         let par_time = std::time::Duration::from_millis(400);
 
         let comparison = ParallelPerformanceComparison::new(seq_time, par_time);

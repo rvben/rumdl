@@ -1593,7 +1593,7 @@ $$
             .iter()
             .filter_map(|w| w.fix.as_ref().map(|f| (f.range.clone(), f.replacement.clone())))
             .collect();
-        fixes.sort_by(|a, b| a.0.start.cmp(&b.0.start));
+        fixes.sort_by_key(|a| a.0.start);
         let mut result = String::new();
         let mut pos = 0usize;
         for (range, replacement) in fixes {

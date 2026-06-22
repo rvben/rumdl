@@ -289,7 +289,7 @@ impl Rule for MD036NoEmphasisAsHeading {
             .iter()
             .filter_map(|w| w.fix.as_ref().map(|f| (f.range.start, f.range.end, &f.replacement)))
             .collect();
-        fixes.sort_by(|a, b| b.0.cmp(&a.0));
+        fixes.sort_by_key(|f| std::cmp::Reverse(f.0));
 
         // Apply fixes from end to beginning to preserve byte offsets
         let mut result = ctx.content.to_string();

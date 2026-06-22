@@ -24,7 +24,7 @@ fn apply_fix(content: &str, fix: &rumdl_lib::rule::Fix) -> String {
 fn apply_all_fixes(content: &str, warnings: &[LintWarning]) -> String {
     // Sort fixes by start position in reverse order to apply from end to start
     let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
-    fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+    fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
 
     let mut result = content.to_string();
     for fix in fixes {

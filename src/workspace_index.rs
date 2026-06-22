@@ -486,7 +486,7 @@ impl WorkspaceIndex {
     /// keep results stable across runs on identical input.
     pub fn files_sorted(&self) -> Vec<(&Path, &FileIndex)> {
         let mut entries: Vec<(&Path, &FileIndex)> = self.files.iter().map(|(p, i)| (p.as_path(), i)).collect();
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        entries.sort_by_key(|(a, _)| *a);
         entries
     }
 

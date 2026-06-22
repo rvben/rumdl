@@ -997,7 +997,7 @@ pub(super) fn apply(content: &str, plan: FixPlan) -> String {
 
     // Apply span edits in reverse order of start offset so earlier offsets
     // remain valid as we mutate.
-    edits.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+    edits.sort_by_key(|e| std::cmp::Reverse(e.range.start));
 
     let mut out = content.to_string();
     for edit in edits {

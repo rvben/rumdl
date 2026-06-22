@@ -230,7 +230,7 @@ impl Rule for MD011NoReversedLinks {
         let mut content = ctx.content.to_string();
         // Apply fixes in reverse order to preserve byte offsets
         let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
-        fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+        fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
 
         for fix in fixes {
             if fix.range.start < content.len() && fix.range.end <= content.len() {

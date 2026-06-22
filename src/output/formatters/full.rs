@@ -150,7 +150,7 @@ impl OutputFormatter for FullFormatter {
                     warning.column,
                 ));
             } else {
-                output.push_str(&format!(" --> {}:{}:{}\n", file_path, warning.line, warning.column,));
+                output.push_str(&format!(" --> {}:{}:{}\n", file_path, warning.line, warning.column));
             }
 
             // Source context with gutter, source line, and carets

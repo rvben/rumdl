@@ -76,7 +76,7 @@ impl Profiler {
 
         // Sort measurements by total time (descending)
         let mut sorted_measurements: Vec<_> = self.measurements.iter().collect();
-        sorted_measurements.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+        sorted_measurements.sort_by_key(|m| std::cmp::Reverse(m.1.0));
 
         // Calculate total time across all sections
         let total_time: Duration = sorted_measurements.iter().map(|(_, (duration, _))| duration).sum();

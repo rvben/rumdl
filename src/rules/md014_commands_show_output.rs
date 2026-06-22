@@ -37,15 +37,11 @@ impl MD014CommandsShowOutput {
     }
 
     fn is_command_line(&self, line: &str) -> bool {
-        get_cached_regex(COMMAND_PATTERN)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false)
+        get_cached_regex(COMMAND_PATTERN).is_ok_and(|re| re.is_match(line))
     }
 
     fn is_shell_language(&self, lang: &str) -> bool {
-        get_cached_regex(SHELL_LANG_PATTERN)
-            .map(|re| re.is_match(lang))
-            .unwrap_or(false)
+        get_cached_regex(SHELL_LANG_PATTERN).is_ok_and(|re| re.is_match(lang))
     }
 
     fn is_output_line(&self, line: &str) -> bool {

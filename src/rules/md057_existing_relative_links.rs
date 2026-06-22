@@ -1192,7 +1192,7 @@ impl Rule for MD057ExistingRelativeLinks {
 
         // Collect fixable warnings (compact-paths) sorted by byte offset descending
         let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
-        fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+        fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
 
         for fix in fixes {
             if fix.range.end <= content.len() {

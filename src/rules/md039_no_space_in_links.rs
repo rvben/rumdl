@@ -114,10 +114,7 @@ impl Rule for MD039NoSpaceInLinks {
             // Optimized unescaping for whitespace check
             let unescaped = self.unescape_fast(&link.text);
 
-            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR)
-                .map(|re| re.is_match(&unescaped))
-                .unwrap_or(false)
-            {
+            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
                 true
             } else {
                 let trimmed = link.text.trim_matches(|c: char| c.is_whitespace());
@@ -135,10 +132,7 @@ impl Rule for MD039NoSpaceInLinks {
                     .map_or(original.len(), |p| p + 1);
                 let dest_portion = &original[dest_start..];
 
-                let fixed = if get_cached_regex(ALL_WHITESPACE_STR)
-                    .map(|re| re.is_match(&unescaped))
-                    .unwrap_or(false)
-                {
+                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
                     format!("[]{dest_portion}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&link.text);
@@ -183,10 +177,7 @@ impl Rule for MD039NoSpaceInLinks {
             // Optimized unescaping for whitespace check
             let unescaped = self.unescape_fast(&image.alt_text);
 
-            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR)
-                .map(|re| re.is_match(&unescaped))
-                .unwrap_or(false)
-            {
+            let needs_warning = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
                 true
             } else {
                 let trimmed = image.alt_text.trim_matches(|c: char| c.is_whitespace());
@@ -201,10 +192,7 @@ impl Rule for MD039NoSpaceInLinks {
                     .map_or(original.len(), |p| p + 1);
                 let dest_portion = &original[dest_start..];
 
-                let fixed = if get_cached_regex(ALL_WHITESPACE_STR)
-                    .map(|re| re.is_match(&unescaped))
-                    .unwrap_or(false)
-                {
+                let fixed = if get_cached_regex(ALL_WHITESPACE_STR).is_ok_and(|re| re.is_match(&unescaped)) {
                     format!("![]{dest_portion}")
                 } else {
                     let trimmed = Self::trim_link_text_preserve_escapes(&image.alt_text);

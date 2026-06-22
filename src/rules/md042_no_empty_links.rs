@@ -328,7 +328,7 @@ impl Rule for MD042NoEmptyLinks {
             .collect();
 
         // Sort fixes by position (descending) to apply from end to start
-        fixes.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+        fixes.sort_by_key(|f| std::cmp::Reverse(f.0.start));
 
         let mut result = content.to_string();
 

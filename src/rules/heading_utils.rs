@@ -205,9 +205,7 @@ pub fn is_heading(line: &str) -> bool {
 
     if trimmed.starts_with('#') {
         // Check for ATX heading
-        get_cached_regex(ATX_PATTERN_STR)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false)
+        get_cached_regex(ATX_PATTERN_STR).is_ok_and(|re| re.is_match(line))
     } else {
         // We can't tell for setext headings without looking at the next line
         false
@@ -217,12 +215,8 @@ pub fn is_heading(line: &str) -> bool {
 /// Checks if a line is a setext heading marker
 #[inline]
 pub fn is_setext_heading_marker(line: &str) -> bool {
-    get_cached_regex(SETEXT_HEADING_1_STR)
-        .map(|re| re.is_match(line))
-        .unwrap_or(false)
-        || get_cached_regex(SETEXT_HEADING_2_STR)
-            .map(|re| re.is_match(line))
-            .unwrap_or(false)
+    get_cached_regex(SETEXT_HEADING_1_STR).is_ok_and(|re| re.is_match(line))
+        || get_cached_regex(SETEXT_HEADING_2_STR).is_ok_and(|re| re.is_match(line))
 }
 
 /// Get the heading level for a line
@@ -244,17 +238,11 @@ pub fn get_heading_level(lines: &[&str], index: usize) -> u32 {
     if index < lines.len() - 1 {
         let next_line = lines[index + 1];
 
-        if get_cached_regex(SETEXT_HEADING_1_STR)
-            .map(|re| re.is_match(next_line))
-            .unwrap_or(false)
-        {
+        if get_cached_regex(SETEXT_HEADING_1_STR).is_ok_and(|re| re.is_match(next_line)) {
             return 1;
         }
 
-        if get_cached_regex(SETEXT_HEADING_2_STR)
-            .map(|re| re.is_match(next_line))
-            .unwrap_or(false)
-        {
+        if get_cached_regex(SETEXT_HEADING_2_STR).is_ok_and(|re| re.is_match(next_line)) {
             return 2;
         }
     }

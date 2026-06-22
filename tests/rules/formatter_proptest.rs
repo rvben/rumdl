@@ -12,7 +12,7 @@ use rumdl_lib::rules::*;
 /// Apply all fixes from warnings to content
 fn apply_all_fixes(content: &str, warnings: &[LintWarning]) -> String {
     let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
-    fixes.sort_by(|a, b| b.range.start.cmp(&a.range.start));
+    fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
 
     let mut result = content.to_string();
     for fix in fixes {
