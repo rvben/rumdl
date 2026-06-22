@@ -376,7 +376,10 @@ mod tests {
                 temp.path(),
                 &MarkdownWalkOptions {
                     skip_vendor_dirs: skip,
-                    ..Default::default()
+                    // Disable gitignore handling so ambient .gitignore files in the
+                    // temp directory's ancestry cannot mask the vendor-dir filtering
+                    // this test exercises.
+                    respect_gitignore: false,
                 },
             )
             .build()
