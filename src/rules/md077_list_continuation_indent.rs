@@ -5,8 +5,28 @@
 
 use std::ops::ControlFlow;
 
+use serde::{Deserialize, Serialize};
+
 use crate::lint_context::{LineInfo, LintContext};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+
+mod md077_config;
+use md077_config::MD077Config;
+
+/// How strictly MD077 enforces continuation-line indentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContinuationStyle {
+    /// Permit any continuation indent in `[0, content_column]` (CommonMark lazy
+    /// continuation). Only over-indentation and content that escapes the list
+    /// after a blank line are flagged.
+    #[default]
+    Any,
+    /// Require every continuation line to align to the item's content column.
+    /// Tight under-indented lazy continuation (which `any` permits) is also
+    /// flagged and snapped up to the content column.
+    Aligned,
+}
 
 /// Rule MD077: List continuation content indentation
 ///
@@ -20,8 +40,27 @@ use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, S
 ///
 /// Under the MkDocs flavor, a minimum of 4 spaces is enforced for ordered list
 /// items to satisfy Python-Markdown.
+///
+/// With `style = "aligned"`, tight under-indented continuation is additionally
+/// flagged and aligned to the content column (mdformat parity).
 #[derive(Clone, Default)]
-pub struct MD077ListContinuationIndent;
+pub struct MD077ListContinuationIndent {
+    config: MD077Config,
+}
+
+impl MD077ListContinuationIndent {
+    /// Construct the rule with an explicit continuation style. `Default`
+    /// (`ContinuationStyle::Any`) preserves the historical behavior.
+    pub fn new(style: ContinuationStyle) -> Self {
+        Self {
+            config: MD077Config { style },
+        }
+    }
+
+    pub fn from_config_struct(config: MD077Config) -> Self {
+        Self { config }
+    }
+}
 
 impl MD077ListContinuationIndent {
     /// Width of a GFM task checkbox prefix including its trailing space:
@@ -216,6 +255,7 @@ impl MD077ListContinuationIndent {
         F: FnMut(&ContinuationLine<'_>) -> ControlFlow<()>,
     {
         let mut saw_blank = false;
+        let mut saw_nested = false;
         let mut nested_content_col: Option<usize> = None;
 
         for line_num in (item_line + 1)..=range_end {
@@ -235,7 +275,16 @@ impl MD077ListContinuationIndent {
             }
 
             if let Some(ref li) = info.list_item {
-                nested_content_col = (li.marker_column > marker_col).then_some(li.content_column);
+                if li.marker_column > marker_col {
+                    nested_content_col = Some(li.content_column);
+                    // Sticky: once a nested child appears, every later line is a
+                    // (lazy) continuation of the deeper item, which owns it under
+                    // CommonMark. Ancestors must defer so the deepest item claims
+                    // and aligns it.
+                    saw_nested = true;
+                } else {
+                    nested_content_col = None;
+                }
                 saw_blank = false;
                 continue;
             }
@@ -267,6 +316,7 @@ impl MD077ListContinuationIndent {
                 trimmed,
                 actual: col,
                 saw_blank,
+                saw_nested,
             };
             if per_line(&line).is_break() {
                 break;
@@ -457,6 +507,10 @@ struct ContinuationLine<'a> {
     trimmed: &'a str,
     actual: usize,
     saw_blank: bool,
+    /// True once a nested child item has appeared earlier in this item's scope.
+    /// Subsequent lines are lazy continuation of the deeper item (which owns
+    /// them under CommonMark), so an ancestor must not claim them.
+    saw_nested: bool,
 }
 
 /// Result of `build_under_indent_warning`. Carries both the warning and,
@@ -528,27 +582,82 @@ impl Rule for MD077ListContinuationIndent {
             })
             .collect();
 
-        // Pass 1 - loose under-indented continuation: content after a blank
-        // line that sits below the content column would escape the list item.
-        // (Tight under-indent is valid CommonMark lazy continuation, so it is
-        // left alone.) This pass runs first so that a deeply nested item claims
-        // an ambiguous line - one that is under-indented for it yet over-indented
-        // for a shallower ancestor - before pass 2 can mis-attribute it to the
+        // Pass 1 - under-indented continuation.
+        //
+        // Loose under-indent (after a blank line) sits below the content column
+        // and would escape the list item; it is always flagged. Tight
+        // under-indent is valid CommonMark lazy continuation, so it is left
+        // alone under `style = "any"`.
+        //
+        // Under `style = "aligned"`, tight under-indent is additionally flagged
+        // and snapped up to the content column. MD077 scopes past the parser's
+        // block end (to catch escaped loose content), and the parser also
+        // absorbs col-0 blockquotes, fences, and tables that sit tight under a
+        // list item as lazy continuation. Reindenting those would pull a
+        // structural block into the item and change the rendered structure, so
+        // the tight-aligned branch skips the same constructs the list parser
+        // treats as separators (blockquotes, fenced/indented code, tables) plus
+        // lines that look like a list marker. Headings and horizontal rules
+        // already terminate the walk; reference/footnote/abbreviation
+        // definitions are skipped inside it. Erring toward skipping yields
+        // false negatives (safe) rather than structural false positives.
+        //
+        // This pass runs first so that a deeply nested item claims an ambiguous
+        // line - one that is under-indented for it yet over-indented for a
+        // shallower ancestor - before pass 2 can mis-attribute it to the
         // ancestor as an over-indent and snap it the wrong way.
+        let aligned = self.config.style == ContinuationStyle::Aligned;
         for &(item_line, marker_col, _content_col, _task_col, required, range_end) in &scoped {
+            // A list-marker-looking line in this item's continuation that the
+            // parser has NOT promoted to a list item is "latent": reindenting an
+            // earlier continuation line can flip it into a real list item, which
+            // re-attributes the lines after it to a different item (different
+            // content column) and breaks single-pass idempotency. Reindenting
+            // any line in such an item is unsafe, so skip aligned-tight flagging
+            // for the whole item. Well-formed prose continuation has no latent
+            // markers, so this only bails on pathological input (a safe false
+            // negative). Real nested items never reach the callback (the walk
+            // handles them via `saw_nested`), so they don't trigger this.
+            let has_latent_marker = aligned && {
+                let mut found = false;
+                Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
+                    if Self::starts_with_list_marker(line.trimmed) {
+                        found = true;
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                });
+                found
+            };
             Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
                 let actual = line.actual;
-                if line.saw_blank && actual < required && flagged_lines.insert(line.line_num) {
-                    let message = if strict_indent {
-                        format!(
-                            "Content inside list item needs {required} spaces of indentation \
-                             for MkDocs compatibility (found {actual})",
-                        )
+                let under_indented = actual < required;
+                let loose_escape = line.saw_blank && under_indented;
+                let aligned_tight = aligned
+                    && !has_latent_marker
+                    && !line.saw_blank
+                    && !line.saw_nested
+                    && under_indented
+                    && !line.info.in_code_block
+                    && !line.trimmed.starts_with('>')
+                    && !crate::utils::skip_context::is_table_line(line.trimmed)
+                    && !Self::starts_with_list_marker(line.trimmed);
+                if (loose_escape || aligned_tight) && flagged_lines.insert(line.line_num) {
+                    let message = if line.saw_blank {
+                        if strict_indent {
+                            format!(
+                                "Content inside list item needs {required} spaces of indentation \
+                                 for MkDocs compatibility (found {actual})",
+                            )
+                        } else {
+                            format!(
+                                "Content after blank line in list item needs {required} spaces of \
+                                 indentation to remain part of the list (found {actual})",
+                            )
+                        }
                     } else {
-                        format!(
-                            "Content after blank line in list item needs {required} spaces of \
-                             indentation to remain part of the list (found {actual})",
-                        )
+                        format!("Continuation line under-indented (expected {required}, found {actual})")
                     };
                     let outcome = Self::build_under_indent_warning(ctx, line, required, message);
                     if let Some(closer_line) = outcome.also_flag_line {
@@ -643,12 +752,7 @@ impl Rule for MD077ListContinuationIndent {
         self
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        Box::new(Self)
-    }
+    crate::impl_rule_config_methods!(MD077Config);
 }
 
 #[cfg(test)]
@@ -658,26 +762,45 @@ mod tests {
 
     fn check(content: &str) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        let rule = MD077ListContinuationIndent;
+        let rule = MD077ListContinuationIndent::default();
         rule.check(&ctx).unwrap()
     }
 
     fn check_mkdocs(content: &str) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = MD077ListContinuationIndent;
+        let rule = MD077ListContinuationIndent::default();
         rule.check(&ctx).unwrap()
     }
 
     fn fix(content: &str) -> String {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
-        let rule = MD077ListContinuationIndent;
+        let rule = MD077ListContinuationIndent::default();
         rule.fix(&ctx).unwrap()
     }
 
     fn fix_mkdocs(content: &str) -> String {
         let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
-        let rule = MD077ListContinuationIndent;
+        let rule = MD077ListContinuationIndent::default();
         rule.fix(&ctx).unwrap()
+    }
+
+    fn aligned_rule() -> MD077ListContinuationIndent {
+        MD077ListContinuationIndent::new(ContinuationStyle::Aligned)
+    }
+
+    fn check_aligned(content: &str) -> Vec<LintWarning> {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        aligned_rule().check(&ctx).unwrap()
+    }
+
+    fn check_aligned_mkdocs(content: &str) -> Vec<LintWarning> {
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        aligned_rule().check(&ctx).unwrap()
+    }
+
+    fn fix_aligned(content: &str) -> String {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        aligned_rule().fix(&ctx).unwrap()
     }
 
     // ── Tight continuation (no blank line) ─────────────────────────────
@@ -2290,5 +2413,265 @@ mod tests {
     fn idempotent_non_task_mkdocs_fence_compound() {
         // MkDocs non-task fence: opener/interior/closer shift together.
         assert_idempotent_mkdocs("1. Item\n\n   ```toml\n   k = 1\n   ```\n");
+    }
+
+    // ── style = "aligned" ──────────────────────────────────────────────
+
+    #[test]
+    fn aligned_tight_zero_indent_continuation_flagged() {
+        // The core #682 case: a tight 0-indent lazy continuation is valid
+        // CommonMark (and accepted by `any`), but `aligned` requires it to sit
+        // at the content column.
+        let content = "- this is a long line\nthat continues on a second line\n";
+        let warnings = check_aligned(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].line, 2);
+        assert_eq!(
+            fix_aligned(content),
+            "- this is a long line\n  that continues on a second line\n"
+        );
+    }
+
+    #[test]
+    fn aligned_full_issue_example_made_consistent() {
+        // The full #682 example: every continuation line is snapped to the
+        // content column, producing the consistent result the reporter wants.
+        let content = "- this is a long line\n\
+                       that continues on a second line\n\
+                       - this is another long line\n\
+                       \x20\x20that continues on the next line\n\
+                       - yet again a long line\n\
+                       and still inconsistently spaced\n\
+                       \x20\x20and even worse\n";
+        let expected = "- this is a long line\n\
+                        \x20\x20that continues on a second line\n\
+                        - this is another long line\n\
+                        \x20\x20that continues on the next line\n\
+                        - yet again a long line\n\
+                        \x20\x20and still inconsistently spaced\n\
+                        \x20\x20and even worse\n";
+        assert_eq!(fix_aligned(content), expected);
+        // And the fix is a fixpoint.
+        assert_eq!(fix_aligned(expected), expected);
+    }
+
+    #[test]
+    fn aligned_already_aligned_not_flagged() {
+        let content = "- item\n  continuation at content column\n";
+        assert!(check_aligned(content).is_empty());
+    }
+
+    #[test]
+    fn aligned_tight_partial_indent_flagged() {
+        // 1 space under "- " (content col 2): tight partial under-indent.
+        let content = "- item\n continuation\n";
+        let warnings = check_aligned(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(fix_aligned(content), "- item\n  continuation\n");
+    }
+
+    #[test]
+    fn aligned_post_blank_zero_indent_still_new_paragraph() {
+        // After a blank line, 0-indent content is a NEW paragraph that has left
+        // the list - aligned mode must not reindent it back into the item.
+        let content = "- item\n\nnew paragraph\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    // ── aligned: structural blocks must NOT be pulled into the list ────
+
+    #[test]
+    fn aligned_top_level_blockquote_after_list_untouched() {
+        // A blockquote tight after a list item is a list-breaking separator,
+        // not continuation. `in_list_block` is false for it, so aligned mode
+        // must leave it alone (no reindent into the item).
+        let content = "- item\n> quote\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_top_level_fence_after_list_untouched() {
+        let content = "- item\n```\ncode\n```\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_top_level_table_after_list_untouched() {
+        let content = "- item\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    // ── aligned: nested lists ──────────────────────────────────────────
+
+    #[test]
+    fn aligned_nested_tight_lazy_continuation_aligns_to_inner() {
+        // A tight lazy continuation after a nested item is, per CommonMark,
+        // continuation of the innermost open item, so it aligns to the inner
+        // item's content column (4), not the outer's (2). The outer item must
+        // defer to the inner one.
+        let content = "- Outer\n  - Inner\ncontinuation\n";
+        let warnings = check_aligned(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(fix_aligned(content), "- Outer\n  - Inner\n    continuation\n");
+    }
+
+    #[test]
+    fn aligned_nested_continuation_already_aligned_not_flagged() {
+        let content = "- L1\n  - L2\n    cont of L2 at 4\n";
+        assert!(check_aligned(content).is_empty());
+    }
+
+    #[test]
+    fn aligned_nested_idempotent() {
+        let content = "- Outer\n  - Inner\ncontinuation\n";
+        let once = fix_aligned(content);
+        assert_eq!(fix_aligned(&once), once);
+    }
+
+    #[test]
+    fn aligned_three_level_nesting_aligns_to_innermost() {
+        // The saw_nested cascade defers through every level, so the tight lazy
+        // line aligns to L3's content column (6), the innermost open item.
+        let content = "- L1\n  - L2\n    - L3\ncont\n";
+        assert_eq!(fix_aligned(content), "- L1\n  - L2\n    - L3\n      cont\n");
+    }
+
+    #[test]
+    fn aligned_continuation_after_sibling_owned_by_last_item() {
+        // Tight lazy continuation after the second sibling belongs to that
+        // sibling (no nesting), so it aligns to its content column (2).
+        let content = "- a\n- b\nlazy\n";
+        assert_eq!(fix_aligned(content), "- a\n- b\n  lazy\n");
+    }
+
+    #[test]
+    fn aligned_multi_digit_ordered_marker_aligns_to_content_column() {
+        let content = "10. Item\nwrap\n";
+        assert_eq!(fix_aligned(content), "10. Item\n    wrap\n");
+    }
+
+    #[test]
+    fn aligned_setext_heading_after_list_left_alone() {
+        // A setext heading is not prose continuation; aligned must not reindent
+        // it (the walk terminates on the heading), leaving the document intact.
+        let content = "- item\nText\n===\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_latent_marker_in_continuation_is_idempotent() {
+        // Regression (fuzzer-found): a list-marker-looking line ("2. ") that the
+        // parser absorbs as lazy continuation can be promoted to a real list
+        // item once an earlier continuation line is reindented, re-attributing
+        // later lines and breaking single-pass idempotency. Such items are not
+        // reindented at all.
+        let content = "# \n- \n``\n2. \n![]()";
+        let once = fix_aligned(content);
+        assert_eq!(fix_aligned(&once), once, "fix must be idempotent in one pass");
+        assert_eq!(once, content, "item with a latent marker is left untouched");
+    }
+
+    #[test]
+    fn aligned_blockquote_nested_list_not_touched() {
+        // Lists inside blockquotes are a documented MD077 limitation (the scan
+        // breaks at the blockquote prefix). Aligned inherits that conservative
+        // no-false-positive behavior.
+        let content = "> - item\n> wrap\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    // ── aligned: GFM task list items ───────────────────────────────────
+
+    #[test]
+    fn aligned_task_post_checkbox_column_accepted() {
+        // Continuation aligned to the post-checkbox column (content_col + 4 = 6)
+        // stays valid so aligned mode doesn't fight MD013 reflow.
+        let content = "- [ ] Task\n      wrap\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_task_under_indent_snaps_to_content_column() {
+        let content = "- [ ] Task\nwrap\n";
+        let warnings = check_aligned(content);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(fix_aligned(content), "- [ ] Task\n  wrap\n");
+    }
+
+    // ── aligned: MkDocs flavor ─────────────────────────────────────────
+
+    #[test]
+    fn aligned_mkdocs_tight_under_indent_snaps_to_four() {
+        // MkDocs raises the required indent to max(content_col, 4) = 4 for "- ".
+        let content = "- item\nwrap\n";
+        let warnings = check_aligned_mkdocs(content);
+        assert_eq!(warnings.len(), 1);
+        let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+        assert_eq!(aligned_rule().fix(&ctx).unwrap(), "- item\n    wrap\n");
+    }
+
+    // ── any (default) regression: tight lazy continuation untouched ────
+
+    #[test]
+    fn any_default_does_not_flag_tight_lazy_continuation() {
+        // The default style must preserve CommonMark lazy continuation.
+        let content = "- item\nwrapped at zero indent\n";
+        assert!(check(content).is_empty());
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn from_config_aligned_enables_tight_flagging() {
+        // End-to-end: `[MD077] style = "aligned"` wires through from_config.
+        let mut config = crate::config::Config::default();
+        let mut rule_config = crate::config::RuleConfig::default();
+        rule_config
+            .values
+            .insert("style".to_string(), toml::Value::String("aligned".to_string()));
+        config.rules.insert("MD077".to_string(), rule_config);
+
+        let rule = MD077ListContinuationIndent::from_config(&config);
+        let ctx = LintContext::new("- item\nwrap\n", MarkdownFlavor::Standard, None);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn from_config_default_is_any() {
+        // No config -> default `any` -> tight lazy continuation untouched.
+        let config = crate::config::Config::default();
+        let rule = MD077ListContinuationIndent::from_config(&config);
+        let ctx = LintContext::new("- item\nwrap\n", MarkdownFlavor::Standard, None);
+        assert!(rule.check(&ctx).unwrap().is_empty());
+    }
+
+    #[test]
+    fn aligned_tight_underindented_fence_inside_item_left_alone() {
+        // A fenced block is a structural construct; aligned mode does not
+        // reindent it (the `in_code_block` guard), so a tight under-indented
+        // fence is a no-op rather than a risky delimiter-only rewrite.
+        let content = "- item\n ```\n code\n ```\n";
+        assert!(check_aligned(content).is_empty());
+        assert_eq!(fix_aligned(content), content);
+    }
+
+    #[test]
+    fn aligned_task_under_indent_fix_is_idempotent() {
+        let content = "- [ ] Task\nwrap\n";
+        let once = fix_aligned(content);
+        assert_eq!(fix_aligned(&once), once);
+    }
+
+    #[test]
+    fn aligned_partial_indent_fix_is_idempotent() {
+        let content = "- item\n continuation\n";
+        let once = fix_aligned(content);
+        assert_eq!(fix_aligned(&once), once);
     }
 }

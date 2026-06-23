@@ -139,7 +139,7 @@ pub use md073_toc_validation::MD073TocValidation;
 pub use md074_mkdocs_nav::MD074MkDocsNav;
 pub use md075_orphaned_table_rows::MD075OrphanedTableRows;
 pub use md076_list_item_spacing::{ListItemSpacingStyle, MD076ListItemSpacing};
-pub use md077_list_continuation_indent::MD077ListContinuationIndent;
+pub use md077_list_continuation_indent::{ContinuationStyle, MD077ListContinuationIndent};
 pub use md078_missing_chunk_labels::MD078MissingChunkLabels;
 pub use md079_chunk_label_spaces::MD079ChunkLabelSpaces;
 pub use md080_heading_anchor_collision::MD080HeadingAnchorCollision;
