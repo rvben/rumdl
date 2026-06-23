@@ -60,6 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.21](https://github.com/rvben/rumdl/compare/v0.2.20...v0.2.21) - 2026-06-23
+
+### Fixed
+
+- **emphasis**: align MD049 and MD037 with CommonMark flanking (#681) ([d1b9968](https://github.com/rvben/rumdl/commit/d1b996823604470b755b7ac7b3a11f0f464a6c91))
+- **ci**: bump pinned Rust toolchain to 1.96.0 to unblock mise tool install ([b2afd76](https://github.com/rvben/rumdl/commit/b2afd763e67e86f8917a1f4b52f7c69e075ec318))
+
 ## [0.2.20](https://github.com/rvben/rumdl/compare/v0.2.19...v0.2.20) - 2026-06-19
 
 ### Fixed
