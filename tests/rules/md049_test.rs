@@ -443,3 +443,76 @@ fn test_inline_code_dollars_do_not_synthesize_math_span() {
     );
     assert_eq!(result[0].line, 3);
 }
+
+#[test]
+fn test_list_marker_not_paired_with_stray_asterisk() {
+    // A `*` list marker (always followed by a space) must not pair with a later
+    // stray `*` to form a fake emphasis span. CommonMark treats neither asterisk
+    // here as emphasis.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+    let content = "* consolidate bullet points like \"* Added logging for observability.\"\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "list marker `*` must not be flagged as emphasis: {result:?}"
+    );
+}
+
+#[test]
+fn test_whitespace_flanked_asterisks_are_not_emphasis() {
+    // Two `*` each flanked by whitespace are not emphasis per CommonMark,
+    // regardless of any list marker. `foo * bar * baz` has no emphasis.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+    let content = "# H\n\nfoo * bar * baz\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "whitespace-flanked `*` must not be flagged as emphasis: {result:?}"
+    );
+}
+
+#[test]
+fn test_whitespace_flanked_underscores_are_not_emphasis() {
+    // The flanking guard is marker-agnostic: `_ bar _` is not emphasis either.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Asterisk);
+    let content = "# H\n\nfoo _ bar _ baz\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "whitespace-flanked `_` must not be flagged as emphasis: {result:?}"
+    );
+}
+
+#[test]
+fn test_emphasis_with_literal_marker_inside_still_flagged() {
+    // CommonMark parses `*foo * bar*` as emphasis containing a literal `*`.
+    // MD049 (underscore style) must still flag and fix the outer asterisks,
+    // not silently miss them.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+    let content = "# H\n\n*foo * bar*\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "emphasis with an interior literal `*` must still be flagged: {result:?}"
+    );
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "# H\n\n_foo * bar_\n");
+}
+
+#[test]
+fn test_genuine_emphasis_on_list_item_still_flagged() {
+    // Guard against over-correction: a real `*emphasis*` span on a `*` list
+    // item must still be flagged (and fixed) under underscore style.
+    let rule = MD049EmphasisStyle::new(EmphasisStyle::Underscore);
+    let content = "* item with *real emphasis* in it\n";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(result.len(), 1, "genuine emphasis must still be flagged: {result:?}");
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, "* item with _real emphasis_ in it\n");
+}

@@ -4,8 +4,8 @@
 use crate::filtered_lines::FilteredLinesExt;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::emphasis_utils::{
-    EmphasisSpan, find_emphasis_markers, find_emphasis_spans, has_doc_patterns, replace_inline_code,
-    replace_inline_math,
+    EmphasisSpan, find_emphasis_markers, find_emphasis_spans, find_valid_emphasis_ranges, has_doc_patterns,
+    replace_inline_code, replace_inline_math,
 };
 use crate::utils::kramdown_utils::has_span_ial;
 use crate::utils::range_utils::byte_to_char_count;
@@ -300,12 +300,26 @@ impl MD037NoSpaceInEmphasis {
         // Find valid emphasis spans
         let spans = find_emphasis_spans(&processed_content, &markers);
 
+        // Byte ranges that are genuine CommonMark emphasis. A spaced span that
+        // falls entirely inside one of these is not "spaces inside emphasis
+        // markers" but the interior of valid emphasis containing a literal
+        // marker (e.g. `*foo * bar*`), which the greedy finder above mispairs.
+        let valid_ranges = find_valid_emphasis_ranges(&processed_content, &markers);
+
         // Check each span for spacing issues
         for span in spans {
             if has_spacing_issues(&span) {
-                // Calculate the full span including markers
                 let full_start = span.opening.start_pos;
                 let full_end = span.closing.end_pos();
+
+                // Suppress when the spaced run is contained in valid emphasis.
+                if valid_ranges
+                    .iter()
+                    .any(|&(start, end)| start <= full_start && full_end <= end)
+                {
+                    continue;
+                }
+
                 let full_text = &content[full_start..full_end];
 
                 // Skip if this emphasis has a Kramdown span IAL immediately after it

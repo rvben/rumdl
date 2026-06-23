@@ -28,28 +28,52 @@ fn test_spaces_inside_asterisk_emphasis() {
 #[test]
 fn test_spaces_inside_double_asterisk() {
     let rule = MD037NoSpaceInEmphasis;
+    // CommonMark pairs `**` markers across the whole line: only the first
+    // `** text **` is literal (a spacing violation); the remainder pairs into
+    // valid `<strong>text ** and ** text</strong>`. cmark and markdownlint
+    // agree, so only the first segment is flagged.
     let content = "** text ** and **text ** and ** text**";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3); // All three have spacing issues
+    assert_eq!(
+        result.len(),
+        1,
+        "only the first `** text **` is a violation: {result:?}"
+    );
+    assert!(result[0].message.contains("** text **"));
+
+    // Each `** text **` in isolation (no cross-pairing) is still a violation.
+    let isolated = "a ** text ** b\n\nc ** more ** d\n\ne ** end ** f";
+    let ctx = LintContext::new(isolated, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.check(&ctx).unwrap().len(), 3);
 }
 
 #[test]
 fn test_spaces_inside_underscore_emphasis() {
     let rule = MD037NoSpaceInEmphasis;
+    // Same cross-pairing as the `**` case: `_ text _` is literal, the rest is
+    // valid `<em>text _ and _ text</em>`.
     let content = "_ text _ and _text _ and _ text_";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3);
+    assert_eq!(result.len(), 1, "only the first `_ text _` is a violation: {result:?}");
+    assert!(result[0].message.contains("_ text _"));
 }
 
 #[test]
 fn test_spaces_inside_double_underscore() {
     let rule = MD037NoSpaceInEmphasis;
+    // `__ text __` is literal; the rest pairs into valid
+    // `<strong>text __ and __ text</strong>`.
     let content = "__ text __ and __text __ and __ text__";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    assert_eq!(result.len(), 3); // All three emphasis spans have spacing issues
+    assert_eq!(
+        result.len(),
+        1,
+        "only the first `__ text __` is a violation: {result:?}"
+    );
+    assert!(result[0].message.contains("__ text __"));
 }
 
 #[test]
@@ -866,4 +890,47 @@ fn test_md037_unclosed_math_graceful() {
         1,
         "Unclosed math should not prevent flagging real emphasis"
     );
+}
+
+/// Valid emphasis containing an interior whitespace-flanked literal marker is
+/// NOT a spacing violation. CommonMark parses `*foo * bar*` as
+/// `<em>foo * bar</em>`, so there is nothing to report. The greedy span finder
+/// otherwise mispairs the outer opener with the interior literal `*`.
+#[test]
+fn test_md037_valid_emphasis_with_interior_literal_marker() {
+    let rule = MD037NoSpaceInEmphasis;
+    let content = "text *foo * bar* here";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "valid emphasis with an interior literal `*` must not be flagged: {result:?}"
+    );
+}
+
+/// Interior markers of a DIFFERENT delimiter inside valid emphasis are literal
+/// too: `*foo _ bad _ bar*` renders as `<em>foo _ bad _ bar</em>`, so the
+/// `_ bad _` is literal text, not a violation. The same `_ y _` standing on its
+/// own, outside any emphasis, IS a violation. Suppression is therefore scoped to
+/// containment in a valid emphasis range, not to the delimiter.
+#[test]
+fn test_md037_interior_other_delimiter_vs_standalone() {
+    let rule = MD037NoSpaceInEmphasis;
+
+    let contained = "x *foo _ bad _ bar* y";
+    let ctx = LintContext::new(contained, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "interior `_ bad _` inside valid `*...*` emphasis must not be flagged"
+    );
+
+    let standalone = "a *x* and _ y _ end";
+    let ctx = LintContext::new(standalone, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "standalone `_ y _` outside emphasis must be flagged: {result:?}"
+    );
+    assert!(result[0].message.contains("_ y _"));
 }
