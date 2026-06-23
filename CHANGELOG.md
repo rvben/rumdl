@@ -61,6 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.22](https://github.com/rvben/rumdl/compare/v0.2.21...v0.2.22) - 2026-06-24
+
+### Added
+
+- **md077**: add opt-in style = "aligned" for continuation indent ([14eebe1](https://github.com/rvben/rumdl/commit/14eebe1c6181fe8b9c40e7fb9219014b78bf324e))
+
+### Fixed
+
+- **md040**: keep blockquote fences valid when adding default language ([eab51f6](https://github.com/rvben/rumdl/commit/eab51f6b8c7902aeedef397285a862a7242d5241))
+- **md013**: keep blockquote markers when reflowing a blockquote nested in a list item ([f601c8c](https://github.com/rvben/rumdl/commit/f601c8cd416791d7ee728fa3ec6676babe96067b))
+
 ## [0.2.21](https://github.com/rvben/rumdl/compare/v0.2.20...v0.2.21) - 2026-06-23
 
 ### Fixed
