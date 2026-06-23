@@ -591,16 +591,17 @@ impl Rule for MD077ListContinuationIndent {
         //
         // Under `style = "aligned"`, tight under-indent is additionally flagged
         // and snapped up to the content column. MD077 scopes past the parser's
-        // block end (to catch escaped loose content), and the parser also
-        // absorbs col-0 blockquotes, fences, and tables that sit tight under a
-        // list item as lazy continuation. Reindenting those would pull a
-        // structural block into the item and change the rendered structure, so
-        // the tight-aligned branch skips the same constructs the list parser
-        // treats as separators (blockquotes, fenced/indented code, tables) plus
-        // lines that look like a list marker. Headings and horizontal rules
-        // already terminate the walk; reference/footnote/abbreviation
-        // definitions are skipped inside it. Erring toward skipping yields
-        // false negatives (safe) rather than structural false positives.
+        // block end (to catch escaped loose content), and the parser absorbs
+        // col-0 blockquotes, fences, and tables that sit tight under a list item
+        // as lazy continuation. Reindenting those would change the rendered
+        // structure, so the tight-aligned branch guards two ways: it skips lines
+        // the parser classified in place (code, blockquote - see
+        // `confirmed_structure`), and it bails on an item whose continuation
+        // holds a construct the parser would re-parse once indentation changes
+        // (a latent list marker or table - see `has_latent_structure`). Headings
+        // and horizontal rules already terminate the walk; reference/footnote/
+        // abbreviation definitions are skipped inside it. Erring toward skipping
+        // yields false negatives (safe) rather than structural false positives.
         //
         // This pass runs first so that a deeply nested item claims an ambiguous
         // line - one that is under-indented for it yet over-indented for a
@@ -608,20 +609,26 @@ impl Rule for MD077ListContinuationIndent {
         // ancestor as an over-indent and snap it the wrong way.
         let aligned = self.config.style == ContinuationStyle::Aligned;
         for &(item_line, marker_col, _content_col, _task_col, required, range_end) in &scoped {
-            // A list-marker-looking line in this item's continuation that the
-            // parser has NOT promoted to a list item is "latent": reindenting an
-            // earlier continuation line can flip it into a real list item, which
-            // re-attributes the lines after it to a different item (different
-            // content column) and breaks single-pass idempotency. Reindenting
-            // any line in such an item is unsafe, so skip aligned-tight flagging
-            // for the whole item. Well-formed prose continuation has no latent
-            // markers, so this only bails on pathological input (a safe false
-            // negative). Real nested items never reach the callback (the walk
-            // handles them via `saw_nested`), so they don't trigger this.
-            let has_latent_marker = aligned && {
+            // "Latent structure": a line in this item's continuation that the
+            // parser has NOT yet promoted to a list item or table, but that
+            // would be once an earlier continuation line is reindented. Such a
+            // promotion re-attributes the following lines to a different block
+            // (different content column) and breaks single-pass idempotency, so
+            // reindenting anything in the item is unsafe and the whole item is
+            // skipped. This is a *prediction* of how the parser would re-parse
+            // after a fix, which is why it stays a heuristic (markers and tables
+            // are the only constructs the parser absorbs as lazy continuation
+            // rather than flagging on the line itself; code and blockquotes are
+            // classified in place and handled per line below). Well-formed prose
+            // continuation matches neither, so this only bails on pathological
+            // input (a safe false negative). Real nested items never reach the
+            // callback (the walk handles them via `saw_nested`).
+            let has_latent_structure = aligned && {
                 let mut found = false;
                 Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
-                    if Self::starts_with_list_marker(line.trimmed) {
+                    if Self::starts_with_list_marker(line.trimmed)
+                        || crate::utils::skip_context::is_table_line(line.trimmed)
+                    {
                         found = true;
                         ControlFlow::Break(())
                     } else {
@@ -634,15 +641,19 @@ impl Rule for MD077ListContinuationIndent {
                 let actual = line.actual;
                 let under_indented = actual < required;
                 let loose_escape = line.saw_blank && under_indented;
+                // Don't reindent a line the parser classified in place as a code
+                // block (fenced or indented) or a blockquote: these are read
+                // straight from its per-line output, so the rule cannot drift
+                // from how rumdl parses the document. Headings and horizontal
+                // rules terminate the walk before the callback; latent list
+                // markers and tables are handled by `has_latent_structure`.
+                let confirmed_structure = line.info.in_code_block || line.info.blockquote.is_some();
                 let aligned_tight = aligned
-                    && !has_latent_marker
+                    && !has_latent_structure
                     && !line.saw_blank
                     && !line.saw_nested
                     && under_indented
-                    && !line.info.in_code_block
-                    && !line.trimmed.starts_with('>')
-                    && !crate::utils::skip_context::is_table_line(line.trimmed)
-                    && !Self::starts_with_list_marker(line.trimmed);
+                    && !confirmed_structure;
                 if (loose_escape || aligned_tight) && flagged_lines.insert(line.line_num) {
                     let message = if line.saw_blank {
                         if strict_indent {
@@ -2574,6 +2585,18 @@ mod tests {
         let once = fix_aligned(content);
         assert_eq!(fix_aligned(&once), once, "fix must be idempotent in one pass");
         assert_eq!(once, content, "item with a latent marker is left untouched");
+    }
+
+    #[test]
+    fn aligned_latent_table_in_continuation_is_idempotent() {
+        // Regression (fuzzer-found): a table-looking line that the parser
+        // absorbs as lazy continuation (so it is NOT yet `in_table_block`) can
+        // be promoted to a real table once an earlier line is reindented. Like
+        // a latent marker, this re-parses the block, so the item is left alone.
+        let content = "- \n![`]()\n|  | ` |\n| --- | --- |";
+        let once = fix_aligned(content);
+        assert_eq!(fix_aligned(&once), once, "fix must be idempotent in one pass");
+        assert_eq!(once, content, "item with a latent table is left untouched");
     }
 
     #[test]
