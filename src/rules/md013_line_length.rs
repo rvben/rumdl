@@ -1945,6 +1945,22 @@ impl MD013LineLength {
                             continue;
                         }
 
+                        // A blockquote nested inside the list item is reflowed by the
+                        // blockquote-aware path (it preserves the `>` prefix, including the
+                        // list indent), not as list-item prose. Collecting it as Content
+                        // would strip the markers and reflow `>` as words, collapsing the
+                        // blank `>` line and dropping `>` from wrapped continuations. End
+                        // the item here so the outer loop routes the blockquote line to
+                        // generate_blockquote_paragraph_fix. Uncollect a pending blank so
+                        // the separator between the list prose and the blockquote survives.
+                        if line_info.blockquote.is_some() {
+                            if matches!(list_item_lines.last(), Some(LineType::Empty)) {
+                                list_item_lines.pop();
+                                i -= 1;
+                            }
+                            break;
+                        }
+
                         // Check if this is a SIBLING list item (breaks parent)
                         // Nested lists are indented >= marker_len and are PART of the parent item
                         // Siblings are at indent < marker_len (at or before parent marker)

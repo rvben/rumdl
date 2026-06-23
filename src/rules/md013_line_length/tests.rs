@@ -4089,6 +4089,147 @@ fn test_blockquote_list_item_with_table_preserved() {
     );
 }
 
+/// A GitHub-style alert (`> [!NOTE]`) nested inside a list item reflows with its
+/// blockquote prefix preserved on every line, exactly like the same alert at the
+/// top level. The blank `>` continuation must keep its marker (not collapse to a
+/// blank line that splits the blockquote) and wrapped lines must keep `>`.
+#[test]
+fn test_blockquote_alert_in_list_item_preserves_marker() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "1. A list item:\n\n   > [!NOTE]\n   >\n   > A blockquote line inside a list that is long enough that reflow will try to wrap it.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let expected = "1. A list item:\n\n   > [!NOTE]\n   >\n   > A blockquote line inside a list that is long enough that reflow will try to\n   > wrap it.\n";
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        expected,
+        "Nested blockquote must keep its `>` prefix on every line"
+    );
+}
+
+/// A blockquote nested in an unordered list item reflows with the list-aligned
+/// blockquote prefix (`  > `, two-space marker width) preserved on every line.
+#[test]
+fn test_blockquote_in_unordered_list_item_preserves_marker() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content =
+        "- A list item:\n\n  > A blockquote line inside a list that is long enough that reflow will try to wrap it.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(
+        lines
+            .iter()
+            .filter(|l| l.contains("blockquote") || l.contains("wrap"))
+            .count()
+            >= 2,
+        "Expected the long quoted line to wrap: {fixed:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with("- "))
+            .all(|l| l.starts_with("  > ")),
+        "Every quoted line keeps the list-aligned `  > ` prefix: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|l| l.chars().count() <= 80),
+        "Wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
+/// Reflowing a blockquote nested in a list item is idempotent: the already-wrapped
+/// output is a fixpoint.
+#[test]
+fn test_blockquote_in_list_item_reflow_is_idempotent() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let already_wrapped = "1. A list item:\n\n   > [!NOTE]\n   >\n   > A blockquote line inside a list that is long enough that reflow will try to\n   > wrap it.\n";
+    let ctx = LintContext::new(already_wrapped, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        already_wrapped,
+        "Already-wrapped nested blockquote must be a fixpoint"
+    );
+}
+
+/// A short blockquote nested in a list item that already fits is left untouched -
+/// no spurious reflow that would strip or rewrite the `>` markers.
+#[test]
+fn test_short_blockquote_in_list_item_unchanged() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "1. A list item:\n\n   > [!NOTE]\n   >\n   > A short note.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        content,
+        "A fitting nested blockquote must be preserved verbatim"
+    );
+}
+
+/// A sibling list item following a nested blockquote is still reflowed: ending the
+/// item at the blockquote must not swallow or skip later siblings.
+#[test]
+fn test_sibling_list_item_after_nested_blockquote_reflows() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "1. First item:\n\n   > A quoted line inside the first item that is plainly long enough that reflow has to wrap it onto a second line.\n\n2. Second item that is itself long enough to exceed the eighty character limit and wrap.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // The quote wraps to more than one line, and every quoted line keeps `   > `.
+    let quoted: Vec<&&str> = lines.iter().filter(|l| l.starts_with("   > ")).collect();
+    assert!(quoted.len() >= 2, "The long quote must wrap, keeping `>`: {fixed:?}");
+    // The second item must still be reflowed independently (continuation indented to 3).
+    let second_idx = lines
+        .iter()
+        .position(|l| l.starts_with("2. "))
+        .expect("second item present");
+    assert!(
+        lines[second_idx + 1].starts_with("   ") && !lines[second_idx + 1].starts_with("   > "),
+        "Sibling item 2 still wraps as plain list prose: {fixed:?}"
+    );
+    assert!(
+        lines.iter().all(|l| l.chars().count() <= 80),
+        "All wrapped lines respect the limit: {fixed:?}"
+    );
+}
+
 /// A nested blockquote list item (`> > - ...`) reflows with the spaced nested
 /// prefix preserved on both the marker and continuation lines.
 #[test]
