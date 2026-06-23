@@ -256,10 +256,12 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            // Get the actual line content for additional checks
+            // Get the actual line content for additional checks. Strip any
+            // blockquote prefix so the info string after the fence is recognized
+            // inside blockquotes the same way it is at the top level.
             let line = lines.get(block.line_idx).unwrap_or(&"");
-            let trimmed = line.trim();
-            let after_fence = trimmed.strip_prefix(&block.fence_marker).unwrap_or("").trim();
+            let fence_line = crate::utils::blockquote::strip_blockquote_prefix(line).trim();
+            let after_fence = fence_line.strip_prefix(&block.fence_marker).unwrap_or("").trim();
 
             // Check if fence has MkDocs superfences attributes but no language
             let has_mkdocs_attrs_only =
@@ -317,10 +319,9 @@ impl Rule for MD040FencedCodeLanguage {
                     severity: Severity::Warning,
                     fix: Some(Fix::new(
                         {
-                            let trimmed = line.trim_start();
-                            let trimmed_start = line.len() - trimmed.len();
+                            let marker_offset = fence_marker_offset(line);
                             let line_start_byte = ctx.line_offsets.get(block.line_idx).copied().unwrap_or(0);
-                            let fence_end_byte = line_start_byte + trimmed_start + block.fence_marker.len();
+                            let fence_end_byte = line_start_byte + marker_offset + block.fence_marker.len();
                             // Replace from after fence marker to end of line content,
                             // so trailing whitespace is cleaned up while any existing
                             // info string / attributes are preserved via the replacement.
@@ -328,8 +329,8 @@ impl Rule for MD040FencedCodeLanguage {
                             fence_end_byte..line_end_byte
                         },
                         {
-                            let trimmed = line.trim_start();
-                            let after_fence = &trimmed[block.fence_marker.len()..];
+                            let line: &str = line;
+                            let after_fence = &line[fence_marker_offset(line) + block.fence_marker.len()..];
                             let after_fence_trimmed = after_fence.trim();
                             if after_fence_trimmed.is_empty() {
                                 "text".to_string()
@@ -488,7 +489,9 @@ fn derive_fenced_code_blocks(ctx: &crate::lint_context::LintContext) -> Vec<Fenc
             let line_start = line_offsets.get(line_idx).copied().unwrap_or(0);
             let line_end = line_offsets.get(line_idx + 1).copied().unwrap_or(content.len());
             let line = content.get(line_start..line_end).unwrap_or("");
-            let trimmed = line.trim();
+            // Strip any blockquote prefix (`> `) before measuring the fence so
+            // markers inside blockquotes are detected by their actual length.
+            let trimmed = crate::utils::blockquote::strip_blockquote_prefix(line).trim();
             let fence_marker = if trimmed.starts_with('`') {
                 let count = trimmed.chars().take_while(|&c| c == '`').count();
                 "`".repeat(count)
@@ -546,10 +549,22 @@ fn is_line_disabled(ranges: &[(usize, usize)], line_idx: usize) -> bool {
     ranges.iter().any(|&(start, end)| line_idx >= start && line_idx < end)
 }
 
+/// Byte offset within `line` where the fence marker begins.
+///
+/// Accounts for an optional blockquote prefix (`>`, `> >`, `>>`, etc.) followed
+/// by indentation. For a plain or list-indented fence the blockquote prefix is
+/// empty, so this reduces to the leading-whitespace length.
+fn fence_marker_offset(line: &str) -> usize {
+    let content = crate::utils::blockquote::strip_blockquote_prefix(line);
+    let blockquote_prefix_len = line.len() - content.len();
+    let indent_len = content.len() - content.trim_start().len();
+    blockquote_prefix_len + indent_len
+}
+
 /// Find the byte span of the language label in a fence line.
 fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
-    let trimmed_start = line.len() - line.trim_start().len();
-    let after_indent = &line[trimmed_start..];
+    let marker_offset = fence_marker_offset(line);
+    let after_indent = &line[marker_offset..];
     if !after_indent.starts_with(fence_marker) {
         return None;
     }
@@ -566,8 +581,8 @@ fn find_label_span(line: &str, fence_marker: &str) -> Option<(usize, usize)> {
         .map_or(after_fence.len(), |(idx, _)| label_start_rel + idx);
 
     Some((
-        trimmed_start + fence_marker.len() + label_start_rel,
-        trimmed_start + fence_marker.len() + label_end_rel,
+        marker_offset + fence_marker.len() + label_start_rel,
+        marker_offset + fence_marker.len() + label_end_rel,
     ))
 }
 
@@ -675,6 +690,52 @@ another block without
         assert!(fixed.contains("  ```text"));
     }
 
+    #[test]
+    fn test_fix_blockquote_empty_fence() {
+        // An empty fence inside a blockquote must become a valid `> ```text`
+        // fence, not a corrupted `> `text `` inline span. MD040 only touches the
+        // fence lines, so the indented content is preserved verbatim.
+        let content = "# Title\n\n> ```\n> root/\n> └── nested/\n>     └── file.txt\n> ```\n";
+        let fixed = run_fix(content).unwrap();
+        let expected = "# Title\n\n> ```text\n> root/\n> └── nested/\n>     └── file.txt\n> ```\n";
+        assert_eq!(fixed, expected);
+    }
+
+    #[test]
+    fn test_fix_blockquote_tilde_and_longer_fences() {
+        // Tilde fences and fences longer than three characters inside a
+        // blockquote must be detected by their actual marker, not the default.
+        let tilde = run_fix("> ~~~\n> code\n> ~~~\n").unwrap();
+        assert_eq!(tilde, "> ~~~text\n> code\n> ~~~\n");
+
+        let longer = run_fix("> ~~~~\n> code\n> ~~~~\n").unwrap();
+        assert_eq!(longer, "> ~~~~text\n> code\n> ~~~~\n");
+
+        let longer_backtick = run_fix("> ````\n> code\n> ````\n").unwrap();
+        assert_eq!(longer_backtick, "> ````text\n> code\n> ````\n");
+    }
+
+    #[test]
+    fn test_fix_nested_blockquote_empty_fence() {
+        // Compact and spaced nested blockquotes both carry their prefix into the
+        // fence line; the fix must place `text` after the real fence marker.
+        let compact = run_fix(">> ```\n>> code\n>> ```\n").unwrap();
+        assert_eq!(compact, ">> ```text\n>> code\n>> ```\n");
+
+        let spaced = run_fix("> > ```\n> > code\n> > ```\n").unwrap();
+        assert_eq!(spaced, "> > ```text\n> > code\n> > ```\n");
+    }
+
+    #[test]
+    fn test_fix_blockquote_empty_fence_is_idempotent() {
+        // Re-running the fix on its own output must be a no-op.
+        let content = "> ```\n> root/\n>     nested\n> ```\n";
+        let once = run_fix(content).unwrap();
+        let twice = run_fix(&once).unwrap();
+        assert_eq!(once, twice);
+        assert_eq!(once, "> ```text\n> root/\n>     nested\n> ```\n");
+    }
+
     // =========================================================================
     // Consistent mode tests
     // =========================================================================
@@ -768,6 +829,22 @@ echo there
         let fixed = run_fix_with_config(content, config).unwrap();
         assert_eq!(fixed.matches("```sh").count(), 2);
         assert_eq!(fixed.matches("```bash").count(), 0);
+    }
+
+    #[test]
+    fn test_consistent_mode_fix_inside_blockquote() {
+        // Consistent-mode normalization must reach fences inside blockquotes.
+        // With one `bash` and one `sh`, the curated default `bash` wins.
+        let content = "> ```bash\n> echo hi\n> ```\n>\n> ```sh\n> echo there\n> ```\n";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            ..Default::default()
+        };
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert_eq!(
+            fixed,
+            "> ```bash\n> echo hi\n> ```\n>\n> ```bash\n> echo there\n> ```\n"
+        );
     }
 
     #[test]
@@ -1200,6 +1277,18 @@ echo there
     // =========================================================================
     // MkDocs superfences tests
     // =========================================================================
+
+    #[test]
+    fn test_mkdocs_superfences_attribute_in_blockquote() {
+        // A superfences attribute fence (no language) inside a blockquote must be
+        // recognized just like a top-level one and not flagged as missing language.
+        let content = "> ```title=\"Example\"\n> echo hi\n> ```\n";
+        let result = run_check_mkdocs(content).unwrap();
+        assert!(
+            result.is_empty(),
+            "MkDocs superfences attribute inside a blockquote should not require language: {result:?}"
+        );
+    }
 
     #[test]
     fn test_mkdocs_superfences_title_only() {
