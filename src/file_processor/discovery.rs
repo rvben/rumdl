@@ -491,12 +491,17 @@ pub fn find_markdown_files(
                     };
 
                     if let Some(pattern) = exclude_matchers.matched_pattern(&path_for_matching) {
-                        // Always print a warning when excluding explicitly provided files
-                        // This matches ESLint's behavior and helps users understand why the file wasn't linted
-                        let display_path = normalize_separators(cleaned_path.clone());
-                        eprintln!(
-                            "warning: {display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
-                        );
+                        // Excluding an explicitly provided file is a deliberate config choice, so
+                        // this is an informational notice, not a warning, and it is surfaced only
+                        // under --verbose. This keeps explicit-path mode as quiet as discovery
+                        // mode (which excludes silently) while still letting `--verbose` explain
+                        // why a named file was skipped. --silent suppresses it entirely.
+                        if args.verbose && !args.silent {
+                            let display_path = normalize_separators(cleaned_path.clone());
+                            eprintln!(
+                                "{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
+                            );
+                        }
                     } else {
                         file_paths.push(canonicalize_path_safe(&cleaned_path));
                     }

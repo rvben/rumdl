@@ -736,10 +736,8 @@ exclude = ["excluded.md", "excluded/**"]
     let norm_stdout1 = normalize(&stdout1);
     let norm_stderr1 = normalize(&stderr1);
     assert!(
-        norm_stderr1.contains("warning:")
-            && norm_stderr1.contains("excluded.md")
-            && norm_stderr1.contains("ignored because of exclude pattern"),
-        "Default behavior: excluded.md should show warning about exclusion. stderr: {norm_stderr1}"
+        norm_stderr1.contains("excluded.md") && norm_stderr1.contains("ignored because of exclude pattern"),
+        "Default behavior with --verbose: excluded.md should show an exclusion notice. stderr: {norm_stderr1}"
     );
     assert!(
         !norm_stdout1.contains("Processing file: excluded.md"),
@@ -767,10 +765,8 @@ exclude = ["excluded.md", "excluded/**"]
         "included.md should be processed"
     );
     assert!(
-        norm_stderr3.contains("warning:")
-            && norm_stderr3.contains("excluded.md")
-            && norm_stderr3.contains("ignored because of exclude pattern"),
-        "excluded.md should show warning about exclusion"
+        norm_stderr3.contains("excluded.md") && norm_stderr3.contains("ignored because of exclude pattern"),
+        "excluded.md should show an exclusion notice under --verbose. stderr: {norm_stderr3}"
     );
     assert!(
         !norm_stdout3.contains("Processing file: excluded.md"),
@@ -784,10 +780,8 @@ exclude = ["excluded.md", "excluded/**"]
     let norm_stdout4 = normalize(&stdout4);
     let norm_stderr4 = normalize(&stderr4);
     assert!(
-        norm_stderr4.contains("warning:")
-            && norm_stderr4.contains("excluded/test.md")
-            && norm_stderr4.contains("ignored because of exclude pattern"),
-        "Files in excluded dir should show warning about exclusion"
+        norm_stderr4.contains("excluded/test.md") && norm_stderr4.contains("ignored because of exclude pattern"),
+        "Files in excluded dir should show an exclusion notice under --verbose. stderr: {norm_stderr4}"
     );
     assert!(
         !norm_stdout4.contains("Processing file: excluded/test.md"),
