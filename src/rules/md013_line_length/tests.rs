@@ -4230,6 +4230,33 @@ fn test_sibling_list_item_after_nested_blockquote_reflows() {
     );
 }
 
+/// A plain (non-admonition) multi-line blockquote nested in a list item reflows
+/// with `>` preserved on every line, just like an alert. Regression for the
+/// follow-up to #683: the `>` markers must not be pulled into the prose
+/// (stranded mid-line) and continuation lines must keep their leading `>` when
+/// the quote's words are rejoined and rewrapped.
+#[test]
+fn test_plain_blockquote_in_list_item_preserves_markers() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(80),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    let content = "1. Do the setup step:\n\n   > **Why both?** This is a plain blockquote that is not a `[!NOTE]` admonition.\n   > It spans several source lines, and reflow strands the `>` marker at the end\n   > of each line when it rewraps them together.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+    let expected = "1. Do the setup step:\n\n   > **Why both?** This is a plain blockquote that is not a `[!NOTE]`\n   > admonition. It spans several source lines, and reflow strands the `>`\n   > marker at the end of each line when it rewraps them together.\n";
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(fixed, expected, "Plain nested blockquote must keep `>` on every line");
+
+    // Idempotent: the rewrapped output is a fixpoint.
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx2).unwrap(), expected, "Reflow must be idempotent");
+}
+
 /// A nested blockquote list item (`> > - ...`) reflows with the spaced nested
 /// prefix preserved on both the marker and continuation lines.
 #[test]
