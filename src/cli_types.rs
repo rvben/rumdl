@@ -184,11 +184,11 @@ pub struct CheckArgs {
     #[arg(short, long, help = "Run in watch mode by re-running whenever files change")]
     pub watch: bool,
 
-    /// Enforce exclude patterns even for paths that are passed explicitly.
-    /// By default, rumdl will lint any paths passed in directly, even if they would typically be excluded.
-    /// Setting this flag will cause rumdl to respect exclusions unequivocally.
-    /// This is useful for pre-commit, which explicitly passes all changed files.
-    #[arg(long, help = "Enforce exclude patterns even for explicitly specified files")]
+    /// Deprecated and hidden: exclude patterns are always respected, including for
+    /// explicitly provided paths (since v0.0.156), so this flag has no effect.
+    /// Accepted for backward compatibility; passing it prints a deprecation notice.
+    /// Use `--no-exclude` to disable exclusions instead.
+    #[arg(long, hide = true)]
     pub force_exclude: bool,
 
     /// Control when to exit with code 1: any (default), warning, error, or never
