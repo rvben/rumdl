@@ -754,5 +754,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md081/"
+  },
+  {
+    "code": "MD082",
+    "name": "no-empty-sections",
+    "aliases": [],
+    "summary": "Headings should have content before the next heading",
+    "category": "heading",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md082/"
   }
 ]

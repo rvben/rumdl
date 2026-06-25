@@ -52,7 +52,7 @@ Python linting, rumdl brings similar speed and developer experience improvements
 It offers:
 
 - ⚡️ **Built for speed** with Rust - significantly faster than alternatives
-- 🔍 **<!-- RULE_COUNT -->75<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
+- 🔍 **<!-- RULE_COUNT -->76<!-- /RULE_COUNT --> lint rules** covering common Markdown issues
 - 🛠️ **Automatic formatting** with `--fix` for files and stdin/stdout
 - 📦 **Zero dependencies** - single binary with no runtime requirements
 - 🔧 **Highly configurable** with TOML-based config files
@@ -526,7 +526,7 @@ The action ref (`rvben/rumdl@v0`) selects the GitHub Action version, while the o
 
 ## Rules
 
-rumdl implements <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
+rumdl implements <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> lint rules for Markdown files. Here are some key rule categories:
 
 | Category       | Description                              | Example Rules       |
 | -------------- | ---------------------------------------- | ------------------- |

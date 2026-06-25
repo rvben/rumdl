@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 75 rules as defined in the RULES array (MD001-MD081)
-    assert_eq!(rules.len(), 75);
+    // Should return all 76 rules as defined in the RULES array (MD001-MD082)
+    assert_eq!(rules.len(), 76);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -28,14 +28,14 @@ fn test_all_rules_returns_all_rules() {
 /// `docs/rules.md` and `docs/stability.md`): which rules run by default must not
 /// change silently. Flipping a rule's `opt_in` flag, adding a new opt-in rule, or
 /// removing one all change the default set and trip this guard. The sibling test
-/// `test_all_rules_returns_all_rules` pins the total at 75, so together they pin
+/// `test_all_rules_returns_all_rules` pins the total at 76, so together they pin
 /// the default-enabled set as well.
 ///
 /// If this fails because of an intentional change, update both this set and the
 /// opt-in table in `docs/rules.md`.
 #[test]
 fn test_opt_in_rule_set_is_frozen() {
-    let expected: HashSet<&'static str> = ["MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080"]
+    let expected: HashSet<&'static str> = ["MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082"]
         .into_iter()
         .collect();
 
@@ -393,8 +393,8 @@ fn test_all_configurable_rules_expose_config_schema() {
     // Update this number when adding new configurable rules.
     assert_eq!(
         rules_with_config.len(),
-        50,
-        "Expected 50 rules with config sections. If you added config to a rule, \
+        51,
+        "Expected 51 rules with config sections. If you added config to a rule, \
          implement default_config_section(). Rules with config: {rules_with_config:?}"
     );
 }

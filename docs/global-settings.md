@@ -214,6 +214,8 @@ Current opt-in rules:
 | MD072 | Frontmatter key sort order   |
 | MD073 | Table of contents validation |
 | MD074 | MkDocs nav validation        |
+| MD080 | Heading anchor collision     |
+| MD082 | No empty sections            |
 
 ```toml
 [global]

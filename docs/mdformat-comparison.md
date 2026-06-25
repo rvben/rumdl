@@ -7,7 +7,7 @@ This document compares rumdl and mdformat, focusing on their formatting capabili
 Both tools format Markdown files, but serve different purposes:
 
 - **mdformat**: Pure formatter focused on consistent Markdown output
-- **rumdl**: Combined linter and formatter with <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> rules plus formatting
+- **rumdl**: Combined linter and formatter with <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> rules plus formatting
 
 **Key Differences:**
 
@@ -16,7 +16,7 @@ Both tools format Markdown files, but serve different purposes:
 | Primary purpose | Formatting only           | Linting + formatting            |
 | Language        | Python                    | Rust                            |
 | Performance     | Good                      | Faster (native + caching)       |
-| Linting rules   | ❌                        | ✅ <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> rules                     |
+| Linting rules   | ❌                        | ✅ <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> rules                     |
 | Extensibility   | Plugin ecosystem          | Built-in flavors                |
 | CommonMark      | Strict compliance         | Strict compliance               |
 
@@ -47,7 +47,7 @@ Both tools format Markdown to a consistent style:
 
 ### Linting (rumdl only)
 
-rumdl provides <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> linting rules that mdformat does not have:
+rumdl provides <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> linting rules that mdformat does not have:
 
 - **Broken link detection** (MD051, MD052, MD057)
 - **Accessibility checks** (MD045 - image alt text)
@@ -299,7 +299,7 @@ style = "atx"
 | Capability              | mdformat           | rumdl                  |
 | ----------------------- | ------------------ | ---------------------- |
 | Markdown formatting     | ✅ Primary focus   | ✅ Via `rumdl fmt`     |
-| Markdown linting        | ❌                 | ✅ <!-- RULE_COUNT -->75<!-- /RULE_COUNT --> rules            |
+| Markdown linting        | ❌                 | ✅ <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> rules            |
 | Performance             | Good               | Faster (native binary) |
 | Extended syntax         | Plugins            | Built-in flavors       |
 | Editor integration      | Basic              | LSP + VS Code          |
