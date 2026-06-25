@@ -62,6 +62,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.23](https://github.com/rvben/rumdl/compare/v0.2.22...v0.2.23) - 2026-06-25
+
+### Added
+
+- **rules**: add MD082 to require content between headings ([e5592ae](https://github.com/rvben/rumdl/commit/e5592aeb52ffec6473a3814e8e0955f58ebe67e1))
+
+### Fixed
+
+- **lint-context**: attach list items whose marker line opens a code fence ([95898f4](https://github.com/rvben/rumdl/commit/95898f49d3ca34ddfe33dbabe5db95c69d6adfc2))
+- **parser**: parse reference-definition titles on a continuation line ([fb02b52](https://github.com/rvben/rumdl/commit/fb02b5210be7529b615f3e4a05d406db3929ec34))
+- **cli**: make per-file exclude notice verbose-only ([2923e27](https://github.com/rvben/rumdl/commit/2923e27cdd2e22a02e41533dfb71d10d7b26b7a9))
+
 ## [0.2.22](https://github.com/rvben/rumdl/compare/v0.2.21...v0.2.22) - 2026-06-24
 
 ### Added
