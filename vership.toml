@@ -20,6 +20,26 @@ search = "rev: v{prev}"
 replace = "rev: v{version}"
 
 [[version_files]]
+glob = "docs/usage/pre-commit.md"
+search = "rev: v{prev}"
+replace = "rev: v{version}"
+
+[[version_files]]
+glob = "docs/getting-started/quickstart.md"
+search = "rev: v{prev}"
+replace = "rev: v{version}"
+
+[[version_files]]
+glob = "docs/mdformat-comparison.md"
+search = "rev: v{prev}"
+replace = "rev: v{version}"
+
+[[version_files]]
+glob = "docs/usage/ci-cd.md"
+search = 'version: "{prev}"'
+replace = 'version: "{version}"'
+
+[[version_files]]
 glob = "npm/cli-*/package.json"
 field = "version"
 

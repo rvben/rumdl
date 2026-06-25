@@ -231,8 +231,8 @@ line-length = 80
        - id: mdformat
 
    # After
-   - repo: https://github.com/rvben/rumdl
-     rev: v0.1.10
+   - repo: https://github.com/rvben/rumdl-pre-commit
+     rev: v0.2.22
      hooks:
        - id: rumdl
     ```

@@ -95,8 +95,8 @@ Add to `.pre-commit-config.yaml`:
 
 ```yaml
 repos:
-  - repo: https://github.com/rvben/rumdl
-    rev: v0.0.222  # Use latest version
+  - repo: https://github.com/rvben/rumdl-pre-commit
+    rev: v0.2.22  # Use latest version
     hooks:
       - id: rumdl
 ```
