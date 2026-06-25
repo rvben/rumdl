@@ -9,7 +9,7 @@ use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::{LintContext, ListBlock};
 use rumdl_lib::rule::Rule;
 use rumdl_lib::rules::{
-    CodeBlockStyle, MD031BlanksAroundFences, MD032BlanksAroundLists, MD040FencedCodeLanguage,
+    CodeBlockStyle, MD007ULIndent, MD031BlanksAroundFences, MD032BlanksAroundLists, MD040FencedCodeLanguage,
     MD077ListContinuationIndent,
 };
 
@@ -310,5 +310,54 @@ fn md077_flags_overindented_continuation_under_fenced_item() {
     assert!(
         result.iter().any(|w| w.line == 4),
         "expected an MD077 warning on line 4, got {result:?}"
+    );
+}
+
+#[test]
+fn md007_keeps_nesting_under_fence_opening_item() {
+    // The outer item opens a fenced code block on its marker line, then a
+    // continuation paragraph, then a correctly-indented nested list (and a deeper
+    // one). MD007 keeps its own ancestor stack and must register the fence-opening
+    // item on it; otherwise the descendants resolve one level too shallow and the
+    // correctly-nested lists get flagged "Expected ... depth 0" and the fix
+    // un-nests them. Correct nesting must produce no warnings.
+    let result = MD007ULIndent::default()
+        .check(&ctx(indoc! {"
+            - ```
+              code
+              ```
+
+              Paragraph.
+
+              - nested
+                - deeper
+        "}))
+        .unwrap();
+    assert!(
+        result.is_empty(),
+        "nested lists under a fence-opening item must stay nested, got {result:?}"
+    );
+}
+
+#[test]
+fn md007_keeps_nesting_under_ordered_fence_opening_item() {
+    // Same bug with an ordered outer item: MD007 tracks ordered items as nesting
+    // ancestors, so an ordered item opening a fence must also be registered.
+    // Otherwise its nested unordered list resolves as top-level and gets un-nested.
+    let result = MD007ULIndent::default()
+        .check(&ctx(indoc! {"
+            1. ```
+               code
+               ```
+
+               Paragraph.
+
+               - nested
+                 - deeper
+        "}))
+        .unwrap();
+    assert!(
+        result.is_empty(),
+        "nested list under an ordered fence-opening item must stay nested, got {result:?}"
     );
 }
