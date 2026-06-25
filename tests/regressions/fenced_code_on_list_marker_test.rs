@@ -8,7 +8,10 @@ use rumdl_lib::MD046CodeBlockStyle;
 use rumdl_lib::config::MarkdownFlavor;
 use rumdl_lib::lint_context::{LintContext, ListBlock};
 use rumdl_lib::rule::Rule;
-use rumdl_lib::rules::{CodeBlockStyle, MD031BlanksAroundFences, MD040FencedCodeLanguage};
+use rumdl_lib::rules::{
+    CodeBlockStyle, MD031BlanksAroundFences, MD032BlanksAroundLists, MD040FencedCodeLanguage,
+    MD077ListContinuationIndent,
+};
 
 fn ctx(content: &str) -> LintContext<'_> {
     LintContext::new(content, MarkdownFlavor::Standard, None)
@@ -261,4 +264,51 @@ fn md046_treats_marker_line_fence_as_fenced() {
         .unwrap();
     assert_eq!(standalone.len(), 1);
     assert_eq!(standalone[0].line, 1);
+}
+
+// --- Rules whose output depends on the item staying in the list --------------
+//
+// These guard the user-visible symptom directly, not just the parsed model.
+// When the fenced marker item was dropped from the list model, a following
+// item looked like a brand-new list immediately preceded by non-blank content
+// (a spurious MD032), and an over-indented continuation under the fenced item
+// was never seen as list content (a missed MD077). Both are reachable only
+// once the fenced item is attached to the list.
+
+#[test]
+fn md032_no_false_positive_after_fenced_item() {
+    // The over-indented continuation (line 4) keeps `- second` (line 5) in the
+    // same list. With the fenced item dropped, `- second` looked like a new list
+    // preceded by non-blank content and MD032 fired a false "preceded by blank
+    // line" on line 5.
+    let result = MD032BlanksAroundLists::default()
+        .check(&ctx(indoc! {"
+            - ```js
+              x
+              ```
+               over-indented continuation
+            - second
+        "}))
+        .unwrap();
+    assert!(result.is_empty(), "expected no MD032 warnings, got {result:?}");
+}
+
+#[test]
+fn md077_flags_overindented_continuation_under_fenced_item() {
+    // The same over-indented continuation (line 4, indent 3 where 2 is expected)
+    // is a genuine MD077 violation - detectable only once the continuation is
+    // recognized as part of the fenced item's list.
+    let result = MD077ListContinuationIndent::default()
+        .check(&ctx(indoc! {"
+            - ```js
+              x
+              ```
+               over-indented continuation
+            - second
+        "}))
+        .unwrap();
+    assert!(
+        result.iter().any(|w| w.line == 4),
+        "expected an MD077 warning on line 4, got {result:?}"
+    );
 }
