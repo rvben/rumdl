@@ -88,8 +88,16 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
     for (line_idx, line_info) in lines.iter().enumerate() {
         let line_num = line_idx + 1;
 
-        // Enhanced code block handling using Design #3's context analysis
-        if line_info.in_code_block {
+        // Enhanced code block handling using Design #3's context analysis.
+        //
+        // Exception: a fenced code block can *open on a list-marker line*, e.g.
+        // "- ```python" or "1. ```js". Such a line is flagged `in_code_block`
+        // (it begins a code block) but is genuinely the start of a list item, so
+        // it must fall through to the list-item handling below to be registered;
+        // otherwise the whole item — and everything indented under it — would be
+        // dropped from the list model. Lines *inside* the fence are never flagged
+        // as list items, so this exception only ever matches the marker line.
+        if line_info.in_code_block && line_info.list_item.is_none() {
             if let Some(ref mut block) = current_block {
                 // Calculate minimum indentation for list continuation
                 let min_continuation_indent =
