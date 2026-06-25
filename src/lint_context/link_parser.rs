@@ -94,6 +94,15 @@ static REF_DEF_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+// CommonMark §4.7 allows a reference definition's title to appear on the line
+// immediately after the destination. This matches a line that is *only* such a
+// title (double-quoted, single-quoted, or parenthesised), with the same escape
+// handling as `REF_DEF_PATTERN`. The capture groups mirror the title groups
+// (1 = "...", 2 = '...', 3 = (...)) so the same unescape path applies.
+static REF_DEF_TITLE_CONTINUATION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"^\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|\(((?:[^()\\]|\\.)*)\))\s*$"#).unwrap()
+});
+
 /// Intermediate result from the pulldown-cmark parse phase.
 /// Regex fallback and code_span filtering happen in the finalize phase.
 pub(super) struct PulldownParseResult<'a> {
@@ -835,19 +844,51 @@ pub(super) fn parse_reference_defs(content: &str, lines: &[LineInfo]) -> Vec<Ref
             );
             // Group 4: "..." title, group 5: '...' title, group 6: (...) title.
             let title_match = cap.get(4).or_else(|| cap.get(5)).or_else(|| cap.get(6));
-            let title = title_match.map(|m| unescape_commonmark_punctuation(m.as_str()));
 
             let match_obj = cap.get(0).unwrap();
             let byte_offset = base_offset + match_obj.start();
-            let byte_end = base_offset + match_obj.end();
 
-            let (title_byte_start, title_byte_end) = if let Some(m) = title_match {
+            let mut byte_end = base_offset + match_obj.end();
+            let mut title = title_match.map(|m| unescape_commonmark_punctuation(m.as_str()));
+            let (mut title_byte_start, mut title_byte_end) = if let Some(m) = title_match {
                 let start = base_offset + m.start().saturating_sub(1);
                 let end = base_offset + m.end() + 1;
                 (Some(start), Some(end))
             } else {
                 (None, None)
             };
+
+            // CommonMark §4.7: when the destination line carries no title, the
+            // title may be on the immediately following line (no blank line
+            // between, same blockquote context, not in a code block). Pull it in
+            // so the whole definition is one reference definition.
+            if title_match.is_none()
+                && let Some(next) = lines.get(line_idx + 1)
+                && !next.in_code_block
+            {
+                let cur_nesting = line_info.blockquote.as_deref().map_or(0, |bq| bq.nesting_level);
+                let (next_line, next_base, next_nesting) = match next.blockquote.as_deref() {
+                    Some(bq) => (
+                        bq.content.as_str(),
+                        next.byte_offset + bq.prefix.len(),
+                        bq.nesting_level,
+                    ),
+                    None => (next.content(content), next.byte_offset, 0),
+                };
+                if next_nesting == cur_nesting
+                    && let Some(tcap) = REF_DEF_TITLE_CONTINUATION.captures(next_line)
+                {
+                    let tmatch = tcap
+                        .get(1)
+                        .or_else(|| tcap.get(2))
+                        .or_else(|| tcap.get(3))
+                        .expect("title alternation always matches");
+                    title = Some(unescape_commonmark_punctuation(tmatch.as_str()));
+                    title_byte_start = Some(next_base + tmatch.start().saturating_sub(1));
+                    title_byte_end = Some(next_base + tmatch.end() + 1);
+                    byte_end = next.byte_offset + next.byte_len;
+                }
+            }
 
             refs.push(ReferenceDef {
                 line: line_num,

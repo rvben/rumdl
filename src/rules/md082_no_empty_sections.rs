@@ -440,4 +440,14 @@ mod tests {
         let w = check_default("# A\n\n> ---\n\n## B\n\ntext\n");
         assert!(w.is_empty(), "got: {w:?}");
     }
+
+    #[test]
+    fn multiline_reference_definition_is_an_empty_section() {
+        // A reference definition is invisible, even when its title sits on a
+        // continuation line. A section whose only body is such a definition is
+        // empty and is flagged.
+        let w = check_default("# A\n\n[ref]: https://example.com\n  \"title\"\n\n## B\n\ntext\n");
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 1);
+    }
 }

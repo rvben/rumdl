@@ -258,6 +258,112 @@ fn test_ref_def_with_angle_bracket_destination_and_title() {
 }
 
 #[test]
+fn test_ref_def_multiline_title_on_next_line() {
+    // CommonMark §4.7: a reference definition's title may sit on the line
+    // immediately after the destination. The whole definition - including the
+    // title line - is one reference definition.
+    let content = "[ref]: https://example.com\n  \"the title\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title.as_deref(), Some("the title"));
+    // The byte range and is_in_reference_def cover the continuation title line.
+    let quote = content.find('"').unwrap();
+    assert!(
+        ctx.is_in_reference_def(quote),
+        "title line should be inside the ref def"
+    );
+    // The title byte range spans the delimiters exactly, and byte_end reaches
+    // the end of the continuation line (the byte before its newline).
+    let def = &ctx.reference_defs[0];
+    assert_eq!(
+        def.title_byte_start,
+        Some(quote),
+        "title_byte_start is the opening quote"
+    );
+    assert_eq!(
+        def.title_byte_end,
+        Some(quote + "\"the title\"".len()),
+        "title_byte_end is one past the closing quote"
+    );
+    assert_eq!(
+        def.byte_end,
+        content.trim_end_matches('\n').len(),
+        "byte_end reaches end of title line"
+    );
+}
+
+#[test]
+fn test_ref_def_single_quote_and_paren_title_on_next_line() {
+    for content in [
+        "[ref]: https://example.com\n  'the title'\n",
+        "[ref]: https://example.com\n  (the title)\n",
+    ] {
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(ctx.reference_defs.len(), 1, "input: {content:?}");
+        assert_eq!(
+            ctx.reference_defs[0].title.as_deref(),
+            Some("the title"),
+            "input: {content:?}"
+        );
+    }
+}
+
+#[test]
+fn test_ref_def_blank_line_breaks_multiline_title() {
+    // A blank line between the destination and a quoted line means the quoted
+    // line is a separate paragraph, not the definition's title.
+    let content = "[ref]: https://example.com\n\n\"not a title\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title, None);
+    let quote = content.find('"').unwrap();
+    assert!(
+        !ctx.is_in_reference_def(quote),
+        "a blank-separated quoted line is not part of the ref def"
+    );
+}
+
+#[test]
+fn test_ref_def_non_title_next_line_not_consumed() {
+    // The line after the destination is only a title if it is *only* a quoted
+    // or parenthesised title; ordinary prose is a separate paragraph.
+    let content = "[ref]: https://example.com\nordinary paragraph text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title, None);
+    let para = content.find("ordinary").unwrap();
+    assert!(
+        !ctx.is_in_reference_def(para),
+        "a following paragraph is not part of the ref def"
+    );
+}
+
+#[test]
+fn test_ref_def_inline_title_unaffected_by_lookahead() {
+    // A definition that already has its title on the destination line is
+    // unchanged; the next line is not pulled in.
+    let content = "[ref]: https://example.com \"inline\"\n\"separate\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title.as_deref(), Some("inline"));
+    let sep = content.find("\"separate\"").unwrap();
+    assert!(
+        !ctx.is_in_reference_def(sep),
+        "the inline-title def must not absorb the next line"
+    );
+}
+
+#[test]
+fn test_ref_def_multiline_title_in_blockquote() {
+    // A reference definition inside a blockquote may also carry its title on
+    // the following (still blockquoted) line.
+    let content = "> [ref]: https://example.com\n>  \"the title\"\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.reference_defs.len(), 1);
+    assert_eq!(ctx.reference_defs[0].title.as_deref(), Some("the title"));
+}
+
+#[test]
 fn test_ref_def_paren_title_with_escaped_parens() {
     // CommonMark §4.7 paren-form titles may contain `(`/`)` only when
     // backslash-escaped. Both pulldown-cmark and the rumdl ref-def regex
