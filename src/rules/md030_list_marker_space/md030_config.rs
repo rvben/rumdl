@@ -2,10 +2,14 @@ use crate::rule_config_serde::RuleConfig;
 use crate::types::{OlAlignColumn, PositiveUsize};
 use serde::{Deserialize, Serialize};
 
-/// Configuration for MD030 (Spaces after list markers)
+/// Configuration for MD030 (Spaces after list markers).
+///
+/// Public so other rules (notably MD013's reflow) can load it through the shared
+/// [`crate::rule_config_serde::load_rule_config`] path and reuse
+/// [`MD030Config::expected_spaces`], rather than re-deriving the spacing rules.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub(super) struct MD030Config {
+pub struct MD030Config {
     /// Spaces for single-line unordered list items (default: 1)
     #[serde(default = "default_spaces", alias = "ul_single")]
     pub ul_single: PositiveUsize,
@@ -43,6 +47,29 @@ impl Default for MD030Config {
             ol_single: default_spaces(),
             ol_multi: default_spaces(),
             ol_align_column: OlAlignColumn::default(),
+        }
+    }
+}
+
+impl MD030Config {
+    /// Number of spaces that should follow a list marker, given whether the list
+    /// is ordered, whether the item spans multiple lines, and the marker width
+    /// (e.g. 1 for `-`, 2 for `1.`).
+    ///
+    /// The `ol-align-column` override takes precedence for ordered lists: it
+    /// aligns text to the target column measured from the marker start, padding a
+    /// narrow marker and letting one too wide overflow with a single space, capped
+    /// at 4 spaces (5+ would start a CommonMark indented code block). Otherwise the
+    /// fixed `ul-single`/`ul-multi`/`ol-single`/`ol-multi` value applies.
+    pub fn expected_spaces(&self, is_ordered: bool, is_multi: bool, marker_len: usize) -> usize {
+        if is_ordered && let Some(target_column) = self.ol_align_column.enabled() {
+            return target_column.saturating_sub(marker_len).clamp(1, 4);
+        }
+        match (is_ordered, is_multi) {
+            (false, false) => self.ul_single.get(),
+            (false, true) => self.ul_multi.get(),
+            (true, false) => self.ol_single.get(),
+            (true, true) => self.ol_multi.get(),
         }
     }
 }

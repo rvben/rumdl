@@ -1,6 +1,7 @@
 use super::*;
 use crate::config::MarkdownFlavor;
 use crate::lint_context::LintContext;
+use indoc::indoc;
 
 #[test]
 fn test_code_spans_false_exempts_unbreakable_inline_code() {
@@ -8378,4 +8379,322 @@ fn test_myst_colon_figure_directive_options_only_preserved() {
         fixed, content,
         "options-only `:::{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// MD030/MD007-aware list reflow
+//
+// Reflow rewrites list items with the post-marker spacing configured via MD030
+// (`ul-single`/`ul-multi`/`ol-single`/`ol-multi`/`ol-align-column`) and aligns
+// continuation lines to the resulting content column, instead of hard-coding a
+// single space and a marker-width continuation indent. With default MD030 (a
+// single space) the output is unchanged.
+// ---------------------------------------------------------------------------
+
+/// Number of leading spaces on a line.
+fn leading_spaces(line: &str) -> usize {
+    line.len() - line.trim_start().len()
+}
+
+/// Spaces between the bullet/number marker and the following content on a list
+/// item's first line (e.g. 1 for `- x`, 3 for `-   x`, 2 for `1.  x`).
+fn marker_spaces(line: &str) -> usize {
+    let after_indent = line.trim_start();
+    let marker_end = if after_indent.starts_with(|c: char| c.is_ascii_digit()) {
+        after_indent.find('.').map_or(0, |p| p + 1)
+    } else {
+        1 // single-char bullet
+    };
+    after_indent[marker_end..].len() - after_indent[marker_end..].trim_start().len()
+}
+
+fn reflow_config(line_length: usize) -> MD013Config {
+    MD013Config {
+        line_length: crate::types::LineLength::from_const(line_length),
+        reflow: true,
+        ..Default::default()
+    }
+}
+
+/// Build an MD030 spacing config from a TOML snippet (kebab keys, e.g.
+/// `"ul-multi = 3"`), exercising the same serde path MD013 uses at runtime.
+fn md030_spacing(toml_snippet: &str) -> crate::rules::md030_list_marker_space::MD030Config {
+    toml::from_str(toml_snippet).expect("valid MD030 config")
+}
+
+#[test]
+fn test_reflow_list_default_spacing_unchanged() {
+    // Regression guard: with default MD030 (1 space), a wrapped bullet keeps a
+    // single space after the marker and a 2-space continuation indent.
+    let rule = MD013LineLength::from_config_struct(reflow_config(40));
+    let content = "- This is a fairly long bullet item that needs to wrap onto at least one more line.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "should wrap: {fixed:?}");
+    assert_eq!(marker_spaces(lines[0]), 1, "first line keeps 1 space: {:?}", lines[0]);
+    for cont in &lines[1..] {
+        if cont.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            leading_spaces(cont),
+            2,
+            "continuation aligns at content column 2: {cont:?}"
+        );
+    }
+    for line in &lines {
+        assert!(line.chars().count() <= 40, "line too long: {line:?}");
+    }
+}
+
+#[test]
+fn test_reflow_unordered_respects_md030_ul_multi() {
+    // ul-multi = 3: a wrapped (multi-line) bullet gets 3 spaces after the marker
+    // and a 4-space continuation indent.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(40));
+    rule.list_spacing = md030_spacing("ul-multi = 3");
+    let content = "- This is a fairly long bullet item that needs to wrap onto at least one more line.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "should wrap: {fixed:?}");
+    assert_eq!(
+        marker_spaces(lines[0]),
+        3,
+        "first line uses ul-multi spaces: {:?}",
+        lines[0]
+    );
+    for cont in &lines[1..] {
+        if cont.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            leading_spaces(cont),
+            4,
+            "continuation aligns at content column 4: {cont:?}"
+        );
+    }
+    for line in &lines {
+        assert!(line.chars().count() <= 40, "line too long: {line:?}");
+    }
+}
+
+#[test]
+fn test_reflow_ordered_respects_md030_ol_multi() {
+    // ol-multi = 2: a wrapped ordered item gets 2 spaces after `1.` (content at
+    // column 4) and a 4-space continuation indent.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(40));
+    rule.list_spacing = md030_spacing("ol-multi = 2");
+    let content = "1. This is a fairly long numbered item that wraps onto at least one more line here.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "should wrap: {fixed:?}");
+    assert!(
+        lines[0].starts_with("1.  "),
+        "ordered marker gets 2 spaces: {:?}",
+        lines[0]
+    );
+    assert_eq!(marker_spaces(lines[0]), 2, "exactly 2 spaces: {:?}", lines[0]);
+    for cont in &lines[1..] {
+        if cont.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            leading_spaces(cont),
+            4,
+            "continuation aligns at content column 4: {cont:?}"
+        );
+    }
+}
+
+#[test]
+fn test_reflow_ordered_respects_ol_align_column() {
+    // ol-align-column = 4 aligns ordered text to column 4 measured from the marker
+    // start, regardless of marker width: `10.` (width 3) gets a single space so
+    // content still lands at column 4, with a 4-space continuation indent.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(40));
+    rule.list_spacing = md030_spacing("ol-align-column = 4");
+    let content = "10. This is a fairly long numbered item that wraps onto at least one more line ok.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "should wrap: {fixed:?}");
+    assert!(
+        lines[0].starts_with("10. "),
+        "content aligned to column 4: {:?}",
+        lines[0]
+    );
+    assert_eq!(
+        marker_spaces(lines[0]),
+        1,
+        "two-digit marker gets 1 space: {:?}",
+        lines[0]
+    );
+    for cont in &lines[1..] {
+        if cont.is_empty() {
+            continue;
+        }
+        assert_eq!(
+            leading_spaces(cont),
+            4,
+            "continuation aligns at content column 4: {cont:?}"
+        );
+    }
+}
+
+#[test]
+fn test_reflow_nested_list_aligns_continuation_to_content_column() {
+    // Nesting: a nested bullet's continuation lines align to that item's own
+    // content column (4), not the outer item's. Default spacing (1 space).
+    let rule = MD013LineLength::from_config_struct(reflow_config(40));
+    let content = indoc! {"
+        - Outer bullet that is itself long enough to wrap across multiple lines for sure here.
+          - Nested bullet that is also quite long and must wrap onto another line as well here.
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    // Outer marker keeps 1 space at column 0.
+    assert!(
+        lines[0].starts_with("- ") && marker_spaces(lines[0]) == 1,
+        "outer marker: {:?}",
+        lines[0]
+    );
+
+    // The nested marker line is at indent 2 with a single space after the dash.
+    let nested_idx = lines
+        .iter()
+        .position(|l| l.starts_with("  - "))
+        .unwrap_or_else(|| panic!("nested marker not found in:\n{fixed}"));
+    assert_eq!(
+        marker_spaces(lines[nested_idx]),
+        1,
+        "nested marker: {:?}",
+        lines[nested_idx]
+    );
+
+    // The nested item's continuation line aligns to column 4 (its content column).
+    let nested_cont = lines[nested_idx + 1];
+    assert_eq!(
+        leading_spaces(nested_cont),
+        4,
+        "nested continuation aligns at content column 4: {nested_cont:?}"
+    );
+    assert!(!nested_cont[4..].starts_with(' '), "no extra indent: {nested_cont:?}");
+
+    for line in &lines {
+        assert!(line.chars().count() <= 40, "line too long: {line:?}");
+    }
+}
+
+#[test]
+fn test_reflow_nested_list_respects_md030_ul_multi() {
+    // Nesting + ul-multi = 3: the nested bullet gets 3 spaces after its dash and a
+    // 6-space continuation indent (indent 2 + dash + 3 spaces).
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(44));
+    rule.list_spacing = md030_spacing("ul-multi = 3");
+    let content = indoc! {"
+        - Outer bullet that is itself long enough to wrap across multiple lines for sure here.
+          - Nested bullet that is also quite long and must wrap onto another line as well here.
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    let nested_idx = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with("- ") && leading_spaces(l) == 2)
+        .unwrap_or_else(|| panic!("nested marker not found in:\n{fixed}"));
+    assert_eq!(
+        marker_spaces(lines[nested_idx]),
+        3,
+        "nested marker ul-multi: {:?}",
+        lines[nested_idx]
+    );
+    let nested_cont = lines[nested_idx + 1];
+    assert_eq!(
+        leading_spaces(nested_cont),
+        6,
+        "nested continuation aligns at content column 6: {nested_cont:?}"
+    );
+
+    for line in &lines {
+        assert!(line.chars().count() <= 44, "line too long: {line:?}");
+    }
+}
+
+#[test]
+fn test_reflow_list_reads_md030_from_global_config() {
+    // End-to-end: MD013 reads MD030's ul-multi from the global config in from_config.
+    use crate::config::{Config, RuleConfig};
+
+    let mut config = Config::default();
+    let parsed: toml::Table = toml::from_str(indoc! {"
+        [MD013]
+        reflow = true
+        line-length = 40
+
+        [MD030]
+        ul-multi = 3
+    "})
+    .expect("valid TOML");
+    for (key, value) in parsed {
+        let mut values = std::collections::BTreeMap::new();
+        if let toml::Value::Table(table) = value {
+            for (k, v) in table {
+                values.insert(k, v);
+            }
+        }
+        config.rules.insert(key, RuleConfig { severity: None, values });
+    }
+
+    let rule = MD013LineLength::from_config(&config);
+    let content = "- This is a fairly long bullet item that needs to wrap onto at least one more line.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let first = fixed.lines().next().unwrap();
+    assert_eq!(marker_spaces(first), 3, "ul-multi read from global config: {first:?}");
+}
+
+#[test]
+fn test_reflow_blockquote_list_respects_md030_ul_multi() {
+    // A list item nested in a blockquote also picks up MD030 spacing: with
+    // ul-multi = 3 the marker gets 3 spaces and continuation lines align under the
+    // content column (4) after the blockquote prefix.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(50));
+    rule.list_spacing = md030_spacing("ul-multi = 3");
+    let content = "> - This is a fairly long bullet inside a blockquote that needs to wrap onto another line.";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert!(lines.len() > 1, "should wrap: {fixed:?}");
+    assert!(
+        lines[0].starts_with("> -   ") && !lines[0].starts_with("> -    "),
+        "blockquote marker gets 3 spaces: {:?}",
+        lines[0]
+    );
+    for cont in &lines[1..] {
+        if cont.trim().is_empty() {
+            continue;
+        }
+        let after_bq = cont
+            .strip_prefix("> ")
+            .unwrap_or_else(|| panic!("missing blockquote prefix: {cont:?}"));
+        assert_eq!(
+            leading_spaces(after_bq),
+            4,
+            "continuation aligns at content column 4: {cont:?}"
+        );
+    }
+    for line in &lines {
+        assert!(line.chars().count() <= 50, "line too long: {line:?}");
+    }
 }

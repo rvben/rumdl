@@ -4,30 +4,16 @@
 //! See [docs/md030.md](../../docs/md030.md) for full documentation, configuration, and examples.
 
 use crate::rule::{LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::blockquote::{effective_indent_in_blockquote, parse_blockquote_prefix};
+use crate::utils::blockquote::parse_blockquote_prefix;
 use crate::utils::calculate_indentation_width_default;
+use crate::utils::list_utils::{
+    ListContinuation, classify_continuation, continuation_params, has_continuation, is_multi_line_list_item,
+};
 use crate::utils::range_utils::calculate_match_range;
 use toml;
 
 mod md030_config;
-use md030_config::MD030Config;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ListType {
-    Unordered,
-    Ordered,
-}
-
-/// How a following line relates to the list item being scanned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Continuation {
-    /// Part of the item (a continuation line or nested content).
-    Belongs,
-    /// A blank line, which neither continues nor ends the item.
-    Skip,
-    /// The item is over (a sibling/ancestor marker or under-indented content).
-    Ends,
-}
+pub use md030_config::MD030Config;
 
 /// An open list item (or inline bullet) whose content the current line may
 /// continue, tracked on a stack. `shift` is its cumulative indent shift (its own
@@ -79,15 +65,6 @@ impl MD030ListMarkerSpace {
     /// The target column for ordered list text, or `None` when alignment is off.
     fn ol_align_column(&self) -> Option<usize> {
         self.config.ol_align_column.enabled()
-    }
-
-    fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
-        match (list_type, is_multi) {
-            (ListType::Unordered, false) => self.config.ul_single.get(),
-            (ListType::Unordered, true) => self.config.ul_multi.get(),
-            (ListType::Ordered, false) => self.config.ol_single.get(),
-            (ListType::Ordered, true) => self.config.ol_multi.get(),
-        }
     }
 }
 
@@ -150,8 +127,8 @@ impl Rule for MD030ListMarkerSpace {
                     ..
                 }) = stack.last()
                 {
-                    if Self::classify_continuation(ctx, line_num_1based, lines, marker_column, bq_level, min_indent)
-                        == Continuation::Ends
+                    if classify_continuation(ctx, line_num_1based, lines, marker_column, bq_level, min_indent)
+                        == ListContinuation::Ends
                     {
                         stack.pop();
                     } else {
@@ -195,11 +172,6 @@ impl Rule for MD030ListMarkerSpace {
                 warnings.push(warning);
             }
 
-            let list_type = if list_info.is_ordered {
-                ListType::Ordered
-            } else {
-                ListType::Unordered
-            };
             let marker_end = list_info.marker_column + list_info.marker.len();
 
             // MD030 only applies when there is content after the marker.
@@ -209,21 +181,12 @@ impl Rule for MD030ListMarkerSpace {
 
             let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-            let expected_spaces = if list_type == ListType::Ordered
-                && let Some(target_column) = self.ol_align_column()
-            {
-                // Align ordered text to the target column, overriding ol-single/
-                // ol-multi: pad a narrow marker up to it, and let one too wide overflow
-                // with a single space. Capped at 4 spaces, since 5+ start an indented
-                // code block in CommonMark.
-                let marker_len = list_info.marker.len();
-                target_column.saturating_sub(marker_len).clamp(1, 4)
-            } else {
-                // Default: a fixed number of spaces by list type and whether the item
-                // is single- or multi-line.
-                let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
-                self.get_expected_spaces(list_type, is_multi_line)
-            };
+            // Spacing comes from the shared MD030 config logic: the ol-align-column
+            // override for ordered lists, otherwise the fixed single-/multi-line value.
+            let is_multi_line = is_multi_line_list_item(ctx, line_num_1based, lines);
+            let expected_spaces =
+                self.config
+                    .expected_spaces(list_info.is_ordered, is_multi_line, list_info.marker.len());
 
             if actual_spaces != expected_spaces {
                 warnings.push(self.spacing_fix_warning(
@@ -238,8 +201,7 @@ impl Rule for MD030ListMarkerSpace {
 
             // Push this item's frame so its continuation lines follow it, and space any
             // inline nested bullet (`1. - x`), which gets its own frame.
-            if may_widen
-                && let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num_1based)
+            if may_widen && let Some((marker_column, bq_level, min_indent)) = continuation_params(ctx, line_num_1based)
             {
                 let item_shift = owner_shift + (expected_spaces as isize - actual_spaces as isize);
                 stack.push(AlignFrame {
@@ -402,86 +364,6 @@ impl MD030ListMarkerSpace {
         Some((offset, spaces))
     }
 
-    /// The marker column, blockquote nesting level, and minimum (blockquote-aware)
-    /// indent a following line needs to continue the list item on `line_num`. These
-    /// are the inputs shared by every continuation scan. `None` if the line isn't a
-    /// list item. Inside a blockquote the indent excludes the prefix so it stays in
-    /// the coordinate system of [`effective_indent_in_blockquote`].
-    fn continuation_params(ctx: &crate::lint_context::LintContext, line_num: usize) -> Option<(usize, usize, usize)> {
-        let info = ctx.line_info(line_num)?;
-        let list = info.list_item.as_ref()?;
-        let (bq_level, min_indent) = match &info.blockquote {
-            Some(bq) if bq.nesting_level > 0 => (bq.nesting_level, list.content_column.saturating_sub(bq.prefix.len())),
-            _ => (0, list.content_column),
-        };
-        Some((list.marker_column, bq_level, min_indent))
-    }
-
-    /// Classify the line at `next_line_num` (1-based) relative to a list item whose
-    /// marker is at `marker_column` with continuation threshold (`bq_level`,
-    /// `min_indent`). The single source of truth for what belongs to a list item.
-    fn classify_continuation(
-        ctx: &crate::lint_context::LintContext,
-        next_line_num: usize,
-        lines: &[&str],
-        marker_column: usize,
-        bq_level: usize,
-        min_indent: usize,
-    ) -> Continuation {
-        let Some(info) = ctx.line_info(next_line_num) else {
-            return Continuation::Skip;
-        };
-        // A deeper marker is nested content; one at the same or a shallower column
-        // ends the item.
-        if let Some(next_list) = &info.list_item {
-            return if next_list.marker_column <= marker_column {
-                Continuation::Ends
-            } else {
-                Continuation::Belongs
-            };
-        }
-        let content = lines.get(next_line_num - 1).copied().unwrap_or("");
-        if content.trim().is_empty() {
-            return Continuation::Skip; // Blank lines don't decide on their own.
-        }
-        let raw_indent = content.len() - content.trim_start().len();
-        if effective_indent_in_blockquote(content, bq_level, raw_indent) < min_indent {
-            Continuation::Ends
-        } else {
-            Continuation::Belongs
-        }
-    }
-
-    /// Whether the list item on `line_num` spans multiple lines (has continuation or
-    /// nested content).
-    fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
-        let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num) else {
-            return false;
-        };
-        Self::has_continuation(ctx, line_num, lines, marker_column, bq_level, min_indent)
-    }
-
-    /// Whether any line after `line_num` (1-based) belongs to an item with the given
-    /// continuation threshold, scanning until the item ends. Shared by the multi-line
-    /// check and the inline-bullet check.
-    fn has_continuation(
-        ctx: &crate::lint_context::LintContext,
-        line_num: usize,
-        lines: &[&str],
-        marker_column: usize,
-        bq_level: usize,
-        min_indent: usize,
-    ) -> bool {
-        for next in (line_num + 1)..=lines.len() {
-            match Self::classify_continuation(ctx, next, lines, marker_column, bq_level, min_indent) {
-                Continuation::Belongs => return true,
-                Continuation::Ends => break,
-                Continuation::Skip => {}
-            }
-        }
-        false
-    }
-
     /// Byte offset on `line` where its shiftable indent begins: column 0 when the
     /// owning item is at top level, or just past the blockquote prefix when it sits
     /// inside a blockquote (its indent lives after the `>` markers).
@@ -546,13 +428,10 @@ impl MD030ListMarkerSpace {
         let (offset, spaces) = Self::inline_unordered_spaces(line, content_column)?;
         let bullet_content_col = offset + spaces;
         // ul-multi if the bullet itself spans lines, else ul-single, measured with a
-        // raw indent (bq_level 0) like a bullet that begins its own line.
-        let multi = Self::has_continuation(ctx, line_num, lines, content_column, 0, bullet_content_col);
-        let want = if multi {
-            self.config.ul_multi.get()
-        } else {
-            self.config.ul_single.get()
-        };
+        // raw indent (bq_level 0) like a bullet that begins its own line. The inline
+        // bullet is always unordered (marker width 1).
+        let multi = has_continuation(ctx, line_num, lines, content_column, 0, bullet_content_col);
+        let want = self.config.expected_spaces(false, multi, 1);
         if spaces == want {
             return None;
         }
@@ -614,7 +493,8 @@ impl MD030ListMarkerSpace {
 
                     if is_clear_intent {
                         let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
-                        let expected_spaces = self.get_expected_spaces(ListType::Ordered, is_multi_line);
+                        // Ordered marker `<digits>.` has width `before_dot.len() + 1`.
+                        let expected_spaces = self.config.expected_spaces(true, is_multi_line, before_dot.len() + 1);
 
                         let marker = format!("{before_dot}.");
                         let marker_pos = indent_len;
