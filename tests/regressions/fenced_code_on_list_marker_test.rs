@@ -361,3 +361,25 @@ fn md007_keeps_nesting_under_ordered_fence_opening_item() {
         "nested list under an ordered fence-opening item must stay nested, got {result:?}"
     );
 }
+
+#[test]
+fn md007_skips_list_like_lines_inside_azure_colon_fence() {
+    // Azure DevOps `:::` blocks are code constructs that pulldown-cmark does not
+    // parse, so their interior lines are flagged `in_code_block` yet still carry a
+    // `list_item` from pulldown. The fence-opening exception must NOT treat such a
+    // line as a list item: it is opaque code, not a fence opener on a list marker.
+    // Otherwise MD007 warns (and offers to "fix" indentation) inside the code block.
+    let content = indoc! {"
+        :::mermaid
+
+          - code
+            - deeper
+        :::
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::AzureDevOps, None);
+    let result = MD007ULIndent::default().check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "MD007 must not flag list-like lines inside an Azure ::: code block, got {result:?}"
+    );
+}
