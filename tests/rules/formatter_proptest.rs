@@ -156,7 +156,7 @@ proptest! {
             Box::new(MD025SingleTitle::default()),
             Box::new(MD026NoTrailingPunctuation::default()),
             Box::new(MD027MultipleSpacesBlockquote::default()),
-            Box::new(MD028NoBlanksBlockquote),
+            Box::new(MD028NoBlanksBlockquote::with_fix(true)),
             Box::new(MD029OrderedListPrefix::default()),
             Box::new(MD030ListMarkerSpace::default()),
             Box::new(MD031BlanksAroundFences::default()),
@@ -367,7 +367,7 @@ idempotent_rule!(
 );
 idempotent_rule!(
     md028,
-    MD028NoBlanksBlockquote,
+    MD028NoBlanksBlockquote::with_fix(true),
     markdown_content_strategy(),
     Standard,
     MkDocs,

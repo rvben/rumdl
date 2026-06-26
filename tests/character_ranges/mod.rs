@@ -211,7 +211,7 @@ pub fn create_rule_by_name(rule_name: &str) -> Option<Box<dyn Rule>> {
         "MD025" => Some(Box::new(MD025SingleTitle::new(1, ""))),
         "MD026" => Some(Box::new(MD026NoTrailingPunctuation::new(Some(".,;:!?".to_string())))),
         "MD027" => Some(Box::new(MD027MultipleSpacesBlockquote::default())),
-        "MD028" => Some(Box::new(MD028NoBlanksBlockquote)),
+        "MD028" => Some(Box::new(MD028NoBlanksBlockquote::with_fix(true))),
         "MD030" => Some(Box::new(MD030ListMarkerSpace::new(1, 1, 1, 1))),
         "MD031" => Some(Box::new(MD031BlanksAroundFences::default())),
         "MD032" => Some(Box::new(MD032BlanksAroundLists::default())),

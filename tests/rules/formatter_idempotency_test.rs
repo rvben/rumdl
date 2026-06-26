@@ -290,7 +290,7 @@ fn test_md027_fix_idempotent() {
 
 #[test]
 fn test_md028_fix_idempotent() {
-    let rule = MD028NoBlanksBlockquote;
+    let rule = MD028NoBlanksBlockquote::with_fix(true);
     let content = "> First quote\n\n> Second quote\n";
     assert_fix_idempotent(&rule, content, "MD028");
 }

@@ -393,8 +393,8 @@ fn test_all_configurable_rules_expose_config_schema() {
     // Update this number when adding new configurable rules.
     assert_eq!(
         rules_with_config.len(),
-        51,
-        "Expected 51 rules with config sections. If you added config to a rule, \
+        52,
+        "Expected 52 rules with config sections. If you added config to a rule, \
          implement default_config_section(). Rules with config: {rules_with_config:?}"
     );
 }
