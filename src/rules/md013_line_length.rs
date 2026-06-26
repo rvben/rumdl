@@ -66,6 +66,7 @@ impl MD013LineLength {
                 length_mode: LengthMode::default(),
                 abbreviations: Vec::new(),
                 require_sentence_capital: true,
+                semantic_link_understanding: true,
             },
         }
     }
@@ -221,6 +222,16 @@ impl Rule for MD013LineLength {
                 if let Some(strict) = obj.get("strict").and_then(serde_json::Value::as_bool) {
                     config.strict = strict;
                 }
+                if let Some(stern) = obj.get("stern").and_then(serde_json::Value::as_bool) {
+                    config.stern = stern;
+                }
+                if let Some(v) = obj
+                    .get("semantic_link_understanding")
+                    .or_else(|| obj.get("semantic-link-understanding"))
+                    .and_then(serde_json::Value::as_bool)
+                {
+                    config.semantic_link_understanding = v;
+                }
                 if let Some(reflow) = obj.get("reflow").and_then(serde_json::Value::as_bool) {
                     config.reflow = reflow;
                 }
@@ -371,8 +382,10 @@ impl Rule for MD013LineLength {
                 continue;
             }
 
-            // Semantic link understanding: suppress when excess comes entirely from inline URLs
-            if !effective_config.strict {
+            // Semantic link understanding: suppress when excess comes entirely from inline URLs.
+            // Disabled by `strict` (all forgiveness off) and by `semantic_link_understanding = false`
+            // (count link/image URLs toward the line length so such lines are flagged).
+            if !effective_config.strict && effective_config.semantic_link_understanding {
                 let text_only_length = self.calculate_text_only_length(effective_length, line_number, ctx);
                 if text_only_length <= line_limit {
                     continue;
