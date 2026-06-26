@@ -2295,10 +2295,17 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_length = word_len;
                     current_line_element_spans.clear();
                 } else {
-                    // Add word to current line
-                    // Only add space if: we have content AND (this isn't the first word OR original had leading space)
-                    // AND this isn't trailing punctuation (which attaches directly)
-                    if current_length > 0 && (i > 0 || has_leading_space) && !is_trailing_punct {
+                    // Add a space only where the source had whitespace at this position.
+                    // For the first word of a text run (i == 0) that means the source had a
+                    // leading space — and reaching this branch already implies the word is
+                    // not adjacent to the previous element, so the space is real and must be
+                    // kept even for punctuation. Suppressing it here would delete the space
+                    // after an inline element, e.g. `` `code` } `` -> `` `code`} ``. The
+                    // no-space (adjacent) case is handled above by `is_first_adjacent`.
+                    // Within a text run (i > 0) trailing punctuation still attaches to the
+                    // preceding word.
+                    let add_space = current_length > 0 && if i == 0 { has_leading_space } else { !is_trailing_punct };
+                    if add_space {
                         current_line.push(' ');
                         current_length += 1;
                     }
