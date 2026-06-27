@@ -8541,6 +8541,59 @@ fn test_md013_reflow_standalone_link_boundary() {
 }
 
 #[test]
+fn test_md013_reflow_standalone_link_boundary_in_blockquote() {
+    // A standalone link between two wrapping blockquote prose lines must stay on
+    // its own line, not be absorbed into the following paragraph during reflow
+    // (mirroring the top-level standalone-link boundary).
+    let content = "> This first quoted sentence is quite long and definitely needs to wrap somewhere.\n> [link](https://example.com/x)\n> And this trailing quoted sentence is also long enough that it must wrap as well.\n";
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        fixed.lines().any(|l| l.trim() == "> [link](https://example.com/x)"),
+        "standalone link must remain on its own blockquote line, got:\n{fixed}"
+    );
+    assert!(
+        !fixed.contains("[link](https://example.com/x) And"),
+        "standalone link must not be absorbed into the following paragraph, got:\n{fixed}"
+    );
+
+    // The reflow must be idempotent.
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    let twice = rule.fix(&ctx2).unwrap();
+    assert_eq!(fixed, twice, "blockquote standalone-link reflow must be idempotent");
+}
+
+#[test]
+fn test_md013_reflow_blockquote_inline_link_not_boundary() {
+    // An inline link inside blockquote prose is NOT a standalone link, so it must
+    // not act as a paragraph boundary: a long blockquote line with an inline link
+    // is still flagged for reflow (the boundary change must not over-reach).
+    let content = "> See [the docs](https://example.com/page) for the full configuration reference right here.\n";
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        !result.is_empty(),
+        "blockquote line with an inline link should still be flagged for reflow"
+    );
+}
+
+#[test]
 fn test_md013_standalone_link_with_trailing_punctuation() {
     let long_url = "https://www.example.com/some/very/long/path/that/exceeds/forty/characters";
 

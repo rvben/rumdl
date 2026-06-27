@@ -688,6 +688,7 @@ impl MD013LineLength {
         content: &str,
         line_num: usize,
         ctx: &crate::lint_context::LintContext,
+        strict: bool,
     ) -> bool {
         let trimmed = content.trim();
 
@@ -706,6 +707,10 @@ impl MD013LineLength {
             || is_snippet_block_delimiter(content)
             || is_github_alert_marker(trimmed)
             || is_html_only_line(content)
+            // A standalone link/image line is exempt from MD013 (non-strict mode),
+            // so it must end the blockquote paragraph rather than be absorbed into
+            // it, mirroring the top-level paragraph reflow boundary.
+            || (!strict && is_standalone_link_or_image_line(content))
     }
 
     fn generate_blockquote_paragraph_fix(
@@ -745,7 +750,7 @@ impl MD013LineLength {
                     break;
                 }
 
-                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx) {
+                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx, config.strict) {
                     break;
                 }
 
@@ -758,7 +763,7 @@ impl MD013LineLength {
             }
 
             let lazy_content = lines[i].trim_start();
-            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx) {
+            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx, config.strict) {
                 break;
             }
 
@@ -1033,7 +1038,7 @@ impl MD013LineLength {
             // An embedded structure (code block, table, fence, nested quote, ...)
             // means the item is not simple prose: keep consuming so the cursor clears
             // the whole structure, but do not produce a fix.
-            if self.is_blockquote_content_boundary(content, i + 1, ctx) {
+            if self.is_blockquote_content_boundary(content, i + 1, ctx, config.strict) {
                 simple = false;
             }
 
