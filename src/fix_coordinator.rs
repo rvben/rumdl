@@ -228,6 +228,26 @@ impl FixCoordinator {
             let ctx = LintContext::new(content, flavor, file_path.map(std::path::Path::to_path_buf));
             total_ctx_creations += 1;
 
+            // Inline `rumdl-configure-file` value overrides: when the document carries
+            // inline rule-config overrides, recreate the affected rules from the merged
+            // config so fixes honor them, matching the lint/diagnostics path. Without
+            // this, fix() would run with the base config and could rewrite content the
+            // configured rule considers valid.
+            let recreated_rules: HashMap<String, Box<dyn Rule>> = {
+                let inline_overrides = ctx.inline_config().get_all_rule_configs();
+                if inline_overrides.is_empty() {
+                    HashMap::new()
+                } else {
+                    let merged = config.merge_with_inline_config(ctx.inline_config());
+                    inline_overrides
+                        .keys()
+                        .filter_map(|name| {
+                            crate::rules::create_rule_by_name(name, &merged).map(|rule| (name.clone(), rule))
+                        })
+                        .collect()
+                }
+            };
+
             let mut any_fix_applied = false;
             // The rule that applied a fix this iteration (used for cycle reporting).
             let mut this_iter_rule: &str = "";
@@ -242,13 +262,18 @@ impl FixCoordinator {
                     continue;
                 }
 
+                // Use the inline-config-recreated instance when present so checks and
+                // fixes reflect inline `rumdl-configure-file` overrides; otherwise the
+                // base rule. Rule identity (name) is unchanged either way.
+                let effective_rule: &dyn Rule = recreated_rules.get(rule.name()).map_or(*rule, |r| r.as_ref());
+
                 // Skip rules that indicate they should be skipped (opt-in rules, content-based skipping)
-                if rule.should_skip(&ctx) {
+                if effective_rule.should_skip(&ctx) {
                     continue;
                 }
 
                 // Check if this rule has any current warnings
-                let Ok(warnings) = rule.check(&ctx) else {
+                let Ok(warnings) = effective_rule.check(&ctx) else {
                     continue;
                 };
 
@@ -276,13 +301,13 @@ impl FixCoordinator {
                 // no fix capability (Unfixable). Unfixable rules attach no inline
                 // fixes, so in practice they are never dispatched to fix().
                 let has_inline_fix = filtered_warnings.iter().any(|w| w.fix.is_some());
-                let rule_advertises_fix = rule.fix_capability() != FixCapability::Unfixable;
+                let rule_advertises_fix = effective_rule.fix_capability() != FixCapability::Unfixable;
                 if !has_inline_fix && !rule_advertises_fix {
                     continue;
                 }
 
                 // Apply fix
-                match rule.fix(&ctx) {
+                match effective_rule.fix(&ctx) {
                     Ok(fixed_content) => {
                         if fixed_content != *content {
                             *content = fixed_content;
@@ -934,5 +959,40 @@ mod tests {
         assert_eq!(result2.rules_fixed, 0, "Second run should fix nothing");
         assert!(result1.converged);
         assert!(result2.converged);
+    }
+
+    #[test]
+    fn test_apply_fixes_collapses_double_space_without_inline_override() {
+        // Control: MD064 actually rewrites this content, so the override test below
+        // is not vacuous - without an inline override the double space is collapsed.
+        let mut content = String::from("`<svg>`.  Fortunately\n");
+        let rules: Vec<Box<dyn Rule>> = vec![crate::rules::create_rule_by_name("MD064", &Config::default()).unwrap()];
+        FixCoordinator::new()
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 10, None)
+            .unwrap();
+        assert_eq!(
+            content, "`<svg>`. Fortunately\n",
+            "MD064 collapses the sentence double space when not overridden"
+        );
+    }
+
+    #[test]
+    fn test_apply_fixes_honors_inline_configure_file_overrides() {
+        // A document that relaxes a rule via an inline `rumdl-configure-file` override
+        // must survive the fix coordinator unchanged: fixes have to honor inline value
+        // overrides the same way lint/diagnostics do, otherwise "fix" rewrites content
+        // the configured rule considers valid.
+        let mut content = String::from(
+            "<!-- rumdl-configure-file { \"MD064\": { \"allow-sentence-double-space\": true } } -->\n\n`<svg>`.  Fortunately\n",
+        );
+        let original = content.clone();
+        let rules: Vec<Box<dyn Rule>> = vec![crate::rules::create_rule_by_name("MD064", &Config::default()).unwrap()];
+        FixCoordinator::new()
+            .apply_fixes_iterative(&rules, &[], &mut content, &Config::default(), 10, None)
+            .unwrap();
+        assert_eq!(
+            content, original,
+            "inline rumdl-configure-file override (allow-sentence-double-space) must prevent the MD064 fix"
+        );
     }
 }
