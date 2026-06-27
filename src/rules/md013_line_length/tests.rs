@@ -8555,6 +8555,41 @@ fn reflow_config(line_length: usize) -> MD013Config {
     }
 }
 
+/// Maximum list-nesting depth an actual CommonMark parser sees in `md`: 1 for a
+/// flat list, 2 for a list nested inside a list item. Used to assert that reflow
+/// preserves list structure rather than flattening a child into a sibling.
+fn commonmark_max_list_depth(md: &str) -> usize {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let (mut depth, mut max) = (0usize, 0usize);
+    for event in Parser::new(md) {
+        match event {
+            Event::Start(Tag::List(_)) => {
+                depth += 1;
+                max = max.max(depth);
+            }
+            Event::End(TagEnd::List(_)) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    max
+}
+
+/// Whether a CommonMark parser sees a blockquote nested inside a list item in
+/// `md` (rather than as a top-level sibling of the list).
+fn commonmark_blockquote_nested_in_list(md: &str) -> bool {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut item_depth = 0usize;
+    for event in Parser::new(md) {
+        match event {
+            Event::Start(Tag::Item) => item_depth += 1,
+            Event::End(TagEnd::Item) => item_depth = item_depth.saturating_sub(1),
+            Event::Start(Tag::BlockQuote(_)) if item_depth > 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
 fn normalize_reflow_config(line_length: usize) -> MD013Config {
     MD013Config {
         line_length: crate::types::LineLength::from_const(line_length),
@@ -8744,8 +8779,12 @@ fn test_reflow_nested_list_aligns_continuation_to_content_column() {
 
 #[test]
 fn test_reflow_nested_list_respects_md030_ul_multi() {
-    // Nesting + ul-multi = 3: the nested bullet gets 3 spaces after its dash and a
-    // 6-space continuation indent (indent 2 + dash + 3 spaces).
+    // Nesting + ul-multi = 3: the parent's marker widens to 3 spaces, moving its
+    // content column from 2 to 4. The nested bullet (also reflowed, independently)
+    // must move with it — its marker aligned to the parent's new content column (4),
+    // 3 spaces after the dash, continuation at column 8 (indent 4 + dash + 3 spaces).
+    // It must NOT stay at indent 2, where a CommonMark parser would reparse it as a
+    // sibling rather than a child.
     let mut rule = MD013LineLength::from_config_struct(reflow_config(44));
     rule.list_spacing = md030_spacing("ul-multi = 3");
     let content = indoc! {"
@@ -8756,10 +8795,18 @@ fn test_reflow_nested_list_respects_md030_ul_multi() {
     let fixed = rule.fix(&ctx).unwrap();
     let lines: Vec<&str> = fixed.lines().collect();
 
+    // The nesting structure is preserved (a real CommonMark parser still sees the
+    // child as nested, not flattened to a sibling).
+    assert_eq!(
+        commonmark_max_list_depth(&fixed),
+        2,
+        "child must stay nested under the widened parent:\n{fixed}"
+    );
+
     let nested_idx = lines
         .iter()
-        .position(|l| l.trim_start().starts_with("- ") && leading_spaces(l) == 2)
-        .unwrap_or_else(|| panic!("nested marker not found in:\n{fixed}"));
+        .position(|l| l.trim_start().starts_with("- ") && leading_spaces(l) == 4)
+        .unwrap_or_else(|| panic!("nested marker not found at the parent's content column:\n{fixed}"));
     assert_eq!(
         marker_spaces(lines[nested_idx]),
         3,
@@ -8769,13 +8816,70 @@ fn test_reflow_nested_list_respects_md030_ul_multi() {
     let nested_cont = lines[nested_idx + 1];
     assert_eq!(
         leading_spaces(nested_cont),
-        6,
-        "nested continuation aligns at content column 6: {nested_cont:?}"
+        8,
+        "nested continuation aligns at content column 8: {nested_cont:?}"
     );
 
     for line in &lines {
         assert!(line.chars().count() <= 44, "line too long: {line:?}");
     }
+}
+
+#[test]
+fn test_reflow_nested_list_not_flattened_under_widened_parent() {
+    // Regression (PR #692 review): under a non-default MD030, a wrapping parent's
+    // marker widens and pushes its content column right; the independently-reflowed
+    // nested child kept its original indent and a CommonMark parser reparsed it as a
+    // sibling. The child's whole subtree must shift with the parent. Compares the
+    // parsed nesting depth of source vs fixed output so it fails if flattening
+    // returns, independent of the exact wrap columns.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(44));
+    rule.list_spacing = md030_spacing("ul-multi = 3");
+    let content = indoc! {"
+        - Outer bullet that is itself long enough to wrap across multiple lines for sure here.
+          - Nested bullet that is also quite long and must wrap onto another line as well here.
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(commonmark_max_list_depth(content), 2, "source is nested");
+    assert_eq!(
+        commonmark_max_list_depth(&fixed),
+        2,
+        "fixed output must remain nested, not flattened:\n{fixed}"
+    );
+
+    // Idempotent: a second fix is a no-op.
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx2).unwrap(), fixed, "reflow must be idempotent");
+}
+
+#[test]
+fn test_reflow_nested_blockquote_not_flattened_under_widened_parent() {
+    // Same flattening regression as nested lists, but for a blockquote child (reflowed
+    // by the blockquote path). When the parent's marker widens, the quote must shift
+    // with it and stay inside the list item rather than detaching into a top-level
+    // sibling quote.
+    let mut rule = MD013LineLength::from_config_struct(reflow_config(60));
+    rule.list_spacing = md030_spacing("ul-multi = 3");
+    let content = indoc! {"
+        - Outer bullet that is itself long enough to wrap across multiple lines here.
+          > quoted child line that is also quite long and should wrap here too.
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert!(
+        commonmark_blockquote_nested_in_list(content),
+        "source quote is nested inside the list item"
+    );
+    assert!(
+        commonmark_blockquote_nested_in_list(&fixed),
+        "fixed quote must stay nested in the list item, not flatten to a sibling:\n{fixed}"
+    );
+
+    let ctx2 = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx2).unwrap(), fixed, "reflow must be idempotent");
 }
 
 #[test]

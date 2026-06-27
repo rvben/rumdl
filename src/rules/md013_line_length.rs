@@ -723,6 +723,7 @@ impl MD013LineLength {
             || is_html_only_line(content)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn generate_blockquote_paragraph_fix(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -731,6 +732,10 @@ impl MD013LineLength {
         line_index: &LineIndex,
         start_idx: usize,
         line_ending: &str,
+        // Extra indent (spaces) to prepend to the emitted `>` prefix so a blockquote
+        // nested in a list item moves with its parent's widened marker. Zero unless a
+        // non-default MD030 widened an ancestor list item.
+        ancestor_shift: isize,
     ) -> (Option<LintWarning>, usize) {
         let Some(start_bq) = ctx.lines.get(start_idx).and_then(|line| line.blockquote.as_deref()) else {
             return (None, start_idx + 1);
@@ -837,6 +842,14 @@ impl MD013LineLength {
 
         let fallback_prefix = start_bq.prefix.clone();
         let explicit_prefix = dominant_blockquote_prefix(&line_data, &fallback_prefix);
+        // Shift the whole quote right to track a widened parent list item's content
+        // column (only widening matters for nesting; a narrowed parent leaves the quote
+        // harmlessly over-indented, which MD027/MD030 tidy).
+        let explicit_prefix = if ancestor_shift > 0 {
+            format!("{}{explicit_prefix}", " ".repeat(ancestor_shift as usize))
+        } else {
+            explicit_prefix
+        };
         let continuation_style = blockquote_continuation_style(&line_data);
 
         let reflow_line_length = if config.line_length.is_unlimited() {
@@ -957,6 +970,7 @@ impl MD013LineLength {
     /// simple tight prose - those embedding a code block, table, fence, or hard
     /// break - are left untouched (`None`) and the cursor still advances past the
     /// whole item so its inner lines are never reprocessed as loose prose.
+    #[allow(clippy::too_many_arguments)]
     fn generate_blockquote_list_item_fix(
         &self,
         ctx: &crate::lint_context::LintContext,
@@ -965,6 +979,10 @@ impl MD013LineLength {
         line_index: &LineIndex,
         start_idx: usize,
         line_ending: &str,
+        // Extra indent (spaces) to prepend to the emitted `>` prefix when this quoted
+        // list lives inside a list item whose marker widened. Zero unless a non-default
+        // MD030 widened an ancestor list item.
+        ancestor_shift: isize,
     ) -> (Option<LintWarning>, usize) {
         use crate::utils::blockquote::effective_indent_in_blockquote;
 
@@ -982,7 +1000,13 @@ impl MD013LineLength {
 
         // The marker line carries the canonical blockquote prefix: its content begins
         // with the list marker, so no list indent has been folded into the prefix.
-        let bq_prefix = start_bq.prefix.clone();
+        // Track a widened parent list item's content column so the quote stays nested
+        // (only widening can detach it; narrowing just over-indents).
+        let bq_prefix = if ancestor_shift > 0 {
+            format!("{}{}", " ".repeat(ancestor_shift as usize), start_bq.prefix)
+        } else {
+            start_bq.prefix.clone()
+        };
 
         let (marker, first_body) = extract_list_marker_and_content(&start_bq.content);
         if marker.is_empty() {
@@ -1239,9 +1263,37 @@ impl MD013LineLength {
         // Replacements must match the original line endings to avoid false positives.
         let line_ending = crate::utils::line_ending::detect_line_ending(ctx.content);
 
+        // Ancestor list-item indent shifts, innermost last. When a reflowed parent's
+        // marker widens under a non-default MD030 (e.g. ul-multi = 3 moves the parent's
+        // content from column 2 to 4), its nested list/blockquote children are reflowed
+        // independently and would otherwise keep their original indent — leaving them
+        // under the parent's new content column, where a CommonMark parser reparses them
+        // as siblings rather than children. Each frame is (source content column,
+        // cumulative shift applied to that item's content column); a descendant adds its
+        // innermost open ancestor's shift to its own indent so the whole subtree moves
+        // together. With default MD030 every shift is 0, so this is inert and the output
+        // is byte-identical.
+        let mut list_shift_stack: Vec<(usize, isize)> = Vec::new();
+
         let mut i = 0;
         while i < lines.len() {
             let line_num = i + 1;
+
+            // Close ancestor frames whose list item has ended at this line: a non-blank
+            // line indented less than the frame's source content column is no longer
+            // inside that item. Blank lines alone don't close a (loose) list item.
+            if !list_shift_stack.is_empty()
+                && let Some(info) = ctx.lines.get(i)
+                && !info.is_blank
+            {
+                while let Some(&(content_column, _)) = list_shift_stack.last() {
+                    if info.indent < content_column {
+                        list_shift_stack.pop();
+                    } else {
+                        break;
+                    }
+                }
+            }
 
             // Handle blockquote paragraphs with style-preserving reflow.
             // Skip blockquotes when blockquotes=false or paragraphs=false
@@ -1268,6 +1320,11 @@ impl MD013LineLength {
                     }
                     continue;
                 }
+                // A blockquote nested in a list item moves with its parent when the
+                // parent's marker widens (see `list_shift_stack`); pass that shift so the
+                // emitted `>` prefix lands under the parent's new content column instead
+                // of detaching into a sibling.
+                let ancestor_shift = list_shift_stack.last().map_or(0isize, |&(_, shift)| shift);
                 // A list item inside the blockquote needs list-aware reflow (marker +
                 // continuation indent); plain prose goes through the paragraph path.
                 let is_bq_list_item = ctx.lines[i]
@@ -1275,9 +1332,25 @@ impl MD013LineLength {
                     .as_deref()
                     .is_some_and(|bq| is_list_item(&bq.content));
                 let (warning, next_idx) = if is_bq_list_item {
-                    self.generate_blockquote_list_item_fix(ctx, config, lines, &line_index, i, line_ending)
+                    self.generate_blockquote_list_item_fix(
+                        ctx,
+                        config,
+                        lines,
+                        &line_index,
+                        i,
+                        line_ending,
+                        ancestor_shift,
+                    )
                 } else {
-                    self.generate_blockquote_paragraph_fix(ctx, config, lines, &line_index, i, line_ending)
+                    self.generate_blockquote_paragraph_fix(
+                        ctx,
+                        config,
+                        lines,
+                        &line_index,
+                        i,
+                        line_ending,
+                        ancestor_shift,
+                    )
                 };
                 if let Some(warning) = warning {
                     warnings.push(warning);
@@ -2309,7 +2382,18 @@ impl MD013LineLength {
                         // The checkbox (e.g. `[ ] `) is content, not part of the list
                         // marker MD030 governs; carry it over verbatim after the spacing.
                         let checkbox_tail = marker[base_marker_len..].to_string();
-                        let indent_prefix = marker[..item_indent].to_string();
+                        // Shift this item right by its ancestors' cumulative marker
+                        // widening so a nested item stays under its parent's (widened)
+                        // content column. Zero for top-level items and for the whole
+                        // tree under default MD030, where the source indent is preserved
+                        // verbatim (byte-identical output).
+                        let ancestor_shift = list_shift_stack.last().map_or(0isize, |&(_, shift)| shift);
+                        let shifted_indent = (item_indent as isize + ancestor_shift).max(0) as usize;
+                        let indent_prefix = if ancestor_shift == 0 {
+                            marker[..item_indent].to_string()
+                        } else {
+                            " ".repeat(shifted_indent)
+                        };
 
                         // Decide single- vs multi-line spacing from the *rewritten* shape,
                         // not the source. A multi-line source is not enough: plain prose
@@ -2333,7 +2417,7 @@ impl MD013LineLength {
                         // `is_multi_line_list_item` (which keys off the *source*). The two
                         // are related but technically distinct and intentionally separate;
                         // if the notion of "multi-line" changes in one, revisit the other.
-                        let single_col = item_indent
+                        let single_col = shifted_indent
                             + bullet_len
                             + self.list_spacing.expected_spaces(li.is_ordered, false, bullet_len)
                             + checkbox_tail.len();
@@ -2421,6 +2505,13 @@ impl MD013LineLength {
                         })
                     }
                 };
+
+                // Record this item's frame so its nested children inherit the shift.
+                // Only a reflowed item's marker actually moves; an unreflowed one keeps
+                // its source position and so contributes no shift to its children. The
+                // source content column (`marker_len`) is the threshold that decides
+                // which following lines are inside this item.
+                list_shift_stack.push((marker_len, if needs_reflow { code_indent_shift } else { 0 }));
 
                 if needs_reflow {
                     let start_range = line_index.whole_line_range(list_start + 1);
