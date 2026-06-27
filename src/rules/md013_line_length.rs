@@ -388,8 +388,8 @@ impl Rule for MD013LineLength {
             // Disabled by `strict` (all forgiveness off) and by `ignore_link_urls = false`
             // (count link/image URLs toward the line length so such lines are flagged).
             if !effective_config.strict && effective_config.ignore_link_urls {
-                let text_only_length = self.calculate_text_only_length(effective_length, line_number, ctx);
-                if text_only_length <= line_limit {
+                let length_without_urls = self.length_without_inline_link_urls(effective_length, line_number, ctx);
+                if length_without_urls <= line_limit {
                     continue;
                 }
             }
@@ -3303,7 +3303,7 @@ impl MD013LineLength {
     ///
     /// Handles nested constructs (e.g., `[![img](url)](url)`) by only counting the
     /// outermost construct to avoid double-counting.
-    fn calculate_text_only_length(
+    fn length_without_inline_link_urls(
         &self,
         effective_length: usize,
         line_number: usize,

@@ -6272,7 +6272,7 @@ fn test_reflow_tab_container_in_list_item() {
 }
 
 /// Regression test: ctx.links must be sorted by line number for binary search
-/// in calculate_text_only_length to work correctly. The link parser appends
+/// in length_without_inline_link_urls to work correctly. The link parser appends
 /// regex-fallback reference links (from earlier lines) after pulldown-cmark links,
 /// which can produce an unsorted vector.
 #[test]
@@ -6319,7 +6319,7 @@ Short text [link](https://github.com/example/repo/blob/master/keps/sig-node/very
 
 /// Regression test: inline link URL subtraction must work even when regex-fallback
 /// reference links from earlier lines are present. Without proper sorting, binary
-/// search in calculate_text_only_length misses the inline link.
+/// search in length_without_inline_link_urls misses the inline link.
 #[test]
 fn test_md013_url_subtraction_with_earlier_reference_links() {
     // Line 7 is ~95 chars raw, but text-only (without URL) is ~35 chars.
