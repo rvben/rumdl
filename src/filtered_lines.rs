@@ -593,6 +593,13 @@ impl<'a> FilteredLinesBuilder<'a> {
         self.config = self.config.skip_div_markers();
         self
     }
+
+    /// Skip lines inside JSX component blocks (MDX only)
+    #[must_use]
+    pub fn skip_jsx_blocks(mut self) -> Self {
+        self.config = self.config.skip_jsx_blocks();
+        self
+    }
 }
 
 impl<'a> IntoIterator for FilteredLinesBuilder<'a> {

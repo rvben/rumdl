@@ -443,7 +443,7 @@ impl MD046CodeBlockStyle {
     /// Pre-compute which lines sit inside a non-code container whose body may
     /// legitimately be indented by 4+ spaces without being an indented code
     /// block: HTML comments, raw HTML blocks, JSX blocks, MDX comments,
-    /// mkdocstrings blocks, footnote definitions, and blockquotes.
+    /// mkdocstrings blocks, footnote definitions, blockquotes, and front-matter.
     ///
     /// This mirrors the skip list used in `check` when emitting indented
     /// code-block warnings, keeping style detection and warning emission in
@@ -459,6 +459,7 @@ impl MD046CodeBlockStyle {
                         || info.in_mkdocstrings
                         || info.in_footnote_definition
                         || info.blockquote.is_some()
+                        || info.in_front_matter
                 })
             })
             .collect()
@@ -956,6 +957,7 @@ impl Rule for MD046CodeBlockStyle {
                             || info.in_mkdocstrings
                             || info.in_footnote_definition
                             || info.blockquote.is_some()
+                            || info.in_front_matter
                     }) {
                         continue;
                     }
@@ -2931,5 +2933,23 @@ More text
             !fixed.contains("```\n```python"),
             "Should not have nested fence openers"
         );
+    }
+
+    #[test]
+    fn test_md046_front_matter() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "---\nmetadata:\n\n    description: Indented\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_md046_fix_front_matter() {
+        let rule = MD046CodeBlockStyle::new(CodeBlockStyle::Fenced);
+        let content = "---\nmetadata:\n\n    description: Indented\n---\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, content);
     }
 }

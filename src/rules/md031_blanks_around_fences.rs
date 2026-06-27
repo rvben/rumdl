@@ -239,11 +239,16 @@ impl Rule for MD031BlanksAroundFences {
 
         // Check blank lines around each fenced code block
         for (opening_line, closing_line) in &fenced_blocks {
-            // Skip fenced code blocks inside PyMdown blocks
-            if ctx
-                .line_info(*opening_line + 1)
-                .is_some_and(|info| info.in_pymdown_block)
-            {
+            // Skip fenced code blocks in skipped regions (comments, front-matter, etc.)
+            if ctx.line_info(*opening_line + 1).is_some_and(|info| {
+                info.in_html_comment
+                    || info.in_mdx_comment
+                    || info.in_front_matter
+                    || info.in_mkdocstrings
+                    || info.in_jsx_block
+                    || info.in_kramdown_extension_block
+                    || info.in_pymdown_block
+            }) {
                 continue;
             }
 
@@ -1154,6 +1159,18 @@ echo "nested"
         assert!(
             warnings.is_empty(),
             "MD031 should not require blank line after Pandoc div opening: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md031_html_comment() {
+        let rule = MD031BlanksAroundFences::default();
+        let content = "text <!--\n```rust\nconst x = 1;\n```\n-->";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MD031 should not require blank lines around fenced blocks inside HTML comments: {warnings:?}"
         );
     }
 }

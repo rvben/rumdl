@@ -98,11 +98,13 @@ pub(super) fn compute_basic_line_info(
             line_end_offset,
         );
 
+        let in_front_matter = front_matter_end > 0 && i < front_matter_end;
+
         // Compute in_math_block before list detection so lines inside $$ ... $$ blocks
         // are not misidentified as list items due to leading +/- operators.
         let in_math_block = math_block_map.get(i).copied().unwrap_or(false);
 
-        let list_item = if in_math_block {
+        let list_item = if in_math_block || in_front_matter || in_html_comment || in_mkdocstrings {
             None
         } else {
             list_item_map
@@ -117,8 +119,6 @@ pub(super) fn compute_basic_line_info(
                     })
                 })
         };
-
-        let in_front_matter = front_matter_end > 0 && i < front_matter_end;
         let is_hr = !in_code_block && !in_front_matter && is_horizontal_rule_line(line);
 
         let in_pandoc_div = flavor.is_pandoc_compatible()

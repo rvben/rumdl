@@ -645,4 +645,16 @@ mod tests {
             "Content should be unchanged when no fixes are available"
         );
     }
+
+    #[test]
+    fn test_md029_front_matter() {
+        let rule = MD029OrderedListPrefix::default();
+        let content = "---\n1. key: value\n3. key2: value2\n---\n1. Item 1\n2. Item 2\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag list-like items in front-matter: {result:?}"
+        );
+    }
 }

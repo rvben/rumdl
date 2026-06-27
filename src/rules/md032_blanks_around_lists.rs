@@ -3194,4 +3194,16 @@ Root level lazy continuation.
             "MD032 should treat Pandoc div marker as transparent before list: {warnings:?}"
         );
     }
+
+    #[test]
+    fn test_md032_html_comment() {
+        let rule = MD032BlanksAroundLists::default();
+        let content = "text\n<!--\n- Item 1\n- Item 2\n-->\ntext";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "MD032 should not require blank lines around lists inside HTML comments: {warnings:?}"
+        );
+    }
 }
