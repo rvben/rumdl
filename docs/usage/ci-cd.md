@@ -40,7 +40,7 @@ The `v0` tag always points to the latest stable release.
 ```yaml
 - uses: rvben/rumdl@v0
   with:
-    version: "0.2.23"
+    version: "0.2.24"
     path: docs/
 ```
 
