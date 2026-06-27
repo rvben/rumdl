@@ -1252,6 +1252,7 @@ impl MD013LineLength {
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
                 || is_html_only_line(lines[i])
+                || (!config.strict && is_standalone_link_or_image_line(lines[i]))
             {
                 i += 1;
                 continue;
@@ -2962,6 +2963,7 @@ impl MD013LineLength {
                     || is_snippet_block_delimiter(next_line)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
+                    || (!config.strict && is_standalone_link_or_image_line(next_line))
                 {
                     break;
                 }

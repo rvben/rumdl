@@ -8379,3 +8379,25 @@ fn test_myst_colon_figure_directive_options_only_preserved() {
         "options-only `:::{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
     );
 }
+
+#[test]
+fn test_md013_reflow_standalone_link_boundary() {
+    let long_url = "a".repeat(100);
+    // Two short lines that will be merged by reflow, plus the standalone link.
+    let content = format!("Line one.\nLine two.\n[link]({})\n", long_url);
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(30),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "Expected no warnings for standalone link in reflow, got: {:?}",
+        result
+    );
+}
