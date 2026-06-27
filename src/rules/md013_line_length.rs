@@ -23,7 +23,6 @@ mod helpers;
 pub mod md013_config;
 use crate::rules::md030_list_marker_space::MD030Config;
 use crate::utils::is_template_directive_only;
-use crate::utils::list_utils::is_multi_line_list_item;
 use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
@@ -1110,9 +1109,20 @@ impl MD013LineLength {
             let bullet = marker.split(' ').next().unwrap_or("");
             let bullet_len = bullet.chars().count();
             let checkbox_tail = &marker[base_marker_width..];
-            // Multi-line per the shared MD030 helper (continuation/nested content),
-            // or because reflow will wrap the body past one line.
-            let is_multi = is_multi_line_list_item(ctx, start_idx + 1, lines) || exceeds_limit();
+            // Decide single- vs multi-line spacing from the rewritten shape. This path
+            // only handles a single tight prose paragraph (structural or multi-paragraph
+            // items set `simple = false` and bail out above), so the emitted item stays
+            // multi-line solely when the joined body wraps past one line. A multi-line
+            // *source* that collapses onto the marker line must use MD030's single-line
+            // spacing, matching the top-level reflow. The wrap test measures at the
+            // single-line content column so it does not depend on the spacing chosen here.
+            let single_col = self.calculate_string_length(&bq_prefix)
+                + bullet_len
+                + self.list_spacing.expected_spaces(is_ordered, false, bullet_len)
+                + checkbox_tail.chars().count();
+            let is_multi = !body_text.is_empty()
+                && self.calculate_effective_length(&format!("{}{body_text}", " ".repeat(single_col)))
+                    > config.line_length.effective_limit();
             let spaces = self.list_spacing.expected_spaces(is_ordered, is_multi, bullet_len);
             let new_marker = format!("{bullet}{}{checkbox_tail}", " ".repeat(spaces));
             let width = new_marker.chars().count();
@@ -1938,6 +1948,12 @@ impl MD013LineLength {
                 }
 
                 let mut list_item_lines: Vec<LineType> = vec![LineType::Content(first_content)];
+                // Set when collection stops at a nested list item or a nested
+                // blockquote that belongs to this item. Such structure is reflowed
+                // independently and is therefore absent from `list_item_lines`/`blocks`,
+                // but it still keeps the emitted item spanning multiple physical lines,
+                // which the MD030 multi-line spacing decision below must account for.
+                let mut has_trailing_nested_structure = false;
                 i += 1;
 
                 // Collect continuation lines using ctx.lines for metadata
@@ -2008,6 +2024,7 @@ impl MD013LineLength {
                         // generate_blockquote_paragraph_fix. Uncollect a pending blank so
                         // the separator between the list prose and the blockquote survives.
                         if line_info.blockquote.is_some() {
+                            has_trailing_nested_structure = true;
                             if matches!(list_item_lines.last(), Some(LineType::Empty)) {
                                 list_item_lines.pop();
                                 i -= 1;
@@ -2028,6 +2045,7 @@ impl MD013LineLength {
                         // If a blank line was collected before this, uncollect it
                         // so the outer loop preserves the blank between parent and nested.
                         if is_list_item(trimmed) && indent >= marker_len {
+                            has_trailing_nested_structure = true;
                             if matches!(list_item_lines.last(), Some(LineType::Empty)) {
                                 list_item_lines.pop();
                                 i -= 1;
@@ -2293,24 +2311,41 @@ impl MD013LineLength {
                         let checkbox_tail = marker[base_marker_len..].to_string();
                         let indent_prefix = marker[..item_indent].to_string();
 
-                        // Decide single- vs multi-line using the shared MD030 helper for
-                        // the structural part (continuation/nested content in the source),
-                        // then additionally treat the item as multi-line when reflow itself
-                        // will wrap its prose past one line. The wrap test uses the
-                        // single-line content column so it is independent of the spacing we
-                        // are about to choose (avoiding a circular result), and using the
-                        // post-wrap multi-line value keeps the result stable with MD030's
-                        // own fixer instead of oscillating.
+                        // Decide single- vs multi-line spacing from the *rewritten* shape,
+                        // not the source. A multi-line source is not enough: plain prose
+                        // continuation collapses onto the marker line during reflow, so a
+                        // two-line bullet that fits becomes a single physical line and must
+                        // use MD030's single-line spacing (otherwise MD013 emits a result
+                        // that MD030 immediately rewrites). The emitted item stays
+                        // multi-line only when reflow cannot collapse it:
+                        //   - the prose wraps past the line length, or
+                        //   - a structural block remains (code, table, admonition, semantic
+                        //     line, snippet, div marker, HTML) that is not joinable prose, or
+                        //   - more than one paragraph remains (blank-separated), or
+                        //   - a nested list/blockquote follows (reflowed independently, so it
+                        //     is absent from `blocks` but still keeps the item multi-line).
+                        // The wrap test uses the single-line content column so it is
+                        // independent of the spacing we are about to choose (avoiding a
+                        // circular result). `ol-align-column` ignores this flag entirely in
+                        // expected_spaces(), so ordered lists are unaffected.
+                        //
+                        // This is the rewritten-shape counterpart of MD030's
+                        // `is_multi_line_list_item` (which keys off the *source*). The two
+                        // are related but technically distinct and intentionally separate;
+                        // if the notion of "multi-line" changes in one, revisit the other.
                         let single_col = item_indent
                             + bullet_len
                             + self.list_spacing.expected_spaces(li.is_ordered, false, bullet_len)
                             + checkbox_tail.len();
-                        let is_multi = is_multi_line_list_item(ctx, list_start + 1, lines)
-                            || (!combined_content.is_empty()
-                                && self.calculate_effective_length(&format!(
-                                    "{}{combined_content}",
-                                    " ".repeat(single_col)
-                                )) > config.line_length.get());
+                        let prose_wraps = !combined_content.is_empty()
+                            && self
+                                .calculate_effective_length(&format!("{}{combined_content}", " ".repeat(single_col)))
+                                > config.line_length.effective_limit();
+                        let has_structural_block = blocks.iter().any(|b| !matches!(b, Block::Paragraph(_)));
+                        let multiple_paragraphs =
+                            blocks.iter().filter(|b| matches!(b, Block::Paragraph(_))).count() > 1;
+                        let is_multi =
+                            prose_wraps || has_structural_block || multiple_paragraphs || has_trailing_nested_structure;
 
                         let spaces = self.list_spacing.expected_spaces(li.is_ordered, is_multi, bullet_len);
                         let new_marker = format!("{indent_prefix}{}{}{checkbox_tail}", li.marker, " ".repeat(spaces));

@@ -8555,6 +8555,15 @@ fn reflow_config(line_length: usize) -> MD013Config {
     }
 }
 
+fn normalize_reflow_config(line_length: usize) -> MD013Config {
+    MD013Config {
+        line_length: crate::types::LineLength::from_const(line_length),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    }
+}
+
 /// Build an MD030 spacing config from a TOML snippet (kebab keys, e.g.
 /// `"ul-multi = 3"`), exercising the same serde path MD013 uses at runtime.
 fn md030_spacing(toml_snippet: &str) -> crate::rules::md030_list_marker_space::MD030Config {
@@ -8836,6 +8845,88 @@ fn test_reflow_blockquote_list_respects_md030_ul_multi() {
     for line in &lines {
         assert!(line.chars().count() <= 50, "line too long: {line:?}");
     }
+}
+
+#[test]
+fn test_reflow_normalize_collapsed_bullet_uses_single_spacing() {
+    // Regression: in normalize mode a plain two-line bullet collapses to a single
+    // physical line under a large line length. The emitted item is then single-line,
+    // so it must use MD030's `ul-single` (1), not `ul-multi` (3) — otherwise MD013
+    // produces output that MD030 immediately rewrites (a self-disagreement that the
+    // full formatter only papers over). The multi-line decision must follow the
+    // rewritten shape, not the collapsible multi-line source.
+    let mut rule = MD013LineLength::from_config_struct(normalize_reflow_config(200));
+    rule.list_spacing = md030_spacing("ul-single = 1\nul-multi = 3");
+    let content = indoc! {"
+        - first
+          second
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(lines.len(), 1, "two-line bullet should collapse to one line: {fixed:?}");
+    assert_eq!(
+        lines[0], "- first second",
+        "collapsed bullet uses single-line spacing: {:?}",
+        lines[0]
+    );
+    assert_eq!(marker_spaces(lines[0]), 1, "single space after marker: {:?}", lines[0]);
+}
+
+#[test]
+fn test_reflow_normalize_collapsed_bullet_with_nested_list_stays_multi() {
+    // A collapsing prose paragraph followed by a nested list keeps the item
+    // multi-line: the nested list is reflowed independently (so it is absent from the
+    // parent's blocks) but still occupies extra physical lines, so the parent must
+    // keep `ul-multi` spacing to agree with MD030.
+    let mut rule = MD013LineLength::from_config_struct(normalize_reflow_config(200));
+    rule.list_spacing = md030_spacing("ul-single = 1\nul-multi = 3");
+    let content = indoc! {"
+        - first
+          second
+          - nested
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let first = fixed.lines().next().unwrap();
+
+    assert!(
+        first.starts_with("-   first second"),
+        "prose still collapses while the marker keeps multi-line spacing: {first:?}"
+    );
+    assert_eq!(
+        marker_spaces(first),
+        3,
+        "parent with a trailing nested list keeps multi-line spacing: {first:?}"
+    );
+}
+
+#[test]
+fn test_reflow_normalize_blockquote_collapsed_bullet_uses_single_spacing() {
+    // The blockquote-nested list reflow shares the same rewritten-shape rule: a
+    // two-line prose bullet that collapses under a large line length uses single-line
+    // spacing rather than the multi-line value implied by its multi-line source.
+    let mut rule = MD013LineLength::from_config_struct(normalize_reflow_config(200));
+    rule.list_spacing = md030_spacing("ul-single = 1\nul-multi = 3");
+    let content = indoc! {"
+        > - first
+        >   second
+    "};
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    let lines: Vec<&str> = fixed.lines().collect();
+
+    assert_eq!(
+        lines.len(),
+        1,
+        "blockquote bullet should collapse to one line: {fixed:?}"
+    );
+    assert_eq!(
+        lines[0], "> - first second",
+        "collapsed blockquote bullet uses single-line spacing: {:?}",
+        lines[0]
+    );
 }
 
 #[test]

@@ -11,7 +11,6 @@ pub mod header_id_utils;
 pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;
-pub mod list_utils;
 pub mod mkdocs_admonitions;
 pub mod mkdocs_attr_list;
 pub mod mkdocs_common;
