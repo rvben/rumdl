@@ -8636,3 +8636,163 @@ reflow-mode = "semantic-line-breaks"
         actions.iter().map(|a| &a.title).collect::<Vec<_>>()
     );
 }
+
+/// Apply one LSP `formatting` pass and return the resulting document content,
+/// persisting it back to the server (mimicking the editor applying the edit).
+/// The handler returns a single whole-document edit, so `new_text` is the full
+/// new content.
+async fn format_once(server: &RumdlLanguageServer, uri: &Url, options: &FormattingOptions) -> String {
+    let before = server.documents.read().await.get(uri).unwrap().content.clone();
+    let params = DocumentFormattingParams {
+        text_document: TextDocumentIdentifier { uri: uri.clone() },
+        options: options.clone(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    };
+    let after = match server.formatting(params).await.unwrap() {
+        Some(edits) if !edits.is_empty() => edits[0].new_text.clone(),
+        _ => before,
+    };
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: after.clone(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    after
+}
+
+/// Standard editor formatting options used by the formatting tests.
+fn editor_formatting_options() -> FormattingOptions {
+    FormattingOptions {
+        tab_size: 4,
+        insert_spaces: true,
+        properties: HashMap::new(),
+        trim_trailing_whitespace: Some(true),
+        insert_final_newline: Some(true),
+        trim_final_newlines: Some(true),
+    }
+}
+
+/// Build a test server whose resolved config sets MD030 `ul-single`/`ul-multi`,
+/// using the same config representation the CLI loads from a `rumdl.toml`.
+async fn server_with_md030_spacing(ul_single: usize, ul_multi: usize) -> RumdlLanguageServer {
+    let server = create_test_server();
+    let mut config = crate::config::Config::default();
+    let toml_src = format!("[MD030]\nul-single = {ul_single}\nul-multi = {ul_multi}\n");
+    let parsed: toml::Table = toml::from_str(&toml_src).unwrap();
+    for (key, value) in parsed {
+        let mut values = std::collections::BTreeMap::new();
+        if let toml::Value::Table(table) = value {
+            for (k, v) in table {
+                values.insert(k, v);
+            }
+        }
+        config
+            .rules
+            .insert(key, crate::config::RuleConfig { severity: None, values });
+    }
+    *server.rumdl_config.write().await = config;
+    // Force config resolution to use the injected config instead of on-disk discovery.
+    server.config.write().await.config_path = Some("rumdl.toml".to_string());
+    server
+}
+
+/// Store `content` under `uri`, format it twice, and return both results so the
+/// caller can assert the formatting handler reaches a fixpoint in a single pass.
+async fn format_twice(server: &RumdlLanguageServer, uri: &Url, content: &str) -> (String, String) {
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let options = editor_formatting_options();
+    let first = format_once(server, uri, &options).await;
+    let second = format_once(server, uri, &options).await;
+    (first, second)
+}
+
+/// Regression for rvben/rumdl-vscode#145: a single "Format Document" must reach a
+/// fixpoint. Nested lists whose marker spacing AND continuation indent both need
+/// adjusting (MD030 `ul-single`/`ul-multi` = 3) used to need several passes in the
+/// editor because the LSP formatting handler applied fixes in a single pass.
+/// `rumdl check --fix` converges in one run by iterating to a fixpoint; the
+/// formatting handler must do the same.
+#[tokio::test]
+async fn test_formatting_idempotent_cascading_list_indent_issue_145() {
+    let server = server_with_md030_spacing(3, 3).await;
+    let uri = Url::parse("file:///nested.md").unwrap();
+    // The exact testcase from the issue.
+    let input = "- Bullet 1\n    - Sub-bullet with long text that is long enough that it is wrapped onto\n      multiple lines.\n- Bullet 2\n";
+
+    let (after_first, after_second) = format_twice(&server, &uri, input).await;
+
+    assert_eq!(
+        after_first, after_second,
+        "formatting must reach a fixpoint in one pass (rvben/rumdl-vscode#145):\n--- after first pass ---\n{after_first}\n--- after second pass ---\n{after_second}"
+    );
+
+    // A single pass must also land on the exact fixpoint that `rumdl check --fix`
+    // (the iterative engine) produces for this input and config.
+    let expected = "-   Bullet 1\n  -   Sub-bullet with long text that is long enough that it is wrapped onto\n      multiple lines.\n-   Bullet 2\n";
+    assert_eq!(
+        after_first, expected,
+        "one formatting pass should match the `rumdl check --fix` fixpoint, got:\n{after_first}"
+    );
+}
+
+/// Same root cause as #145 but with continuation lines at both nesting levels:
+/// widening the markers cascades into re-indenting each level's continuation, so
+/// a single-pass formatter could not converge. One pass must now be a fixpoint.
+#[tokio::test]
+async fn test_formatting_idempotent_nested_continuation_both_levels() {
+    let server = server_with_md030_spacing(3, 3).await;
+    let uri = Url::parse("file:///both-levels.md").unwrap();
+    let input = "- Outer item with text long enough that it is\n  wrapped onto a second line here.\n  - Inner item with text long enough that it is\n    wrapped onto a second line here.\n";
+
+    let (after_first, after_second) = format_twice(&server, &uri, input).await;
+
+    assert_eq!(
+        after_first, after_second,
+        "formatting must reach a fixpoint in one pass with continuation at both levels:\n--- after first pass ---\n{after_first}\n--- after second pass ---\n{after_second}"
+    );
+    // Both markers were widened to three spaces after the bullet.
+    assert!(
+        after_first.contains("-   Outer"),
+        "outer marker widened, got:\n{after_first}"
+    );
+    assert!(
+        after_first.contains("-   Inner"),
+        "inner marker widened, got:\n{after_first}"
+    );
+}
+
+/// The formatting handler routes through `apply_all_fixes`, which must keep
+/// applying the LSP-specific config (VS Code settings), not just the on-disk
+/// file config. Disabling MD030 via the LSP `disable_rules` setting must stop
+/// the formatter from re-spacing list markers, even though the file config
+/// enables MD030 `ul-single`/`ul-multi` = 3.
+#[tokio::test]
+async fn test_formatting_honors_lsp_disable_rules() {
+    let server = server_with_md030_spacing(3, 3).await;
+    // LSP-specific override: a VS Code user/workspace setting disabling MD030.
+    server.config.write().await.disable_rules = Some(vec!["MD030".to_string()]);
+
+    let uri = Url::parse("file:///lsp-disable.md").unwrap();
+    let input = "- Bullet 1\n  - Sub-bullet here.\n- Bullet 2\n";
+    let (after_first, _after_second) = format_twice(&server, &uri, input).await;
+
+    // MD030 is disabled through LSP settings, so markers keep their single space.
+    assert!(
+        !after_first.contains("-   "),
+        "LSP disable_rules must suppress MD030 marker spacing during formatting, got:\n{after_first}"
+    );
+    assert!(
+        after_first.contains("- Bullet 1"),
+        "single-space marker must be preserved, got:\n{after_first}"
+    );
+}
