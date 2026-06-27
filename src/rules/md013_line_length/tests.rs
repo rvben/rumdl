@@ -8554,3 +8554,27 @@ fn test_md013_standalone_link_with_trailing_punctuation() {
         );
     }
 }
+
+#[test]
+fn test_md013_reflow_consecutive_long_lines() {
+    // Two consecutive long lines in a paragraph.
+    // Limit is 30.
+    let content = indoc::indoc! {"
+        This is line one which is very long.
+        This is line two which is also very long.
+    "};
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(30),
+        reflow: true,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    // We expect 2 warnings, and BOTH should have a fix.
+    assert_eq!(result.len(), 2, "Expected 2 warnings, got: {result:?}");
+    assert!(result[0].fix.is_some(), "First warning should have a fix");
+    assert!(result[1].fix.is_some(), "Second warning should have a fix");
+}
