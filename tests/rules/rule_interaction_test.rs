@@ -216,7 +216,7 @@ fn test_md047_with_other_rules() {
 fn test_blockquote_list_combination() {
     let md004 = MD004UnorderedListStyle::default();
     let md009 = MD009TrailingSpaces::default();
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
 
     // Blockquote containing list with issues
     let content = "> * Item 1  \n>\n> - Item 2  \n> + Item 3";

@@ -23,11 +23,10 @@ pub struct MD036Config {
     pub punctuation: String,
 
     /// Enable auto-fix to convert emphasis-as-heading to real headings.
-    /// `from_config` defaults this to true (matching the rule's advertised
-    /// FullyFixable capability), so `rumdl fmt` rewrites surviving lines —
-    /// `check()` already excludes lists, blockquotes, code blocks, headings,
-    /// TOC labels, and punctuation-terminated phrases. Set to false in TOML
-    /// for diagnostic-only behavior.
+    /// Defaults to false: converting emphasis to a heading is a meaning change
+    /// the linter cannot verify (a standalone emphasized line may be a bold
+    /// name, filename, or label rather than a heading), so `rumdl fmt` only
+    /// rewrites when this is set to true. `check()` still warns either way.
     #[serde(default)]
     pub fix: bool,
 

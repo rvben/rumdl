@@ -237,7 +237,32 @@ impl Rule for MD007ULIndent {
             let is_skipped_region = |info: &crate::lint_context::LineInfo| {
                 info.in_code_block || info.in_front_matter || info.in_mkdocstrings || info.in_footnote_definition
             };
-            if is_skipped_region(line_info) {
+            // Exception: a fenced code block can open on a list-marker line
+            // (e.g. "- ```"). Such a line is flagged `in_code_block` but is
+            // genuinely a list item, so it must fall through to the list-item
+            // handling below to be pushed onto the ancestor stack; otherwise its
+            // descendants resolve one nesting level too shallow and get wrongly
+            // flagged (and "fixed") as over-indented. The line must ITSELF open a
+            // backtick/tilde fence: a list-like line interior to a code construct
+            // that pulldown-cmark does not parse (e.g. an Azure `:::` block) is also
+            // `in_code_block` with a `list_item`, but it is opaque code, not a list
+            // item, so it stays skipped. The other skipped regions (front matter,
+            // mkdocstrings, footnote definitions) genuinely contain their list
+            // items, so those are still skipped.
+            let opens_fence_on_marker_line = line_info
+                .list_item
+                .as_ref()
+                .and_then(|item| line_info.content(ctx.content).get(item.content_column..))
+                .is_some_and(|after_marker| {
+                    let after_marker = after_marker.trim_start();
+                    after_marker.starts_with("```") || after_marker.starts_with("~~~")
+                });
+            let fence_opening_marker_line = opens_fence_on_marker_line
+                && line_info.in_code_block
+                && !line_info.in_front_matter
+                && !line_info.in_mkdocstrings
+                && !line_info.in_footnote_definition;
+            if is_skipped_region(line_info) && !fence_opening_marker_line {
                 // The opening line of such a region (e.g. an unindented code fence)
                 // breaks out of any open list just like a paragraph would, so the
                 // stale list stack must be cleared even though the region's lines

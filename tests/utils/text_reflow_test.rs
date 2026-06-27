@@ -6290,3 +6290,52 @@ fn test_slb_standalone_paren_not_merged_back() {
         "Parenthetical must be on its own line, not merged with 'elsewhere'. Got:\n{result:#?}"
     );
 }
+
+#[test]
+fn test_reflow_preserves_space_after_code_span_before_punctuation() {
+    // Regression: a punctuation / closing-bracket word that follows an inline code
+    // span with a space in the source must keep that space. Reflow used to classify
+    // such a word as "trailing punctuation" and attach it, deleting the real space
+    // after the code span (e.g. a literal "`code` }" became "`code`}").
+    let options = ReflowOptions {
+        line_length: 60,
+        ..Default::default()
+    };
+
+    // A closing brace used as a literal symbol after a code span (the reported case).
+    let input = "Closing brace as a word: `code` } and then a long tail of words to wrap.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("`code` }"),
+        "space after the code span must be preserved, got:\n{result}"
+    );
+    assert!(
+        !result.contains("`code`}"),
+        "the space after the code span must not be deleted, got:\n{result}"
+    );
+
+    // Braces inside code spans round-trip untouched too.
+    let input2 = "A set notation example `{` 1 2 3 `}` and then some more trailing words here.";
+    let result2 = reflow_markdown(input2, &options);
+    assert!(
+        result2.contains("`{` 1 2 3 `}`"),
+        "code-span braces must be preserved verbatim, got:\n{result2}"
+    );
+
+    // No regression: punctuation directly after a code span (no source space) still
+    // attaches without a space.
+    let input3 = "Use the `foo`, then `bar`. Plus more words that are long enough to wrap here now.";
+    let result3 = reflow_markdown(input3, &options);
+    assert!(
+        result3.contains("`foo`,"),
+        "no-space comma must stay attached, got:\n{result3}"
+    );
+    assert!(
+        result3.contains("`bar`."),
+        "no-space period must stay attached, got:\n{result3}"
+    );
+    assert!(
+        !result3.contains("`foo` ,"),
+        "a space must not be introduced before attached punctuation, got:\n{result3}"
+    );
+}

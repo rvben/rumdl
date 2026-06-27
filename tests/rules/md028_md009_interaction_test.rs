@@ -7,7 +7,7 @@ fn test_issue_66_exact_scenario() {
     // This is the exact scenario from issue #66
     // https://github.com/rvben/rumdl/issues/66
     // User reported MD028 and MD009 "fighting each other"
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // The exact markdown from the issue
@@ -33,7 +33,7 @@ fn test_issue_66_exact_scenario() {
 #[test]
 fn test_issue_66_without_space() {
     // Same scenario but with just ">" (no space)
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     let content = "# Test blockquote\n\n> La\n>\n> lala";
@@ -55,7 +55,7 @@ fn test_issue_66_without_space() {
 #[test]
 fn test_issue_66_with_truly_blank_line() {
     // Test what SHOULD be flagged by MD028
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // Same as issue but with truly blank line (no >)
@@ -79,7 +79,7 @@ fn test_issue_66_with_truly_blank_line() {
 
 #[test]
 fn test_md028_does_not_add_trailing_space() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
 
     // Content with truly blank line
     let content = "> First line\n\n> Third line";
@@ -147,7 +147,7 @@ fn test_md009_flags_multiple_trailing_spaces_in_blockquote() {
 
 #[test]
 fn test_md028_md009_nested_blockquotes() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     let content = "> Level 1\n\n>> Level 2\n\n> Level 1 again";
@@ -169,7 +169,7 @@ fn test_md028_md009_nested_blockquotes() {
 
 #[test]
 fn test_md028_md009_indented_blockquotes() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     let content = "  > Indented\n\n  > More";
@@ -191,7 +191,7 @@ fn test_md028_md009_indented_blockquotes() {
 
 #[test]
 fn test_md028_flags_blockquote_with_only_space() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
 
     // Empty blockquote line with space (which we now consider valid)
     let content = "> First\n> \n> Third";
@@ -204,7 +204,7 @@ fn test_md028_flags_blockquote_with_only_space() {
 
 #[test]
 fn test_multiple_fixes_dont_conflict() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // Complex content with multiple issues
@@ -238,7 +238,7 @@ fn test_multiple_fixes_dont_conflict() {
 
 #[test]
 fn test_edge_case_only_blockquote_markers() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // File with only blockquote markers
@@ -264,7 +264,7 @@ fn test_edge_case_only_blockquote_markers() {
 
 #[test]
 fn test_blockquote_with_tabs() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     let content = ">\t\n>  \t  \n> text\t";
@@ -287,7 +287,7 @@ fn test_blockquote_with_tabs() {
 
 #[test]
 fn test_mixed_blockquote_and_list() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // Blockquote containing a list
@@ -307,7 +307,7 @@ fn test_mixed_blockquote_and_list() {
 
 #[test]
 fn test_blockquote_at_end_of_file() {
-    let md028 = MD028NoBlanksBlockquote;
+    let md028 = MD028NoBlanksBlockquote::with_fix(true);
     let md009 = MD009TrailingSpaces::default();
 
     // Blockquote ending with empty line (no newline at end)

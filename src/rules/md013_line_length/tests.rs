@@ -2698,6 +2698,7 @@ fn test_paragraphs_false_skips_regular_text() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2734,6 +2735,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2771,6 +2773,7 @@ fn test_paragraphs_false_still_checks_headings() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2806,6 +2809,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2841,6 +2845,7 @@ fn test_paragraphs_true_checks_regular_text() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2876,6 +2881,7 @@ fn test_line_length_zero_disables_all_checks() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2911,6 +2917,7 @@ fn test_line_length_zero_with_headings() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2946,6 +2953,7 @@ fn test_line_length_zero_with_code_blocks() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2981,6 +2989,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3044,6 +3053,7 @@ Final paragraph.
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
     let result = rule.check(&ctx).unwrap();
@@ -3111,6 +3121,7 @@ fn test_reflow_preserves_mkdocstrings_autodoc_block() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3144,6 +3155,7 @@ fn test_reflow_preserves_mkdocstrings_with_identifier() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3178,6 +3190,7 @@ fn test_reflow_preserves_mkdocstrings_surrounded_by_paragraphs() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3215,6 +3228,7 @@ fn test_reflow_mkdocstrings_not_detected_in_standard_flavor() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3245,6 +3259,7 @@ fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5176,6 +5191,7 @@ fn test_reflow_admonition_in_list_item_basic() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5239,6 +5255,7 @@ fn test_reflow_collapsible_admonition_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5294,6 +5311,7 @@ fn test_reflow_multiple_admonitions_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5371,6 +5389,7 @@ fn test_reflow_admonition_short_content_preserved() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5417,6 +5436,7 @@ fn test_reflow_admonition_with_multiple_paragraphs() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5485,6 +5505,7 @@ fn test_reflow_admonition_not_in_standard_flavor() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5533,6 +5554,7 @@ fn test_reflow_admonition_idempotent() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5586,6 +5608,7 @@ fn test_reflow_admonition_only_in_list_no_long_text() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5644,6 +5667,7 @@ fn test_reflow_content_after_admonition_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5707,6 +5731,7 @@ fn test_reflow_content_after_admonition_short_lines() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5754,6 +5779,7 @@ fn test_reflow_multiple_blocks_after_admonition() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5809,6 +5835,7 @@ fn test_reflow_admonition_empty_body() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5858,6 +5885,7 @@ fn test_reflow_admonition_no_blank_line_before_body() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5911,6 +5939,7 @@ fn test_reflow_admonition_body_indent_preserved() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5970,6 +5999,7 @@ fn test_reflow_admonition_with_code_block_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6034,6 +6064,7 @@ fn test_reflow_admonition_with_tilde_fence_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6092,6 +6123,7 @@ fn test_reflow_admonition_with_multiple_code_blocks_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6158,6 +6190,7 @@ fn test_reflow_admonition_code_block_idempotent() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6209,6 +6242,7 @@ fn test_reflow_tab_container_in_list_item() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6853,6 +6887,7 @@ fn test_paragraphs_false_skips_blockquote_content() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6888,6 +6923,7 @@ fn test_blockquotes_false_skips_blockquote_content() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6923,6 +6959,7 @@ fn test_blockquotes_true_paragraphs_true_checks_blockquotes() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6957,6 +6994,7 @@ fn test_blockquotes_false_still_checks_regular_paragraphs() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6991,6 +7029,7 @@ fn test_blockquotes_false_paragraphs_false_skips_blockquotes() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7041,6 +7080,7 @@ fn test_nested_blockquote_skipped_when_blockquotes_false() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7075,6 +7115,7 @@ fn test_paragraphs_false_skips_nested_blockquote() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7110,6 +7151,7 @@ fn test_blockquotes_false_skips_reflow_warnings() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7145,6 +7187,7 @@ fn test_paragraphs_false_skips_blockquote_reflow_warnings() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7180,6 +7223,7 @@ fn test_blockquotes_true_with_reflow_still_warns() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7214,6 +7258,7 @@ fn test_blockquotes_false_skips_lazy_continuation() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7248,6 +7293,7 @@ fn test_blockquotes_false_reflow_skips_lazy_continuation() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7283,6 +7329,7 @@ fn test_blockquotes_false_paragraph_after_blockquote_still_warns() {
         length_mode: LengthMode::default(),
         abbreviations: Vec::new(),
         require_sentence_capital: true,
+        ignore_link_urls: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -8089,6 +8136,99 @@ fn test_md013_stern_strict_takes_precedence() {
     );
 }
 
+// A long URL that pushes the line past 80 on its own; the visible text is short.
+const LONG_URL: &str = "https://example.com/an/extremely/long/url/path/that/keeps/going/well/past/eighty/columns";
+
+#[test]
+fn test_md013_ignore_link_urls_on_forgives_wrappable_link_line() {
+    // Default: ignore_link_urls = true. A line over the limit only because of an
+    // inline link's URL is forgiven, even in stern mode.
+    let config = MD013Config {
+        stern: true,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = format!("Some lead text here [x]({LONG_URL}) and trailing words.\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert!(
+        result.is_empty(),
+        "with ignore_link_urls on, a URL-only-over link line is forgiven, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md013_ignore_link_urls_off_flags_wrappable_link_line() {
+    // stern + ignore_link_urls = false: count the URL toward the line length, so a
+    // link line with wrappable text around it is flagged (what strict also does).
+    let config = MD013Config {
+        stern: true,
+        ignore_link_urls: false,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = format!("Some lead text here [x]({LONG_URL}) and trailing words.\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "with ignore_link_urls off, the link line must be flagged, got {result:?}"
+    );
+}
+
+#[test]
+fn test_md013_ignore_link_urls_off_still_exempts_unbreakable_link() {
+    // The key difference from strict: a standalone link (a single unbreakable
+    // token) stays exempt under stern even with tolerance off, because stern's
+    // single-token exemption is independent of ignore_link_urls.
+    let config = MD013Config {
+        stern: true,
+        ignore_link_urls: false,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    for content in [format!("[x]({LONG_URL})\n"), format!("- [x]({LONG_URL})\n")] {
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "stern + tolerance off must still exempt an unbreakable standalone link, got {result:?} for {content:?}"
+        );
+    }
+
+    // strict, by contrast, flags even the unbreakable standalone link.
+    let strict = make_rule(MD013Config {
+        strict: true,
+        ..MD013Config::default()
+    });
+    let content = format!("[x]({LONG_URL})\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        strict.check(&ctx).unwrap().len(),
+        1,
+        "strict flags the standalone link that stern + tolerance off exempts"
+    );
+}
+
+#[test]
+fn test_md013_ignore_link_urls_off_default_mode() {
+    // ignore_link_urls is orthogonal to stern: it also disables the forgiveness
+    // in default mode (the trailing-token rule does not save a mid-line link).
+    let config = MD013Config {
+        ignore_link_urls: false,
+        ..MD013Config::default()
+    };
+    let rule = make_rule(config);
+    let content = format!("Some lead text here [x]({LONG_URL}) and trailing words.\n");
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.check(&ctx).unwrap().len(),
+        1,
+        "ignore_link_urls off flags the link line in default mode too"
+    );
+}
+
 #[test]
 fn test_md013_heading_line_length_unset_falls_back_to_line_length() {
     let config = MD013Config {
@@ -8380,7 +8520,6 @@ fn test_myst_colon_figure_directive_options_only_preserved() {
         "options-only `:::{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
     );
 }
-
 // ---------------------------------------------------------------------------
 // MD030/MD007-aware list reflow
 //
@@ -8696,5 +8835,40 @@ fn test_reflow_blockquote_list_respects_md030_ul_multi() {
     }
     for line in &lines {
         assert!(line.chars().count() <= 50, "line too long: {line:?}");
+    }
+}
+
+#[test]
+fn test_md013_standalone_link_with_trailing_punctuation() {
+    let long_url = "https://www.example.com/some/very/long/path/that/exceeds/forty/characters";
+
+    let cases = vec![
+        format!("[a b c d e f g h i j k l m n o p]({long_url}),\n"),
+        format!("(something\n[a b c d e f g h i j k l m n o p]({long_url}))\n"),
+        format!("[something\n[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("([a b c d e f g h i j k l m n o p]({long_url}))\n"),
+        format!("[[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("([a b c d e f g h i j k l m n o p]({long_url})\n"),
+        // Reverse cases (unbalanced leading wrappers)
+        format!("([a b c d e f g h i j k l m n o p]({long_url})\nsomething)\n"),
+        format!("[[a b c d e f g h i j k l m n o p]({long_url})\nsomething]\n"),
+        format!("{{[a b c d e f g h i j k l m n o p]({long_url})\nsomething}}\n"),
+        format!("\"[a b c d e f g h i j k l m n o p]({long_url})\nsomething\"\n"),
+    ];
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(30),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    for content in cases {
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "should exempt standalone link in content: {content:?}, got {result:?}"
+        );
     }
 }

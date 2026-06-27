@@ -318,11 +318,10 @@ impl Rule for MD036NoEmphasisAsHeading {
             "punctuation".to_string(),
             toml::Value::String(self.config.punctuation.clone()),
         );
-        // Emit `fix = true` so the init-generated config matches the runtime
-        // default established by `from_config`. The rule advertises
-        // `FixCapability::FullyFixable`; users who want diagnostic-only
-        // behavior can flip this explicitly.
-        map.insert("fix".to_string(), toml::Value::Boolean(true));
+        // Emit `fix = false` so the init-generated config matches the runtime
+        // default established by `from_config`. Auto-conversion is opt-in
+        // because it changes document meaning; users enable it explicitly.
+        map.insert("fix".to_string(), toml::Value::Boolean(false));
         map.insert("heading-style".to_string(), toml::Value::String("atx".to_string()));
         map.insert(
             "heading-level".to_string(),
@@ -338,13 +337,14 @@ impl Rule for MD036NoEmphasisAsHeading {
         let punctuation = crate::config::get_rule_config_value::<String>(config, "MD036", "punctuation")
             .unwrap_or_else(|| ".,;:!?".to_string());
 
-        // Default to true: MD036 advertises FixCapability::FullyFixable, and
-        // check() already excludes lists, blockquotes, code blocks, headings,
-        // TOC labels, and punctuation-terminated phrases — so any line that
-        // survives those filters is a genuine emphasis-as-heading that the
-        // rule should rewrite. Users who want diagnostic-only behavior can
-        // still set `fix = false` explicitly.
-        let fix = crate::config::get_rule_config_value::<bool>(config, "MD036", "fix").unwrap_or(true);
+        // Default to false: converting emphasis to a heading is a meaning
+        // change the linter cannot verify. A standalone emphasized line is
+        // textually indistinguishable whether it is a bold name, filename,
+        // label, version note, or a phrase genuinely meant as a heading, so
+        // auto-converting by default silently rewrites documents (and injects
+        // phantom entries into the heading structure). check() still warns;
+        // users who want the rewrite opt in with `fix = true`.
+        let fix = crate::config::get_rule_config_value::<bool>(config, "MD036", "fix").unwrap_or(false);
 
         // heading_style currently only supports "atx"
         let heading_style = HeadingStyle::Atx;
@@ -788,11 +788,54 @@ mod tests {
 
         let table = config.as_table().unwrap();
         assert_eq!(table.get("punctuation").unwrap().as_str().unwrap(), ".,;:!?");
-        // `fix = true` matches the runtime default in `from_config`, so the
+        // `fix = false` matches the runtime default in `from_config`, so the
         // generated init config is consistent with no-config behavior.
-        assert!(table.get("fix").unwrap().as_bool().unwrap());
+        assert!(!table.get("fix").unwrap().as_bool().unwrap());
         assert_eq!(table.get("heading-style").unwrap().as_str().unwrap(), "atx");
         assert_eq!(table.get("heading-level").unwrap().as_integer().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_default_warns_but_does_not_autoconvert() {
+        // Through the production config path, MD036's autofix is opt-in: `check`
+        // still warns (a useful nudge, matching markdownlint's detect-only
+        // behavior), but `fmt` must not convert emphasis to a heading. Bold
+        // names, filenames, and notes are textually indistinguishable from a
+        // genuine heading, so auto-conversion silently corrupts documents.
+        let rule = MD036NoEmphasisAsHeading::from_config(&crate::config::Config::default());
+        let content = "**Michael Rose**\n\nProfile text.";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(warnings.len(), 1, "detection should still fire by default");
+        assert!(warnings[0].fix.is_none(), "default warnings must not carry a fix");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed, content,
+            "default fmt must not auto-convert emphasis to a heading"
+        );
+    }
+
+    #[test]
+    fn test_default_preserves_real_world_emphasis() {
+        // Regression: emphasis that is plainly not a heading must survive default
+        // `rumdl fmt` untouched. These cases were found by formatting the clap and
+        // minimal-mistakes corpora, where the old default rewrote a prose note, a
+        // bold filename, and a bold version note into H2 headings.
+        let rule = MD036NoEmphasisAsHeading::from_config(&crate::config::Config::default());
+        for content in [
+            "Intro.\n\n*Note: without the links setup, we can't demonstrate the behavior*\n\nMore.",
+            "**index.md**\n\nA configuration file.",
+            "*New in v4.26.0*\n\nA new feature.",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                content,
+                "default fmt must preserve: {content:?}"
+            );
+        }
     }
 
     #[test]

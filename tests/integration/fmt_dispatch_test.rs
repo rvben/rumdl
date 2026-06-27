@@ -30,13 +30,35 @@ fn fmt_through_coordinator(content: &str, rules: Vec<Box<dyn Rule>>) -> String {
 // ── MD036 ────────────────────────────────────────────────────────────────
 
 #[test]
-fn md036_fmt_promotes_emphasis_to_heading_with_default_config() {
-    // The rule advertises FullyFixable, so `rumdl fmt` with default config
-    // must rewrite the bare emphasis line into a real heading.
+fn md036_fmt_does_not_promote_emphasis_with_default_config() {
+    // Auto-conversion is opt-in: a standalone emphasized line is textually
+    // indistinguishable whether it is a bold name/filename/label or a phrase
+    // meant as a heading, so `rumdl fmt` with default config must NOT rewrite
+    // it (doing so silently changes document meaning). check() still warns.
+    let before = "# Heading\n\n**Looks like a heading**\n\nSome content.\n";
+
+    let rule = MD036NoEmphasisAsHeading::from_config(&Config::default());
+    let after = fmt_through_coordinator(before, vec![rule]);
+
+    assert_eq!(after, before, "default fmt must leave emphasis untouched");
+}
+
+#[test]
+fn md036_fmt_promotes_emphasis_to_heading_when_fix_enabled() {
+    // With `fix = true` the rule advertises FullyFixable and `rumdl fmt` must
+    // dispatch to Rule::fix() and rewrite the bare emphasis line into a heading.
     let before = "# Heading\n\n**Looks like a heading**\n\nSome content.\n";
     let expected = "# Heading\n\n## Looks like a heading\n\nSome content.\n";
 
-    let rule = MD036NoEmphasisAsHeading::from_config(&Config::default());
+    let mut config = Config::default();
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("fix".to_string(), toml::Value::Boolean(true));
+    config.rules.insert(
+        "MD036".to_string(),
+        rumdl_lib::config::RuleConfig { severity: None, values },
+    );
+
+    let rule = MD036NoEmphasisAsHeading::from_config(&config);
     let after = fmt_through_coordinator(before, vec![rule]);
 
     assert_eq!(after, expected);
@@ -150,10 +172,11 @@ fn md046_fmt_converts_fenced_to_indented() {
 // ── Regression guards on the warning surface ────────────────────────────
 
 #[test]
-fn md036_default_config_attaches_inline_fix_to_warnings() {
-    // The advertised behavior is "Fix is always available." With default config,
-    // warnings produced by check() must carry inline Fix objects so LSP code
-    // actions can offer the rewrite.
+fn md036_default_config_warns_without_inline_fix() {
+    // Auto-conversion is opt-in, so with default config check() must still warn
+    // (the nudge is useful) but must NOT attach an inline Fix: offering an LSP
+    // code action that silently turns emphasis into a heading is the same unsafe
+    // guess as the fmt rewrite.
     use rumdl_lib::lint_context::LintContext;
 
     let content = "# Title\n\n**Promote me**\n\nBody.\n";
@@ -163,8 +186,35 @@ fn md036_default_config_attaches_inline_fix_to_warnings() {
 
     assert_eq!(warnings.len(), 1, "expected one MD036 warning");
     assert!(
+        warnings[0].fix.is_none(),
+        "MD036 warning must not carry an inline Fix under the default (opt-in) config; got {:?}",
+        warnings[0]
+    );
+}
+
+#[test]
+fn md036_attaches_inline_fix_to_warnings_when_fix_enabled() {
+    // With `fix = true`, check() warnings must carry inline Fix objects so LSP
+    // code actions can offer the rewrite.
+    use rumdl_lib::lint_context::LintContext;
+
+    let content = "# Title\n\n**Promote me**\n\nBody.\n";
+    let mut config = Config::default();
+    let mut values = std::collections::BTreeMap::new();
+    values.insert("fix".to_string(), toml::Value::Boolean(true));
+    config.rules.insert(
+        "MD036".to_string(),
+        rumdl_lib::config::RuleConfig { severity: None, values },
+    );
+
+    let rule = MD036NoEmphasisAsHeading::from_config(&config);
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let warnings = rule.check(&ctx).expect("check must succeed");
+
+    assert_eq!(warnings.len(), 1, "expected one MD036 warning");
+    assert!(
         warnings[0].fix.is_some(),
-        "MD036 warning must carry an inline Fix when fix capability is FullyFixable; got {:?}",
+        "MD036 warning must carry an inline Fix when fix = true; got {:?}",
         warnings[0]
     );
 }

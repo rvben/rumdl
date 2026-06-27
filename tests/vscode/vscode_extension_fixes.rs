@@ -134,7 +134,10 @@ fn create_test_case_for_rule(rule_name: &str) -> Option<(&'static str, Box<dyn R
             ">  Multiple spaces in blockquote",
             Box::new(MD027MultipleSpacesBlockquote::default()),
         )),
-        "MD028" => Some(("> Quote\n>\n> More quote", Box::new(MD028NoBlanksBlockquote))),
+        "MD028" => Some((
+            "> Quote\n>\n> More quote",
+            Box::new(MD028NoBlanksBlockquote::with_fix(true)),
+        )),
         "MD029" => Some((
             "1. First\n3. Third",
             Box::new(MD029OrderedListPrefix::new(ListStyle::Ordered)),

@@ -359,37 +359,99 @@ fn is_content_all_html_tags(s: &str) -> bool {
 
 /// Check if content (after stripping list/blockquote markers) is a standalone link,
 /// optionally wrapped in emphasis.
+fn is_matching_wrapper(s: &str, first: char, last: char) -> bool {
+    match (first, last) {
+        (f, l) if f == l && (f == '*' || f == '_' || f == '"' || f == '\'') => true,
+        ('(', ')') => s.chars().filter(|&c| c == '(').count() == s.chars().filter(|&c| c == ')').count(),
+        ('[', ']') => s.chars().filter(|&c| c == '[').count() == s.chars().filter(|&c| c == ']').count(),
+        ('{', '}')
+        | ('\u{201C}', '\u{201D}') // “ and ”
+        | ('\u{2018}', '\u{2019}') // ‘ and ’
+        | ('（', '）')
+        | ('｛', '｝')
+        | ('【', '】')
+        | ('「', '」')
+        | ('『', '』') => true,
+        _ => false,
+    }
+}
+
+fn is_safe_leading(c: char) -> bool {
+    matches!(c, '(' | '{' | '（' | '｛' | '【' | '「' | '『' | '［' | '*' | '_')
+        || crate::utils::sentence_utils::is_opening_quote(c)
+}
+
+fn is_safe_trailing(c: char) -> bool {
+    matches!(
+        c,
+        '.' | ',' | ';' | ':' | '!' | '?' | '}' | '）' | '｝' | '】' | '』' | '」' | '］' | '、' | '，' | '；' | '：'
+    ) || crate::utils::sentence_utils::is_closing_quote(c)
+        || crate::utils::sentence_utils::is_cjk_sentence_ending(c)
+}
+
+/// Check if content (after stripping list/blockquote markers) is a standalone link,
+/// optionally wrapped in emphasis.
 fn is_link_with_optional_emphasis(s: &str) -> bool {
     let mut s = s.trim();
     if s.is_empty() {
         return false;
     }
 
-    // Strip emphasis wrappers (up to 3 chars: *, **, ***, _, __, ___)
-    let emphasis_chars: &[char] = &['*', '_'];
-    let leading_emphasis = s.chars().take_while(|c| emphasis_chars.contains(c)).count();
-    if leading_emphasis > 0 && leading_emphasis <= 3 {
-        let trimmed_end = s.trim_end();
-        let trailing_emphasis = trimmed_end
-            .chars()
-            .rev()
-            .take_while(|c| emphasis_chars.contains(c))
-            .count();
-        // Only strip when the leading and trailing emphasis runs are distinct
-        // (there is inner content between them). For an all-emphasis string like
-        // "**" the runs overlap and `leading + trailing > len`, which would make
-        // the slice start exceed its end and panic.
-        if trailing_emphasis == leading_emphasis && leading_emphasis + trailing_emphasis <= trimmed_end.len() {
-            s = &s[leading_emphasis..trimmed_end.len() - trailing_emphasis];
+    loop {
+        // 1. Check match first
+        if INLINE_LINK_RE.is_match(s) || REF_LINK_RE.is_match(s) {
+            return true;
+        }
+
+        let prev_len = s.len();
+        if prev_len < 2 {
+            break;
+        }
+
+        let first = s.chars().next().unwrap();
+        let last = s.chars().next_back().unwrap();
+
+        // 2. Try matching wrappers first (non-structural)
+        if is_matching_wrapper(s, first, last) {
+            s = s[first.len_utf8()..s.len() - last.len_utf8()].trim();
+            continue;
+        }
+
+        // 3. Peel safe leading
+        if is_safe_leading(first) {
+            s = s[first.len_utf8()..].trim();
+            continue;
+        }
+
+        // 4. Peel safe trailing
+        if is_safe_trailing(last) || last == '*' || last == '_' {
+            s = s[..s.len() - last.len_utf8()].trim();
+            continue;
+        }
+
+        // 5. Peel unsafe structural if they are extra (heuristic)
+        if first == '[' && s.chars().filter(|&c| c == '[').count() > s.chars().filter(|&c| c == ']').count() {
+            s = s[first.len_utf8()..].trim();
+            continue;
+        }
+
+        if last == ')' && s.chars().filter(|&c| c == ')').count() > s.chars().filter(|&c| c == '(').count() {
+            s = s[..s.len() - last.len_utf8()].trim();
+            continue;
+        }
+
+        if last == ']' && s.chars().filter(|&c| c == ']').count() > s.chars().filter(|&c| c == '[').count() {
+            s = s[..s.len() - last.len_utf8()].trim();
+            continue;
+        }
+
+        // If we couldn't peel anything, we are stuck
+        if s.len() == prev_len {
+            break;
         }
     }
 
-    let s = s.trim();
-    if s.is_empty() {
-        return false;
-    }
-
-    INLINE_LINK_RE.is_match(s) || REF_LINK_RE.is_match(s)
+    false
 }
 
 #[cfg(test)]
@@ -635,6 +697,77 @@ mod tests {
         // Collapsed reference link
         assert!(is_standalone_link_or_image_line("[text][]"));
         assert!(is_standalone_link_or_image_line("- [text][]"));
+    }
+
+    #[test]
+    fn test_standalone_link_with_trailing_punctuation() {
+        // Trailing punctuation on bare links
+        assert!(is_standalone_link_or_image_line("[text](url),"));
+        assert!(is_standalone_link_or_image_line("[text](url)."));
+        assert!(is_standalone_link_or_image_line("[text](url);"));
+        assert!(is_standalone_link_or_image_line("[text](url):"));
+        assert!(is_standalone_link_or_image_line("[text](url)?"));
+        assert!(is_standalone_link_or_image_line("[text](url)!"));
+
+        // Trailing quotes (can be unbalanced)
+        assert!(is_standalone_link_or_image_line("[text](url)\""));
+        assert!(is_standalone_link_or_image_line("[text](url)'"));
+        assert!(is_standalone_link_or_image_line("[text](url)”"));
+        assert!(is_standalone_link_or_image_line("[text](url)’"));
+
+        // Balanced wrappers (parentheses, braces, quotes)
+        assert!(is_standalone_link_or_image_line("([text](url))"));
+        assert!(is_standalone_link_or_image_line("{[text](url)}"));
+        assert!(is_standalone_link_or_image_line("\"[text](url)\""));
+        assert!(is_standalone_link_or_image_line("'[text](url)'"));
+        assert!(is_standalone_link_or_image_line("“[text](url)”"));
+        assert!(is_standalone_link_or_image_line("‘[text](url)’"));
+
+        // CJK balanced wrappers
+        assert!(is_standalone_link_or_image_line("（[text](url)）"));
+        assert!(is_standalone_link_or_image_line("｛[text](url)｝"));
+        assert!(is_standalone_link_or_image_line("【[text](url)】"));
+        assert!(is_standalone_link_or_image_line("「[text](url)」"));
+        assert!(is_standalone_link_or_image_line("『[text](url)』"));
+
+        // CJK trailing punctuation
+        assert!(is_standalone_link_or_image_line("[text](url)。"));
+        assert!(is_standalone_link_or_image_line("[text](url)，"));
+        assert!(is_standalone_link_or_image_line("[text](url)；"));
+        assert!(is_standalone_link_or_image_line("[text](url)："));
+        assert!(is_standalone_link_or_image_line("[text](url)！"));
+        assert!(is_standalone_link_or_image_line("[text](url)？"));
+        assert!(is_standalone_link_or_image_line("[text](url)、"));
+
+        // Multiple trailing punctuations
+        assert!(is_standalone_link_or_image_line("[text](url)..."));
+        assert!(is_standalone_link_or_image_line("[text](url)?!"));
+
+        // With emphasis and trailing punctuation
+        assert!(is_standalone_link_or_image_line("**[text](url)**,"));
+        assert!(is_standalone_link_or_image_line("*[text](url)*."));
+        assert!(is_standalone_link_or_image_line("***[text](url)***!"));
+
+        // Punctuation inside emphasis
+        assert!(is_standalone_link_or_image_line("**[text](url),**"));
+        assert!(is_standalone_link_or_image_line("*[text](url).*"));
+        assert!(is_standalone_link_or_image_line("***[text](url)!***"));
+
+        // In lists and blockquotes
+        assert!(is_standalone_link_or_image_line("- [text](url),"));
+        assert!(is_standalone_link_or_image_line("> [text](url)."));
+        assert!(is_standalone_link_or_image_line("  - **[text](url)**;"));
+
+        // Reference style
+        assert!(is_standalone_link_or_image_line("[text][ref],"));
+        assert!(is_standalone_link_or_image_line("![alt][ref]."));
+        assert!(is_standalone_link_or_image_line("- ***[text][ref]***!"));
+
+        // Standalone image with trailing punctuation
+        assert!(is_standalone_link_or_image_line("![alt](url),"));
+
+        // Complex nested emphasis and punctuation (Issue regression)
+        assert!(is_standalone_link_or_image_line("**_***[text](url).***._.**"));
     }
 
     #[test]
