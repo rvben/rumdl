@@ -1,6 +1,7 @@
 use super::*;
 use crate::lsp::types::{warning_to_code_actions, warning_to_diagnostic};
 use crate::rule::LintWarning;
+use indoc::indoc;
 use tower_lsp::LspService;
 
 fn create_test_server() -> RumdlLanguageServer {
@@ -8727,7 +8728,12 @@ async fn test_formatting_idempotent_cascading_list_indent_issue_145() {
     let server = server_with_md030_spacing(3, 3).await;
     let uri = Url::parse("file:///nested.md").unwrap();
     // The exact testcase from the issue.
-    let input = "- Bullet 1\n    - Sub-bullet with long text that is long enough that it is wrapped onto\n      multiple lines.\n- Bullet 2\n";
+    let input = indoc! {"
+        - Bullet 1
+            - Sub-bullet with long text that is long enough that it is wrapped onto
+              multiple lines.
+        - Bullet 2
+    "};
 
     let (after_first, after_second) = format_twice(&server, &uri, input).await;
 
@@ -8737,8 +8743,16 @@ async fn test_formatting_idempotent_cascading_list_indent_issue_145() {
     );
 
     // A single pass must also land on the exact fixpoint that `rumdl check --fix`
-    // (the iterative engine) produces for this input and config.
-    let expected = "-   Bullet 1\n  -   Sub-bullet with long text that is long enough that it is wrapped onto\n      multiple lines.\n-   Bullet 2\n";
+    // (the iterative engine) produces for this input and config. With the markers
+    // widened to `-   ` (content column 4), the sub-bullet stays nested under the
+    // parent at column 4 rather than detaching to column 2 (MD007 aligns it to the
+    // parent's widened content column).
+    let expected = indoc! {"
+        -   Bullet 1
+            -   Sub-bullet with long text that is long enough that it is wrapped onto
+                multiple lines.
+        -   Bullet 2
+    "};
     assert_eq!(
         after_first, expected,
         "one formatting pass should match the `rumdl check --fix` fixpoint, got:\n{after_first}"
