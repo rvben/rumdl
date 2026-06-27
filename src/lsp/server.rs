@@ -17,8 +17,6 @@ use crate::config::{Config, is_valid_rule_name};
 use crate::discovery::{ExcludeMatchers, is_markdown_extension};
 use crate::lsp::index_worker::IndexWorker;
 use crate::lsp::types::{IndexState, IndexUpdate, LspRuleSettings, RumdlLspConfig};
-use crate::rule::FixCapability;
-use crate::rules;
 use crate::workspace_index::WorkspaceIndex;
 
 /// Maximum number of rules in enable/disable lists (DoS protection)
@@ -1087,85 +1085,22 @@ impl LanguageServer for RumdlLanguageServer {
         );
 
         if let Some(text) = self.get_document_content(&uri).await {
-            // Get config with LSP overrides
-            let config_guard = self.config.read().await;
-            let lsp_config = config_guard.clone();
-            drop(config_guard);
-
-            // Resolve configuration for this specific file
-            let file_path = uri.to_file_path().ok();
-            let file_config = if let Some(ref path) = file_path {
-                self.resolve_config_for_file(path).await
-            } else {
-                // Fallback to global config for non-file URIs
-                self.rumdl_config.read().await.clone()
-            };
-
-            // Merge LSP settings with file config based on configuration_preference
-            let rumdl_config = self.merge_lsp_settings(file_config, &lsp_config);
-
-            let all_rules = rules::all_rules(&rumdl_config);
-            let flavor = if let Some(ref path) = file_path {
-                rumdl_config.get_flavor_for_file(path)
-            } else {
-                rumdl_config.markdown_flavor()
-            };
-
-            // Use the standard filter_rules function which respects config's disabled rules
-            let mut filtered_rules = rules::filter_rules(&all_rules, &rumdl_config.global);
-
-            // Apply LSP config overrides
-            filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
-
-            // Phase 1: Apply lint rule fixes
-            let mut result = text.clone();
-            match crate::lint(
-                &text,
-                &filtered_rules,
-                false,
-                flavor,
-                file_path.clone(),
-                Some(&rumdl_config),
-            ) {
-                Ok(warnings) => {
-                    log::debug!(
-                        "Found {} warnings, {} with fixes",
-                        warnings.len(),
-                        warnings.iter().filter(|w| w.fix.is_some()).count()
-                    );
-
-                    let has_fixes = warnings.iter().any(|w| w.fix.is_some());
-                    if has_fixes {
-                        // Only apply fixes from fixable rules during formatting
-                        let fixable_warnings: Vec<_> = warnings
-                            .iter()
-                            .filter(|w| {
-                                if let Some(rule_name) = &w.rule_name {
-                                    filtered_rules
-                                        .iter()
-                                        .find(|r| r.name() == rule_name)
-                                        .is_some_and(|r| r.fix_capability() != FixCapability::Unfixable)
-                                } else {
-                                    false
-                                }
-                            })
-                            .cloned()
-                            .collect();
-
-                        match crate::utils::fix_utils::apply_warning_fixes(&text, &fixable_warnings) {
-                            Ok(fixed_content) => {
-                                result = fixed_content;
-                            }
-                            Err(e) => {
-                                log::error!("Failed to apply fixes: {e}");
-                            }
-                        }
-                    }
-                }
+            // Phase 1: Apply lint rule fixes, iterating to a fixpoint through the
+            // same `FixCoordinator` engine as `rumdl check --fix` and the editor's
+            // fix-all action. A single fix pass can leave cascading fixes
+            // unapplied — e.g. MD030 widening a list marker, which then requires
+            // MD007 to re-indent the nested content and its continuation lines —
+            // which forced "Format Document" to be run several times to converge
+            // (rvben/rumdl-vscode#145). `apply_all_fixes` also handles config
+            // resolution, rule filtering, LSP overrides and excludes for the URI.
+            let mut result = match self.apply_all_fixes(&uri, &text).await {
+                Ok(Some(fixed)) => fixed,
+                Ok(None) => text.clone(),
                 Err(e) => {
-                    log::error!("Failed to lint document: {e}");
+                    log::error!("Failed to apply fixes during formatting: {e}");
+                    text.clone()
                 }
-            }
+            };
 
             // Phase 2: Apply FormattingOptions (standard LSP behavior)
             // This ensures we respect editor preferences even if lint rules don't catch everything
