@@ -98,6 +98,21 @@ pub struct MD013Config {
     #[serde(default)]
     pub stern: bool,
 
+    /// Whether to apply semantic link understanding (default: true).
+    ///
+    /// In non-strict mode, a line that exceeds the limit only because of the URL
+    /// portion of an inline `[text](url)` / `![alt](url)` is forgiven (the URL
+    /// cannot be shortened). Set to `false` to count those URLs toward the line
+    /// length so the line is flagged. Combine with `stern` to flag a link line
+    /// that has wrappable text around it while still exempting a line that is a
+    /// single unbreakable token (a bare URL or a standalone link). Has no effect
+    /// in `strict` mode, which already disables all forgiveness.
+    #[serde(
+        default = "default_semantic_link_understanding",
+        alias = "semantic_link_understanding"
+    )]
+    pub semantic_link_understanding: bool,
+
     /// Per-context maximum line length for headings.
     ///
     /// `None` (unset) falls back to `line_length`. `Some(0)` means "no limit
@@ -179,6 +194,10 @@ fn default_require_sentence_capital() -> bool {
     true
 }
 
+fn default_semantic_link_understanding() -> bool {
+    true
+}
+
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -191,6 +210,7 @@ impl Default for MD013Config {
             blockquotes: default_blockquotes(),
             strict: false,
             stern: false,
+            semantic_link_understanding: default_semantic_link_understanding(),
             heading_line_length: None,
             code_block_line_length: None,
             reflow: false,
@@ -372,6 +392,7 @@ mod tests {
             length_mode: LengthMode::default(),
             abbreviations: Vec::new(),
             require_sentence_capital: true,
+            semantic_link_understanding: true,
         };
 
         let toml_str = toml::to_string(&config).unwrap();
