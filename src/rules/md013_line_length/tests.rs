@@ -8379,3 +8379,38 @@ fn test_myst_colon_figure_directive_options_only_preserved() {
         "options-only `:::{{figure}}` directive must be preserved verbatim, got:\n{fixed}"
     );
 }
+
+#[test]
+fn test_md013_standalone_link_with_trailing_punctuation() {
+    let long_url = "https://www.example.com/some/very/long/path/that/exceeds/forty/characters";
+
+    let cases = vec![
+        format!("[a b c d e f g h i j k l m n o p]({long_url}),\n"),
+        format!("(something\n[a b c d e f g h i j k l m n o p]({long_url}))\n"),
+        format!("[something\n[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("([a b c d e f g h i j k l m n o p]({long_url}))\n"),
+        format!("[[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("[a b c d e f g h i j k l m n o p]({long_url})]\n"),
+        format!("([a b c d e f g h i j k l m n o p]({long_url})\n"),
+        // Reverse cases (unbalanced leading wrappers)
+        format!("([a b c d e f g h i j k l m n o p]({long_url})\nsomething)\n"),
+        format!("[[a b c d e f g h i j k l m n o p]({long_url})\nsomething]\n"),
+        format!("{{[a b c d e f g h i j k l m n o p]({long_url})\nsomething}}\n"),
+        format!("\"[a b c d e f g h i j k l m n o p]({long_url})\nsomething\"\n"),
+    ];
+
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(30),
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    for content in cases {
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "should exempt standalone link in content: {content:?}, got {result:?}"
+        );
+    }
+}
