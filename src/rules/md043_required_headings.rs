@@ -186,6 +186,53 @@ impl MD043RequiredHeadings {
             false
         }
     }
+
+    fn expected_pattern_description(pattern: &str) -> String {
+        match pattern {
+            "+" => "one or more headings".to_string(),
+            "?" => "one heading".to_string(),
+            "*" => "zero or more headings".to_string(),
+            _ => format!("heading '{pattern}'"),
+        }
+    }
+
+    fn structure_mismatch_message(&self, actual_headings: &[String], exp_idx: usize, act_idx: usize) -> String {
+        let prefix = "Heading structure does not match required structure.";
+
+        if let Some(expected) = self.config.headings.get(exp_idx) {
+            if let Some(previous) = exp_idx.checked_sub(1).and_then(|idx| self.config.headings.get(idx))
+                && matches!(previous.as_str(), "+" | "?")
+                && act_idx == actual_headings.len()
+                && let Some(actual) = actual_headings.last()
+                && self.headings_match(expected, actual)
+            {
+                let requirement = Self::expected_pattern_description(previous);
+                return format!(
+                    "{prefix} Expected {requirement} before '{expected}', but found '{actual}' immediately"
+                );
+            }
+
+            let expected = Self::expected_pattern_description(expected);
+            if let Some(actual) = actual_headings.get(act_idx) {
+                format!(
+                    "{prefix} Expected {expected} at position {}, but found '{actual}'",
+                    act_idx + 1
+                )
+            } else {
+                format!(
+                    "{prefix} Expected {expected} at position {}, but found no more headings",
+                    act_idx + 1
+                )
+            }
+        } else if let Some(actual) = actual_headings.get(act_idx) {
+            format!(
+                "{prefix} Expected no more headings after position {act_idx}, but found '{actual}' at position {}",
+                act_idx + 1
+            )
+        } else {
+            prefix.to_string()
+        }
+    }
 }
 
 impl Rule for MD043RequiredHeadings {
@@ -219,10 +266,12 @@ impl Rule for MD043RequiredHeadings {
         }
 
         // Use wildcard matching for pattern support
-        let (headings_match, _exp_idx, _act_idx) =
+        let (headings_match, exp_idx, act_idx) =
             self.match_headings_with_wildcards(&actual_headings, &self.config.headings);
 
         if !headings_match {
+            let message = self.structure_mismatch_message(&actual_headings, exp_idx, act_idx);
+
             // If no headings found but we have required headings, create a warning
             if actual_headings.is_empty() && !self.config.headings.is_empty() {
                 warnings.push(LintWarning {
@@ -231,7 +280,7 @@ impl Rule for MD043RequiredHeadings {
                     column: 1,
                     end_line: 1,
                     end_column: 2,
-                    message: format!("Required headings not found: {:?}", self.config.headings),
+                    message,
                     severity: Severity::Warning,
                     fix: None,
                 });
@@ -251,15 +300,14 @@ impl Rule for MD043RequiredHeadings {
                         column: start_col,
                         end_line,
                         end_column: end_col,
-                        message: "Heading structure does not match the required structure".to_string(),
+                        message: message.clone(),
                         severity: Severity::Warning,
                         fix: None,
                     });
                 }
             }
 
-            // If we have no warnings but headings don't match (could happen if we have no headings),
-            // add a warning at the beginning of the file
+            // If no heading ranges were emitted despite a mismatch, add a warning at the beginning of the file.
             if warnings.is_empty() {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
@@ -267,10 +315,7 @@ impl Rule for MD043RequiredHeadings {
                     column: 1,
                     end_line: 1,
                     end_column: 2,
-                    message: format!(
-                        "Heading structure does not match required structure. Expected: {:?}, Found: {:?}",
-                        self.config.headings, actual_headings
-                    ),
+                    message,
                     severity: Severity::Warning,
                     fix: None,
                 });

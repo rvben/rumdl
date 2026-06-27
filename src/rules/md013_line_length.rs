@@ -398,8 +398,8 @@ impl Rule for MD013LineLength {
             // Disabled by `strict` (all forgiveness off) and by `ignore_link_urls = false`
             // (count link/image URLs toward the line length so such lines are flagged).
             if !effective_config.strict && effective_config.ignore_link_urls {
-                let text_only_length = self.calculate_text_only_length(effective_length, line_number, ctx);
-                if text_only_length <= line_limit {
+                let length_without_urls = self.length_without_inline_link_urls(effective_length, line_number, ctx);
+                if length_without_urls <= line_limit {
                     continue;
                 }
             }
@@ -703,6 +703,7 @@ impl MD013LineLength {
         content: &str,
         line_num: usize,
         ctx: &crate::lint_context::LintContext,
+        strict: bool,
     ) -> bool {
         let trimmed = content.trim();
 
@@ -721,6 +722,10 @@ impl MD013LineLength {
             || is_snippet_block_delimiter(content)
             || is_github_alert_marker(trimmed)
             || is_html_only_line(content)
+            // A standalone link/image line is exempt from MD013 (non-strict mode),
+            // so it must end the blockquote paragraph rather than be absorbed into
+            // it, mirroring the top-level paragraph reflow boundary.
+            || (!strict && is_standalone_link_or_image_line(content))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -765,7 +770,7 @@ impl MD013LineLength {
                     break;
                 }
 
-                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx) {
+                if self.is_blockquote_content_boundary(&bq.content, line_num, ctx, config.strict) {
                     break;
                 }
 
@@ -778,7 +783,7 @@ impl MD013LineLength {
             }
 
             let lazy_content = lines[i].trim_start();
-            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx) {
+            if self.is_blockquote_content_boundary(lazy_content, line_num, ctx, config.strict) {
                 break;
             }
 
@@ -1072,7 +1077,7 @@ impl MD013LineLength {
             // An embedded structure (code block, table, fence, nested quote, ...)
             // means the item is not simple prose: keep consuming so the cursor clears
             // the whole structure, but do not produce a fix.
-            if self.is_blockquote_content_boundary(content, i + 1, ctx) {
+            if self.is_blockquote_content_boundary(content, i + 1, ctx, config.strict) {
                 simple = false;
             }
 
@@ -1389,6 +1394,7 @@ impl MD013LineLength {
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
                 || is_html_only_line(lines[i])
+                || (!config.strict && is_standalone_link_or_image_line(lines[i]))
             {
                 i += 1;
                 continue;
@@ -3207,6 +3213,7 @@ impl MD013LineLength {
                     || is_snippet_block_delimiter(next_line)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
+                    || (!config.strict && is_standalone_link_or_image_line(next_line))
                 {
                     break;
                 }
@@ -3424,62 +3431,77 @@ impl MD013LineLength {
 
                 // Only generate a warning if the replacement is different from the original
                 if original_text != replacement {
-                    // Create warning with actual fix
-                    // In default mode, report the specific line that violates
-                    // In normalize mode, report the whole paragraph
-                    // In sentence-per-line mode, report the entire paragraph
-                    let (warning_line, warning_end_line) = match config.reflow_mode {
-                        ReflowMode::Normalize => (paragraph_start + 1, end_line + 1),
-                        ReflowMode::SentencePerLine | ReflowMode::SemanticLineBreaks => {
-                            // Highlight the entire paragraph that needs reformatting
-                            (paragraph_start + 1, paragraph_start + paragraph_lines.len())
-                        }
+                    // Determine which line ranges and messages to report based on the reflow mode.
+                    let warnings_to_report: Vec<(usize, usize, String)> = match config.reflow_mode {
                         ReflowMode::Default => {
-                            // Find the first line that exceeds the limit
-                            let mut violating_line = paragraph_start;
-                            for (idx, line) in paragraph_lines.iter().enumerate() {
-                                if self.calculate_effective_length(line) > config.line_length.get() {
-                                    violating_line = paragraph_start + idx;
-                                    break;
-                                }
-                            }
-                            (violating_line + 1, violating_line + 1)
+                            // In default mode, report a warning for *every* line in the paragraph
+                            // that exceeds the limit. Each warning will carry the same paragraph-level
+                            // fix, making all of them auto-fixable.
+                            paragraph_lines
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, line)| self.calculate_effective_length(line) > config.line_length.get())
+                                .map(|(idx, _)| {
+                                    let violating_line = paragraph_start + idx + 1;
+                                    (
+                                        violating_line,
+                                        violating_line,
+                                        format!("Line length exceeds {} characters", config.line_length.get()),
+                                    )
+                                })
+                                .collect()
+                        }
+                        ReflowMode::Normalize => {
+                            // In normalize mode, report the whole paragraph as needing normalization.
+                            vec![(
+                                paragraph_start + 1,
+                                end_line + 1,
+                                format!(
+                                    "Paragraph could be normalized to use line length of {} characters",
+                                    config.line_length.get()
+                                ),
+                            )]
+                        }
+                        ReflowMode::SentencePerLine => {
+                            // In sentence-per-line mode, highlight the entire paragraph that needs reformatting.
+                            let num_sentences = split_into_sentences(&paragraph_text).len();
+                            let message = if paragraph_lines.len() == 1 {
+                                // Single line with multiple sentences
+                                format!("Line contains {num_sentences} sentences (one sentence per line required)")
+                            } else {
+                                // Multiple lines - could be split sentences or mixed
+                                let num_lines = paragraph_lines.len();
+                                format!(
+                                    "Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)"
+                                )
+                            };
+                            vec![(paragraph_start + 1, paragraph_start + paragraph_lines.len(), message)]
+                        }
+                        ReflowMode::SemanticLineBreaks => {
+                            // In semantic-line-breaks mode, highlight the entire paragraph.
+                            let num_sentences = split_into_sentences(&paragraph_text).len();
+                            vec![(
+                                paragraph_start + 1,
+                                paragraph_start + paragraph_lines.len(),
+                                format!("Paragraph should use semantic line breaks ({num_sentences} sentences)"),
+                            )]
                         }
                     };
 
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        message: match config.reflow_mode {
-                            ReflowMode::Normalize => format!(
-                                "Paragraph could be normalized to use line length of {} characters",
-                                config.line_length.get()
-                            ),
-                            ReflowMode::SentencePerLine => {
-                                let num_sentences = split_into_sentences(&paragraph_text).len();
-                                if paragraph_lines.len() == 1 {
-                                    // Single line with multiple sentences
-                                    format!("Line contains {num_sentences} sentences (one sentence per line required)")
-                                } else {
-                                    let num_lines = paragraph_lines.len();
-                                    // Multiple lines - could be split sentences or mixed
-                                    format!("Paragraph should have one sentence per line (found {num_sentences} sentences across {num_lines} lines)")
-                                }
-                            },
-                            ReflowMode::SemanticLineBreaks => {
-                                let num_sentences = split_into_sentences(&paragraph_text).len();
-                                format!(
-                                    "Paragraph should use semantic line breaks ({num_sentences} sentences)"
-                                )
-                            },
-                            ReflowMode::Default => format!("Line length exceeds {} characters", config.line_length.get()),
-                        },
-                        line: warning_line,
-                        column: 1,
-                        end_line: warning_end_line,
-                        end_column: lines[warning_end_line.saturating_sub(1)].chars().count() + 1,
-                        severity: Severity::Warning,
-                        fix: Some(crate::rule::Fix::new(byte_range, replacement)),
-                    });
+                    // Generate the actual lint warnings. All warnings for this paragraph
+                    // share the same paragraph-level fix.
+                    for (w_start, w_end, msg) in warnings_to_report {
+                        warnings.push(LintWarning {
+                            rule_name: Some(self.name().to_string()),
+                            message: msg,
+                            line: w_start,
+                            column: 1,
+                            end_line: w_end,
+                            end_column: lines[w_end.saturating_sub(1)].chars().count() + 1,
+                            severity: Severity::Warning,
+                            fix: Some(crate::rule::Fix::new(byte_range.clone(), replacement.clone())),
+                        });
+                    }
                 }
             }
         }
@@ -3511,7 +3533,7 @@ impl MD013LineLength {
     ///
     /// Handles nested constructs (e.g., `[![img](url)](url)`) by only counting the
     /// outermost construct to avoid double-counting.
-    fn calculate_text_only_length(
+    fn length_without_inline_link_urls(
         &self,
         effective_length: usize,
         line_number: usize,
