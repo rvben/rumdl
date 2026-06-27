@@ -8410,9 +8410,7 @@ fn test_md013_standalone_link_with_trailing_punctuation() {
         let result = rule.check(&ctx).unwrap();
         assert!(
             result.is_empty(),
-            "should exempt standalone link in content: {:?}, got {:?}",
-            content,
-            result
+            "should exempt standalone link in content: {content:?}, got {result:?}"
         );
     }
 }

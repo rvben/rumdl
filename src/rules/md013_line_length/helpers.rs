@@ -384,22 +384,7 @@ fn is_safe_leading(c: char) -> bool {
 fn is_safe_trailing(c: char) -> bool {
     matches!(
         c,
-        '.' | ','
-            | ';'
-            | ':'
-            | '!'
-            | '?'
-            | '}'
-            | '）'
-            | '｝'
-            | '】'
-            | '』'
-            | '」'
-            | '］'
-            | '、'
-            | '，'
-            | '；'
-            | '：'
+        '.' | ',' | ';' | ':' | '!' | '?' | '}' | '）' | '｝' | '】' | '』' | '」' | '］' | '、' | '，' | '；' | '：'
     ) || crate::utils::sentence_utils::is_closing_quote(c)
         || crate::utils::sentence_utils::is_cjk_sentence_ending(c)
 }
