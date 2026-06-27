@@ -1,5 +1,13 @@
-use rumdl_lib::rule::Rule;
+use rumdl_lib::rule::{LintWarning, Rule};
 use rumdl_lib::rules::MD043RequiredHeadings;
+
+fn assert_warning_message(result: &[LintWarning], expected: &str) {
+    assert!(!result.is_empty(), "Expected at least one warning");
+    assert!(
+        result.iter().all(|warning| warning.message == expected),
+        "Expected all warnings to have message {expected:?}, got: {result:?}"
+    );
+}
 
 #[test]
 fn test_matching_headings() {
@@ -30,6 +38,130 @@ fn test_missing_heading() {
     let fixed = rule.fix(&ctx).unwrap();
     // MD043 now preserves original content to prevent data loss
     assert_eq!(fixed, content);
+}
+
+#[test]
+fn test_structure_mismatch_message_reports_first_different_heading() {
+    let required = vec![
+        "# Introduction".to_string(),
+        "# Methods".to_string(),
+        "# Results".to_string(),
+    ];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction\n\n# Results";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected heading '# Methods' at position 2, but found '# Results'",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_reports_missing_trailing_heading() {
+    let required = vec!["# Introduction".to_string(), "# Methods".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected heading '# Methods' at position 2, but found no more headings",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_reports_extra_trailing_heading() {
+    let required = vec!["# Introduction".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction\n\n## Extra";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected no more headings after position 1, but found '## Extra' at position 2",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_reports_extra_trailing_heading_after_wildcard() {
+    let required = vec!["# Introduction".to_string(), "*".to_string(), "# Results".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction\n\n## Optional 1\n\n## Optional 2\n\n# Results\n\n## Extra";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected no more headings after position 4, but found '## Extra' at position 5",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_handles_plus_before_required_heading() {
+    let required = vec!["# Introduction".to_string(), "+".to_string(), "# Results".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction\n\n# Results";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected one or more headings before '# Results', but found '# Results' immediately",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_preserves_actual_case_after_wildcard() {
+    let required = vec!["+".to_string(), "# Results".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# RESULTS";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected one or more headings before '# Results', but found '# RESULTS' immediately",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_handles_question_before_required_heading() {
+    let required = vec!["?".to_string(), "## Description".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "## Description";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected one heading before '## Description', but found '## Description' immediately",
+    );
+}
+
+#[test]
+fn test_structure_mismatch_message_handles_asterisk_missing_required_heading() {
+    let required = vec!["# Introduction".to_string(), "*".to_string(), "# Results".to_string()];
+    let rule = MD043RequiredHeadings::new(required);
+    let content = "# Introduction\n\n## Optional 1\n\n## Optional 2";
+    let ctx = rumdl_lib::lint_context::LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+
+    assert_warning_message(
+        &result,
+        "Heading structure does not match required structure. Expected heading '# Results' at position 4, but found no more headings",
+    );
 }
 
 #[test]
