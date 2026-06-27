@@ -8523,7 +8523,7 @@ fn test_myst_colon_figure_directive_options_only_preserved() {
 fn test_md013_reflow_standalone_link_boundary() {
     let long_url = "a".repeat(100);
     // Two short lines that will be merged by reflow, plus the standalone link.
-    let content = format!("Line one.\nLine two.\n[link]({})\n", long_url);
+    let content = format!("Line one.\nLine two.\n[link]({long_url})\n");
 
     let config = MD013Config {
         line_length: crate::types::LineLength::from_const(30),
@@ -8536,8 +8536,7 @@ fn test_md013_reflow_standalone_link_boundary() {
 
     assert!(
         result.is_empty(),
-        "Expected no warnings for standalone link in reflow, got: {:?}",
-        result
+        "Expected no warnings for standalone link in reflow, got: {result:?}"
     );
 }
 
