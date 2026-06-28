@@ -1082,6 +1082,12 @@ impl Rule for MD060TableFormat {
         let lines = ctx.raw_lines();
         let table_blocks = &ctx.table_blocks;
 
+        // Nothing to format when there are no tables; return the content verbatim
+        // so non-table documents are never altered.
+        if table_blocks.is_empty() {
+            return Ok(content.to_string());
+        }
+
         let mut result_lines: Vec<String> = lines.iter().map(|&s| s.to_string()).collect();
 
         for table_block in table_blocks {
@@ -1108,9 +1114,13 @@ impl Rule for MD060TableFormat {
         }
 
         let mut fixed = result_lines.join("\n");
-        if content.ends_with('\n') && !fixed.ends_with('\n') {
-            fixed.push('\n');
-        }
+        // `raw_lines()` drops the trailing empty line, so `join("\n")` collapses a
+        // run of trailing blank lines down to a single newline. Restore the
+        // original trailing-newline run exactly so trailing blank lines are
+        // preserved and the fix is idempotent.
+        let original_trailing_newlines = content.len() - content.trim_end_matches('\n').len();
+        fixed.truncate(fixed.trim_end_matches('\n').len());
+        fixed.push_str(&"\n".repeat(original_trailing_newlines));
         Ok(fixed)
     }
 
@@ -2709,5 +2719,36 @@ Cell 1     Cell 2
             result_std.is_empty(),
             "MD060 already-aligned table with caption should have no warnings under Standard: {result_std:?}"
         );
+    }
+
+    #[test]
+    fn test_fix_preserves_trailing_blank_lines_and_is_idempotent() {
+        // Regression: the fix reconstructed content via raw_lines().join("\n"),
+        // which dropped trailing blank lines one per pass (non-idempotent) and
+        // altered documents with no tables at all.
+        let rule = MD060TableFormat::new(true, "aligned".to_string());
+
+        // No table: content must be returned byte-for-byte unchanged.
+        for input in ["# \n\n\n\n", "text\n\n\n", "no trailing newline", "only blanks\n\n"] {
+            let ctx = LintContext::new(input, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(
+                rule.fix(&ctx).unwrap(),
+                input,
+                "MD060 must not alter table-free content: {input:?}"
+            );
+        }
+
+        // Table followed by trailing blank lines: the table is formatted but the
+        // trailing blanks survive, and a second pass is a no-op.
+        let with_table = "| a | b |\n|---|---|\n| 1 | 2 |\n\n\n";
+        let ctx = LintContext::new(with_table, crate::config::MarkdownFlavor::Standard, None);
+        let once = rule.fix(&ctx).unwrap();
+        assert!(
+            once.ends_with("\n\n\n"),
+            "trailing blank lines must be preserved, got: {once:?}"
+        );
+        let ctx2 = LintContext::new(&once, crate::config::MarkdownFlavor::Standard, None);
+        let twice = rule.fix(&ctx2).unwrap();
+        assert_eq!(once, twice, "MD060 fix must be idempotent with trailing blank lines");
     }
 }
