@@ -498,7 +498,17 @@ impl Rule for MD007ULIndent {
                 } else {
                     expected_indent
                 };
-                let expected_content_visual_col = accepted_indent + 2;
+                // Store the content column the item will have *after* its indent is
+                // fixed: the corrected marker column plus this marker's actual width
+                // (marker char + the spaces after it). Using the real width rather than a
+                // hard-coded 2 keeps a child aligned to a parent whose marker was widened
+                // by a non-default MD030 (e.g. `-   ` under `ul-multi = 3`, content column
+                // 4); hard-coding 2 stored column 2 and flagged the correctly-nested child
+                // as over-indented, then "fixed" it to a column where it detaches into a
+                // sibling. For the common single-space marker the width is 2, so the
+                // stored value is unchanged.
+                let marker_width = visual_content_column.saturating_sub(visual_marker_column);
+                let expected_content_visual_col = accepted_indent + marker_width;
                 list_stack.push((
                     visual_marker_column,
                     line_idx,
@@ -802,6 +812,7 @@ mod tests {
     use super::*;
     use crate::lint_context::LintContext;
     use crate::rule::Rule;
+    use indoc::indoc;
 
     #[test]
     fn test_valid_list_indent() {
@@ -2939,6 +2950,126 @@ items:
         assert!(
             result.is_empty(),
             "indent=4 under '100.' should accept 4-space indent: {result:?}"
+        );
+    }
+
+    /// Maximum list-nesting depth a real CommonMark parser sees in `md`: 1 for a
+    /// flat list, 2 for a list nested inside a list item. Guards against indent
+    /// "fixes" that silently flatten a child into a sibling.
+    fn commonmark_max_list_depth(md: &str) -> usize {
+        use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+        let (mut depth, mut max) = (0usize, 0usize);
+        for event in Parser::new(md) {
+            match event {
+                Event::Start(Tag::List(_)) => {
+                    depth += 1;
+                    max = max.max(depth);
+                }
+                Event::End(TagEnd::List(_)) => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        max
+    }
+
+    #[test]
+    fn test_md007_widened_parent_marker_keeps_nested_child() {
+        // A non-default MD030 (e.g. `ul-multi = 3`) widens a parent bullet to `-   `,
+        // moving its content column to 4. A child aligned to that column (indent 4) is
+        // correctly nested in CommonMark, so MD007 must accept it instead of flagging it
+        // as over-indented — the old behavior stored the parent's content column as 2 and
+        // "fixed" the child to column 2, detaching it into a sibling.
+        let rule = MD007ULIndent::default();
+        let content = indoc! {"
+            -   Parent item
+                - Nested item
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "a child aligned to a widened parent's content column must not be flagged: {result:?}"
+        );
+        assert_eq!(commonmark_max_list_depth(content), 2, "precondition: source is nested");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "fix must be a no-op for an already correctly nested child"
+        );
+    }
+
+    #[test]
+    fn test_md007_widened_parent_aligns_child_to_content_column() {
+        // A child mis-indented under a widened parent is corrected to the parent's
+        // content column (4 here), not to the fixed-grid column 2 that would detach it.
+        let rule = MD007ULIndent::default();
+        let content = indoc! {"
+            -   Parent item
+                 - Nested item
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            indoc! {"
+                -   Parent item
+                    - Nested item
+            "},
+            "child must align to the parent's content column 4: {fixed:?}"
+        );
+        assert_eq!(
+            commonmark_max_list_depth(&fixed),
+            2,
+            "fixed child must remain nested, not flattened to a sibling:\n{fixed}"
+        );
+    }
+
+    #[test]
+    fn test_md007_widened_markers_nested_multiple_levels() {
+        // Several levels of widened markers all stay nested: each child aligns to its
+        // own parent's widened content column.
+        let rule = MD007ULIndent::default();
+        let content = indoc! {"
+            -   Level 0
+                -   Level 1
+                    - Level 2
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "deeply nested widened markers must not be flagged: {result:?}"
+        );
+        assert_eq!(
+            commonmark_max_list_depth(content),
+            3,
+            "three nesting levels are preserved"
+        );
+    }
+
+    #[test]
+    fn test_md007_default_marker_indent_still_enforced() {
+        // Regression guard: the widened-marker handling must not relax the check for
+        // ordinary single-space markers. An over-indented child is still flagged and
+        // fixed back to the 2-space grid.
+        let rule = MD007ULIndent::default();
+        let content = indoc! {"
+            - Parent item
+                - Nested item
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "an over-indented child under a normal marker is still flagged: {result:?}"
+        );
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            indoc! {"
+                - Parent item
+                  - Nested item
+            "}
         );
     }
 }
