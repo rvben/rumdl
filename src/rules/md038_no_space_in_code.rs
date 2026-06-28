@@ -258,9 +258,17 @@ impl Rule for MD038NoSpaceInCode {
         // Use centralized code spans from LintContext
         let code_spans = ctx.code_spans();
         for (i, code_span) in code_spans.iter().enumerate() {
-            // Skip code spans that are inside fenced/indented code blocks
             if let Some(line_info) = ctx.lines.get(code_span.line - 1) {
-                if line_info.in_code_block {
+                // Skip code spans that are inside fenced/indented code blocks, front-matter,
+                // math blocks, HTML blocks, HTML comments, mkdocstrings, or ESM blocks.
+                if line_info.in_code_block
+                    || line_info.in_front_matter
+                    || line_info.in_math_block
+                    || line_info.in_html_block
+                    || line_info.in_html_comment
+                    || line_info.in_mkdocstrings
+                    || line_info.in_esm_block
+                {
                     continue;
                 }
                 // Skip multi-line code spans inside MkDocs containers where pulldown-cmark
@@ -476,6 +484,39 @@ mod tests {
                 result.len()
             );
         }
+    }
+
+    #[test]
+    fn test_md038_front_matter() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "---\ntitle: \"`  code  `\"\n---\n`  code  `";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag the one in the body (line 4), not the one in front-matter (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_md038_math_block() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "$$\n`  code  `\n$$\n`  code  `";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag the one in the body (line 4), not the one in math block (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
+    }
+
+    #[test]
+    fn test_md038_html_comment() {
+        let rule = MD038NoSpaceInCode::new();
+        let content = "<!--\n`  code  `\n-->\n`  code  `";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag the one in the body (line 4), not the one in HTML comment (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
     }
 
     #[test]

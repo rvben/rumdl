@@ -1,3 +1,4 @@
+use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 use crate::lint_context::types::HeadingStyle;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -137,11 +138,14 @@ impl Rule for MD009TrailingSpaces {
         // Use pre-computed lines (needed for looking back at prev_line)
         let lines = ctx.raw_lines();
 
-        for (line_num, &line) in lines.iter().enumerate() {
-            // Skip lines inside PyMdown blocks (MkDocs flavor)
-            if ctx.line_info(line_num + 1).is_some_and(|info| info.in_pymdown_block) {
-                continue;
-            }
+        let mut filtered = ctx.filtered_lines().skip_front_matter().skip_pymdown_blocks();
+        if !self.config.strict {
+            filtered = filtered.skip_code_blocks();
+        }
+
+        for filtered_line in filtered {
+            let line_num = filtered_line.line_num - 1;
+            let line = filtered_line.content;
 
             let line_is_ascii = line.is_ascii();
             // Count ASCII trailing spaces for br_spaces comparison
@@ -202,16 +206,6 @@ impl Rule for MD009TrailingSpaces {
                     });
                 }
                 continue;
-            }
-
-            // Handle code blocks if not in strict mode
-            if !self.config.strict {
-                // Use pre-computed line info
-                if let Some(line_info) = ctx.line_info(line_num + 1)
-                    && line_info.in_code_block
-                {
-                    continue;
-                }
             }
 
             // Check if it's a valid line break (only ASCII spaces count for br_spaces).
@@ -346,6 +340,17 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].line, 1);
         assert_eq!(result[0].message, "3 trailing spaces found");
+    }
+
+    #[test]
+    fn test_md009_front_matter() {
+        let rule = MD009TrailingSpaces::default();
+        let content = "---\ntitle: Test   \n---\nBody   ";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only flag the one in the body (line 4), not the one in front-matter (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
     }
 
     #[test]

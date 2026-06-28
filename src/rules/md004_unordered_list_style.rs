@@ -669,4 +669,18 @@ mod tests {
         // Should detect all non-asterisk markers
         assert!(result.len() > 600);
     }
+
+    #[test]
+    fn test_md004_front_matter() {
+        let rule = MD004UnorderedListStyle::new(UnorderedListStyle::Dash);
+        // Front-matter has asterisk list, body has dash list.
+        // If front-matter is NOT skipped, it will flag the asterisk list because we configured Dash.
+        let content = "---\n* key: value\n---\n- Item 1\n- Item 2\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not flag list-like items in front-matter: {result:?}"
+        );
+    }
 }

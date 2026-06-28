@@ -221,10 +221,16 @@ impl Rule for MD012NoMultipleBlanks {
             .filtered_lines()
             .skip_front_matter()
             .skip_code_blocks()
+            .skip_html_comments()
+            .skip_html_blocks()
             .skip_quarto_divs()
             .skip_math_blocks()
             .skip_obsidian_comments()
             .skip_pymdown_blocks()
+            .skip_jsx_expressions()
+            .skip_mdx_comments()
+            .skip_jsx_blocks()
+            .skip_esm_blocks()
         {
             let line_num = filtered_line.line_num - 1; // Convert 1-based to 0-based for internal tracking
             let line = filtered_line.content;
@@ -465,6 +471,24 @@ mod tests {
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert!(result.is_empty()); // Blank lines inside code blocks are ignored
+    }
+
+    #[test]
+    fn test_blank_lines_in_html_comment() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n<!--\ncomment\n\n\n\nmore comment\n-->\n\nAfter";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Blank lines inside HTML comments are ignored
+    }
+
+    #[test]
+    fn test_blank_lines_in_html_block() {
+        let rule = MD012NoMultipleBlanks::default();
+        let content = "Before\n\n<script>\n\n\n\n</script>\n\nAfter";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty()); // Blank lines inside HTML blocks are ignored
     }
 
     #[test]

@@ -2,6 +2,7 @@ mod md041_config;
 
 pub(super) use md041_config::MD041Config;
 
+use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::HeadingStyle;
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, Severity};
 use crate::rules::front_matter_utils::FrontMatterUtils;
@@ -135,18 +136,23 @@ impl MD041FirstLineHeading {
     fn first_content_line_idx(ctx: &crate::lint_context::LintContext) -> Option<usize> {
         let is_mkdocs = ctx.flavor == crate::config::MarkdownFlavor::MkDocs;
 
-        for (idx, line_info) in ctx.lines.iter().enumerate() {
-            if line_info.in_front_matter
-                || line_info.is_blank
-                || line_info.in_esm_block
-                || line_info.in_html_comment
-                || line_info.in_mdx_comment
-                || line_info.in_kramdown_extension_block
-                || line_info.is_kramdown_block_ial
-            {
+        let filtered = ctx
+            .filtered_lines()
+            .skip_front_matter()
+            .skip_esm_blocks()
+            .skip_html_comments()
+            .skip_mdx_comments()
+            .skip_kramdown_extension_blocks();
+
+        for filtered_line in filtered {
+            let idx = filtered_line.line_num - 1;
+            let line_info = &ctx.lines[idx];
+
+            if line_info.is_blank || line_info.is_kramdown_block_ial {
                 continue;
             }
-            let line_content = line_info.content(ctx.content);
+
+            let line_content = filtered_line.content;
             if is_mkdocs && is_mkdocs_anchor_line(line_content) {
                 continue;
             }

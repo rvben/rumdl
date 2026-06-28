@@ -93,8 +93,16 @@ impl Rule for MD027MultipleSpacesBlockquote {
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
 
-            // Skip lines in code blocks and HTML blocks
-            if line_info.in_code_block || line_info.in_html_block {
+            // Skip lines in code blocks, HTML blocks, and other skippable regions
+            if line_info.in_code_block
+                || line_info.in_html_block
+                || line_info.in_html_comment
+                || line_info.in_mdx_comment
+                || line_info.in_front_matter
+                || line_info.in_mkdocstrings
+                || line_info.in_jsx_block
+                || line_info.in_kramdown_extension_block
+            {
                 continue;
             }
 
@@ -838,5 +846,17 @@ mod tests {
     fn test_md027_config_default_is_false() {
         let cfg = MD027Config::default();
         assert!(!cfg.list_items, "rumdl default for list_items should be false");
+    }
+
+    #[test]
+    fn test_md027_html_comment() {
+        let rule = MD027MultipleSpacesBlockquote::default();
+        let content = "<!--\n>  comment\n-->";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "MD027 should not flag blockquotes inside HTML comments: {result:?}"
+        );
     }
 }

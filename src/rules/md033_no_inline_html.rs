@@ -1010,11 +1010,14 @@ impl Rule for MD033NoInlineHtml {
             // Reconstruct tag string from byte offsets
             let tag = &content[html_tag.byte_offset..html_tag.byte_end];
 
-            // Skip tags in code blocks, PyMdown blocks, and block IALs
-            if ctx
-                .line_info(line_num)
-                .is_some_and(|info| info.in_code_block || info.in_pymdown_block || info.is_kramdown_block_ial)
-            {
+            // Skip tags in code blocks, PyMdown blocks, block IALs, front-matter, and math blocks
+            if ctx.line_info(line_num).is_some_and(|info| {
+                info.in_code_block
+                    || info.in_pymdown_block
+                    || info.is_kramdown_block_ial
+                    || info.in_front_matter
+                    || info.in_math_block
+            }) {
                 continue;
             }
 
@@ -1219,6 +1222,29 @@ mod tests {
         // Only reports opening tags, not closing tags
         assert_eq!(result.len(), 1); // Only <div>, not </div>
         assert!(result[0].message.starts_with("Inline HTML found: <div>"));
+    }
+
+    #[test]
+    fn test_md033_front_matter() {
+        let rule = MD033NoInlineHtml::default();
+        let content = "---\ndescription: <div class=\"test\">hello</div>\n---\n# Title\n<div>body</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only report <div>body</div> (line 5), not <div class="test"> (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+        assert_eq!(result[0].message, "Inline HTML found: <div>");
+    }
+
+    #[test]
+    fn test_md033_math_block() {
+        let rule = MD033NoInlineHtml::default();
+        let content = "$$\nx < y && y > z\n$$\n<div>body</div>";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        // Should only report <div>body</div> (line 4), not the fake tag <y> in math (line 2)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 4);
     }
 
     #[test]
