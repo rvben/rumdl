@@ -95,8 +95,6 @@ pub struct LineFilterConfig {
     pub skip_obsidian_comments: bool,
     /// Skip lines inside PyMdown Blocks (/// ... ///, MkDocs flavor only)
     pub skip_pymdown_blocks: bool,
-    /// Skip lines inside kramdown extension blocks ({::comment}...{:/comment}, etc.)
-    pub skip_kramdown_extension_blocks: bool,
     /// Skip lines that are div markers (::: opening or closing)
     /// Unlike `skip_quarto_divs` which skips ALL content inside divs,
     /// this only skips the marker lines themselves (structural delimiters)
@@ -281,16 +279,6 @@ impl LineFilterConfig {
     #[must_use]
     pub fn skip_pymdown_blocks(mut self) -> Self {
         self.skip_pymdown_blocks = true;
-        self
-    }
-
-    /// Skip lines inside kramdown extension blocks ({::comment}...{:/comment}, {::nomarkdown}...{:/nomarkdown})
-    ///
-    /// Kramdown extension blocks contain content that should not be processed
-    /// as regular markdown (comments, raw HTML, options directives).
-    #[must_use]
-    pub fn skip_kramdown_extension_blocks(mut self) -> Self {
-        self.skip_kramdown_extension_blocks = true;
         self
     }
 
@@ -574,13 +562,6 @@ impl<'a> FilteredLinesBuilder<'a> {
     #[must_use]
     pub fn skip_pymdown_blocks(mut self) -> Self {
         self.config = self.config.skip_pymdown_blocks();
-        self
-    }
-
-    /// Skip lines inside kramdown extension blocks ({::comment}...{:/comment}, etc.)
-    #[must_use]
-    pub fn skip_kramdown_extension_blocks(mut self) -> Self {
-        self.config = self.config.skip_kramdown_extension_blocks();
         self
     }
 

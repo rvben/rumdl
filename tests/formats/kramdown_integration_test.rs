@@ -563,11 +563,7 @@ fn test_kramdown_filtered_lines_skip_extension_blocks() {
     let content = "Line 1\n{::comment}\nhidden\n{:/comment}\nLine 5";
     let ctx = LintContext::new(content, MarkdownFlavor::Kramdown, None);
 
-    let lines: Vec<_> = ctx
-        .filtered_lines()
-        .skip_kramdown_extension_blocks()
-        .into_iter()
-        .collect();
+    let lines: Vec<_> = ctx.filtered_lines().into_iter().collect();
 
     // Lines inside extension blocks should be filtered out
     assert!(
@@ -590,11 +586,7 @@ fn test_kramdown_filtered_lines_not_in_standard() {
     let content = "Line 1\n{::comment}\nhidden\n{:/comment}\nLine 5";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
 
-    let lines: Vec<_> = ctx
-        .filtered_lines()
-        .skip_kramdown_extension_blocks()
-        .into_iter()
-        .collect();
+    let lines: Vec<_> = ctx.filtered_lines().into_iter().collect();
 
     // In standard flavor, the "extension" syntax is just regular text
     assert!(

@@ -141,8 +141,7 @@ impl MD041FirstLineHeading {
             .skip_front_matter()
             .skip_esm_blocks()
             .skip_html_comments()
-            .skip_mdx_comments()
-            .skip_kramdown_extension_blocks();
+            .skip_mdx_comments();
 
         for filtered_line in filtered {
             let idx = filtered_line.line_num - 1;
