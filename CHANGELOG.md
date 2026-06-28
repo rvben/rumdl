@@ -64,6 +64,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.25](https://github.com/rvben/rumdl/compare/v0.2.24...v0.2.25) - 2026-06-28
+
+### Added
+
+- **lsp**: document LSP settings and scope link-completion triggers ([18fae1b](https://github.com/rvben/rumdl/commit/18fae1b78744891dd0d26a6d44f5beb0c6d285b8))
+- **MD013**: reflow lists with configured marker spacing (#692) ([b00b117](https://github.com/rvben/rumdl/commit/b00b1173b1b0eb0be934e0454824932bb707fc69))
+
+### Fixed
+
+- **MD052**: preserve author casing in undefined-reference messages ([6d1cb96](https://github.com/rvben/rumdl/commit/6d1cb9668dea356a06552df6c7232baf030397aa))
+- **MD013**: preserve single-tilde strikethrough content during reflow (#701) ([a2387ce](https://github.com/rvben/rumdl/commit/a2387cefc01a7c3da8d899a2cc3dadde3bb6e87d))
+- **rules**: resolve complex link handling in reflow and MD052 (#702) ([d57a61a](https://github.com/rvben/rumdl/commit/d57a61a098c53e9fde079ec0e911b8e5bdb2e12e))
+- **rules**: prevent front-matter and skippable region leakage (#699) ([e09fa06](https://github.com/rvben/rumdl/commit/e09fa06e40088fa0814acff4407574a3928714c9))
+- **MD007**: align nested lists to a widened parent's content column (#700) ([595cc4d](https://github.com/rvben/rumdl/commit/595cc4df7a0a8befa1bd17edcc489a40e104d2da))
+
 ## [0.2.24](https://github.com/rvben/rumdl/compare/v0.2.23...v0.2.24) - 2026-06-27
 
 ### Added
