@@ -10,13 +10,7 @@ use crate::utils::range_utils::calculate_match_range;
 use toml;
 
 mod md030_config;
-use md030_config::MD030Config;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ListType {
-    Unordered,
-    Ordered,
-}
+pub use md030_config::MD030Config;
 
 /// How a following line relates to the list item being scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,15 +73,6 @@ impl MD030ListMarkerSpace {
     /// The target column for ordered list text, or `None` when alignment is off.
     fn ol_align_column(&self) -> Option<usize> {
         self.config.ol_align_column.enabled()
-    }
-
-    fn get_expected_spaces(&self, list_type: ListType, is_multi: bool) -> usize {
-        match (list_type, is_multi) {
-            (ListType::Unordered, false) => self.config.ul_single.get(),
-            (ListType::Unordered, true) => self.config.ul_multi.get(),
-            (ListType::Ordered, false) => self.config.ol_single.get(),
-            (ListType::Ordered, true) => self.config.ol_multi.get(),
-        }
     }
 }
 
@@ -195,11 +180,6 @@ impl Rule for MD030ListMarkerSpace {
                 warnings.push(warning);
             }
 
-            let list_type = if list_info.is_ordered {
-                ListType::Ordered
-            } else {
-                ListType::Unordered
-            };
             let marker_end = list_info.marker_column + list_info.marker.len();
 
             // MD030 only applies when there is content after the marker.
@@ -209,21 +189,12 @@ impl Rule for MD030ListMarkerSpace {
 
             let actual_spaces = list_info.content_column.saturating_sub(marker_end);
 
-            let expected_spaces = if list_type == ListType::Ordered
-                && let Some(target_column) = self.ol_align_column()
-            {
-                // Align ordered text to the target column, overriding ol-single/
-                // ol-multi: pad a narrow marker up to it, and let one too wide overflow
-                // with a single space. Capped at 4 spaces, since 5+ start an indented
-                // code block in CommonMark.
-                let marker_len = list_info.marker.len();
-                target_column.saturating_sub(marker_len).clamp(1, 4)
-            } else {
-                // Default: a fixed number of spaces by list type and whether the item
-                // is single- or multi-line.
-                let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
-                self.get_expected_spaces(list_type, is_multi_line)
-            };
+            // Spacing comes from the shared MD030 config logic: the ol-align-column
+            // override for ordered lists, otherwise the fixed single-/multi-line value.
+            let is_multi_line = self.is_multi_line_list_item(ctx, line_num_1based, lines);
+            let expected_spaces =
+                self.config
+                    .expected_spaces(list_info.is_ordered, is_multi_line, list_info.marker.len());
 
             if actual_spaces != expected_spaces {
                 warnings.push(self.spacing_fix_warning(
@@ -452,8 +423,17 @@ impl MD030ListMarkerSpace {
         }
     }
 
-    /// Whether the list item on `line_num` spans multiple lines (has continuation or
-    /// nested content).
+    /// Whether the list item on `line_num` spans multiple lines *as written* (it has
+    /// continuation or nested content).
+    ///
+    /// Maintainer note: MD013's list reflow needs the multi-line shape of the
+    /// *rewritten* item instead — plain prose continuation collapses onto the marker
+    /// line during reflow — so it deliberately does not reuse this and derives its own
+    /// `is_multi` from the post-reflow shape (see `md013_line_length.rs`). The two are
+    /// related but technically distinct: this reflects the current text, MD013's the
+    /// predicted output. The spacing *policy* they share lives in
+    /// [`MD030Config::expected_spaces`]; if the meaning of "multi-line" changes here,
+    /// check whether MD013's reflow prediction needs the matching change.
     fn is_multi_line_list_item(&self, ctx: &crate::lint_context::LintContext, line_num: usize, lines: &[&str]) -> bool {
         let Some((marker_column, bq_level, min_indent)) = Self::continuation_params(ctx, line_num) else {
             return false;
@@ -546,13 +526,10 @@ impl MD030ListMarkerSpace {
         let (offset, spaces) = Self::inline_unordered_spaces(line, content_column)?;
         let bullet_content_col = offset + spaces;
         // ul-multi if the bullet itself spans lines, else ul-single, measured with a
-        // raw indent (bq_level 0) like a bullet that begins its own line.
+        // raw indent (bq_level 0) like a bullet that begins its own line. The inline
+        // bullet is always unordered (marker width 1).
         let multi = Self::has_continuation(ctx, line_num, lines, content_column, 0, bullet_content_col);
-        let want = if multi {
-            self.config.ul_multi.get()
-        } else {
-            self.config.ul_single.get()
-        };
+        let want = self.config.expected_spaces(false, multi, 1);
         if spaces == want {
             return None;
         }
@@ -614,7 +591,8 @@ impl MD030ListMarkerSpace {
 
                     if is_clear_intent {
                         let is_multi_line = self.is_multi_line_for_unrecognized(line_num, lines);
-                        let expected_spaces = self.get_expected_spaces(ListType::Ordered, is_multi_line);
+                        // Ordered marker `<digits>.` has width `before_dot.len() + 1`.
+                        let expected_spaces = self.config.expected_spaces(true, is_multi_line, before_dot.len() + 1);
 
                         let marker = format!("{before_dot}.");
                         let marker_pos = indent_len;
