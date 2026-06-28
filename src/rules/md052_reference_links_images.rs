@@ -466,7 +466,7 @@ impl MD052ReferenceLinkImages {
                         link.line - 1,
                         link.byte_offset - line_start,
                         match_len,
-                        ref_id.to_string(),
+                        original_case_label(&link.text, &reference_lower),
                     ));
                     reported_refs.insert(reference_lower, true);
                 }
@@ -563,7 +563,7 @@ impl MD052ReferenceLinkImages {
                         image.line - 1,
                         image.byte_offset - line_start,
                         match_len,
-                        ref_id.to_string(),
+                        original_case_label(&image.alt_text, &reference_lower),
                     ));
                     reported_refs.insert(reference_lower, true);
                 }
@@ -867,6 +867,19 @@ impl MD052ReferenceLinkImages {
         }
 
         undefined
+    }
+}
+
+/// Choose the casing to display for an undefined reference. The matching key
+/// (`reference_id`) is lowercased, but for shortcut and collapsed references the
+/// link text (or image alt text) is itself the label, so its original casing is
+/// what the author wrote. Prefer that; fall back to the normalized key for full
+/// reference links (where the text is not the label) or when the text is empty.
+fn original_case_label(text: &str, reference_lower: &str) -> String {
+    if !text.is_empty() && text.to_lowercase() == reference_lower {
+        text.to_string()
+    } else {
+        reference_lower.to_string()
     }
 }
 
@@ -1673,7 +1686,8 @@ Use [Result] for error handling.
 
         // Should only flag [Result] because it's not in ignore
         assert_eq!(result.len(), 1, "Should only flag names not in ignore");
-        assert!(result[0].message.contains("result"));
+        // The message preserves the author's original casing for shortcut references.
+        assert!(result[0].message.contains("Result"));
     }
 
     #[test]
@@ -1772,7 +1786,8 @@ See [other docs][MissingRef] for more.
         // String is NOT in the hardcoded list, so we test that the user config works
         // [Box] should be flagged (not in ignore)
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("box"));
+        // The message preserves the author's original casing for shortcut references.
+        assert!(result[0].message.contains("Box"));
     }
 
     #[test]
