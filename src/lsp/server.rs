@@ -255,7 +255,10 @@ impl LanguageServer for RumdlLanguageServer {
         // Load rumdl configuration with auto-discovery (fallback/default)
         self.load_configuration(false).await;
 
-        let enable_link_navigation = self.config.read().await.enable_link_navigation;
+        let (enable_link_navigation, enable_link_completions) = {
+            let config = self.config.read().await;
+            (config.enable_link_navigation, config.enable_link_completions)
+        };
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
@@ -287,15 +290,24 @@ impl LanguageServer for RumdlLanguageServer {
                     workspace_diagnostics: false,
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 })),
+                // Completion always stays available for fenced code-block language
+                // labels (backtick trigger). The link-target triggers (`(` `#` `/`
+                // `.` `-`) are only registered when link completions are enabled, so
+                // a client with its own link-completion source (e.g. a PKM-focused
+                // LSP) is not invoked on those characters when the feature is off.
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec![
-                        "`".to_string(),
-                        "(".to_string(),
-                        "#".to_string(),
-                        "/".to_string(),
-                        ".".to_string(),
-                        "-".to_string(),
-                    ]),
+                    trigger_characters: Some(if enable_link_completions {
+                        vec![
+                            "`".to_string(),
+                            "(".to_string(),
+                            "#".to_string(),
+                            "/".to_string(),
+                            ".".to_string(),
+                            "-".to_string(),
+                        ]
+                    } else {
+                        vec!["`".to_string()]
+                    }),
                     resolve_provider: Some(false),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                     all_commit_characters: None,

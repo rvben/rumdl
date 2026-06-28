@@ -3318,6 +3318,51 @@ async fn test_link_completions_disabled_returns_none() {
 }
 
 #[tokio::test]
+async fn test_code_fence_completion_works_when_link_completions_disabled() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    // Disabling link completions must NOT disable fenced code-block language
+    // completion - they share one completion capability but are independent.
+    let temp_dir = tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    let content = "# Hello\n\n```py\nprint('hi')\n```";
+    fs::write(&test_file, content).unwrap();
+
+    let server = create_test_server();
+    server.config.write().await.enable_link_completions = false;
+
+    let uri = Url::from_file_path(&test_file).unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: content.to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = CompletionParams {
+        text_document_position: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position { line: 2, character: 5 }, // After ```py
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+        context: None,
+    };
+
+    let result = server.completion(params).await.unwrap();
+    let Some(CompletionResponse::Array(items)) = result else {
+        panic!("code-fence completion should still return items when link completions are off");
+    };
+    assert!(
+        items.iter().any(|i| i.label.to_lowercase() == "python"),
+        "python language completion must still work with link completions disabled"
+    );
+}
+
+#[tokio::test]
 async fn test_link_navigation_disabled_hover_returns_none() {
     let server = create_test_server();
     server.config.write().await.enable_link_navigation = false;

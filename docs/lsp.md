@@ -26,7 +26,8 @@ The rumdl LSP server provides:
 - **Code actions**: Quick fixes for auto-fixable issues
 - **Document formatting**: Format entire document (`rumdl fmt`)
 - **Range formatting**: Format selected text
-- **Completion**: Language suggestions for fenced code blocks
+- **Completion**: Language suggestions for fenced code blocks, plus file paths and heading anchors inside link targets
+- **Link navigation**: Hover preview, go-to-definition, find-references, and rename for Markdown links
 
 ### Code block language completion
 
@@ -54,6 +55,23 @@ Features:
 - Filters by `allowed-languages` and `disallowed-languages`
 - Prioritizes `preferred-aliases` in results
 - Shows canonical language name in completion details
+
+### Link path and anchor completion
+
+Inside a Markdown link target, rumdl suggests workspace file paths after `](`
+and heading anchors after `#` (for example `](../guide.md#` lists the headings
+in `guide.md`). This is driven by a workspace index of Markdown files and their
+headings.
+
+If you use another language server for link completion (for example a PKM/notes
+LSP) and do not want rumdl's suggestions, disable it with the
+`enableLinkCompletions` setting (see [LSP settings](#lsp-settings)). When
+disabled, rumdl returns no link suggestions and does not register the
+link-target trigger characters (`(`, `#`, `/`, `.`, `-`), so it is not invoked on
+them; fenced code-block language completion still works. Linting, formatting,
+and code actions are unaffected. The related navigation features (hover,
+go-to-definition, references, rename) are controlled separately by
+`enableLinkNavigation`.
 
 ## Editor configuration
 
@@ -164,6 +182,40 @@ Or use built-in defaults only:
 ```bash
 rumdl server --no-config
 ```
+
+### LSP settings
+
+Beyond the config file, editors can pass settings to the server as LSP
+initialization options (or `workspace/didChangeConfiguration`). These are
+top-level keys in camelCase, following Ruff's LSP convention:
+
+| Setting                        | Default  | Description                                                                                                                                 |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enableLinting`                | `true`   | Real-time diagnostics as you type                                                                                                           |
+| `enableAutoFix`                | `false`  | Apply auto-fixes on save                                                                                                                    |
+| `enableLinkCompletions`        | `true`   | File-path and heading-anchor completions inside link targets. Set to `false` to keep linting while letting another LSP own link completion. |
+| `enableLinkNavigation`         | `true`   | Hover, go-to-definition, find-references, and rename for links. Set to `false` to avoid conflicts with another LSP that provides these.     |
+| `linkCompletionContentRoots`   | `[]`     | Roots for absolute-style link completion (e.g. `/img/01.webp`); defaults to the workspace roots.                                            |
+| `configPath`                   | (auto)   | Explicit path to a rumdl config file                                                                                                        |
+| `disableRules` / `enableRules` | (config) | Override which rules run                                                                                                                    |
+
+For example, to keep rumdl's linting but turn off its link completion and
+navigation (so your own LSP owns those), in Neovim:
+
+```lua
+vim.lsp.config("rumdl", {
+  cmd = { "rumdl", "server" },
+  filetypes = { "markdown" },
+  root_markers = { ".git" },
+  init_options = {
+    enableLinkCompletions = false,
+    enableLinkNavigation = false,
+  },
+})
+```
+
+These keys are read from the server's initialization options, so any editor that
+can pass `initializationOptions` to a language server can set them.
 
 ## Troubleshooting
 
