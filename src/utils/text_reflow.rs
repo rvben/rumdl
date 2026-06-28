@@ -8,16 +8,14 @@ use crate::utils::is_definition_list_item;
 use crate::utils::mkdocs_attr_list::{ATTR_LIST_PATTERN, is_standalone_attr_list};
 use crate::utils::mkdocs_snippets::is_snippet_block_delimiter;
 use crate::utils::regex_cache::{
-    DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, FOOTNOTE_REF_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
-    HUGO_SHORTCODE_REGEX, INLINE_IMAGE_REGEX, INLINE_LINK_FANCY_REGEX, INLINE_MATH_REGEX, LINKED_IMAGE_INLINE_INLINE,
-    LINKED_IMAGE_INLINE_REF, LINKED_IMAGE_REF_INLINE, LINKED_IMAGE_REF_REF, REF_IMAGE_REGEX, REF_LINK_REGEX,
-    SHORTCUT_REF_REGEX, WIKI_LINK_REGEX,
+    DISPLAY_MATH_REGEX, EMAIL_PATTERN, EMOJI_SHORTCODE_REGEX, HTML_ENTITY_REGEX, HTML_TAG_PATTERN,
+    HUGO_SHORTCODE_REGEX, INLINE_MATH_REGEX, WIKI_LINK_REGEX,
 };
 use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_quote, is_opening_quote,
     text_ends_with_abbreviation,
 };
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
@@ -553,55 +551,29 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     reflow_elements(&elements, options)
 }
 
-/// Image source in a linked image structure
-#[derive(Debug, Clone)]
-enum LinkedImageSource {
-    /// Inline image URL: ![alt](url)
-    Inline(String),
-    /// Reference image: ![alt][ref]
-    Reference(String),
-}
-
-/// Link target in a linked image structure
-#[derive(Debug, Clone)]
-enum LinkedImageTarget {
-    /// Inline link URL: ](url)
-    Inline(String),
-    /// Reference link: ][ref]
-    Reference(String),
-}
-
 /// Represents a piece of content in the markdown
 #[derive(Debug, Clone)]
 enum Element {
     /// Plain text that can be wrapped
     Text(String),
     /// A complete markdown inline link [text](url)
-    Link { text: String, url: String },
+    Link(String),
     /// A complete markdown reference link [text][ref]
-    ReferenceLink { text: String, reference: String },
+    ReferenceLink(String),
     /// A complete markdown empty reference link [text][]
-    EmptyReferenceLink { text: String },
+    EmptyReferenceLink(String),
     /// A complete markdown shortcut reference link [ref]
-    ShortcutReference { reference: String },
+    ShortcutReference(String),
     /// A complete markdown inline image ![alt](url)
-    InlineImage { alt: String, url: String },
+    InlineImage(String),
     /// A complete markdown reference image ![alt][ref]
-    ReferenceImage { alt: String, reference: String },
+    ReferenceImage(String),
     /// A complete markdown empty reference image ![alt][]
-    EmptyReferenceImage { alt: String },
-    /// A clickable image badge in any of 4 forms:
-    /// - [![alt](img-url)](link-url)
-    /// - [![alt][img-ref]](link-url)
-    /// - [![alt](img-url)][link-ref]
-    /// - [![alt][img-ref]][link-ref]
-    LinkedImage {
-        alt: String,
-        img_source: LinkedImageSource,
-        link_target: LinkedImageTarget,
-    },
+    EmptyReferenceImage(String),
+    /// A clickable image badge
+    LinkedImage(String),
     /// Footnote reference [^note]
-    FootnoteReference { note: String },
+    FootnoteReference(String),
     /// Strikethrough text ~~text~~
     Strikethrough(String),
     /// Wiki-style link [[wiki]] or [[wiki|text]]
@@ -646,30 +618,15 @@ impl std::fmt::Display for Element {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Element::Text(s) => write!(f, "{s}"),
-            Element::Link { text, url } => write!(f, "[{text}]({url})"),
-            Element::ReferenceLink { text, reference } => write!(f, "[{text}][{reference}]"),
-            Element::EmptyReferenceLink { text } => write!(f, "[{text}][]"),
-            Element::ShortcutReference { reference } => write!(f, "[{reference}]"),
-            Element::InlineImage { alt, url } => write!(f, "![{alt}]({url})"),
-            Element::ReferenceImage { alt, reference } => write!(f, "![{alt}][{reference}]"),
-            Element::EmptyReferenceImage { alt } => write!(f, "![{alt}][]"),
-            Element::LinkedImage {
-                alt,
-                img_source,
-                link_target,
-            } => {
-                // Build the image part: ![alt](url) or ![alt][ref]
-                let img_part = match img_source {
-                    LinkedImageSource::Inline(url) => format!("![{alt}]({url})"),
-                    LinkedImageSource::Reference(r) => format!("![{alt}][{r}]"),
-                };
-                // Build the link part: (url) or [ref]
-                match link_target {
-                    LinkedImageTarget::Inline(url) => write!(f, "[{img_part}]({url})"),
-                    LinkedImageTarget::Reference(r) => write!(f, "[{img_part}][{r}]"),
-                }
-            }
-            Element::FootnoteReference { note } => write!(f, "[^{note}]"),
+            Element::Link(s) => write!(f, "{s}"),
+            Element::ReferenceLink(s) => write!(f, "{s}"),
+            Element::EmptyReferenceLink(s) => write!(f, "{s}"),
+            Element::ShortcutReference(s) => write!(f, "{s}"),
+            Element::InlineImage(s) => write!(f, "{s}"),
+            Element::ReferenceImage(s) => write!(f, "{s}"),
+            Element::EmptyReferenceImage(s) => write!(f, "{s}"),
+            Element::LinkedImage(s) => write!(f, "{s}"),
+            Element::FootnoteReference(s) => write!(f, "{s}"),
             Element::Strikethrough(s) => write!(f, "~~{s}~~"),
             Element::WikiLink(s) => write!(f, "[[{s}]]"),
             Element::InlineMath(s) => write!(f, "${s}$"),
@@ -819,6 +776,74 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
     spans
 }
 
+#[derive(Debug, Clone)]
+struct LinkSpan {
+    start: usize,
+    end: usize,
+    link_type: Option<LinkType>,
+    is_image: bool,
+    is_footnote: bool,
+}
+
+fn extract_link_spans(text: &str) -> Vec<LinkSpan> {
+    let mut spans = Vec::new();
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let parser = Parser::new_ext(text, options).into_offset_iter();
+    let mut stack = Vec::new();
+
+    for (event, range) in parser {
+        match event {
+            Event::Start(Tag::Link { link_type, .. }) => {
+                stack.push((range.start, Some(link_type), false));
+            }
+            Event::Start(Tag::Image { link_type, .. }) => {
+                stack.push((range.start, Some(link_type), true));
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some((start_byte, link_type, is_image)) = stack.pop()
+                    && stack.is_empty()
+                {
+                    spans.push(LinkSpan {
+                        start: start_byte,
+                        end: range.end,
+                        link_type,
+                        is_image,
+                        is_footnote: false,
+                    });
+                }
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some((start_byte, link_type, is_image)) = stack.pop()
+                    && stack.is_empty()
+                {
+                    spans.push(LinkSpan {
+                        start: start_byte,
+                        end: range.end,
+                        link_type,
+                        is_image,
+                        is_footnote: false,
+                    });
+                }
+            }
+            Event::FootnoteReference(_) if stack.is_empty() => {
+                spans.push(LinkSpan {
+                    start: range.start,
+                    end: range.end,
+                    link_type: None,
+                    is_image: false,
+                    is_footnote: true,
+                });
+            }
+            _ => {}
+        }
+    }
+
+    spans.sort_by_key(|s| s.start);
+    spans
+}
+
 /// If `text` starts with a MyST inline role (`` {name}`content` `` or
 /// `` {domain:role}`content` ``), return the byte length of the whole role unit.
 ///
@@ -890,8 +915,9 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
     let mut elements = Vec::new();
     let mut remaining = text;
 
-    // Pre-extract emphasis spans using pulldown-cmark for CommonMark-compliant parsing
+    // Pre-extract emphasis spans and link spans using pulldown-cmark
     let emphasis_spans = extract_emphasis_spans(text);
+    let link_spans = extract_link_spans(text);
 
     while !remaining.is_empty() {
         // Calculate current byte offset in original text
@@ -900,81 +926,24 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
         // Store (start, end, pattern_name) to unify standard Regex and FancyRegex match results
         let mut earliest_match: Option<(usize, usize, &str)> = None;
 
-        // Check for linked images FIRST (all 4 variants)
-        // Quick literal check: only run expensive regexes if we might have a linked image
-        // Pattern starts with "[!" so check for that first
-        if remaining.contains("[!") {
-            // Pattern 1: [![alt](img)](link) - inline image in inline link
-            if let Some(m) = LINKED_IMAGE_INLINE_INLINE.find(remaining)
-                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-            {
-                earliest_match = Some((m.start(), m.end(), "linked_image_ii"));
-            }
-
-            // Pattern 2: [![alt][ref]](link) - reference image in inline link
-            if let Some(m) = LINKED_IMAGE_REF_INLINE.find(remaining)
-                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-            {
-                earliest_match = Some((m.start(), m.end(), "linked_image_ri"));
-            }
-
-            // Pattern 3: [![alt](img)][ref] - inline image in reference link
-            if let Some(m) = LINKED_IMAGE_INLINE_REF.find(remaining)
-                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-            {
-                earliest_match = Some((m.start(), m.end(), "linked_image_ir"));
-            }
-
-            // Pattern 4: [![alt][ref]][ref] - reference image in reference link
-            if let Some(m) = LINKED_IMAGE_REF_REF.find(remaining)
-                && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-            {
-                earliest_match = Some((m.start(), m.end(), "linked_image_rr"));
+        // Find the earliest link span
+        let mut next_link: Option<&LinkSpan> = None;
+        for span in &link_spans {
+            if span.start >= current_offset {
+                next_link = Some(span);
+                break;
             }
         }
 
-        // Check for images (they start with ! so should be detected before links)
-        // Inline images - ![alt](url)
-        if let Some(m) = INLINE_IMAGE_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "inline_image"));
-        }
-
-        // Reference images - ![alt][ref]
-        if let Some(m) = REF_IMAGE_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "ref_image"));
-        }
-
-        // Check for footnote references - [^note]
-        if let Some(m) = FOOTNOTE_REF_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "footnote_ref"));
-        }
-
-        // Check for inline links - [text](url)
-        if let Ok(Some(m)) = INLINE_LINK_FANCY_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "inline_link"));
-        }
-
-        // Check for reference links - [text][ref]
-        if let Ok(Some(m)) = REF_LINK_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "ref_link"));
-        }
-
-        // Check for shortcut reference links - [ref]
-        // Only check if we haven't found an earlier pattern that would conflict
-        if let Ok(Some(m)) = SHORTCUT_REF_REGEX.find(remaining)
-            && earliest_match.as_ref().is_none_or(|(start, _, _)| m.start() < *start)
-        {
-            earliest_match = Some((m.start(), m.end(), "shortcut_ref"));
+        if let Some(span) = next_link {
+            let pos_in_remaining = span.start - current_offset;
+            if earliest_match
+                .as_ref()
+                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
+            {
+                let match_end = span.end - current_offset;
+                earliest_match = Some((pos_in_remaining, match_end, "link_span"));
+            }
         }
 
         // Check for wiki-style links - [[wiki]]
@@ -997,8 +966,6 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
         {
             earliest_match = Some((m.start(), m.end(), "inline_math"));
         }
-
-        // Note: Strikethrough is now handled by pulldown-cmark in extract_emphasis_spans
 
         // Check for emoji shortcodes - :emoji:
         if let Some(m) = EMOJI_SHORTCODE_REGEX.find(remaining)
@@ -1043,7 +1010,7 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
             };
 
             if is_url_autolink || is_email_autolink {
-                earliest_match = Some((m.start(), m.end(), "autolink"));
+                // Autolinks are handled by link_span
             } else {
                 earliest_match = Some((m.start(), m.end(), "html_tag"));
             }
@@ -1121,166 +1088,39 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
 
             // Process the matched pattern
             match pattern_type {
-                // Pattern 1: [![alt](img)](link) - inline image in inline link
-                "linked_image_ii" => {
-                    if let Some(caps) = LINKED_IMAGE_INLINE_INLINE.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let img_url = caps.get(2).map_or("", |m| m.as_str());
-                        let link_url = caps.get(3).map_or("", |m| m.as_str());
-                        elements.push(Element::LinkedImage {
-                            alt: alt.to_string(),
-                            img_source: LinkedImageSource::Inline(img_url.to_string()),
-                            link_target: LinkedImageTarget::Inline(link_url.to_string()),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                // Pattern 2: [![alt][ref]](link) - reference image in inline link
-                "linked_image_ri" => {
-                    if let Some(caps) = LINKED_IMAGE_REF_INLINE.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let img_ref = caps.get(2).map_or("", |m| m.as_str());
-                        let link_url = caps.get(3).map_or("", |m| m.as_str());
-                        elements.push(Element::LinkedImage {
-                            alt: alt.to_string(),
-                            img_source: LinkedImageSource::Reference(img_ref.to_string()),
-                            link_target: LinkedImageTarget::Inline(link_url.to_string()),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                // Pattern 3: [![alt](img)][ref] - inline image in reference link
-                "linked_image_ir" => {
-                    if let Some(caps) = LINKED_IMAGE_INLINE_REF.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let img_url = caps.get(2).map_or("", |m| m.as_str());
-                        let link_ref = caps.get(3).map_or("", |m| m.as_str());
-                        elements.push(Element::LinkedImage {
-                            alt: alt.to_string(),
-                            img_source: LinkedImageSource::Inline(img_url.to_string()),
-                            link_target: LinkedImageTarget::Reference(link_ref.to_string()),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                // Pattern 4: [![alt][ref]][ref] - reference image in reference link
-                "linked_image_rr" => {
-                    if let Some(caps) = LINKED_IMAGE_REF_REF.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let img_ref = caps.get(2).map_or("", |m| m.as_str());
-                        let link_ref = caps.get(3).map_or("", |m| m.as_str());
-                        elements.push(Element::LinkedImage {
-                            alt: alt.to_string(),
-                            img_source: LinkedImageSource::Reference(img_ref.to_string()),
-                            link_target: LinkedImageTarget::Reference(link_ref.to_string()),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "inline_image" => {
-                    if let Some(caps) = INLINE_IMAGE_REGEX.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let url = caps.get(2).map_or("", |m| m.as_str());
-                        elements.push(Element::InlineImage {
-                            alt: alt.to_string(),
-                            url: url.to_string(),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("!".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "ref_image" => {
-                    if let Some(caps) = REF_IMAGE_REGEX.captures(remaining) {
-                        let alt = caps.get(1).map_or("", |m| m.as_str());
-                        let reference = caps.get(2).map_or("", |m| m.as_str());
-
-                        if reference.is_empty() {
-                            elements.push(Element::EmptyReferenceImage { alt: alt.to_string() });
-                        } else {
-                            elements.push(Element::ReferenceImage {
-                                alt: alt.to_string(),
-                                reference: reference.to_string(),
-                            });
+                "link_span" => {
+                    let span = next_link.unwrap();
+                    let raw_text = remaining[pos..match_end].to_string();
+                    if span.is_footnote {
+                        elements.push(Element::FootnoteReference(raw_text));
+                    } else if span.is_image {
+                        match span.link_type {
+                            Some(LinkType::Inline) => elements.push(Element::InlineImage(raw_text)),
+                            Some(LinkType::Reference) | Some(LinkType::Shortcut) => {
+                                elements.push(Element::ReferenceImage(raw_text))
+                            }
+                            Some(LinkType::Collapsed) => elements.push(Element::EmptyReferenceImage(raw_text)),
+                            _ => elements.push(Element::InlineImage(raw_text)),
                         }
-                        remaining = &remaining[match_end..];
                     } else {
-                        elements.push(Element::Text("!".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "footnote_ref" => {
-                    if let Some(caps) = FOOTNOTE_REF_REGEX.captures(remaining) {
-                        let note = caps.get(1).map_or("", |m| m.as_str());
-                        elements.push(Element::FootnoteReference { note: note.to_string() });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "inline_link" => {
-                    if let Ok(Some(caps)) = INLINE_LINK_FANCY_REGEX.captures(remaining) {
-                        let text = caps.get(1).map_or("", |m| m.as_str());
-                        let url = caps.get(2).map_or("", |m| m.as_str());
-                        elements.push(Element::Link {
-                            text: text.to_string(),
-                            url: url.to_string(),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        // Fallback - shouldn't happen
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
-                }
-                "ref_link" => {
-                    if let Ok(Some(caps)) = REF_LINK_REGEX.captures(remaining) {
-                        let text = caps.get(1).map_or("", |m| m.as_str());
-                        let reference = caps.get(2).map_or("", |m| m.as_str());
-
-                        if reference.is_empty() {
-                            // Empty reference link [text][]
-                            elements.push(Element::EmptyReferenceLink { text: text.to_string() });
-                        } else {
-                            // Regular reference link [text][ref]
-                            elements.push(Element::ReferenceLink {
-                                text: text.to_string(),
-                                reference: reference.to_string(),
-                            });
+                        match span.link_type {
+                            Some(LinkType::Inline) => {
+                                if raw_text.starts_with('[') && raw_text.contains("![") {
+                                    elements.push(Element::LinkedImage(raw_text));
+                                } else {
+                                    elements.push(Element::Link(raw_text));
+                                }
+                            }
+                            Some(LinkType::Reference) => elements.push(Element::ReferenceLink(raw_text)),
+                            Some(LinkType::Collapsed) => elements.push(Element::EmptyReferenceLink(raw_text)),
+                            Some(LinkType::Shortcut) => elements.push(Element::ShortcutReference(raw_text)),
+                            Some(LinkType::Autolink) | Some(LinkType::Email) => {
+                                elements.push(Element::Autolink(raw_text))
+                            }
+                            _ => elements.push(Element::Link(raw_text)),
                         }
-                        remaining = &remaining[match_end..];
-                    } else {
-                        // Fallback - shouldn't happen
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
                     }
-                }
-                "shortcut_ref" => {
-                    if let Ok(Some(caps)) = SHORTCUT_REF_REGEX.captures(remaining) {
-                        let reference = caps.get(1).map_or("", |m| m.as_str());
-                        elements.push(Element::ShortcutReference {
-                            reference: reference.to_string(),
-                        });
-                        remaining = &remaining[match_end..];
-                    } else {
-                        // Fallback - shouldn't happen
-                        elements.push(Element::Text("[".to_string()));
-                        remaining = &remaining[1..];
-                    }
+                    remaining = &remaining[match_end..];
                 }
                 "wiki_link" => {
                     if let Some(caps) = WIKI_LINK_REGEX.captures(remaining) {
@@ -1312,7 +1152,6 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
                         remaining = &remaining[1..];
                     }
                 }
-                // Note: "strikethrough" case removed - now handled by pulldown-cmark
                 "emoji" => {
                     if let Some(caps) = EMOJI_SHORTCODE_REGEX.captures(remaining) {
                         let emoji = caps.get(1).map_or("", |m| m.as_str());
@@ -1331,11 +1170,6 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
                 "hugo_shortcode" => {
                     // Hugo shortcodes are atomic elements - preserve them exactly
                     elements.push(Element::HugoShortcode(remaining[pos..match_end].to_string()));
-                    remaining = &remaining[match_end..];
-                }
-                "autolink" => {
-                    // Autolinks are atomic elements - preserve them exactly
-                    elements.push(Element::Autolink(remaining[pos..match_end].to_string()));
                     remaining = &remaining[match_end..];
                 }
                 "html_tag" => {

@@ -51,6 +51,7 @@ Multiple \[escaped\] \[brackets\] on same line"#;
 fn test_nested_brackets_with_escapes() {
     let content = r#"Complex: [outer \[escaped inner\] text](url)
 Nested reference: [text with \[brackets\]][ref]
+
 [ref]: https://example.com"#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);

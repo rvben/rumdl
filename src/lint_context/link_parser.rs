@@ -144,6 +144,7 @@ pub(super) fn parse_links_images_pulldown<'a>(
             broken_links.push(BrokenLinkInfo {
                 reference: link.reference.to_string(),
                 span: link.span.clone(),
+                link_type: link.link_type,
             });
             None
         }),
@@ -485,6 +486,68 @@ pub(super) fn finalize_links_and_images<'a>(
     result
         .images
         .retain(|img| !super::LintContext::is_offset_in_code_span(code_spans, img.byte_offset));
+
+    // Convert broken links to ParsedLink and add them to result.links
+    for broken in &result.broken_links {
+        let start_pos = broken.span.start;
+        let span_end = broken.span.end;
+
+        if is_in_html_comment_ranges(html_comment_ranges, start_pos) {
+            continue;
+        }
+
+        let (line_idx, line_num, col_start) = super::LintContext::find_line_for_offset(lines, content, start_pos);
+
+        if is_mkdocs_snippet_line(lines[line_idx].content(content), flavor) {
+            continue;
+        }
+
+        let (_, _end_line_num, col_end) = super::LintContext::find_line_for_offset(lines, content, span_end);
+
+        let raw_span = &content[broken.span.clone()];
+        let link_text = if raw_span.starts_with('[') {
+            let mut depth = 0;
+            let mut close_pos = None;
+            for (i, byte) in raw_span.bytes().enumerate().skip(1) {
+                if byte == b'[' {
+                    depth += 1;
+                } else if byte == b']' {
+                    if depth == 0 {
+                        close_pos = Some(i);
+                        break;
+                    } else {
+                        depth -= 1;
+                    }
+                }
+            }
+            if let Some(pos) = close_pos {
+                &raw_span[1..pos]
+            } else {
+                ""
+            }
+        } else {
+            ""
+        };
+
+        let is_reference = true;
+        let reference_id = Some(Cow::Owned(broken.reference.to_lowercase()));
+
+        result.links.push(ParsedLink {
+            line: line_num,
+            start_col: col_start,
+            end_col: col_end,
+            byte_offset: start_pos,
+            byte_end: span_end,
+            text: Cow::Owned(link_text.to_string()),
+            url: Cow::Borrowed(""),
+            title: None,
+            is_reference,
+            reference_id,
+            link_type: broken.link_type,
+        });
+
+        result.link_found_positions.insert(start_pos);
+    }
 
     // Regex fallback for links: find undefined references missed by pulldown-cmark
     for cap in LINK_PATTERN.captures_iter(content) {

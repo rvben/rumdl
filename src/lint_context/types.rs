@@ -186,6 +186,8 @@ pub struct BrokenLinkInfo {
     pub reference: String,
     /// Byte span in the source document
     pub span: std::ops::Range<usize>,
+    /// The type of the broken link
+    pub link_type: LinkType,
 }
 
 /// Parsed footnote reference (e.g., `[^1]`, `[^note]`)
