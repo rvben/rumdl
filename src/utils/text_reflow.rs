@@ -574,8 +574,12 @@ enum Element {
     LinkedImage(String),
     /// Footnote reference [^note]
     FootnoteReference(String),
-    /// Strikethrough text ~~text~~
-    Strikethrough(String),
+    /// Strikethrough text ~~text~~ or ~text~ (GFM allows one or two tildes)
+    Strikethrough {
+        content: String,
+        /// True if the original used a double-tilde (~~) marker, false for a single tilde (~)
+        double: bool,
+    },
     /// Wiki-style link [[wiki]] or [[wiki|text]]
     WikiLink(String),
     /// Inline math $math$
@@ -627,7 +631,10 @@ impl std::fmt::Display for Element {
             Element::EmptyReferenceImage(s) => write!(f, "{s}"),
             Element::LinkedImage(s) => write!(f, "{s}"),
             Element::FootnoteReference(s) => write!(f, "{s}"),
-            Element::Strikethrough(s) => write!(f, "~~{s}~~"),
+            Element::Strikethrough { content, double } => {
+                let marker = if *double { "~~" } else { "~" };
+                write!(f, "{marker}{content}{marker}")
+            }
             Element::WikiLink(s) => write!(f, "[[{s}]]"),
             Element::InlineMath(s) => write!(f, "${s}$"),
             Element::DisplayMath(s) => write!(f, "$${s}$$"),
@@ -672,6 +679,9 @@ struct EmphasisSpan {
     is_strikethrough: bool,
     /// Whether the original used underscore markers (for emphasis only)
     uses_underscore: bool,
+    /// For strikethrough spans, whether the original used a double-tilde (~~)
+    /// marker rather than a single tilde (~). Meaningless for other spans.
+    strikethrough_double: bool,
 }
 
 /// Extract emphasis and strikethrough spans from text using pulldown-cmark
@@ -717,6 +727,7 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
                             is_strong: false,
                             is_strikethrough: false,
                             uses_underscore,
+                            strikethrough_double: false,
                         });
                     }
                 }
@@ -741,6 +752,7 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
                             is_strong: true,
                             is_strikethrough: false,
                             uses_underscore,
+                            strikethrough_double: false,
                         });
                     }
                 }
@@ -750,9 +762,13 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
             }
             Event::End(TagEnd::Strikethrough) => {
                 if let Some(start_byte) = strikethrough_stack.pop() {
-                    // Extract content between the ~~ markers (2 char marker on each side)
-                    let content_start = start_byte + 2;
-                    let content_end = range.end - 2;
+                    // pulldown-cmark's GFM strikethrough accepts both ~~text~~ and
+                    // ~text~. Detect the actual marker width so single-tilde spans
+                    // keep their first and last content character.
+                    let double = text.get(start_byte..start_byte + 2) == Some("~~");
+                    let marker_len = if double { 2 } else { 1 };
+                    let content_start = start_byte + marker_len;
+                    let content_end = range.end - marker_len;
                     if content_end > content_start
                         && let Some(content) = text.get(content_start..content_end)
                     {
@@ -763,6 +779,7 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
                             is_strong: false,
                             is_strikethrough: true,
                             uses_underscore: false,
+                            strikethrough_double: double,
                         });
                     }
                 }
@@ -1219,7 +1236,10 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
                     if let Some(span) = pulldown_emphasis {
                         let span_len = span.end - span.start;
                         if span.is_strikethrough {
-                            elements.push(Element::Strikethrough(span.content.clone()));
+                            elements.push(Element::Strikethrough {
+                                content: span.content.clone(),
+                                double: span.strikethrough_double,
+                            });
                         } else if span.is_strong {
                             elements.push(Element::Bold {
                                 content: span.content.clone(),
@@ -1356,11 +1376,11 @@ fn reflow_elements_sentence_per_line(
                 &mut current_line,
                 &mut lines,
             );
-        } else if let Element::Strikethrough(content) = element {
+        } else if let Element::Strikethrough { content, double } = element {
             // Handle strikethrough elements - may contain multiple sentences that need continuation
             handle_emphasis_sentence_split(
                 content,
-                "~~",
+                if *double { "~~" } else { "~" },
                 &abbreviations,
                 require_sentence_capital,
                 &mut current_line,
@@ -2149,7 +2169,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             }
         } else if matches!(
             element,
-            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough(_)
+            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
         ) && element_len > options.line_length
         {
             // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
@@ -2158,7 +2178,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             let (content, marker): (&str, &str) = match element {
                 Element::Italic { content, underscore } => (content.as_str(), if *underscore { "_" } else { "*" }),
                 Element::Bold { content, underscore } => (content.as_str(), if *underscore { "__" } else { "**" }),
-                Element::Strikethrough(content) => (content.as_str(), "~~"),
+                Element::Strikethrough { content, double } => (content.as_str(), if *double { "~~" } else { "~" }),
                 _ => unreachable!(),
             };
 

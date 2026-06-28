@@ -6370,3 +6370,71 @@ fn test_reflow_preserves_space_after_code_span_before_punctuation() {
         "a space must not be introduced before attached punctuation, got:\n{result3}"
     );
 }
+
+// Collapse all runs of whitespace (including the line breaks reflow inserts)
+// into single spaces so an assertion can compare reflowed content against its
+// one-line form regardless of where wrapping landed.
+fn collapse_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn test_reflow_single_tilde_strikethrough_preserves_content() {
+    // Regression for #701: reflow ate the first and last character of a
+    // single-tilde strikethrough span (and rewrote ~text~ as ~~text~~), because
+    // the marker width was hard-coded to 2 even though GFM allows one tilde.
+    let options = ReflowOptions {
+        line_length: 79,
+        ..Default::default()
+    };
+
+    // Wide enough to need wrapping, so the span passes through the reflow path.
+    let input = "Plain text here. ~strikethrough span that is long enough to need to wrap across the line length here.~ More plain text.";
+    let result = reflow_markdown(input, &options);
+
+    // No content is lost: every boundary character of the span survives and the
+    // single-tilde marker style is preserved (not promoted to ~~).
+    assert_eq!(
+        collapse_ws(&result),
+        collapse_ws(input),
+        "single-tilde span content/marker must round-trip through reflow; got:\n{result}"
+    );
+    assert!(
+        !result.contains("~~"),
+        "single-tilde strikethrough must not be rewritten to double-tilde; got:\n{result}"
+    );
+}
+
+#[test]
+fn test_reflow_strikethrough_marker_width_roundtrips() {
+    // Both ~single~ and ~~double~~ strikethrough must round-trip their marker
+    // width and full content. A short line_length forces the spans through the
+    // wrapping/decomposition path where the marker-width bug lived.
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+
+    // Single-tilde span that must wrap: content and both boundary chars survive,
+    // and the marker is not promoted to double-tilde.
+    let single_input = "lead ~Crossed out content spanning well past the wrap boundary here.~ tail";
+    let single = reflow_markdown(single_input, &options);
+    assert_eq!(
+        collapse_ws(&single),
+        collapse_ws(single_input),
+        "single-tilde span content/marker corrupted by wrapping; got:\n{single}"
+    );
+    assert!(
+        !single.contains("~~"),
+        "single-tilde must not become double-tilde; got:\n{single}"
+    );
+
+    // Double-tilde span that must wrap keeps its double marker and content.
+    let double_input = "lead ~~Crossed out content spanning well past the wrap boundary here.~~ tail";
+    let double = reflow_markdown(double_input, &options);
+    assert_eq!(
+        collapse_ws(&double),
+        collapse_ws(double_input),
+        "double-tilde span content/marker corrupted by wrapping; got:\n{double}"
+    );
+}
