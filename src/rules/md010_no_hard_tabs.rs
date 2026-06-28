@@ -741,4 +741,18 @@ mod tests {
             "Text    with    tab\n```makefile\ntarget:\n\tcommand\n```\nMore    tabs"
         );
     }
+
+    #[test]
+    fn test_tabs_in_front_matter_are_not_flagged() {
+        // Hard tabs inside YAML front matter are metadata, not Markdown body,
+        // and must not be reported.
+        let rule = MD010NoHardTabs::default();
+        let content = "---\ntitle:\t\"Tabbed value\"\n---\n\n# Heading\n\nBody text.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "tabs inside front matter must not be flagged, got: {result:?}"
+        );
+    }
 }

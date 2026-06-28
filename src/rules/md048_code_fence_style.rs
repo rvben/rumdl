@@ -1092,4 +1092,20 @@ or `edition2024` annotations, such as:
             "Fix is not idempotent:\nFirst pass:\n{first_pass}\nSecond pass:\n{second_pass}"
         );
     }
+
+    #[test]
+    fn test_front_matter_fence_does_not_drive_style_detection() {
+        // A complete fence pair inside front matter must not influence consistent
+        // style detection. The only real (body) fence is tilde, so the document is
+        // self-consistent; counting the front-matter backtick pair would flip the
+        // detected style to backtick and wrongly flag the body.
+        let rule = MD048CodeFenceStyle::new(CodeFenceStyle::Consistent);
+        let content = "---\ndescription: |\n  ```\n  code\n  ```\n---\n\n~~~python\nprint(\"hi\")\n~~~\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "front-matter fence must not drive style detection, got: {result:?}"
+        );
+    }
 }
