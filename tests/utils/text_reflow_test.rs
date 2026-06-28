@@ -89,6 +89,37 @@ fn test_preserve_links() {
 }
 
 #[test]
+fn test_preserve_complex_links() {
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+
+    let input = "Check [link `code` text](url) for details.";
+    let result = reflow_line(input, &options);
+    assert!(
+        result.iter().any(|line| line.contains("[link `code` text](url)")),
+        "Link with code span should not be broken. Got: {result:?}"
+    );
+
+    let input2 = "Check [link `code [with brackets]` text](url) for details.";
+    let result2 = reflow_line(input2, &options);
+    assert!(
+        result2
+            .iter()
+            .any(|line| line.contains("[link `code [with brackets]` text](url)")),
+        "Link with code span containing brackets should not be broken. Got: {result2:?}"
+    );
+
+    let input3 = "Check [link `code [` text](url) for details.";
+    let result3 = reflow_line(input3, &options);
+    assert!(
+        result3.iter().any(|line| line.contains("[link `code [` text](url)")),
+        "Link with code span containing unbalanced bracket should not be broken. Got: {result3:?}"
+    );
+}
+
+#[test]
 fn test_reflow_keeps_closing_quote_with_parenthetical_placeholder() {
     let options = ReflowOptions {
         line_length: 80,

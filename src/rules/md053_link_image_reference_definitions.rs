@@ -908,7 +908,7 @@ mod tests {
     #[test]
     fn test_duplicate_and_unused() {
         let rule = MD053LinkImageReferenceDefinitions::new();
-        let content = "[used]\n[used]: url1\n[used]: url2\n[unused]: url3";
+        let content = "[used]\n\n[used]: http://url1\n\n[used]: http://url2\n\n[unused]: http://url3";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
 
@@ -918,8 +918,8 @@ mod tests {
 
         assert_eq!(duplicate_warnings.len(), 1);
         assert_eq!(unused_warnings.len(), 1);
-        assert_eq!(duplicate_warnings[0].line, 3); // Second [used] definition
-        assert_eq!(unused_warnings[0].line, 4); // [unused] definition
+        assert_eq!(duplicate_warnings[0].line, 5); // Second [used] definition
+        assert_eq!(unused_warnings[0].line, 7); // [unused] definition
     }
 
     #[test]

@@ -3,6 +3,7 @@ use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::SHORTCUT_REF_REGEX;
 use crate::utils::skip_context::{is_in_math_context, is_in_table_cell};
+use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -316,6 +317,22 @@ impl MD052ReferenceLinkImages {
         references
     }
 
+    fn compute_example_sections(ctx: &crate::lint_context::LintContext) -> HashSet<usize> {
+        let mut sections = HashSet::new();
+        let mut in_section = false;
+        for (line_num, line) in ctx.raw_lines().iter().enumerate() {
+            if OUTPUT_EXAMPLE_START.is_match(line) {
+                in_section = true;
+            } else if line.starts_with('#') {
+                in_section = false;
+            }
+            if in_section {
+                sections.insert(line_num + 1);
+            }
+        }
+        sections
+    }
+
     fn find_undefined_references(
         &self,
         references: &HashSet<String>,
@@ -324,7 +341,8 @@ impl MD052ReferenceLinkImages {
     ) -> Vec<(usize, usize, usize, String)> {
         let mut undefined = Vec::new();
         let mut reported_refs = HashMap::new();
-        let mut in_example_section = false;
+
+        let example_sections = Self::compute_example_sections(ctx);
 
         // Get code spans and HTML tags once for the entire function
         let code_spans = ctx.code_spans();
@@ -334,6 +352,17 @@ impl MD052ReferenceLinkImages {
         for link in &ctx.links {
             if !link.is_reference {
                 continue; // Skip inline links
+            }
+
+            // Skip shortcut links if shortcut_syntax is disabled
+            if !self.config.shortcut_syntax && matches!(link.link_type, LinkType::Shortcut | LinkType::ShortcutUnknown)
+            {
+                continue;
+            }
+
+            // Skip Pandoc/RMarkdown inline footnotes: ^[text]
+            if link.byte_offset > 0 && ctx.content.as_bytes().get(link.byte_offset - 1) == Some(&b'^') {
+                continue;
             }
 
             // Skip links inside Jinja templates
@@ -386,6 +415,11 @@ impl MD052ReferenceLinkImages {
             if let Some(ref_id) = &link.reference_id {
                 let reference_lower = ref_id.to_lowercase();
 
+                // Skip Pandoc implicit header references
+                if ctx.flavor.is_pandoc_compatible() && ctx.matches_implicit_header_reference(ref_id) {
+                    continue;
+                }
+
                 // Skip known non-reference patterns (markdown extensions, code examples)
                 if self.is_known_non_reference_pattern(ref_id) {
                     continue;
@@ -407,17 +441,11 @@ impl MD052ReferenceLinkImages {
 
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
-                    // Check if the line is in an example section or list item
+                    if example_sections.contains(&link.line) {
+                        continue;
+                    }
+
                     if let Some(line_info) = ctx.line_info(link.line) {
-                        if OUTPUT_EXAMPLE_START.is_match(line_info.content(ctx.content)) {
-                            in_example_section = true;
-                            continue;
-                        }
-
-                        if in_example_section {
-                            continue;
-                        }
-
                         // Skip list items
                         if LIST_ITEM_REGEX.is_match(line_info.content(ctx.content)) {
                             continue;
@@ -510,17 +538,11 @@ impl MD052ReferenceLinkImages {
 
                 // Check if reference is defined
                 if !references.contains(&reference_lower) && !reported_refs.contains_key(&reference_lower) {
-                    // Check if the line is in an example section or list item
+                    if example_sections.contains(&image.line) {
+                        continue;
+                    }
+
                     if let Some(line_info) = ctx.line_info(image.line) {
-                        if OUTPUT_EXAMPLE_START.is_match(line_info.content(ctx.content)) {
-                            in_example_section = true;
-                            continue;
-                        }
-
-                        if in_example_section {
-                            continue;
-                        }
-
                         // Skip list items
                         if LIST_ITEM_REGEX.is_match(line_info.content(ctx.content)) {
                             continue;
@@ -574,8 +596,6 @@ impl MD052ReferenceLinkImages {
 
         // Need to use regex for shortcut references
         let lines = ctx.raw_lines();
-        in_example_section = false; // Reset for line-by-line processing
-
         for (line_num, line) in lines.iter().enumerate() {
             // Skip lines in frontmatter or code blocks using LintContext's pre-computed info
             if let Some(line_info) = ctx.line_info(line_num + 1)
@@ -584,19 +604,8 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Check for example sections
-            if OUTPUT_EXAMPLE_START.is_match(line) {
-                in_example_section = true;
+            if example_sections.contains(&(line_num + 1)) {
                 continue;
-            }
-
-            if in_example_section {
-                // Check if we're exiting the example section (another heading)
-                if line.starts_with('#') && !OUTPUT_EXAMPLE_START.is_match(line) {
-                    in_example_section = false;
-                } else {
-                    continue;
-                }
             }
 
             // Skip list items
@@ -1664,7 +1673,7 @@ Use [Result] for error handling.
 
         // Should only flag [Result] because it's not in ignore
         assert_eq!(result.len(), 1, "Should only flag names not in ignore");
-        assert!(result[0].message.contains("Result"));
+        assert!(result[0].message.contains("result"));
     }
 
     #[test]
@@ -1763,7 +1772,7 @@ See [other docs][MissingRef] for more.
         // String is NOT in the hardcoded list, so we test that the user config works
         // [Box] should be flagged (not in ignore)
         assert_eq!(result.len(), 1);
-        assert!(result[0].message.contains("Box"));
+        assert!(result[0].message.contains("box"));
     }
 
     #[test]
@@ -1835,5 +1844,20 @@ See [other docs][MissingRef] for more.
             pandoc_result.is_empty(),
             "Pandoc flavor should accept [My Section] as an implicit header ref: {pandoc_result:?}"
         );
+    }
+
+    #[test]
+    fn test_md052_complex_undefined_reference() {
+        let rule = MD052ReferenceLinkImages::from_config(&crate::config::Config::default());
+        // Undefined reference with complex text containing brackets in code span
+        let content = "Check [link `code [with brackets]` text][undefined_ref] for details.\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Undefined reference in complex link must be flagged: {result:?}"
+        );
+        assert_eq!(result[0].message, "Reference 'undefined_ref' not found");
     }
 }

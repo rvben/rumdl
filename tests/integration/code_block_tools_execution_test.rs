@@ -26,14 +26,49 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
-/// True if `tool` is on PATH.
+/// True if `tool` is on PATH and can be executed (not broken).
 fn tool_available(tool: &str) -> bool {
     let finder = if cfg!(windows) { "where" } else { "which" };
-    Command::new(finder)
+    let exists = Command::new(finder)
         .arg(tool)
         .output()
         .map(|o| o.status.success())
-        .unwrap_or(false)
+        .unwrap_or(false);
+
+    if !exists {
+        return false;
+    }
+
+    // Tool-specific verification to handle wrappers or broken installations
+    match tool {
+        "terraform" => {
+            // terraform version returns success and contains "Terraform"
+            Command::new("terraform")
+                .arg("version")
+                .output()
+                .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("Terraform"))
+                .unwrap_or(false)
+        }
+        "black" => {
+            // black --version returns success
+            Command::new("black")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
+        _ => {
+            // Default spawn check (safe, won't block even if tool expects stdin,
+            // because we pass --version and kill it immediately if it spawns)
+            match Command::new(tool).arg("--version").spawn() {
+                Ok(mut child) => {
+                    let _ = child.kill();
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+    }
 }
 
 /// Write a `.rumdl.toml` and a markdown file with a single fenced block, in a temp dir.

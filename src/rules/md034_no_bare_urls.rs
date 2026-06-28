@@ -536,15 +536,16 @@ impl Rule for MD034NoBareUrls {
                 })
             });
 
-            // Filter out warnings where the URL is inside a parsed link
-            // This handles cases like [text]( https://url ) where the URL has leading whitespace
-            // pulldown-cmark correctly parses these as valid links even though our regex misses them
             line_warnings.retain(|warning| {
                 if let Some(fix) = &warning.fix {
                     // Check if the fix range falls inside any parsed link's byte range
                     !ctx.links
                         .iter()
-                        .any(|link| fix.range.start >= link.byte_offset && fix.range.end <= link.byte_end)
+                        .any(|link| {
+                            !(link.is_reference && link.url.is_empty())
+                                && fix.range.start >= link.byte_offset
+                                && fix.range.end <= link.byte_end
+                        })
                 } else {
                     true
                 }
@@ -1005,5 +1006,30 @@ Some trailing content with no closing fence.
             1,
             "Under Standard flavor a bare URL on a `:::` line must still be flagged: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_md034_complex_link() {
+        let rule = MD034NoBareUrls;
+
+        // Case 1: Balanced brackets in code span.
+        // We should flag the bare URL at the end, but NOT the one inside the link.
+        let content = "Check [link `code [with brackets]` text](http://example.com) and see http://bare.com.\n";
+        let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag exactly 1 URL (the bare one): {result:?}");
+        assert!(result[0].message.contains("bare.com"));
+
+        // Case 2: Unbalanced brackets in code span.
+        // We should flag the bare URL at the end, but NOT the one inside the link.
+        let content2 = "Check [link `code [` text](http://example.com) and see http://bare.com.\n";
+        let ctx2 = crate::lint_context::LintContext::new(content2, crate::config::MarkdownFlavor::Standard, None);
+        let result2 = rule.check(&ctx2).unwrap();
+        assert_eq!(
+            result2.len(),
+            1,
+            "Should flag exactly 1 URL (the bare one): {result2:?}"
+        );
+        assert!(result2[0].message.contains("bare.com"));
     }
 }
