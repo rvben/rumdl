@@ -51,6 +51,9 @@ jobs:
       - name: Check code-block-tools docs in sync with registry
         run: make check-code-block-tools
 
+      - name: Check Rust formatting
+        run: make fmt-check
+
       - name: Run linting
         run: make lint
 

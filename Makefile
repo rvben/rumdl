@@ -295,6 +295,11 @@ fmt:
 	cargo clippy --fix --allow-dirty --allow-staged -- -D clippy::uninlined_format_args
 	cargo fix --allow-dirty --allow-staged
 
+# Verify Rust sources are rustfmt-clean (no changes applied). Run in CI so an
+# unformatted contribution fails the gate instead of slipping in.
+fmt-check:
+	cargo fmt --check
+
 lint-actions:
 	actionlint
 	uvx zizmor --min-severity=medium .github/workflows/
