@@ -1,5 +1,5 @@
 // Use jemalloc for better memory allocation performance on Unix-like systems
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
@@ -161,6 +161,7 @@ enum Commands {
         output: Option<String>,
     },
     /// Start the Language Server Protocol server
+    #[cfg(not(target_arch = "wasm32"))]
     Server {
         /// TCP port to listen on (for debugging)
         #[arg(long)]
@@ -391,6 +392,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Commands::CodeBlockToolsDocs { action } => {
                 commands::code_block_tools_docs::handle_code_block_tools_docs(action);
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Commands::Server { port, stdio, verbose } => {
                 let config_path = if cli.no_config || cli.isolated {
                     None

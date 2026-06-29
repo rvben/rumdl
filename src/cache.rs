@@ -28,7 +28,11 @@ static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// because `CacheEntry.timestamp` differs per write.
 fn atomic_write(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let counter = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    #[cfg(not(target_arch = "wasm32"))]
     let tmp_path = target.with_extension(format!("tmp.{}.{counter}", std::process::id()));
+    // pid not available on WASI
+    #[cfg(target_arch = "wasm32")]
+    let tmp_path = target.with_extension(format!("tmp.{counter}"));
     match fs::write(&tmp_path, bytes).and_then(|()| fs::rename(&tmp_path, target)) {
         Ok(()) => Ok(()),
         Err(e) => {

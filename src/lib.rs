@@ -61,7 +61,7 @@ pub mod lint_context;
 pub mod markdownlint_config;
 pub mod profiling;
 pub mod rule;
-#[cfg(feature = "native")]
+#[cfg(feature = "colored")]
 pub mod vscode;
 pub mod workspace_index;
 #[macro_use]
@@ -75,7 +75,7 @@ pub mod utils;
 // Native-only modules (require tokio, tower-lsp, etc.)
 #[cfg(feature = "native")]
 pub mod lsp;
-#[cfg(feature = "native")]
+#[cfg(feature = "colored")]
 pub mod output;
 #[cfg(feature = "native")]
 pub mod parallel;

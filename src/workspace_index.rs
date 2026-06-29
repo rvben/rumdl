@@ -260,7 +260,7 @@ pub fn extract_cross_file_links(ctx: &LintContext) -> ExtractedCrossFileLinks {
 }
 
 /// Magic bytes identifying a workspace index cache file
-#[cfg(feature = "native")]
+#[cfg(feature = "postcard")]
 const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 
 /// Cache format version - increment when WorkspaceIndex serialization changes
@@ -268,11 +268,11 @@ const CACHE_MAGIC: &[u8; 4] = b"RWSI";
 /// no longer correct. Version 8 forces a rebuild so the new `root_relative_links`
 /// field is populated; earlier caches lack it, leaving find-references unable to
 /// discover root-relative (`/path`) links until a rescan.
-#[cfg(feature = "native")]
+#[cfg(feature = "postcard")]
 const CACHE_FORMAT_VERSION: u32 = 8;
 
 /// Cache file name within the version directory
-#[cfg(feature = "native")]
+#[cfg(feature = "postcard")]
 const CACHE_FILE_NAME: &str = "workspace_index.bin";
 
 /// Workspace-wide index for cross-file analysis
@@ -565,7 +565,7 @@ impl WorkspaceIndex {
     /// - Magic header for file type validation
     /// - Format version for compatibility detection
     /// - Atomic writes (temp file + rename) to prevent corruption
-    #[cfg(feature = "native")]
+    #[cfg(feature = "postcard")]
     pub fn save_to_cache(&self, cache_dir: &Path) -> std::io::Result<()> {
         use std::fs;
         use std::io::Write;
@@ -585,7 +585,11 @@ impl WorkspaceIndex {
 
         // Write atomically: write to temp file then rename
         let final_path = cache_dir.join(CACHE_FILE_NAME);
+        #[cfg(not(target_arch = "wasm32"))]
         let temp_path = cache_dir.join(format!("{}.tmp.{}", CACHE_FILE_NAME, std::process::id()));
+        // pid not available on WASI
+        #[cfg(target_arch = "wasm32")]
+        let temp_path = cache_dir.join(format!("{CACHE_FILE_NAME}.tmp"));
 
         // Write to temp file
         {
@@ -614,7 +618,7 @@ impl WorkspaceIndex {
     /// - Magic header doesn't match
     /// - Format version is incompatible
     /// - Data is corrupted
-    #[cfg(feature = "native")]
+    #[cfg(feature = "postcard")]
     pub fn load_from_cache(cache_dir: &Path) -> Option<Self> {
         use std::fs;
 
