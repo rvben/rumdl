@@ -7829,6 +7829,313 @@ async fn test_initialize_advertises_symbol_capabilities() {
     );
 }
 
+// ── enable_symbols tests ─────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_symbols_enabled_by_default() {
+    let server = create_test_server();
+    assert!(
+        server.config.read().await.enable_symbols,
+        "enable_symbols must default to true"
+    );
+}
+
+#[tokio::test]
+async fn test_symbols_config_deserialization() {
+    // Omitting the field must leave it true (backwards-compatible default)
+    let json = r#"{"enableLinting": true}"#;
+    let config: crate::lsp::types::RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(config.enable_symbols);
+
+    // Explicitly disabling must be honoured
+    let json = r#"{"enableSymbols": false}"#;
+    let config: crate::lsp::types::RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(!config.enable_symbols);
+}
+
+#[tokio::test]
+async fn test_document_symbol_disabled_when_symbols_off() {
+    // A document WITH headings is open, so the handler would return an outline if
+    // it were unguarded. With symbols disabled it must return None instead.
+    let server = create_test_server();
+    *server.client_supports_hierarchical_symbols.write().await = true;
+    server.config.write().await.enable_symbols = false;
+
+    let uri = Url::parse("file:///outline.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "# Top\n\n## Child\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    assert!(
+        server.document_symbol(params).await.unwrap().is_none(),
+        "document_symbol must return None when enable_symbols is false"
+    );
+}
+
+#[tokio::test]
+async fn test_workspace_symbol_disabled_when_symbols_off() {
+    use crate::workspace_index::{FileIndex, HeadingIndex, WorkspaceIndex};
+
+    // The index has a matching heading, so the handler would return it if it were
+    // unguarded. With symbols disabled it must return None instead.
+    let server = create_test_server();
+    server.config.write().await.enable_symbols = false;
+
+    let doc_path = std::env::temp_dir().join("rumdl-ws-symbol-off").join("doc.md");
+    {
+        let mut index = server.workspace_index.write().await;
+        *index = WorkspaceIndex::new();
+        let mut fi = FileIndex::default();
+        fi.headings.push(HeadingIndex {
+            text: "Configuration".to_string(),
+            auto_anchor: "configuration".to_string(),
+            custom_anchor: None,
+            line: 3,
+            is_setext: false,
+        });
+        index.insert_file(doc_path, fi);
+    }
+
+    let params = WorkspaceSymbolParams {
+        query: "config".to_string(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    assert!(
+        server.symbol(params).await.unwrap().is_none(),
+        "workspace symbol must return None when enable_symbols is false"
+    );
+}
+
+/// When `enableSymbols` is false, the server must not advertise the document or
+/// workspace symbol capabilities. Clients rely on ServerCapabilities to decide
+/// whether to send these requests; returning None from the handlers is not enough.
+#[tokio::test]
+async fn test_initialize_omits_symbol_capabilities_when_disabled() {
+    let server = create_test_server();
+
+    let options = serde_json::json!({ "enableSymbols": false });
+    let params = InitializeParams {
+        initialization_options: Some(options),
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+
+    let caps = LanguageServer::initialize(&server, params).await.unwrap().capabilities;
+
+    assert!(
+        caps.document_symbol_provider.is_none(),
+        "document_symbol_provider must be None when enableSymbols is false: {:?}",
+        caps.document_symbol_provider
+    );
+    assert!(
+        caps.workspace_symbol_provider.is_none(),
+        "workspace_symbol_provider must be None when enableSymbols is false: {:?}",
+        caps.workspace_symbol_provider
+    );
+}
+
+#[tokio::test]
+async fn test_symbols_disabled_via_did_change_configuration() {
+    let server = create_test_server();
+
+    // Default state: symbols are enabled
+    assert!(server.config.read().await.enable_symbols);
+
+    // A settings payload that only sets enableSymbols: false must be recognized as
+    // a full config and applied (not dropped as an unknown key).
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableSymbols": false }),
+        })
+        .await;
+
+    assert!(
+        !server.config.read().await.enable_symbols,
+        "did_change_configuration must apply enableSymbols: false"
+    );
+
+    // Confirm the handler respects the updated flag, even with a heading present.
+    let uri = Url::parse("file:///live.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "# Heading\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    assert!(
+        server.document_symbol(params).await.unwrap().is_none(),
+        "document_symbol should be suppressed after live config disables symbols"
+    );
+}
+
+#[tokio::test]
+async fn test_symbols_reenabled_via_did_change_configuration() {
+    // The live-config path must be symmetric: after disabling symbols, a bare
+    // `{"enableSymbols": true}` payload must re-enable them (key-presence
+    // detection), not be dropped as an unknown key.
+    let server = create_test_server();
+    *server.client_supports_hierarchical_symbols.write().await = true;
+
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableSymbols": false }),
+        })
+        .await;
+    assert!(!server.config.read().await.enable_symbols, "disable must apply");
+
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableSymbols": true }),
+        })
+        .await;
+    assert!(
+        server.config.read().await.enable_symbols,
+        "did_change_configuration must apply a bare enableSymbols: true re-enable"
+    );
+
+    // The handler must respond again once re-enabled.
+    let uri = Url::parse("file:///reenabled.md").unwrap();
+    server.documents.write().await.insert(
+        uri.clone(),
+        DocumentEntry {
+            content: "# Heading\n".to_string(),
+            version: Some(1),
+            from_disk: false,
+        },
+    );
+    let params = DocumentSymbolParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    assert!(
+        server.document_symbol(params).await.unwrap().is_some(),
+        "document_symbol should respond again after symbols are re-enabled"
+    );
+}
+
+#[tokio::test]
+async fn test_did_change_configuration_partial_payload_does_not_clobber_other_flags() {
+    // A partial didChangeConfiguration payload must merge onto the current config,
+    // not replace it: setting one flag must leave previously-set flags intact
+    // rather than resetting the omitted fields to their defaults.
+    let server = create_test_server();
+
+    // Establish non-default state via one partial payload.
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableLinkNavigation": false }),
+        })
+        .await;
+    assert!(
+        !server.config.read().await.enable_link_navigation,
+        "precondition: enableLinkNavigation disabled"
+    );
+
+    // A second, unrelated partial payload must not reset enableLinkNavigation.
+    server
+        .did_change_configuration(DidChangeConfigurationParams {
+            settings: serde_json::json!({ "enableSymbols": false }),
+        })
+        .await;
+
+    let config = server.config.read().await;
+    assert!(!config.enable_symbols, "enableSymbols must be applied");
+    assert!(
+        !config.enable_link_navigation,
+        "a partial enableSymbols payload must NOT clobber the previously-set enableLinkNavigation"
+    );
+}
+
+#[test]
+fn test_merge_lsp_config_overlays_only_present_keys() {
+    // A partial payload changes only its keys; every omitted field keeps its
+    // current value (not its default).
+    let current = RumdlLspConfig {
+        enable_link_navigation: false,
+        config_path: Some("/explicit.toml".to_string()),
+        ..RumdlLspConfig::default()
+    };
+    let merged = merge_lsp_config(&current, &serde_json::json!({ "enableSymbols": false }))
+        .expect("merge of a valid object payload must succeed");
+
+    assert!(!merged.enable_symbols, "the present key is applied");
+    assert!(
+        !merged.enable_link_navigation,
+        "an omitted bool keeps its current (non-default) value"
+    );
+    assert_eq!(
+        merged.config_path.as_deref(),
+        Some("/explicit.toml"),
+        "an omitted configPath is preserved, not reset"
+    );
+}
+
+#[test]
+fn test_merge_lsp_config_full_snapshot_applies_every_key() {
+    // A full snapshot overlays every field, so it fully applies.
+    let current = RumdlLspConfig {
+        enable_symbols: false,
+        enable_linting: false,
+        ..RumdlLspConfig::default()
+    };
+    let merged = merge_lsp_config(
+        &current,
+        &serde_json::json!({ "enableLinting": true, "enableSymbols": true, "enableLinkNavigation": false }),
+    )
+    .unwrap();
+
+    assert!(merged.enable_linting);
+    assert!(merged.enable_symbols);
+    assert!(!merged.enable_link_navigation);
+}
+
+#[test]
+fn test_merge_lsp_config_non_object_payload_returns_none() {
+    // The defensive path: a non-object payload yields None so the caller leaves the
+    // config unchanged rather than clobbering it.
+    let current = RumdlLspConfig::default();
+    assert!(merge_lsp_config(&current, &serde_json::json!("not an object")).is_none());
+    assert!(merge_lsp_config(&current, &serde_json::json!(42)).is_none());
+    assert!(merge_lsp_config(&current, &serde_json::Value::Null).is_none());
+}
+
+#[test]
+fn test_symbols_config_serde_roundtrip() {
+    // Verify `enableSymbols: false` round-trips correctly through serde
+    let json = r#"{"enableSymbols": false}"#;
+    let config: RumdlLspConfig = serde_json::from_str(json).unwrap();
+    assert!(!config.enable_symbols, "enableSymbols should deserialize to false");
+    // All other fields should use their defaults
+    assert!(config.enable_linting, "enableLinting should default to true");
+    assert!(
+        config.enable_link_navigation,
+        "enableLinkNavigation should default to true"
+    );
+
+    // Verify serialization produces camelCase key
+    let serialized = serde_json::to_string(&config).unwrap();
+    assert!(serialized.contains("\"enableSymbols\":false"));
+}
+
 /// Resolve the config file path that the LSP's per-file resolver picked,
 /// by calling `resolve_config_for_file` and then inspecting the cache.
 /// Used by parity tests to compare LSP and CLI resolution on the same tree.

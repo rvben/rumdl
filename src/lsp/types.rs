@@ -110,6 +110,13 @@ pub struct RumdlLspConfig {
     /// When false, rumdl will not respond to these requests, avoiding conflicts with other LSPs
     /// that provide the same features (e.g., PKM-focused LSPs)
     pub enable_link_navigation: bool,
+    /// Enable the document and workspace symbol providers (the heading outline and
+    /// cross-file heading search). When false, rumdl advertises neither symbol
+    /// capability and answers neither request, avoiding duplicate heading entries
+    /// when another Markdown LSP (e.g. marksman, markdown-oxide) already provides
+    /// the outline. Takes effect when the server (re)starts, like the other
+    /// capability flags.
+    pub enable_symbols: bool,
     /// Content roots for absolute-style link completion (e.g. `/img/01.webp`).
     /// Each entry is an absolute path, or a path relative to the workspace root.
     /// When empty, the workspace root folders are used.
@@ -128,6 +135,7 @@ impl Default for RumdlLspConfig {
             settings: None,
             enable_link_completions: true,
             enable_link_navigation: true,
+            enable_symbols: true,
             link_completion_content_roots: Vec::new(),
         }
     }
@@ -561,6 +569,7 @@ mod tests {
             settings: None,
             enable_link_completions: true,
             enable_link_navigation: true,
+            enable_symbols: true,
             link_completion_content_roots: Vec::new(),
         };
 

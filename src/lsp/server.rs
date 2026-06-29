@@ -25,6 +25,30 @@ const MAX_RULE_LIST_SIZE: usize = 100;
 /// Maximum allowed line length value (DoS protection)
 const MAX_LINE_LENGTH: usize = 10_000;
 
+/// Merge the keys present in a `workspace/didChangeConfiguration` payload onto the
+/// current LSP config, returning the merged config.
+///
+/// Only the keys the client actually sent are changed; every other field keeps its
+/// current value, so a partial payload (e.g. just `{"enableSymbols": false}`) never
+/// resets omitted fields to their defaults. A client that sends a full snapshot
+/// still fully applies. Returns `None` only if `incoming` is not a JSON object, the
+/// current config cannot be represented as one, or the merged object fails to
+/// deserialize -- all unreachable for the current field types, which round-trip
+/// through serde JSON; the caller treats `None` as "leave the config unchanged"
+/// rather than clobbering omitted fields.
+fn merge_lsp_config(current: &RumdlLspConfig, incoming: &serde_json::Value) -> Option<RumdlLspConfig> {
+    let serde_json::Value::Object(incoming) = incoming else {
+        return None;
+    };
+    let serde_json::Value::Object(mut base) = serde_json::to_value(current).ok()? else {
+        return None;
+    };
+    for (key, value) in incoming {
+        base.insert(key.clone(), value.clone());
+    }
+    serde_json::from_value(serde_json::Value::Object(base)).ok()
+}
+
 /// Represents a document in the LSP server's cache
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentEntry {
@@ -255,9 +279,13 @@ impl LanguageServer for RumdlLanguageServer {
         // Load rumdl configuration with auto-discovery (fallback/default)
         self.load_configuration(false).await;
 
-        let (enable_link_navigation, enable_link_completions) = {
+        let (enable_link_navigation, enable_link_completions, enable_symbols) = {
             let config = self.config.read().await;
-            (config.enable_link_navigation, config.enable_link_completions)
+            (
+                config.enable_link_navigation,
+                config.enable_link_completions,
+                config.enable_symbols,
+            )
         };
 
         Ok(InitializeResult {
@@ -282,8 +310,8 @@ impl LanguageServer for RumdlLanguageServer {
                 })),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
-                document_symbol_provider: Some(OneOf::Left(true)),
-                workspace_symbol_provider: Some(OneOf::Left(true)),
+                document_symbol_provider: enable_symbols.then_some(OneOf::Left(true)),
+                workspace_symbol_provider: enable_symbols.then_some(OneOf::Left(true)),
                 diagnostic_provider: Some(DiagnosticServerCapabilities::Options(DiagnosticOptions {
                     identifier: Some("rumdl".to_string()),
                     inter_file_dependencies: true,
@@ -550,6 +578,15 @@ impl LanguageServer for RumdlLanguageServer {
             serde_json::Value::Object(obj) if obj.contains_key("linkCompletionContentRoots")
         );
 
+        // `enableSymbols` is detected by key presence (not just a non-default value)
+        // so that a bare payload applies symmetrically: both `{"enableSymbols": false}`
+        // and a later `{"enableSymbols": true}` re-enable take effect, rather than the
+        // re-enable deserializing to the default and being dropped as an unknown key.
+        let has_symbols_key = matches!(
+            &rumdl_settings,
+            serde_json::Value::Object(obj) if obj.contains_key("enableSymbols")
+        );
+
         // Track if we successfully applied any configuration
         let mut config_applied = false;
         let mut warnings: Vec<String> = Vec::new();
@@ -599,6 +636,7 @@ impl LanguageServer for RumdlLanguageServer {
                 || full_config.enable_auto_fix
                 || !full_config.enable_link_completions
                 || !full_config.enable_link_navigation
+                || has_symbols_key
                 || has_content_roots_key)
         {
             // Validate rule names
@@ -617,9 +655,25 @@ impl LanguageServer for RumdlLanguageServer {
                 }
             }
 
-            log::info!("Applied full LSP configuration from settings");
-            *self.config.write().await = full_config;
-            config_applied = true;
+            // Merge only the keys the client sent onto the current config (see
+            // `merge_lsp_config`), so a partial payload never clobbers previously-set
+            // fields. The write lock is held across the merge so the read-modify-write
+            // is atomic; the merge is synchronous and `.await`-free, so it cannot
+            // deadlock or stall the executor. `full_config` was already validated above
+            // and is no longer needed here (a merge failure leaves the config unchanged
+            // rather than falling back to a clobbering whole-struct replace).
+            {
+                let mut config = self.config.write().await;
+                if let Some(merged) = merge_lsp_config(&config, &rumdl_settings) {
+                    *config = merged;
+                    drop(config);
+                    log::info!("Merged LSP configuration from client settings");
+                    config_applied = true;
+                } else {
+                    drop(config);
+                    warnings.push("Could not merge LSP configuration update; keeping current settings".to_string());
+                }
+            }
         } else if let serde_json::Value::Object(obj) = rumdl_settings {
             // Otherwise, treat as per-rule settings with manual parsing
             // Format: { "MD013": { "lineLength": 80 }, "disable": ["MD009"] }
@@ -1241,6 +1295,10 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn document_symbol(&self, params: DocumentSymbolParams) -> JsonRpcResult<Option<DocumentSymbolResponse>> {
+        if !self.config.read().await.enable_symbols {
+            return Ok(None);
+        }
+
         let uri = params.text_document.uri;
         let Some(text) = self.get_document_content(&uri).await else {
             return Ok(None);
@@ -1259,6 +1317,10 @@ impl LanguageServer for RumdlLanguageServer {
     }
 
     async fn symbol(&self, params: WorkspaceSymbolParams) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        if !self.config.read().await.enable_symbols {
+            return Ok(None);
+        }
+
         let query = params.query.to_lowercase();
         let index = self.workspace_index.read().await;
         let symbols = super::symbols::workspace_symbols(&index, &query);

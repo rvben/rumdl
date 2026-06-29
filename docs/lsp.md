@@ -189,18 +189,21 @@ Beyond the config file, editors can pass settings to the server as LSP
 initialization options (or `workspace/didChangeConfiguration`). These are
 top-level keys in camelCase, following Ruff's LSP convention:
 
-| Setting                        | Default  | Description                                                                                                                                 |
-| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enableLinting`                | `true`   | Real-time diagnostics as you type                                                                                                           |
-| `enableAutoFix`                | `false`  | Apply auto-fixes on save                                                                                                                    |
-| `enableLinkCompletions`        | `true`   | File-path and heading-anchor completions inside link targets. Set to `false` to keep linting while letting another LSP own link completion. |
-| `enableLinkNavigation`         | `true`   | Hover, go-to-definition, find-references, and rename for links. Set to `false` to avoid conflicts with another LSP that provides these.     |
-| `linkCompletionContentRoots`   | `[]`     | Roots for absolute-style link completion (e.g. `/img/01.webp`); defaults to the workspace roots.                                            |
-| `configPath`                   | (auto)   | Explicit path to a rumdl config file                                                                                                        |
-| `disableRules` / `enableRules` | (config) | Override which rules run                                                                                                                    |
+| Setting                        | Default  | Description                                                                                                                                                              |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enableLinting`                | `true`   | Real-time diagnostics as you type                                                                                                                                        |
+| `enableAutoFix`                | `false`  | Apply auto-fixes on save                                                                                                                                                 |
+| `enableLinkCompletions`        | `true`   | File-path and heading-anchor completions inside link targets. Set to `false` to keep linting while letting another LSP own link completion.                              |
+| `enableLinkNavigation`         | `true`   | Hover, go-to-definition, find-references, and rename for links. Set to `false` to avoid conflicts with another LSP that provides these.                                  |
+| `enableSymbols`                | `true`   | Document outline (`documentSymbol`) and workspace heading search (`workspace/symbol`). Set to `false` to avoid duplicate headings when another LSP provides the outline. |
+| `linkCompletionContentRoots`   | `[]`     | Roots for absolute-style link completion (e.g. `/img/01.webp`); defaults to the workspace roots.                                                                         |
+| `configPath`                   | (auto)   | Explicit path to a rumdl config file                                                                                                                                     |
+| `disableRules` / `enableRules` | (config) | Override which rules run                                                                                                                                                 |
 
-For example, to keep rumdl's linting but turn off its link completion and
-navigation (so your own LSP owns those), in Neovim:
+For example, to run rumdl alongside a navigation-focused Markdown LSP (such as
+marksman or markdown-oxide) as a pure linter/formatter - keeping its diagnostics,
+fixes, and formatting while letting the other server own completion, navigation,
+and the heading outline - in Neovim:
 
 ```lua
 vim.lsp.config("rumdl", {
@@ -210,12 +213,15 @@ vim.lsp.config("rumdl", {
   init_options = {
     enableLinkCompletions = false,
     enableLinkNavigation = false,
+    enableSymbols = false,
   },
 })
 ```
 
 These keys are read from the server's initialization options, so any editor that
-can pass `initializationOptions` to a language server can set them.
+can pass `initializationOptions` to a language server can set them. Capability
+flags like `enableSymbols` are negotiated when the server starts, so changes take
+effect after the server (re)starts.
 
 ## Troubleshooting
 
