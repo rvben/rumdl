@@ -225,8 +225,8 @@ jobs:
           experimental: true
           install: false
 
-      - name: Install mise tools
-        run: ./scripts/mise-install.sh
+      - name: Install Rust toolchain
+        run: ./scripts/mise-install.sh rust
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -235,10 +235,39 @@ jobs:
       - name: Build for wasm32-wasip1-threads
         run: make build-wasi
 
+  # Build the browser/npm wasm package on every push so the `wasm` feature path
+  # (published to npm) can't silently regress between releases. Mirrors the
+  # release build via the shared `make build-wasm` target.
+  build-wasm:
+    name: Build (browser wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install Rust toolchain
+        run: ./scripts/mise-install.sh rust
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@wasm-pack
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-wasm
+
+      - name: Build browser wasm package
+        run: make build-wasm
+
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi]
+    needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi, build-wasm]
     if: always()
     steps:
       - name: Verify all checks passed

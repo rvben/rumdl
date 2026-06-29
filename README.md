@@ -1275,10 +1275,18 @@ cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
 # Or simply: make build-wasi
 ```
 
-The browser/`wasm-bindgen` build uses a separate `wasm` feature targeting
-`wasm32-unknown-unknown`. Always pass `--no-default-features` for wasm targets:
-the default `native` feature pulls in tokio and the language server, neither of
-which builds for wasm.
+The browser/npm package uses a separate `wasm` feature (via `wasm-bindgen`)
+targeting `wasm32-unknown-unknown`:
+
+```bash
+make build-wasm
+# Equivalent to: wasm-pack build --target web --no-default-features --features wasm
+```
+
+Always pass `--no-default-features` for wasm targets: the default `native`
+feature pulls in tokio and the language server, neither of which builds for wasm.
+Both wasm builds are exercised on every push in CI (`make build-wasi` /
+`make build-wasm`).
 
 ### Testing
 

@@ -324,7 +324,7 @@ jobs:
         uses: taiki-e/install-action@wasm-pack
 
       - name: Build WASM
-        run: wasm-pack build --target web --no-default-features --features wasm
+        run: make build-wasm
 
       - name: Prepare package
         run: |

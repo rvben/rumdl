@@ -1,5 +1,7 @@
 target/
 target-*/
+# wasm-pack output (make build-wasm); wasm-pack also writes pkg/.gitignore
+pkg/
 .test-repos/
 **/__pycache__
 **/*.egg-info

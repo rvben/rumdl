@@ -66,6 +66,13 @@ build-wasi:
 	rustup target add wasm32-wasip1-threads 2>/dev/null || true
 	cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
 
+# Build the browser/npm wasm package (wasm32-unknown-unknown via wasm-pack).
+# Identical command to the release pipeline so local == CI == release; requires
+# wasm-pack on PATH. Run in CI so the browser build can't silently regress.
+build-wasm:
+	rustup target add wasm32-unknown-unknown 2>/dev/null || true
+	wasm-pack build --target web --no-default-features --features wasm
+
 # Static binary builds for Linux (musl)
 build-static-linux-x64:
 	@echo "Building static Linux x86_64 binary..."
