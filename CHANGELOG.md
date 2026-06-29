@@ -65,6 +65,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.26](https://github.com/rvben/rumdl/compare/v0.2.25...v0.2.26) - 2026-06-29
+
+### Added
+
+- **wasi**: add wasi build feature, make target, and CI coverage ([8b9b027](https://github.com/rvben/rumdl/commit/8b9b0276563d23b7f13a9033c6f336b1e6667514))
+- **lsp**: add enableSymbols setting to gate symbol providers ([b80f001](https://github.com/rvben/rumdl/commit/b80f001f11a7679a8c2f69631d1ab8df26e7eff9))
+
+### Fixed
+
+- **workspace-index**: make cache temp file names unique per write ([d3aa269](https://github.com/rvben/rumdl/commit/d3aa26901e38b1de1cd2d8649477bb61b82cbc61))
+- allow building for WASI ([8d0b44a](https://github.com/rvben/rumdl/commit/8d0b44a9913a893b57bbdb211bc19da4c59c131f))
+- **MD060**: preserve trailing blank lines and skip table-free content ([0223b30](https://github.com/rvben/rumdl/commit/0223b30bbf0ac9adde1bcadb5300460f6aa2d1c6))
+
 ## [0.2.25](https://github.com/rvben/rumdl/compare/v0.2.24...v0.2.25) - 2026-06-28
 
 ### Added
