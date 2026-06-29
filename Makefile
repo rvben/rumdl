@@ -60,6 +60,12 @@ ci-install-mise:
 build:
 	cargo build --release
 
+# Build the CLI for WASI (wasm32-wasip1-threads). The `wasi` feature drops the
+# native LSP/tokio/jemalloc stack. Run in CI so wasm support can't silently regress.
+build-wasi:
+	rustup target add wasm32-wasip1-threads 2>/dev/null || true
+	cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
+
 # Static binary builds for Linux (musl)
 build-static-linux-x64:
 	@echo "Building static Linux x86_64 binary..."

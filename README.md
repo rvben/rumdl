@@ -1263,6 +1263,23 @@ If a release breaks something documented as stable, that is a bug.
 make build
 ```
 
+#### Building for WebAssembly / WASI
+
+The CLI can be compiled for WASI (e.g. to run under [wasmtime](https://wasmtime.dev/))
+using the `wasi` feature, which excludes the host-only language server, jemalloc,
+and tokio stack:
+
+```bash
+rustup target add wasm32-wasip1-threads
+cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
+# Or simply: make build-wasi
+```
+
+The browser/`wasm-bindgen` build uses a separate `wasm` feature targeting
+`wasm32-unknown-unknown`. Always pass `--no-default-features` for wasm targets:
+the default `native` feature pulls in tokio and the language server, neither of
+which builds for wasm.
+
 ### Testing
 
 ```bash

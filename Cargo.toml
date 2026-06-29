@@ -104,6 +104,12 @@ native = [
     "memory-stats",
 ]
 wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
+# Build the CLI for wasm/WASI targets (e.g. wasm32-wasip1-threads under wasmtime).
+# This is `native` minus the LSP/tokio stack and other host-only deps, so the
+# linter, config loading, cache, and watch keep working while the language server
+# is left out. Usage:
+#   cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
+wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify"]
 
 [dev-dependencies]
 assert_cmd = "2.1.1"
