@@ -12,6 +12,9 @@ pub mod source_tracking;
 pub use source_tracking::*;
 
 mod loading;
+// Re-exported for the native LSP (`lsp::configuration`), the only cross-module
+// consumer; gated so non-native builds (e.g. wasm/WASI) don't warn on it.
+#[cfg(feature = "native")]
 pub(crate) use loading::rumdl_configs_in_dir;
 
 pub mod registry;

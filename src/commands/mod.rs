@@ -13,7 +13,8 @@ pub mod import;
 pub mod init;
 pub mod rule;
 pub mod schema;
-#[cfg(not(target_arch = "wasm32"))]
+// The LSP server requires tokio and the native-only `lsp` module.
+#[cfg(feature = "native")]
 pub mod server;
 pub mod version;
 pub mod vscode;

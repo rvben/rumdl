@@ -161,7 +161,7 @@ enum Commands {
         output: Option<String>,
     },
     /// Start the Language Server Protocol server
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(feature = "native")]
     Server {
         /// TCP port to listen on (for debugging)
         #[arg(long)]
@@ -392,7 +392,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Commands::CodeBlockToolsDocs { action } => {
                 commands::code_block_tools_docs::handle_code_block_tools_docs(action);
             }
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(feature = "native")]
             Commands::Server { port, stdio, verbose } => {
                 let config_path = if cli.no_config || cli.isolated {
                     None
