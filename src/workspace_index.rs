@@ -275,6 +275,12 @@ const CACHE_FORMAT_VERSION: u32 = 8;
 #[cfg(feature = "postcard")]
 const CACHE_FILE_NAME: &str = "workspace_index.bin";
 
+/// Monotonic counter making cache temp-file names unique per write, mirroring
+/// `cache.rs`. Combined with the process id (where available) it keeps
+/// concurrent writers from colliding on the temp path before the atomic rename.
+#[cfg(feature = "postcard")]
+static CACHE_TEMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Workspace-wide index for cross-file analysis
 ///
 /// Contains pre-extracted information from all markdown files in the workspace,
@@ -583,13 +589,16 @@ impl WorkspaceIndex {
         cache_data.extend_from_slice(&CACHE_FORMAT_VERSION.to_le_bytes());
         cache_data.extend_from_slice(&encoded);
 
-        // Write atomically: write to temp file then rename
+        // Write atomically: write to temp file then rename. A per-write unique
+        // suffix keeps concurrent writers from clobbering each other's temp file
+        // before the rename. WASI has no process id, so the counter alone carries
+        // uniqueness there (matching `cache.rs`).
         let final_path = cache_dir.join(CACHE_FILE_NAME);
+        let counter = CACHE_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         #[cfg(not(target_arch = "wasm32"))]
-        let temp_path = cache_dir.join(format!("{}.tmp.{}", CACHE_FILE_NAME, std::process::id()));
-        // pid not available on WASI
+        let temp_path = cache_dir.join(format!("{CACHE_FILE_NAME}.tmp.{}.{counter}", std::process::id()));
         #[cfg(target_arch = "wasm32")]
-        let temp_path = cache_dir.join(format!("{CACHE_FILE_NAME}.tmp"));
+        let temp_path = cache_dir.join(format!("{CACHE_FILE_NAME}.tmp.{counter}"));
 
         // Write to temp file
         {
