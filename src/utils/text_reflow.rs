@@ -15,7 +15,7 @@ use crate::utils::sentence_utils::{
     get_abbreviations, is_cjk_char, is_cjk_sentence_ending, is_closing_quote, is_opening_quote,
     text_ends_with_abbreviation,
 };
-use pulldown_cmark::{Event, LinkType, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{BrokenLink, CowStr, Event, LinkType, Options, Parser, Tag, TagEnd};
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
@@ -75,6 +75,20 @@ pub struct ReflowOptions {
     /// Used by mkdocs flavor where continuation is always 4 spaces
     /// regardless of checkbox markers.
     pub max_list_continuation_indent: Option<usize>,
+    /// Defined reference labels for the surrounding document, used to decide
+    /// whether a bare shortcut reference (`[text]`) is a real link (kept atomic
+    /// during reflow) or literal bracketed prose (wrapped like normal text).
+    ///
+    /// `None` means no reference information is available: every shortcut is
+    /// treated as atomic. This is the safe default - it never splits a real
+    /// link, at the cost of also not wrapping literal bracketed prose.
+    ///
+    /// `Some(set)` enables definition-aware behavior: a shortcut is atomic only
+    /// when its normalized label (see [`normalize_reference_label`]) is in the
+    /// set. Full and collapsed reference links and reference images are always
+    /// atomic regardless, because their `][ref]` / `[]` syntax is an explicit
+    /// link signal that does not depend on a definition being in scope.
+    pub defined_references: Option<HashSet<String>>,
 }
 
 impl Default for ReflowOptions {
@@ -91,8 +105,19 @@ impl Default for ReflowOptions {
             myst_roles: false,
             require_sentence_capital: true,
             max_list_continuation_indent: None,
+            defined_references: None,
         }
     }
+}
+
+/// Normalize a reference label for definition matching: collapse internal
+/// whitespace runs to a single space, trim, and lowercase (CommonMark-style
+/// label matching). Both the defined labels and the shortcut references checked
+/// against them are run through this function, so matching is case- and
+/// whitespace-insensitive. Biasing toward matching keeps a real shortcut link
+/// atomic even when its use and definition differ only in case or whitespace.
+pub fn normalize_reference_label(label: &str) -> String {
+    label.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
 }
 
 /// Build a boolean mask indicating which character positions are inside inline code spans.
@@ -522,7 +547,12 @@ fn trim_preserving_hard_break(s: &str) -> String {
 
 /// Parse markdown elements using the appropriate parser based on options.
 fn parse_elements(text: &str, options: &ReflowOptions) -> Vec<Element> {
-    parse_markdown_elements_inner(text, options.attr_lists, options.myst_roles)
+    parse_markdown_elements_inner(
+        text,
+        options.attr_lists,
+        options.myst_roles,
+        options.defined_references.as_ref(),
+    )
 }
 
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
@@ -802,12 +832,42 @@ struct LinkSpan {
     is_footnote: bool,
 }
 
-fn extract_link_spans(text: &str) -> Vec<LinkSpan> {
+fn extract_link_spans(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<LinkSpan> {
     let mut spans = Vec::new();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_FOOTNOTES);
 
-    let parser = Parser::new_ext(text, options).into_offset_iter();
+    // Reflow parses each paragraph in isolation, so the document's reference
+    // definitions are never in scope. Without a broken-link callback,
+    // pulldown-cmark would emit reference-style links (`[text][ref]`,
+    // `[text][]`, `[text]`, `![alt][ref]`) as plain text, and reflow would wrap
+    // their text mid-link. Resolving an unresolved reference to a dummy
+    // destination makes pulldown emit the full link span so reflow treats it as
+    // an atomic unit; the destination is unused because the element is rebuilt
+    // verbatim from the source bytes.
+    //
+    // Full and collapsed references and reference images carry explicit
+    // `][ref]` / `[]` syntax, so they are always resolved (atomic). A bare
+    // shortcut `[text]` is ambiguous: it is only a real link when its label is
+    // actually defined. With `Some(defined_references)` an undefined shortcut is
+    // left unresolved (returns `None`) so it reflows as literal prose; with
+    // `None` (no reference info) every shortcut stays atomic, which never splits
+    // a real link.
+    let resolve = move |link: BrokenLink<'_>| -> Option<(CowStr<'_>, CowStr<'_>)> {
+        // The callback reports the syntactic reference type (`Shortcut` for a
+        // bare `[text]`); the eventual emitted tag carries the `*Unknown`
+        // variant. Only a bare shortcut is ambiguous - full and collapsed
+        // references fall through and stay atomic.
+        let atomic = match link.link_type {
+            LinkType::Shortcut | LinkType::ShortcutUnknown => match defined_references {
+                Some(defs) => defs.contains(&normalize_reference_label(link.reference.as_ref())),
+                None => true,
+            },
+            _ => true,
+        };
+        atomic.then_some((CowStr::Borrowed(""), CowStr::Borrowed("")))
+    };
+    let parser = Parser::new_with_broken_link_callback(text, options, Some(resolve)).into_offset_iter();
     let mut stack = Vec::new();
 
     for (event, range) in parser {
@@ -928,13 +988,18 @@ fn myst_role_len_at(text: &str) -> Option<usize> {
 /// 5. Reference links [text][ref] - before shortcut references
 /// 6. Shortcut reference links [ref] - detected last to avoid false positives
 /// 7. Other elements (code, bold, italic, MyST roles, etc.) - processed normally
-fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool) -> Vec<Element> {
+fn parse_markdown_elements_inner(
+    text: &str,
+    attr_lists: bool,
+    myst_roles: bool,
+    defined_references: Option<&HashSet<String>>,
+) -> Vec<Element> {
     let mut elements = Vec::new();
     let mut remaining = text;
 
     // Pre-extract emphasis spans and link spans using pulldown-cmark
     let emphasis_spans = extract_emphasis_spans(text);
-    let link_spans = extract_link_spans(text);
+    let link_spans = extract_link_spans(text, defined_references);
 
     while !remaining.is_empty() {
         // Calculate current byte offset in original text
@@ -1113,10 +1178,15 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
                     } else if span.is_image {
                         match span.link_type {
                             Some(LinkType::Inline) => elements.push(Element::InlineImage(raw_text)),
-                            Some(LinkType::Reference) | Some(LinkType::Shortcut) => {
-                                elements.push(Element::ReferenceImage(raw_text))
+                            // `*Unknown` variants are produced when reflow's broken-link
+                            // callback resolves a reference whose definition is out of scope.
+                            Some(LinkType::Reference)
+                            | Some(LinkType::ReferenceUnknown)
+                            | Some(LinkType::Shortcut)
+                            | Some(LinkType::ShortcutUnknown) => elements.push(Element::ReferenceImage(raw_text)),
+                            Some(LinkType::Collapsed) | Some(LinkType::CollapsedUnknown) => {
+                                elements.push(Element::EmptyReferenceImage(raw_text))
                             }
-                            Some(LinkType::Collapsed) => elements.push(Element::EmptyReferenceImage(raw_text)),
                             _ => elements.push(Element::InlineImage(raw_text)),
                         }
                     } else {
@@ -1128,9 +1198,17 @@ fn parse_markdown_elements_inner(text: &str, attr_lists: bool, myst_roles: bool)
                                     elements.push(Element::Link(raw_text));
                                 }
                             }
-                            Some(LinkType::Reference) => elements.push(Element::ReferenceLink(raw_text)),
-                            Some(LinkType::Collapsed) => elements.push(Element::EmptyReferenceLink(raw_text)),
-                            Some(LinkType::Shortcut) => elements.push(Element::ShortcutReference(raw_text)),
+                            // `*Unknown` variants are produced when reflow's broken-link
+                            // callback resolves a reference whose definition is out of scope.
+                            Some(LinkType::Reference) | Some(LinkType::ReferenceUnknown) => {
+                                elements.push(Element::ReferenceLink(raw_text))
+                            }
+                            Some(LinkType::Collapsed) | Some(LinkType::CollapsedUnknown) => {
+                                elements.push(Element::EmptyReferenceLink(raw_text))
+                            }
+                            Some(LinkType::Shortcut) | Some(LinkType::ShortcutUnknown) => {
+                                elements.push(Element::ShortcutReference(raw_text))
+                            }
                             Some(LinkType::Autolink) | Some(LinkType::Email) => {
                                 elements.push(Element::Autolink(raw_text))
                             }
@@ -1920,12 +1998,13 @@ fn cascade_split_line(
     length_mode: ReflowLengthMode,
     attr_lists: bool,
     myst_roles: bool,
+    defined_references: Option<&HashSet<String>>,
 ) -> Vec<String> {
     if line_length == 0 || display_len(text, length_mode) <= line_length {
         return vec![text.to_string()];
     }
 
-    let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles);
+    let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles, defined_references);
     let element_spans = compute_element_spans(&elements);
 
     // Try parenthetical boundary split (before clause punctuation so that
@@ -1939,6 +2018,7 @@ fn cascade_split_line(
             length_mode,
             attr_lists,
             myst_roles,
+            defined_references,
         ));
         return result;
     }
@@ -1953,6 +2033,7 @@ fn cascade_split_line(
             length_mode,
             attr_lists,
             myst_roles,
+            defined_references,
         ));
         return result;
     }
@@ -1967,6 +2048,7 @@ fn cascade_split_line(
             length_mode,
             attr_lists,
             myst_roles,
+            defined_references,
         ));
         return result;
     }
@@ -1984,6 +2066,9 @@ fn cascade_split_line(
         myst_roles,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        // Unused here: this fallback arranges already-parsed elements and never
+        // re-parses links, so shortcut definedness is never consulted.
+        defined_references: None,
     };
     reflow_elements(&elements, &options)
 }
@@ -2015,6 +2100,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
                 length_mode,
                 options.attr_lists,
                 options.myst_roles,
+                options.defined_references.as_ref(),
             ));
         }
     }

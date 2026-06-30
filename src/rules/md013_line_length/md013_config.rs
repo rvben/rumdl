@@ -271,16 +271,20 @@ impl MD013Config {
         }
     }
 
+    /// Map the configured length mode to the reflow engine's length mode.
+    pub(crate) fn reflow_length_mode(&self) -> crate::utils::text_reflow::ReflowLengthMode {
+        match self.length_mode {
+            LengthMode::Chars => crate::utils::text_reflow::ReflowLengthMode::Chars,
+            LengthMode::Visual => crate::utils::text_reflow::ReflowLengthMode::Visual,
+            LengthMode::Bytes => crate::utils::text_reflow::ReflowLengthMode::Bytes,
+        }
+    }
+
     /// Build a `ReflowOptions` from this configuration.
     ///
     /// Converts `reflow_mode`, `length_mode`, `abbreviations`, and `line_length`
     /// into the unified `ReflowOptions` type used by the reflow engine.
     pub fn to_reflow_options(&self) -> crate::utils::text_reflow::ReflowOptions {
-        let length_mode = match self.length_mode {
-            LengthMode::Chars => crate::utils::text_reflow::ReflowLengthMode::Chars,
-            LengthMode::Visual => crate::utils::text_reflow::ReflowLengthMode::Visual,
-            LengthMode::Bytes => crate::utils::text_reflow::ReflowLengthMode::Bytes,
-        };
         crate::utils::text_reflow::ReflowOptions {
             line_length: self.line_length.get(),
             break_on_sentences: true,
@@ -288,11 +292,14 @@ impl MD013Config {
             sentence_per_line: self.reflow_mode == ReflowMode::SentencePerLine,
             semantic_line_breaks: self.reflow_mode == ReflowMode::SemanticLineBreaks,
             abbreviations: self.abbreviations_for_reflow(),
-            length_mode,
+            length_mode: self.reflow_length_mode(),
             attr_lists: false,
             myst_roles: false,
             require_sentence_capital: self.require_sentence_capital,
             max_list_continuation_indent: None,
+            // No document context here (config-only), so shortcut references
+            // stay atomic. The rule's fix path supplies the defined labels.
+            defined_references: None,
         }
     }
 }

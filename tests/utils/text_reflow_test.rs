@@ -19,6 +19,7 @@ fn test_list_item_trailing_whitespace_removal() {
         myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        defined_references: None,
     };
 
     let result = reflow_markdown(input, &options);
@@ -204,6 +205,151 @@ fn test_reference_link_patterns_fixed() {
     }
 }
 
+/// Regression coverage for issue #704: reference-style links must stay atomic
+/// during reflow even when the line exceeds `line_length`. Reflow parses each
+/// paragraph in isolation (without the document's reference definitions), so a
+/// parser that only recognizes resolved links would treat the link text as
+/// wrappable prose and split it mid-link.
+///
+/// Each case is a single line longer than `line_length`, so reflow must wrap.
+/// The assertion is twofold: the output actually wrapped (contains a newline),
+/// and the full link syntax survives intact on one line (no soft break inside
+/// the link text).
+fn assert_link_kept_atomic(input: &str, link: &str) {
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains('\n'),
+        "input did not wrap, so the test is vacuous\nInput: {input}\nResult: {result}"
+    );
+    assert!(
+        result.contains(link),
+        "link must stay atomic (not split across lines)\nExpected intact: {link}\nInput: {input}\nResult: {result}"
+    );
+}
+
+#[test]
+fn test_long_full_reference_link_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][github] indeed.",
+        "[this is a lot of text for a simple link to github.com][github]",
+    );
+}
+
+#[test]
+fn test_long_collapsed_reference_link_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][] indeed.",
+        "[this is a lot of text for a simple link to github.com][]",
+    );
+}
+
+#[test]
+fn test_long_shortcut_reference_link_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and [this is a lot of text for a simple shortcut link here] indeed.",
+        "[this is a lot of text for a simple shortcut link here]",
+    );
+}
+
+#[test]
+fn test_long_reference_image_kept_atomic() {
+    assert_link_kept_atomic(
+        "I have set the mode to normalize, and ![this is a lot of alt text for a simple image description][github] now.",
+        "![this is a lot of alt text for a simple image description][github]",
+    );
+}
+
+#[test]
+fn test_reference_link_with_bracketed_code_span_kept_atomic() {
+    // Motivating case from #702: a link whose text contains a code span with
+    // brackets must remain atomic across wraps.
+    assert_link_kept_atomic(
+        "Please refer to [click `arr[0]` for the first element of the array here][github] right now.",
+        "[click `arr[0]` for the first element of the array here][github]",
+    );
+}
+
+#[test]
+fn test_reference_link_reflow_is_idempotent() {
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+    let input =
+        "I have set the mode to normalize, and [this is a lot of text for a simple link to github.com][github] indeed.";
+    let once = reflow_markdown(input, &options);
+    let twice = reflow_markdown(&once, &options);
+    assert_eq!(once, twice, "reflow of a reference link must be idempotent");
+}
+
+/// Definition-aware shortcut handling: a bare `[text]` shortcut is a real link
+/// (atomic) only when its label is actually defined in the document. When the
+/// caller supplies `Some(defined_labels)`, an undefined bracketed run is literal
+/// prose and must wrap; a defined one stays atomic. Full/collapsed/image
+/// references are unaffected (always atomic) and covered above.
+fn defined_set(labels: &[&str]) -> std::collections::HashSet<String> {
+    labels.iter().map(|s| s.to_string()).collect()
+}
+
+#[test]
+fn test_long_defined_shortcut_reference_kept_atomic() {
+    let options = ReflowOptions {
+        line_length: 80,
+        defined_references: Some(defined_set(&[
+            "my project documentation and the related developer resources",
+        ])),
+        ..Default::default()
+    };
+    let input = "Please go ahead and read [my project documentation and the related developer resources] now.";
+    let result = reflow_markdown(input, &options);
+    assert!(result.contains('\n'), "input did not wrap: {result}");
+    assert!(
+        result.contains("[my project documentation and the related developer resources]"),
+        "a defined shortcut reference must stay atomic: {result}"
+    );
+}
+
+#[test]
+fn test_long_undefined_shortcut_wraps_as_prose() {
+    let options = ReflowOptions {
+        line_length: 80,
+        // Reference info IS available, and this label is not among the defined
+        // ones, so the bracketed run is literal prose and should wrap.
+        defined_references: Some(defined_set(&["something else entirely"])),
+        ..Default::default()
+    };
+    let input = "Please go ahead and read [this is a long undefined bracketed editorial aside that keeps going] now.";
+    let result = reflow_markdown(input, &options);
+    assert!(result.contains('\n'), "input did not wrap: {result}");
+    assert!(
+        !result.contains("[this is a long undefined bracketed editorial aside that keeps going]"),
+        "an undefined shortcut should wrap as prose, not stay atomic: {result}"
+    );
+}
+
+#[test]
+fn test_defined_shortcut_matching_is_case_and_whitespace_insensitive() {
+    // Definition matching biases toward atomic so a real link is never split by
+    // a mere case or whitespace difference between the use and the definition.
+    let options = ReflowOptions {
+        line_length: 80,
+        defined_references: Some(defined_set(&[
+            "my project documentation and the related developer resources",
+        ])),
+        ..Default::default()
+    };
+    let input = "Please go ahead and read [My  Project  Documentation  and  the  Related  Developer  Resources] now.";
+    let result = reflow_markdown(input, &options);
+    assert!(
+        result.contains("[My  Project  Documentation  and  the  Related  Developer  Resources]"),
+        "a case/whitespace variant of a defined label must still be atomic: {result}"
+    );
+}
+
 #[test]
 fn test_sentence_detection_basic() {
     let text = "First sentence. Second sentence. Third sentence.";
@@ -260,6 +406,7 @@ fn test_sentence_per_line_reflow() {
         myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        defined_references: None,
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -592,6 +739,7 @@ fn test_ie_abbreviation_split_debug() {
         myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        defined_references: None,
     };
 
     let result = reflow_line(input, &options);
@@ -617,6 +765,7 @@ fn test_ie_abbreviation_paragraph() {
         myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        defined_references: None,
     };
 
     let result = reflow_markdown(input, &options);
@@ -697,6 +846,7 @@ fn test_definition_list_with_paragraphs() {
         myst_roles: false,
         require_sentence_capital: true,
         max_list_continuation_indent: None,
+        defined_references: None,
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";

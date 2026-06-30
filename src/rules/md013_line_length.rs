@@ -12,8 +12,8 @@ use crate::utils::range_utils::calculate_excess_range;
 use crate::utils::regex_cache::{IMAGE_REF_PATTERN, LINK_REF_PATTERN, URL_PATTERN};
 use crate::utils::table_utils::TableUtils;
 use crate::utils::text_reflow::{
-    BlockquoteLineData, ReflowLengthMode, blockquote_continuation_style, dominant_blockquote_prefix,
-    reflow_blockquote_content, split_into_sentences,
+    BlockquoteLineData, blockquote_continuation_style, dominant_blockquote_prefix, reflow_blockquote_content,
+    split_into_sentences,
 };
 use pulldown_cmark::LinkType;
 use toml;
@@ -94,11 +94,46 @@ impl MD013LineLength {
     }
 
     /// Convert MD013 LengthMode to text_reflow ReflowLengthMode
-    fn reflow_length_mode(&self) -> ReflowLengthMode {
-        match self.config.length_mode {
-            LengthMode::Chars => ReflowLengthMode::Chars,
-            LengthMode::Visual => ReflowLengthMode::Visual,
-            LengthMode::Bytes => ReflowLengthMode::Bytes,
+    /// Normalized set of reference labels defined in the document.
+    ///
+    /// Passed to reflow so a bare shortcut reference (`[text]`) is treated as an
+    /// atomic link only when its label is actually defined; an undefined
+    /// bracketed run reflows as literal prose.
+    fn defined_reference_labels(ctx: &crate::lint_context::LintContext) -> std::collections::HashSet<String> {
+        ctx.reference_defs
+            .iter()
+            .map(|d| crate::utils::text_reflow::normalize_reference_label(&d.id))
+            .collect()
+    }
+
+    /// Build the reflow options shared by every MD013 fix path.
+    ///
+    /// `line_length` varies per call site (some subtract a list-marker or
+    /// blockquote prefix); every other field is derived uniformly from the
+    /// effective config and the document flavor. Callers that need a different
+    /// `max_list_continuation_indent` override it via struct update.
+    fn reflow_options(
+        ctx: &crate::lint_context::LintContext,
+        config: &MD013Config,
+        line_length: usize,
+    ) -> crate::utils::text_reflow::ReflowOptions {
+        crate::utils::text_reflow::ReflowOptions {
+            line_length,
+            break_on_sentences: true,
+            preserve_breaks: false,
+            sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
+            semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
+            abbreviations: config.abbreviations_for_reflow(),
+            length_mode: config.reflow_length_mode(),
+            attr_lists: ctx.flavor.supports_attr_lists(),
+            myst_roles: ctx.flavor.supports_myst_roles(),
+            require_sentence_capital: config.require_sentence_capital,
+            max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
+                Some(4)
+            } else {
+                None
+            },
+            defined_references: Some(Self::defined_reference_labels(ctx)),
         }
     }
 
@@ -867,23 +902,7 @@ impl MD013LineLength {
                 .max(1)
         };
 
-        let reflow_options = crate::utils::text_reflow::ReflowOptions {
-            line_length: reflow_line_length,
-            break_on_sentences: true,
-            preserve_breaks: false,
-            sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-            semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-            abbreviations: config.abbreviations_for_reflow(),
-            length_mode: self.reflow_length_mode(),
-            attr_lists: ctx.flavor.supports_attr_lists(),
-            myst_roles: ctx.flavor.supports_myst_roles(),
-            require_sentence_capital: config.require_sentence_capital,
-            max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                Some(4)
-            } else {
-                None
-            },
-        };
+        let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
 
         let reflowed_with_style =
             reflow_blockquote_content(&line_data, &explicit_prefix, continuation_style, &reflow_options);
@@ -1167,23 +1186,7 @@ impl MD013LineLength {
             config.line_length.get().saturating_sub(prefix_width).max(1)
         };
 
-        let reflow_options = crate::utils::text_reflow::ReflowOptions {
-            line_length: reflow_line_length,
-            break_on_sentences: true,
-            preserve_breaks: false,
-            sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-            semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-            abbreviations: config.abbreviations_for_reflow(),
-            length_mode: self.reflow_length_mode(),
-            attr_lists: ctx.flavor.supports_attr_lists(),
-            myst_roles: ctx.flavor.supports_myst_roles(),
-            require_sentence_capital: config.require_sentence_capital,
-            max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                Some(4)
-            } else {
-                None
-            },
-        };
+        let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
 
         let reflowed = crate::utils::text_reflow::reflow_line(body_text, &reflow_options);
         if reflowed.is_empty() {
@@ -1678,18 +1681,11 @@ impl MD013LineLength {
                         .saturating_sub(FN_INDENT.max(prefix_display_width))
                         .max(20)
                 };
+                // Footnote continuation uses a fixed 4-space indent, so list
+                // continuation capping does not apply here.
                 let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                    line_length: reflow_line_length,
-                    break_on_sentences: true,
-                    preserve_breaks: false,
-                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                    abbreviations: config.abbreviations_for_reflow(),
-                    length_mode: self.reflow_length_mode(),
-                    attr_lists: ctx.flavor.supports_attr_lists(),
-                    myst_roles: ctx.flavor.supports_myst_roles(),
-                    require_sentence_capital: config.require_sentence_capital,
                     max_list_continuation_indent: None,
+                    ..Self::reflow_options(ctx, config, reflow_line_length)
                 };
 
                 let indent_str = " ".repeat(FN_INDENT);
@@ -1908,23 +1904,7 @@ impl MD013LineLength {
                 } else {
                     config.line_length.get().saturating_sub(base_indent_len).max(1)
                 };
-                let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                    line_length: reflow_line_length,
-                    break_on_sentences: true,
-                    preserve_breaks: false,
-                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                    abbreviations: config.abbreviations_for_reflow(),
-                    length_mode: self.reflow_length_mode(),
-                    attr_lists: ctx.flavor.supports_attr_lists(),
-                    myst_roles: ctx.flavor.supports_myst_roles(),
-                    require_sentence_capital: config.require_sentence_capital,
-                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                        Some(4)
-                    } else {
-                        None
-                    },
-                };
+                let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
                 let reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
                 // Re-add the 4-space indent to each reflowed line
@@ -2536,23 +2516,7 @@ impl MD013LineLength {
                     } else {
                         config.line_length.get().saturating_sub(indent_size).max(1)
                     };
-                    let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                        line_length: reflow_line_length,
-                        break_on_sentences: true,
-                        preserve_breaks: false,
-                        sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                        semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                        abbreviations: config.abbreviations_for_reflow(),
-                        length_mode: self.reflow_length_mode(),
-                        attr_lists: ctx.flavor.supports_attr_lists(),
-                        myst_roles: ctx.flavor.supports_myst_roles(),
-                        require_sentence_capital: config.require_sentence_capital,
-                        max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                            Some(4)
-                        } else {
-                            None
-                        },
-                    };
+                    let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
 
                     let mut result: Vec<String> = Vec::new();
                     let mut is_first_block = true;
@@ -2955,23 +2919,7 @@ impl MD013LineLength {
                                     config.line_length.get().saturating_sub(body_indent).max(1)
                                 };
 
-                                let admon_reflow_options = crate::utils::text_reflow::ReflowOptions {
-                                    line_length: admon_reflow_length,
-                                    break_on_sentences: true,
-                                    preserve_breaks: false,
-                                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                                    abbreviations: config.abbreviations_for_reflow(),
-                                    length_mode: self.reflow_length_mode(),
-                                    attr_lists: ctx.flavor.supports_attr_lists(),
-                                    myst_roles: ctx.flavor.supports_myst_roles(),
-                                    require_sentence_capital: config.require_sentence_capital,
-                                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                                        Some(4)
-                                    } else {
-                                        None
-                                    },
-                                };
+                                let admon_reflow_options = Self::reflow_options(ctx, config, admon_reflow_length);
 
                                 // Output each segment
                                 for segment in &segments {
@@ -3377,23 +3325,7 @@ impl MD013LineLength {
                 } else {
                     config.line_length.get()
                 };
-                let reflow_options = crate::utils::text_reflow::ReflowOptions {
-                    line_length: reflow_line_length,
-                    break_on_sentences: true,
-                    preserve_breaks: false,
-                    sentence_per_line: config.reflow_mode == ReflowMode::SentencePerLine,
-                    semantic_line_breaks: config.reflow_mode == ReflowMode::SemanticLineBreaks,
-                    abbreviations: config.abbreviations_for_reflow(),
-                    length_mode: self.reflow_length_mode(),
-                    attr_lists: ctx.flavor.supports_attr_lists(),
-                    myst_roles: ctx.flavor.supports_myst_roles(),
-                    require_sentence_capital: config.require_sentence_capital,
-                    max_list_continuation_indent: if ctx.flavor.requires_strict_list_indent() {
-                        Some(4)
-                    } else {
-                        None
-                    },
-                };
+                let reflow_options = Self::reflow_options(ctx, config, reflow_line_length);
                 let mut reflowed = crate::utils::text_reflow::reflow_line(&paragraph_text, &reflow_options);
 
                 // Re-apply the common indent to each non-empty reflowed line so
