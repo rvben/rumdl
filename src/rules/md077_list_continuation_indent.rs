@@ -324,6 +324,34 @@ impl MD077ListContinuationIndent {
         }
     }
 
+    /// Whether the item's owned continuation range holds a *latent* structural
+    /// construct: a list marker or table line the parser has not yet promoted to
+    /// its own block, but would once an earlier continuation line is reindented.
+    /// Such a promotion re-attributes the following lines to a different block
+    /// (different content column) and breaks single-pass idempotency, so the
+    /// caller skips the whole item when this returns true.
+    ///
+    /// Unlike [`walk_item_continuation`], this scans the full owned range and
+    /// does NOT stop at a heading or horizontal rule. A heading partway through
+    /// the continuation can itself be parse-unstable: an empty backtick run, for
+    /// instance, is read as a setext heading, and reindenting an earlier line
+    /// dissolves it and promotes a list marker that sits past it. Stopping at the
+    /// heading would hide that marker from this check and let the reindent break
+    /// idempotency. Lines already parsed as list items are real nested children,
+    /// not latent, and are handled by the walk's `saw_nested` logic instead.
+    fn item_range_has_latent_structure(ctx: &LintContext, item_line: usize, range_end: usize) -> bool {
+        (item_line + 1..=range_end).any(|line_num| {
+            ctx.line_info(line_num).is_some_and(|info| {
+                if info.is_blank || info.list_item.is_some() {
+                    return false;
+                }
+                let trimmed = info.content(ctx.content).trim_start();
+                !Self::should_skip_line(info, trimmed)
+                    && (Self::starts_with_list_marker(trimmed) || crate::utils::skip_context::is_table_line(trimmed))
+            })
+        })
+    }
+
     /// Scan an item's owned range and report whether any *other* continuation
     /// line in the item uses the content column or the post-checkbox column.
     ///
@@ -623,20 +651,7 @@ impl Rule for MD077ListContinuationIndent {
             // continuation matches neither, so this only bails on pathological
             // input (a safe false negative). Real nested items never reach the
             // callback (the walk handles them via `saw_nested`).
-            let has_latent_structure = aligned && {
-                let mut found = false;
-                Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
-                    if Self::starts_with_list_marker(line.trimmed)
-                        || crate::utils::skip_context::is_table_line(line.trimmed)
-                    {
-                        found = true;
-                        ControlFlow::Break(())
-                    } else {
-                        ControlFlow::Continue(())
-                    }
-                });
-                found
-            };
+            let has_latent_structure = aligned && Self::item_range_has_latent_structure(ctx, item_line, range_end);
             Self::walk_item_continuation(ctx, item_line, range_end, marker_col, |line| {
                 let actual = line.actual;
                 let under_indented = actual < required;
@@ -812,6 +827,27 @@ mod tests {
     fn fix_aligned(content: &str) -> String {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         aligned_rule().fix(&ctx).unwrap()
+    }
+
+    fn fix_aligned_quarto(content: &str) -> String {
+        let ctx = LintContext::new(content, MarkdownFlavor::Quarto, None);
+        aligned_rule().fix(&ctx).unwrap()
+    }
+
+    #[test]
+    fn aligned_idempotent_with_latent_marker_behind_unstable_heading() {
+        // Regression: an empty backtick run (`` ``\n`` ``) is parsed as a setext
+        // heading. That heading used to terminate the latent-structure walk
+        // before it reached the `- ` marker on the next line, so the marker was
+        // not detected as latent. Reindenting the `1. ` continuation then
+        // promoted `- ` to a real list item, producing a fresh under-indent
+        // violation on the second pass and breaking single-pass idempotency.
+        // The latent-structure scan now spans the full owned range, detects the
+        // marker, and leaves the (ambiguous) item alone.
+        let input = "1. \n``\n``\n- \n``";
+        let once = fix_aligned_quarto(input);
+        let twice = fix_aligned_quarto(&once);
+        assert_eq!(once, twice, "MD077 aligned fix must be idempotent (Quarto)");
     }
 
     // ── Tight continuation (no blank line) ─────────────────────────────
