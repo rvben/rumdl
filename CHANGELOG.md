@@ -66,6 +66,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.27](https://github.com/rvben/rumdl/compare/v0.2.26...v0.2.27) - 2026-06-30
+
+### Fixed
+
+- **MD077**: detect latent list markers past an unstable heading ([05d273e](https://github.com/rvben/rumdl/commit/05d273eae5636d400f97f7186eb6cabda140ecd3))
+- **MD013**: keep reference-style links atomic when reflowing ([a991a71](https://github.com/rvben/rumdl/commit/a991a71c2b05a1f83cb95de95e4b96cf3c4227e8))
+
 ## [0.2.26](https://github.com/rvben/rumdl/compare/v0.2.25...v0.2.26) - 2026-06-29
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "@rumdl/cli-darwin-x64",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "description": "rumdl binary for macOS x64 (Intel)",
   "license": "MIT",
   "repository": {
