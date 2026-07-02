@@ -85,6 +85,11 @@ vim.lsp.config("rumdl", {
   cmd = { "rumdl", "server" },
   filetypes = { "markdown" },
   root_markers = { ".git" },
+  settings = {
+    rumdl = {
+      lineLength = 100,
+    },
+  },
 })
 
 vim.lsp.enable("rumdl")

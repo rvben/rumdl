@@ -27,6 +27,23 @@ See [VS Code Integration](../vscode-extension.md) for detailed setup.
 
 ## Neovim
 
+### Native LSP (Neovim 0.11+)
+
+```lua
+vim.lsp.config("rumdl", {
+  cmd = { "rumdl", "server" },
+  filetypes = { "markdown" },
+  root_markers = { ".git", ".rumdl.toml" },
+  settings = {
+    rumdl = {
+      lineLength = 100,
+    },
+  },
+})
+
+vim.lsp.enable("rumdl")
+```
+
 ### Using nvim-lspconfig
 
 ```lua
