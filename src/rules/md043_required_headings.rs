@@ -747,7 +747,7 @@ impl Rule for MD043RequiredHeadings {
                 } => warnings.push(self.warning(
                     self.omission_range(next_actual_index, &actual, ctx),
                     format!(
-                        "{prefix} Wildcard '{}' at position {} requires {}, but none was available",
+                        "{prefix} Wildcard '{}' at pattern position {} requires {}, but none was available",
                         kind.pattern(),
                         source_index + 1,
                         kind.requirement()

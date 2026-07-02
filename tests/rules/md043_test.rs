@@ -219,7 +219,7 @@ fn test_exact_ranges_for_each_alignment_edit() {
         (
             vec!["# A", "+", "# B"],
             "# A\n\n# B ##",
-            "Wildcard '+' at position 2 requires one or more headings, but none was available",
+            "Wildcard '+' at pattern position 2 requires one or more headings, but none was available",
             (3, 1, 3, 7),
         ),
         (
@@ -387,7 +387,7 @@ fn test_missing_heading() {
 }
 
 #[test]
-fn test_structure_mismatch_message_reports_missing_heading() {
+fn test_reports_missing_middle_heading() {
     let required = vec![
         "# Introduction".to_string(),
         "# Methods".to_string(),
@@ -406,7 +406,7 @@ fn test_structure_mismatch_message_reports_missing_heading() {
 }
 
 #[test]
-fn test_structure_mismatch_message_reports_missing_trailing_heading() {
+fn test_reports_missing_trailing_heading() {
     let required = vec!["# Introduction".to_string(), "# Methods".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction";
@@ -421,7 +421,7 @@ fn test_structure_mismatch_message_reports_missing_trailing_heading() {
 }
 
 #[test]
-fn test_structure_mismatch_message_reports_extra_trailing_heading() {
+fn test_reports_extra_trailing_heading() {
     let required = vec!["# Introduction".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n## Extra";
@@ -436,7 +436,7 @@ fn test_structure_mismatch_message_reports_extra_trailing_heading() {
 }
 
 #[test]
-fn test_structure_mismatch_message_reports_extra_trailing_heading_after_wildcard() {
+fn test_reports_extra_trailing_heading_after_wildcard() {
     let required = vec!["# Introduction".to_string(), "*".to_string(), "# Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n## Optional 1\n\n## Optional 2\n\n# Results\n\n## Extra";
@@ -451,7 +451,7 @@ fn test_structure_mismatch_message_reports_extra_trailing_heading_after_wildcard
 }
 
 #[test]
-fn test_structure_mismatch_message_handles_plus_before_required_heading() {
+fn test_reports_unsatisfied_plus_before_required_heading() {
     let required = vec!["# Introduction".to_string(), "+".to_string(), "# Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n# Results";
@@ -461,12 +461,12 @@ fn test_structure_mismatch_message_handles_plus_before_required_heading() {
 
     assert_warning_message(
         &result,
-        "Heading structure does not match required structure. Wildcard '+' at position 2 requires one or more headings, but none was available",
+        "Heading structure does not match required structure. Wildcard '+' at pattern position 2 requires one or more headings, but none was available",
     );
 }
 
 #[test]
-fn test_structure_mismatch_message_preserves_actual_case_after_wildcard() {
+fn test_reports_unsatisfied_plus_when_anchor_matches_only_heading() {
     let required = vec!["+".to_string(), "# Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# RESULTS";
@@ -476,12 +476,12 @@ fn test_structure_mismatch_message_preserves_actual_case_after_wildcard() {
 
     assert_warning_message(
         &result,
-        "Heading structure does not match required structure. Wildcard '+' at position 1 requires one or more headings, but none was available",
+        "Heading structure does not match required structure. Wildcard '+' at pattern position 1 requires one or more headings, but none was available",
     );
 }
 
 #[test]
-fn test_structure_mismatch_message_handles_question_before_required_heading() {
+fn test_reports_unsatisfied_question_before_required_heading() {
     let required = vec!["?".to_string(), "## Description".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "## Description";
@@ -491,12 +491,12 @@ fn test_structure_mismatch_message_handles_question_before_required_heading() {
 
     assert_warning_message(
         &result,
-        "Heading structure does not match required structure. Wildcard '?' at position 1 requires one heading, but none was available",
+        "Heading structure does not match required structure. Wildcard '?' at pattern position 1 requires one heading, but none was available",
     );
 }
 
 #[test]
-fn test_structure_mismatch_message_handles_asterisk_missing_required_heading() {
+fn test_reports_missing_required_heading_after_asterisk() {
     let required = vec!["# Introduction".to_string(), "*".to_string(), "# Results".to_string()];
     let rule = MD043RequiredHeadings::new(required);
     let content = "# Introduction\n\n## Optional 1\n\n## Optional 2";
