@@ -84,7 +84,7 @@ Add to your Neovim configuration:
 vim.lsp.config("rumdl", {
   cmd = { "rumdl", "server" },
   filetypes = { "markdown" },
-  root_markers = { ".git" },
+  root_markers = { ".git", ".rumdl.toml" },
   settings = {
     rumdl = {
       lineLength = 100,
@@ -194,16 +194,29 @@ Beyond the config file, editors can pass settings to the server as LSP
 initialization options (or `workspace/didChangeConfiguration`). These are
 top-level keys in camelCase, following Ruff's LSP convention:
 
-| Setting                        | Default  | Description                                                                                                                                                              |
-| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `enableLinting`                | `true`   | Real-time diagnostics as you type                                                                                                                                        |
-| `enableAutoFix`                | `false`  | Apply auto-fixes on save                                                                                                                                                 |
-| `enableLinkCompletions`        | `true`   | File-path and heading-anchor completions inside link targets. Set to `false` to keep linting while letting another LSP own link completion.                              |
-| `enableLinkNavigation`         | `true`   | Hover, go-to-definition, find-references, and rename for links. Set to `false` to avoid conflicts with another LSP that provides these.                                  |
-| `enableSymbols`                | `true`   | Document outline (`documentSymbol`) and workspace heading search (`workspace/symbol`). Set to `false` to avoid duplicate headings when another LSP provides the outline. |
-| `linkCompletionContentRoots`   | `[]`     | Roots for absolute-style link completion (e.g. `/img/01.webp`); defaults to the workspace roots.                                                                         |
-| `configPath`                   | (auto)   | Explicit path to a rumdl config file                                                                                                                                     |
-| `disableRules` / `enableRules` | (config) | Override which rules run                                                                                                                                                 |
+| Setting                        | Default  | Description                                                                                                                                                                                          |
+| ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enableLinting`                | `true`   | Real-time diagnostics as you type                                                                                                                                                                    |
+| `enableAutoFix`                | `false`  | Apply auto-fixes on save                                                                                                                                                                             |
+| `enableLinkCompletions`        | `true`   | File-path and heading-anchor completions inside link targets. Set to `false` to keep linting while letting another LSP own link completion.                                                          |
+| `enableLinkNavigation`         | `true`   | Hover, go-to-definition, find-references, and rename for links. Set to `false` to avoid conflicts with another LSP that provides these.                                                              |
+| `enableSymbols`                | `true`   | Document outline (`documentSymbol`) and workspace heading search (`workspace/symbol`). Set to `false` to avoid duplicate headings when another LSP provides the outline.                             |
+| `linkCompletionContentRoots`   | `[]`     | Roots for absolute-style link completion (e.g. `/img/01.webp`); defaults to the workspace roots.                                                                                                     |
+| `configPath`                   | (auto)   | Explicit path to a rumdl config file                                                                                                                                                                 |
+| `disableRules` / `enableRules` | (config) | Override which rules run                                                                                                                                                                             |
+| `settings`                     | (config) | Rule overrides. `lineLength` sets the global line length; a rule key such as `MD013` sets per-rule options (e.g. `settings = { lineLength = 100 }` or `settings = { MD013 = { lineLength = 120 } }`) |
+
+The same options reach the server two ways, with slightly different nesting:
+
+- **Initialization options** (`init_options` in `vim.lsp.config`): the top-level
+  keys above are passed directly, and rule overrides go under `settings`, e.g.
+  `init_options = { settings = { lineLength = 100 } }`.
+- **Workspace configuration** (`settings` in `vim.lsp.config`, sent via
+  `workspace/didChangeConfiguration`): everything is nested under a `rumdl`
+  section, with rule overrides directly under it, e.g.
+  `settings = { rumdl = { lineLength = 100 } }`.
+
+Both are honored; use whichever your client makes easier.
 
 For example, to run rumdl alongside a navigation-focused Markdown LSP (such as
 marksman or markdown-oxide) as a pure linter/formatter - keeping its diagnostics,
@@ -214,7 +227,7 @@ and the heading outline - in Neovim:
 vim.lsp.config("rumdl", {
   cmd = { "rumdl", "server" },
   filetypes = { "markdown" },
-  root_markers = { ".git" },
+  root_markers = { ".git", ".rumdl.toml" },
   init_options = {
     enableLinkCompletions = false,
     enableLinkNavigation = false,

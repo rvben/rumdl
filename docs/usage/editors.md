@@ -62,7 +62,9 @@ null_ls.setup({
 })
 ```
 
-### Manual LSP Setup
+### Manual LSP Setup (pre-0.11 fallback)
+
+On Neovim older than 0.11, use `vim.lsp.start` instead of `vim.lsp.config`:
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
