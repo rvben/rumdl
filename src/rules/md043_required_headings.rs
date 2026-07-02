@@ -44,6 +44,187 @@ pub struct MD043RequiredHeadings {
     config: MD043Config,
 }
 
+#[derive(Debug, Clone)]
+struct DocumentHeading {
+    text: String,
+    match_key: String,
+    line_index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WildcardKind {
+    One,
+    OneOrMore,
+}
+
+impl WildcardKind {
+    fn pattern(self) -> &'static str {
+        match self {
+            Self::One => "?",
+            Self::OneOrMore => "+",
+        }
+    }
+
+    fn requirement(self) -> &'static str {
+        match self {
+            Self::One => "one heading",
+            Self::OneOrMore => "one or more headings",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PatternToken {
+    Literal { source_index: usize },
+    RequiredWildcard { source_index: usize, kind: WildcardKind },
+    RepeatingWildcard { anchor_index: Option<usize> },
+}
+
+/// Alignment score that minimizes edits, then favors exact matches, wildcard
+/// absorption, and substitutions in that order.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct AlignmentScore {
+    cost: usize,
+    exact_literals: usize,
+    wildcard_absorptions: usize,
+    substitutions: usize,
+}
+
+impl AlignmentScore {
+    fn with_cost(mut self) -> Self {
+        self.cost += 1;
+        self
+    }
+
+    fn with_exact(mut self) -> Self {
+        self.exact_literals += 1;
+        self
+    }
+
+    fn with_absorption(mut self) -> Self {
+        self.wildcard_absorptions += 1;
+        self
+    }
+
+    fn with_substitution(mut self) -> Self {
+        self.cost += 1;
+        self.substitutions += 1;
+        self
+    }
+
+    fn is_better_than(self, other: Self) -> bool {
+        self.cost < other.cost
+            || (self.cost == other.cost
+                && (self.exact_literals > other.exact_literals
+                    || (self.exact_literals == other.exact_literals
+                        && (self.wildcard_absorptions > other.wildcard_absorptions
+                            || (self.wildcard_absorptions == other.wildcard_absorptions
+                                && self.substitutions > other.substitutions)))))
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AlignmentDecision {
+    Done,
+    MatchLiteral,
+    Substitute,
+    OmitLiteral,
+    ConsumeRequiredWildcard,
+    OmitRequiredWildcard,
+    ConsumeRepeatingWildcard,
+    SkipRepeatingWildcard,
+    Unexpected,
+}
+
+impl AlignmentDecision {
+    fn tie_break_priority(self) -> u8 {
+        match self {
+            Self::MatchLiteral | Self::Substitute | Self::ConsumeRequiredWildcard | Self::SkipRepeatingWildcard => 3,
+            Self::OmitLiteral | Self::OmitRequiredWildcard | Self::ConsumeRepeatingWildcard => 2,
+            Self::Unexpected => 1,
+            Self::Done => 0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AlignmentCell {
+    score: AlignmentScore,
+    decision: AlignmentDecision,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AlignmentStep {
+    MatchLiteral {
+        expected_index: usize,
+        actual_index: usize,
+    },
+    Substitution {
+        expected_index: usize,
+        actual_index: usize,
+    },
+    MissingLiteral {
+        expected_index: usize,
+        next_actual_index: usize,
+    },
+    RequiredWildcardConsumed {
+        source_index: usize,
+        actual_index: usize,
+    },
+    RepeatingWildcardConsumed {
+        actual_index: usize,
+    },
+    UnsatisfiedWildcard {
+        source_index: usize,
+        kind: WildcardKind,
+        next_actual_index: usize,
+    },
+    Unexpected {
+        actual_index: usize,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AlignmentEvent {
+    LiteralMatch {
+        expected_index: usize,
+        actual_index: usize,
+    },
+    RequiredWildcardMatch {
+        source_index: usize,
+        actual_index: usize,
+    },
+    RepeatingWildcardMatch {
+        actual_index: usize,
+    },
+    Substitution {
+        expected_index: usize,
+        actual_index: usize,
+    },
+    MissingLiteral {
+        expected_index: usize,
+        next_actual_index: usize,
+    },
+    UnsatisfiedWildcard {
+        source_index: usize,
+        kind: WildcardKind,
+        next_actual_index: usize,
+    },
+    Unexpected {
+        actual_index: usize,
+    },
+    OutOfOrder {
+        expected_index: usize,
+        actual_index: usize,
+    },
+}
+
+#[derive(Debug)]
+struct AlignmentResult {
+    events: Vec<AlignmentEvent>,
+}
+
 impl MD043RequiredHeadings {
     pub fn new(headings: Vec<String>) -> Self {
         Self {
@@ -61,17 +242,21 @@ impl MD043RequiredHeadings {
 
     /// Compare two headings based on the match_case configuration
     fn headings_match(&self, expected: &str, actual: &str) -> bool {
+        self.match_key(expected) == self.match_key(actual)
+    }
+
+    fn match_key(&self, heading: &str) -> String {
         if self.config.match_case {
-            expected == actual
+            heading.to_string()
         } else {
-            expected.to_lowercase() == actual.to_lowercase()
+            heading.to_lowercase()
         }
     }
 
-    fn extract_headings(&self, ctx: &crate::lint_context::LintContext) -> Vec<String> {
+    fn extract_headings(&self, ctx: &crate::lint_context::LintContext) -> Vec<DocumentHeading> {
         let mut result = Vec::new();
 
-        for line_info in &ctx.lines {
+        for (line_index, line_info) in ctx.lines.iter().enumerate() {
             if let Some(heading) = &line_info.heading {
                 // Skip invalid headings (e.g., `#NoSpace` which lacks required space after #)
                 if !heading.is_valid {
@@ -80,157 +265,417 @@ impl MD043RequiredHeadings {
 
                 // Reconstruct the full heading format with the hash symbols
                 let full_heading = format!("{} {}", heading.marker, heading.text.trim());
-                result.push(full_heading);
+                let match_key = self.match_key(&full_heading);
+                result.push(DocumentHeading {
+                    text: full_heading,
+                    match_key,
+                    line_index,
+                });
             }
         }
 
         result
     }
 
-    /// Match headings against patterns with wildcard support
-    ///
-    /// Wildcards:
-    /// - `*` - Zero or more unspecified headings
-    /// - `+` - One or more unspecified headings
-    /// - `?` - Exactly one unspecified heading
-    ///
-    /// Returns (matched, expected_index, actual_index) indicating whether
-    /// all patterns were satisfied and the final positions in both sequences.
-    fn match_headings_with_wildcards(
-        &self,
-        actual_headings: &[String],
-        expected_patterns: &[String],
-    ) -> (bool, usize, usize) {
-        let mut exp_idx = 0;
-        let mut act_idx = 0;
-        let mut match_any = false; // Flexible matching mode for * and +
+    fn compile_pattern(&self) -> Vec<PatternToken> {
+        let mut tokens = Vec::new();
+        let mut index = 0;
 
-        while exp_idx < expected_patterns.len() && act_idx < actual_headings.len() {
-            let pattern = &expected_patterns[exp_idx];
-
-            if pattern == "*" {
-                // Zero or more headings: peek ahead to next required pattern
-                exp_idx += 1;
-                if exp_idx >= expected_patterns.len() {
-                    // * at end means rest of headings are allowed
-                    return (true, exp_idx, actual_headings.len());
-                }
-                // Enable flexible matching until we find next required pattern
-                match_any = true;
-                continue;
-            } else if pattern == "+" {
-                // One or more headings: consume at least one
-                if act_idx >= actual_headings.len() {
-                    return (false, exp_idx, act_idx); // Need at least one heading
-                }
-                act_idx += 1;
-                exp_idx += 1;
-                // Enable flexible matching for remaining headings
-                match_any = true;
-                // If + is at the end, consume all remaining headings
-                if exp_idx >= expected_patterns.len() {
-                    return (true, exp_idx, actual_headings.len());
-                }
-                continue;
-            } else if pattern == "?" {
-                // Exactly one unspecified heading
-                act_idx += 1;
-                exp_idx += 1;
-                match_any = false;
+        while index < self.config.headings.len() {
+            if !matches!(self.config.headings[index].as_str(), "*" | "+" | "?") {
+                tokens.push(PatternToken::Literal { source_index: index });
+                index += 1;
                 continue;
             }
 
-            // Literal pattern matching
-            let actual = &actual_headings[act_idx];
-            if self.headings_match(pattern, actual) {
-                // Exact match found
-                act_idx += 1;
-                exp_idx += 1;
-                match_any = false;
-            } else if match_any {
-                // In flexible mode, try next heading
-                act_idx += 1;
-            } else {
-                // No match and not in flexible mode
-                return (false, exp_idx, act_idx);
-            }
-        }
-
-        // Handle remaining patterns
-        while exp_idx < expected_patterns.len() {
-            let pattern = &expected_patterns[exp_idx];
-            if pattern == "*" {
-                // * allows zero headings, continue
-                exp_idx += 1;
-            } else if pattern == "+" {
-                // + requires at least one heading but we're out of headings
-                return (false, exp_idx, act_idx);
-            } else if pattern == "?" {
-                // ? requires exactly one heading but we're out
-                return (false, exp_idx, act_idx);
-            } else {
-                // Literal pattern not satisfied
-                return (false, exp_idx, act_idx);
-            }
-        }
-
-        // Check if we consumed all actual headings
-        let all_matched = act_idx == actual_headings.len() && exp_idx == expected_patterns.len();
-        (all_matched, exp_idx, act_idx)
-    }
-
-    fn is_heading(&self, line_index: usize, ctx: &crate::lint_context::LintContext) -> bool {
-        if line_index < ctx.lines.len() {
-            ctx.lines[line_index].heading.is_some()
-        } else {
-            false
-        }
-    }
-
-    fn expected_pattern_description(pattern: &str) -> String {
-        match pattern {
-            "+" => "one or more headings".to_string(),
-            "?" => "one heading".to_string(),
-            "*" => "zero or more headings".to_string(),
-            _ => format!("heading '{pattern}'"),
-        }
-    }
-
-    fn structure_mismatch_message(&self, actual_headings: &[String], exp_idx: usize, act_idx: usize) -> String {
-        let prefix = "Heading structure does not match required structure.";
-
-        if let Some(expected) = self.config.headings.get(exp_idx) {
-            if let Some(previous) = exp_idx.checked_sub(1).and_then(|idx| self.config.headings.get(idx))
-                && matches!(previous.as_str(), "+" | "?")
-                && act_idx == actual_headings.len()
-                && let Some(actual) = actual_headings.last()
-                && self.headings_match(expected, actual)
+            let run_start = index;
+            while index < self.config.headings.len() && matches!(self.config.headings[index].as_str(), "*" | "+" | "?")
             {
-                let requirement = Self::expected_pattern_description(previous);
-                return format!(
-                    "{prefix} Expected {requirement} before '{expected}', but found '{actual}' immediately"
-                );
+                index += 1;
+            }
+            let anchor_index = (index < self.config.headings.len()).then_some(index);
+            let mut has_repeating_slot = false;
+
+            for source_index in run_start..index {
+                match self.config.headings[source_index].as_str() {
+                    "?" => tokens.push(PatternToken::RequiredWildcard {
+                        source_index,
+                        kind: WildcardKind::One,
+                    }),
+                    "+" => {
+                        tokens.push(PatternToken::RequiredWildcard {
+                            source_index,
+                            kind: WildcardKind::OneOrMore,
+                        });
+                        has_repeating_slot = true;
+                    }
+                    "*" => has_repeating_slot = true,
+                    _ => unreachable!(),
+                }
             }
 
-            let expected = Self::expected_pattern_description(expected);
-            if let Some(actual) = actual_headings.get(act_idx) {
-                format!(
-                    "{prefix} Expected {expected} at position {}, but found '{actual}'",
-                    act_idx + 1
-                )
-            } else {
-                format!(
-                    "{prefix} Expected {expected} at position {}, but found no more headings",
-                    act_idx + 1
-                )
+            if has_repeating_slot {
+                tokens.push(PatternToken::RepeatingWildcard { anchor_index });
             }
-        } else if let Some(actual) = actual_headings.get(act_idx) {
-            format!(
-                "{prefix} Expected no more headings after position {act_idx}, but found '{actual}' at position {}",
-                act_idx + 1
-            )
-        } else {
-            prefix.to_string()
+        }
+
+        tokens
+    }
+
+    fn is_anchor(actual: &DocumentHeading, anchor_index: Option<usize>, expected_keys: &[String]) -> bool {
+        anchor_index.is_some_and(|index| expected_keys[index] == actual.match_key)
+    }
+
+    /// Builds a suffix DP over compiled pattern tokens and actual headings.
+    /// Scores use two rolling rows; compact decisions are retained for backtracking.
+    fn align_steps(&self, actual: &[DocumentHeading], expected_keys: &[String]) -> Vec<AlignmentStep> {
+        let tokens = self.compile_pattern();
+        let columns = actual.len() + 1;
+        let cell_count = (tokens.len() + 1)
+            .checked_mul(columns)
+            .expect("MD043 alignment table dimensions overflow");
+        let mut decisions = vec![AlignmentDecision::Done; cell_count];
+        let table_index = |token_index: usize, actual_index: usize| token_index * columns + actual_index;
+        let mut next_scores = vec![AlignmentScore::default(); columns];
+        let mut current_scores = vec![AlignmentScore::default(); columns];
+
+        for actual_index in (0..actual.len()).rev() {
+            next_scores[actual_index] = next_scores[actual_index + 1].with_cost();
+            decisions[table_index(tokens.len(), actual_index)] = AlignmentDecision::Unexpected;
+        }
+
+        for token_index in (0..tokens.len()).rev() {
+            for actual_index in (0..=actual.len()).rev() {
+                let mut best = AlignmentCell {
+                    score: AlignmentScore {
+                        cost: usize::MAX,
+                        ..AlignmentScore::default()
+                    },
+                    decision: AlignmentDecision::Done,
+                };
+                let mut consider = |score: AlignmentScore, decision: AlignmentDecision| {
+                    if score.is_better_than(best.score)
+                        || (score == best.score && decision.tie_break_priority() > best.decision.tie_break_priority())
+                    {
+                        best = AlignmentCell { score, decision };
+                    }
+                };
+
+                match tokens[token_index] {
+                    PatternToken::Literal { source_index } => {
+                        if actual_index < actual.len() {
+                            let diagonal = next_scores[actual_index + 1];
+                            if expected_keys[source_index] == actual[actual_index].match_key {
+                                consider(diagonal.with_exact(), AlignmentDecision::MatchLiteral);
+                            } else {
+                                consider(diagonal.with_substitution(), AlignmentDecision::Substitute);
+                            }
+                        }
+                        consider(next_scores[actual_index].with_cost(), AlignmentDecision::OmitLiteral);
+                        if actual_index < actual.len() {
+                            consider(
+                                current_scores[actual_index + 1].with_cost(),
+                                AlignmentDecision::Unexpected,
+                            );
+                        }
+                    }
+                    PatternToken::RequiredWildcard { .. } => {
+                        if actual_index < actual.len() {
+                            consider(
+                                next_scores[actual_index + 1].with_absorption(),
+                                AlignmentDecision::ConsumeRequiredWildcard,
+                            );
+                        }
+                        consider(
+                            next_scores[actual_index].with_cost(),
+                            AlignmentDecision::OmitRequiredWildcard,
+                        );
+                    }
+                    PatternToken::RepeatingWildcard { anchor_index } => {
+                        consider(next_scores[actual_index], AlignmentDecision::SkipRepeatingWildcard);
+                        if actual_index < actual.len()
+                            && !Self::is_anchor(&actual[actual_index], anchor_index, expected_keys)
+                        {
+                            consider(
+                                current_scores[actual_index + 1].with_absorption(),
+                                AlignmentDecision::ConsumeRepeatingWildcard,
+                            );
+                        }
+                    }
+                }
+
+                current_scores[actual_index] = best.score;
+                decisions[table_index(token_index, actual_index)] = best.decision;
+            }
+
+            std::mem::swap(&mut current_scores, &mut next_scores);
+        }
+
+        let mut steps = Vec::new();
+        let mut token_index = 0;
+        let mut actual_index = 0;
+        while token_index < tokens.len() || actual_index < actual.len() {
+            let decision = decisions[table_index(token_index, actual_index)];
+            match decision {
+                AlignmentDecision::Done => break,
+                AlignmentDecision::MatchLiteral => {
+                    let PatternToken::Literal { source_index } = tokens[token_index] else {
+                        unreachable!()
+                    };
+                    steps.push(AlignmentStep::MatchLiteral {
+                        expected_index: source_index,
+                        actual_index,
+                    });
+                    token_index += 1;
+                    actual_index += 1;
+                }
+                AlignmentDecision::Substitute => {
+                    let PatternToken::Literal { source_index } = tokens[token_index] else {
+                        unreachable!()
+                    };
+                    steps.push(AlignmentStep::Substitution {
+                        expected_index: source_index,
+                        actual_index,
+                    });
+                    token_index += 1;
+                    actual_index += 1;
+                }
+                AlignmentDecision::OmitLiteral => {
+                    let PatternToken::Literal { source_index } = tokens[token_index] else {
+                        unreachable!()
+                    };
+                    steps.push(AlignmentStep::MissingLiteral {
+                        expected_index: source_index,
+                        next_actual_index: actual_index,
+                    });
+                    token_index += 1;
+                }
+                AlignmentDecision::ConsumeRequiredWildcard => {
+                    let PatternToken::RequiredWildcard { source_index, .. } = tokens[token_index] else {
+                        unreachable!()
+                    };
+                    steps.push(AlignmentStep::RequiredWildcardConsumed {
+                        source_index,
+                        actual_index,
+                    });
+                    token_index += 1;
+                    actual_index += 1;
+                }
+                AlignmentDecision::OmitRequiredWildcard => {
+                    let PatternToken::RequiredWildcard { source_index, kind, .. } = tokens[token_index] else {
+                        unreachable!()
+                    };
+                    steps.push(AlignmentStep::UnsatisfiedWildcard {
+                        source_index,
+                        kind,
+                        next_actual_index: actual_index,
+                    });
+                    token_index += 1;
+                }
+                AlignmentDecision::ConsumeRepeatingWildcard => {
+                    steps.push(AlignmentStep::RepeatingWildcardConsumed { actual_index });
+                    actual_index += 1;
+                }
+                AlignmentDecision::SkipRepeatingWildcard => token_index += 1,
+                AlignmentDecision::Unexpected => {
+                    steps.push(AlignmentStep::Unexpected { actual_index });
+                    actual_index += 1;
+                }
+            }
+        }
+
+        steps
+    }
+
+    /// Converts equivalent unmatched literal and actual occurrences into out-of-order
+    /// events. Required wildcard matches retain ownership of their consumed heading.
+    fn alignment(&self, actual: &[DocumentHeading]) -> AlignmentResult {
+        let expected_keys = self
+            .config
+            .headings
+            .iter()
+            .map(|heading| self.match_key(heading))
+            .collect::<Vec<_>>();
+        let steps = self.align_steps(actual, &expected_keys);
+        let mut paired_expected = vec![false; steps.len()];
+        let mut reordered = vec![None; steps.len()];
+        let unmatched_expected = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(step_index, step)| match step {
+                AlignmentStep::MissingLiteral { expected_index, .. }
+                | AlignmentStep::Substitution { expected_index, .. } => Some((step_index, *expected_index)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let candidates = steps
+            .iter()
+            .enumerate()
+            .filter_map(|(step_index, step)| match step {
+                AlignmentStep::Unexpected { actual_index }
+                | AlignmentStep::RepeatingWildcardConsumed { actual_index }
+                | AlignmentStep::Substitution { actual_index, .. } => Some((step_index, *actual_index)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut used_candidates = vec![false; candidates.len()];
+
+        // Pair equal unmatched occurrences in sequence order. A substitution contributes both an
+        // unmatched expected side and an unmatched actual side, allowing crossed substitutions to
+        // become moves. Required wildcard slots retain ownership of their consumed heading.
+        for (expected_step, expected_index) in unmatched_expected {
+            if let Some((candidate_slot, (candidate_step, _actual_index))) =
+                candidates
+                    .iter()
+                    .enumerate()
+                    .find(|(candidate_slot, (_, actual_index))| {
+                        !used_candidates[*candidate_slot]
+                            && expected_keys[expected_index] == actual[*actual_index].match_key
+                    })
+            {
+                used_candidates[candidate_slot] = true;
+                paired_expected[expected_step] = true;
+                reordered[*candidate_step] = Some(expected_index);
+            }
+        }
+
+        let mut events = Vec::with_capacity(steps.len());
+        for (step_index, step) in steps.iter().enumerate() {
+            match *step {
+                AlignmentStep::MatchLiteral {
+                    expected_index,
+                    actual_index,
+                } => events.push(AlignmentEvent::LiteralMatch {
+                    expected_index,
+                    actual_index,
+                }),
+                AlignmentStep::RequiredWildcardConsumed {
+                    source_index,
+                    actual_index,
+                } => events.push(AlignmentEvent::RequiredWildcardMatch {
+                    source_index,
+                    actual_index,
+                }),
+                AlignmentStep::RepeatingWildcardConsumed { actual_index } => {
+                    if let Some(expected_index) = reordered[step_index] {
+                        events.push(AlignmentEvent::OutOfOrder {
+                            expected_index,
+                            actual_index,
+                        });
+                    } else {
+                        events.push(AlignmentEvent::RepeatingWildcardMatch { actual_index });
+                    }
+                }
+                AlignmentStep::Substitution {
+                    expected_index,
+                    actual_index,
+                } => match (paired_expected[step_index], reordered[step_index]) {
+                    (false, None) => events.push(AlignmentEvent::Substitution {
+                        expected_index,
+                        actual_index,
+                    }),
+                    (true, None) => events.push(AlignmentEvent::Unexpected { actual_index }),
+                    (true, Some(reordered_expected)) => events.push(AlignmentEvent::OutOfOrder {
+                        expected_index: reordered_expected,
+                        actual_index,
+                    }),
+                    (false, Some(reordered_expected)) => {
+                        events.push(AlignmentEvent::MissingLiteral {
+                            expected_index,
+                            next_actual_index: actual_index,
+                        });
+                        events.push(AlignmentEvent::OutOfOrder {
+                            expected_index: reordered_expected,
+                            actual_index,
+                        });
+                    }
+                },
+                AlignmentStep::MissingLiteral {
+                    expected_index,
+                    next_actual_index,
+                } => {
+                    if !paired_expected[step_index] {
+                        events.push(AlignmentEvent::MissingLiteral {
+                            expected_index,
+                            next_actual_index,
+                        });
+                    }
+                }
+                AlignmentStep::UnsatisfiedWildcard {
+                    source_index,
+                    kind,
+                    next_actual_index,
+                } => events.push(AlignmentEvent::UnsatisfiedWildcard {
+                    source_index,
+                    kind,
+                    next_actual_index,
+                }),
+                AlignmentStep::Unexpected { actual_index } => {
+                    if let Some(expected_index) = reordered[step_index] {
+                        events.push(AlignmentEvent::OutOfOrder {
+                            expected_index,
+                            actual_index,
+                        });
+                    } else {
+                        events.push(AlignmentEvent::Unexpected { actual_index });
+                    }
+                }
+            }
+        }
+
+        AlignmentResult { events }
+    }
+
+    fn heading_range(
+        &self,
+        heading: &DocumentHeading,
+        ctx: &crate::lint_context::LintContext,
+    ) -> (usize, usize, usize, usize) {
+        calculate_heading_range(
+            heading.line_index + 1,
+            ctx.lines[heading.line_index].content(ctx.content),
+        )
+    }
+
+    fn omission_range(
+        &self,
+        next_actual_index: usize,
+        actual: &[DocumentHeading],
+        ctx: &crate::lint_context::LintContext,
+    ) -> (usize, usize, usize, usize) {
+        actual
+            .get(next_actual_index)
+            .or_else(|| actual.last())
+            .map_or((1, 1, 1, 2), |heading| self.heading_range(heading, ctx))
+    }
+
+    fn reorder_message(&self, expected_index: usize, actual: &str) -> String {
+        let previous = self.config.headings[..expected_index]
+            .iter()
+            .rev()
+            .find(|heading| !matches!(heading.as_str(), "*" | "+" | "?"));
+        let next = self.config.headings[expected_index + 1..]
+            .iter()
+            .find(|heading| !matches!(heading.as_str(), "*" | "+" | "?"));
+        let location = match (previous, next) {
+            (Some(previous), Some(next)) => format!("expected between '{previous}' and '{next}'"),
+            (Some(previous), None) => format!("expected after '{previous}'"),
+            (None, Some(next)) => format!("expected before '{next}'"),
+            (None, None) => "expected at its configured position".to_string(),
+        };
+        format!("Heading structure does not match required structure. Heading '{actual}' is out of order; {location}")
+    }
+
+    fn warning(&self, range: (usize, usize, usize, usize), message: String) -> LintWarning {
+        LintWarning {
+            rule_name: Some(self.name().to_string()),
+            line: range.0,
+            column: range.1,
+            end_line: range.2,
+            end_column: range.3,
+            message,
+            severity: Severity::Warning,
+            fix: None,
         }
     }
 }
@@ -249,76 +694,80 @@ impl Rule for MD043RequiredHeadings {
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {
+        if self.config.headings.is_empty() || ctx.content.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let actual = self.extract_headings(ctx);
+        let alignment = self.alignment(&actual);
+        let prefix = "Heading structure does not match required structure.";
         let mut warnings = Vec::new();
-        let actual_headings = self.extract_headings(ctx);
-
-        // If no required headings are specified, the rule is disabled
-        if self.config.headings.is_empty() {
-            return Ok(warnings);
-        }
-
-        // Check if all patterns are only * wildcards (which allow zero headings)
-        let all_optional_wildcards = self.config.headings.iter().all(|p| p == "*");
-        if actual_headings.is_empty() && all_optional_wildcards {
-            // Allow empty documents when only * wildcards are specified
-            // (? and + require at least some headings)
-            return Ok(warnings);
-        }
-
-        // Use wildcard matching for pattern support
-        let (headings_match, exp_idx, act_idx) =
-            self.match_headings_with_wildcards(&actual_headings, &self.config.headings);
-
-        if !headings_match {
-            let message = self.structure_mismatch_message(&actual_headings, exp_idx, act_idx);
-
-            // If no headings found but we have required headings, create a warning
-            if actual_headings.is_empty() && !self.config.headings.is_empty() {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 2,
-                    message,
-                    severity: Severity::Warning,
-                    fix: None,
-                });
-                return Ok(warnings);
-            }
-
-            // Create warnings for each heading that doesn't match
-            for (i, line_info) in ctx.lines.iter().enumerate() {
-                if self.is_heading(i, ctx) {
-                    // Calculate precise character range for the entire heading
-                    let (start_line, start_col, end_line, end_col) =
-                        calculate_heading_range(i + 1, line_info.content(ctx.content));
-
-                    warnings.push(LintWarning {
-                        rule_name: Some(self.name().to_string()),
-                        line: start_line,
-                        column: start_col,
-                        end_line,
-                        end_column: end_col,
-                        message: message.clone(),
-                        severity: Severity::Warning,
-                        fix: None,
-                    });
+        for event in alignment.events {
+            match event {
+                AlignmentEvent::LiteralMatch {
+                    expected_index,
+                    actual_index,
+                } => debug_assert!(
+                    self.headings_match(&self.config.headings[expected_index], &actual[actual_index].text)
+                ),
+                AlignmentEvent::RequiredWildcardMatch {
+                    source_index,
+                    actual_index,
+                } => {
+                    debug_assert!(matches!(self.config.headings[source_index].as_str(), "+" | "?"));
+                    debug_assert!(actual_index < actual.len());
                 }
-            }
-
-            // If no heading ranges were emitted despite a mismatch, add a warning at the beginning of the file.
-            if warnings.is_empty() {
-                warnings.push(LintWarning {
-                    rule_name: Some(self.name().to_string()),
-                    line: 1,
-                    column: 1,
-                    end_line: 1,
-                    end_column: 2,
-                    message,
-                    severity: Severity::Warning,
-                    fix: None,
-                });
+                AlignmentEvent::RepeatingWildcardMatch { actual_index } => {
+                    debug_assert!(actual_index < actual.len());
+                }
+                AlignmentEvent::Substitution {
+                    expected_index,
+                    actual_index,
+                } => warnings.push(self.warning(
+                    self.heading_range(&actual[actual_index], ctx),
+                    format!(
+                        "{prefix} Expected heading '{}', but found '{}'",
+                        self.config.headings[expected_index], actual[actual_index].text
+                    ),
+                )),
+                AlignmentEvent::MissingLiteral {
+                    expected_index,
+                    next_actual_index,
+                } => warnings.push(self.warning(
+                    self.omission_range(next_actual_index, &actual, ctx),
+                    format!(
+                        "{prefix} Missing required heading '{}'",
+                        self.config.headings[expected_index]
+                    ),
+                )),
+                AlignmentEvent::UnsatisfiedWildcard {
+                    source_index,
+                    kind,
+                    next_actual_index,
+                } => warnings.push(self.warning(
+                    self.omission_range(next_actual_index, &actual, ctx),
+                    format!(
+                        "{prefix} Wildcard '{}' at position {} requires {}, but none was available",
+                        kind.pattern(),
+                        source_index + 1,
+                        kind.requirement()
+                    ),
+                )),
+                AlignmentEvent::Unexpected { actual_index } => warnings.push(self.warning(
+                    self.heading_range(&actual[actual_index], ctx),
+                    format!(
+                        "{prefix} Unexpected heading '{}' at position {}",
+                        actual[actual_index].text,
+                        actual_index + 1
+                    ),
+                )),
+                AlignmentEvent::OutOfOrder {
+                    expected_index,
+                    actual_index,
+                } => warnings.push(self.warning(
+                    self.heading_range(&actual[actual_index], ctx),
+                    self.reorder_message(expected_index, &actual[actual_index].text),
+                )),
             }
         }
 
@@ -326,46 +775,23 @@ impl Rule for MD043RequiredHeadings {
     }
 
     fn fix(&self, ctx: &crate::lint_context::LintContext) -> Result<String, LintError> {
-        let content = ctx.content;
-        // If no required headings are specified, return content as is
-        if self.config.headings.is_empty() {
-            return Ok(content.to_string());
-        }
-
-        let actual_headings = self.extract_headings(ctx);
-
-        // Check if headings already match using wildcard support - if so, no fix needed
-        let (headings_match, _, _) = self.match_headings_with_wildcards(&actual_headings, &self.config.headings);
-        if headings_match {
-            return Ok(content.to_string());
-        }
-
         // Auto-fixing MD043 would require restructuring the document (inserting,
         // renaming, or reordering headings), which risks data loss. Return the
         // content unchanged and let the user address the violation manually.
-        Ok(content.to_string())
+        Ok(ctx.content.to_string())
     }
 
     /// Check if this rule should be skipped
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
-        // Skip if no heading requirements or content is empty
         if self.config.headings.is_empty() || ctx.content.is_empty() {
             return true;
         }
 
-        // Check if any heading exists using cached information
-        let has_heading = ctx.lines.iter().any(|line| line.heading.is_some());
-
-        // Don't skip if we have wildcard requirements that need headings (? or +)
-        // even when no headings exist, because we need to report the error
-        if !has_heading {
-            let has_required_wildcards = self.config.headings.iter().any(|p| p == "?" || p == "+");
-            if has_required_wildcards {
-                return false; // Don't skip - we need to check and report error
-            }
-        }
-
-        !has_heading
+        let has_valid_heading = ctx
+            .lines
+            .iter()
+            .any(|line| line.heading.as_ref().is_some_and(|heading| heading.is_valid));
+        !has_valid_heading && self.config.headings.iter().all(|pattern| pattern == "*")
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -391,7 +817,10 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
-            actual_headings,
+            actual_headings
+                .iter()
+                .map(|heading| heading.text.clone())
+                .collect::<Vec<_>>(),
             vec!["# Test Document".to_string(), "## Real heading 2".to_string()],
             "Should extract correct headings and ignore code blocks"
         );
@@ -401,7 +830,10 @@ mod tests {
         let ctx = crate::lint_context::LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let actual_headings = rule.extract_headings(&ctx);
         assert_eq!(
-            actual_headings,
+            actual_headings
+                .iter()
+                .map(|heading| heading.text.clone())
+                .collect::<Vec<_>>(),
             vec!["# Test Document".to_string(), "## Not Real heading 2".to_string()],
             "Should extract actual headings including mismatched ones"
         );
@@ -469,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn test_should_skip_no_false_positives() {
+    fn test_should_not_skip_headingless_documents_with_literal_requirements() {
         // Create rule with required headings
         let required = vec!["Test".to_string()];
         let rule = MD043RequiredHeadings::new(required);
@@ -477,68 +909,75 @@ mod tests {
         // Test 1: Content with '#' character in normal text (not a heading)
         let content = "This paragraph contains a # character but is not a heading";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with # in normal text"
+            "Should check headingless content when a literal heading is required"
         );
 
         // Test 2: Content with code block containing heading-like syntax
         let content = "Regular paragraph\n\n```markdown\n# This is not a real heading\n```\n\nMore text";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with heading-like syntax in code blocks"
+            "Should check content whose only heading syntax is in a code block"
         );
 
         // Test 3: Content with list items using '-' character
         let content = "Some text\n\n- List item 1\n- List item 2\n\nMore text";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with list items using dash"
+            "Should check headingless list content"
         );
 
         // Test 4: Content with horizontal rule that uses '---'
         let content = "Some text\n\n---\n\nMore text below the horizontal rule";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with horizontal rule"
+            "Should check headingless content containing a horizontal rule"
         );
 
         // Test 5: Content with equals sign in normal text
         let content = "This is a normal paragraph with equals sign x = y + z";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with equals sign in normal text"
+            "Should check headingless content containing an equals sign"
         );
 
         // Test 6: Content with dash/minus in normal text
         let content = "This is a normal paragraph with minus sign x - y = z";
         assert!(
-            rule.should_skip(&LintContext::new(
+            !rule.should_skip(&LintContext::new(
                 content,
                 crate::config::MarkdownFlavor::Standard,
                 None
             )),
-            "Should skip content with minus sign in normal text"
+            "Should check headingless content containing a minus sign"
         );
+
+        let optional = MD043RequiredHeadings::new(vec!["*".to_string()]);
+        assert!(optional.should_skip(&LintContext::new(
+            "No headings",
+            crate::config::MarkdownFlavor::Standard,
+            None
+        )));
     }
 
     #[test]
@@ -1381,5 +1820,305 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert!(result.is_empty(), "* at end should allow trailing headings");
+    }
+
+    #[test]
+    fn test_reordering_respects_case_levels_and_duplicate_occurrences() {
+        let insensitive = MD043RequiredHeadings::from_config_struct(MD043Config {
+            headings: vec!["# A".into(), "# B".into(), "# A".into()],
+            match_case: false,
+        });
+        let duplicate_move = LintContext::new("# A\n# a\n# B", crate::config::MarkdownFlavor::Standard, None);
+        let result = insensitive.check(&duplicate_move).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].message,
+            "Heading structure does not match required structure. Heading '# B' is out of order; expected between '# A' and '# A'"
+        );
+        assert_eq!(result[0].line, 3);
+
+        let sensitive = MD043RequiredHeadings::from_config_struct(MD043Config {
+            headings: vec!["# A".into(), "# B".into()],
+            match_case: true,
+        });
+        let case_mismatch = LintContext::new("# B\n# a", crate::config::MarkdownFlavor::Standard, None);
+        let result = sensitive.check(&case_mismatch).unwrap();
+        assert!(result.iter().all(|warning| !warning.message.contains("out of order")));
+
+        let wrong_level = LintContext::new("# B\n## A", crate::config::MarkdownFlavor::Standard, None);
+        let result = sensitive.check(&wrong_level).unwrap();
+        assert!(result.iter().all(|warning| !warning.message.contains("out of order")));
+    }
+
+    #[test]
+    fn test_leading_and_trailing_moves_report_configured_neighbors() {
+        let rule = MD043RequiredHeadings::new(vec!["# A".into(), "# B".into(), "# C".into()]);
+        let leading = LintContext::new("# C\n# A\n# B", crate::config::MarkdownFlavor::Standard, None);
+        let leading_result = rule.check(&leading).unwrap();
+        assert_eq!(leading_result.len(), 1);
+        assert_eq!(
+            leading_result[0].message,
+            "Heading structure does not match required structure. Heading '# C' is out of order; expected after '# B'"
+        );
+
+        let trailing = LintContext::new("# B\n# C\n# A", crate::config::MarkdownFlavor::Standard, None);
+        let trailing_result = rule.check(&trailing).unwrap();
+        assert_eq!(trailing_result.len(), 1);
+        assert_eq!(
+            trailing_result[0].message,
+            "Heading structure does not match required structure. Heading '# A' is out of order; expected before '# B'"
+        );
+    }
+
+    #[test]
+    fn test_exhaustive_small_alignments_are_deterministic_and_owned() {
+        let pattern_values = ["# A", "# B", "*", "+", "?"];
+        let actual_values = ["# A", "# B", "# X"];
+
+        for pattern_len in 1..=3 {
+            for pattern_number in 0..pattern_values.len().pow(pattern_len as u32) {
+                let mut number = pattern_number;
+                let mut headings = Vec::with_capacity(pattern_len);
+                for _ in 0..pattern_len {
+                    headings.push(pattern_values[number % pattern_values.len()].to_string());
+                    number /= pattern_values.len();
+                }
+                let obligations = headings.iter().filter(|heading| heading.as_str() != "*").count();
+
+                for actual_len in 0..=3 {
+                    for actual_number in 0..actual_values.len().pow(actual_len as u32) {
+                        let mut number = actual_number;
+                        let mut actual = Vec::with_capacity(actual_len);
+                        for _ in 0..actual_len {
+                            actual.push(actual_values[number % actual_values.len()]);
+                            number /= actual_values.len();
+                        }
+                        let content = if actual.is_empty() {
+                            "plain text".to_string()
+                        } else {
+                            actual.join("\n")
+                        };
+                        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+
+                        for match_case in [false, true] {
+                            let rule = MD043RequiredHeadings::from_config_struct(MD043Config {
+                                headings: headings.clone(),
+                                match_case,
+                            });
+                            let first = rule.check(&ctx).unwrap();
+                            let second = rule.check(&ctx).unwrap();
+                            assert_eq!(first, second, "pattern={headings:?}, actual={actual:?}");
+
+                            let extracted = rule.extract_headings(&ctx);
+                            let alignment = rule.alignment(&extracted);
+                            let mut expected_uses = vec![0; headings.len()];
+                            let mut actual_uses = vec![0; extracted.len()];
+                            for event in &alignment.events {
+                                match *event {
+                                    AlignmentEvent::LiteralMatch {
+                                        expected_index,
+                                        actual_index,
+                                    }
+                                    | AlignmentEvent::Substitution {
+                                        expected_index,
+                                        actual_index,
+                                    }
+                                    | AlignmentEvent::OutOfOrder {
+                                        expected_index,
+                                        actual_index,
+                                    } => {
+                                        expected_uses[expected_index] += 1;
+                                        actual_uses[actual_index] += 1;
+                                    }
+                                    AlignmentEvent::RequiredWildcardMatch {
+                                        source_index,
+                                        actual_index,
+                                    } => {
+                                        expected_uses[source_index] += 1;
+                                        actual_uses[actual_index] += 1;
+                                    }
+                                    AlignmentEvent::RepeatingWildcardMatch { actual_index }
+                                    | AlignmentEvent::Unexpected { actual_index } => {
+                                        actual_uses[actual_index] += 1;
+                                    }
+                                    AlignmentEvent::MissingLiteral { expected_index, .. } => {
+                                        expected_uses[expected_index] += 1;
+                                    }
+                                    AlignmentEvent::UnsatisfiedWildcard { source_index, .. } => {
+                                        expected_uses[source_index] += 1;
+                                    }
+                                }
+                            }
+
+                            for (index, pattern) in headings.iter().enumerate() {
+                                let expected_count = usize::from(pattern != "*");
+                                assert_eq!(
+                                    expected_uses[index], expected_count,
+                                    "pattern={headings:?}, actual={actual:?}, events={:?}",
+                                    alignment.events
+                                );
+                            }
+                            assert!(
+                                actual_uses.iter().all(|uses| *uses == 1),
+                                "pattern={headings:?}, actual={actual:?}, events={:?}",
+                                alignment.events
+                            );
+                            assert_eq!(
+                                first.is_empty(),
+                                wildcard_language_accepts(&rule, &extracted),
+                                "pattern={headings:?}, actual={actual:?}, events={:?}",
+                                alignment.events
+                            );
+                            assert!(first.len() <= obligations + actual.len());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_exhaustive_len4_alignment_matches_wildcard_language() {
+        // Regression guard for the alignment DP. The size-3 exhaustive test above cannot
+        // express interactions that need four tokens (two separate wildcard runs split by a
+        // literal, a required + repeating wildcard followed by an anchor and a trailing
+        // literal, etc.) -- exactly where an alignment regression would most plausibly hide.
+        // This focuses on the core property only (accept/reject == the wildcard language) so
+        // it stays cheap; determinism and ownership invariants are already covered at len 3.
+        let pattern_values = ["# A", "# B", "*", "+", "?"];
+        let actual_values = ["# A", "# B", "# X"];
+
+        // Parse each document once and reuse it across every pattern. Rebuilding the
+        // LintContext per pattern dominates the runtime; precomputing keeps this in the
+        // ~1s range so it can live in the default test run.
+        let mut contents = Vec::new();
+        for actual_len in 0..=4usize {
+            for actual_number in 0..actual_values.len().pow(actual_len as u32) {
+                let mut number = actual_number;
+                let mut actual = Vec::with_capacity(actual_len);
+                for _ in 0..actual_len {
+                    actual.push(actual_values[number % actual_values.len()]);
+                    number /= actual_values.len();
+                }
+                contents.push((actual.join("\n"), actual));
+            }
+        }
+        let documents: Vec<(LintContext, &Vec<&str>)> = contents
+            .iter()
+            .map(|(content, actual)| {
+                let text = if actual.is_empty() { "plain text" } else { content };
+                (
+                    LintContext::new(text, crate::config::MarkdownFlavor::Standard, None),
+                    actual,
+                )
+            })
+            .collect();
+
+        for pattern_len in 1..=4usize {
+            for pattern_number in 0..pattern_values.len().pow(pattern_len as u32) {
+                let mut number = pattern_number;
+                let mut headings = Vec::with_capacity(pattern_len);
+                for _ in 0..pattern_len {
+                    headings.push(pattern_values[number % pattern_values.len()].to_string());
+                    number /= pattern_values.len();
+                }
+                // Case sensitivity is orthogonal to the wildcard-run interactions this guards,
+                // and is already exhaustively covered in both modes at len 3.
+                let rule = MD043RequiredHeadings::from_config_struct(MD043Config {
+                    headings: headings.clone(),
+                    match_case: false,
+                });
+
+                for (ctx, actual) in &documents {
+                    let extracted = rule.extract_headings(ctx);
+                    assert_eq!(
+                        rule.check(ctx).unwrap().is_empty(),
+                        wildcard_language_accepts(&rule, &extracted),
+                        "pattern={headings:?}, actual={actual:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fully_equal_scores_prefer_the_earliest_literal_occurrence() {
+        let rule = MD043RequiredHeadings::new(vec!["# A".into(), "# A".into()]);
+        let ctx = LintContext::new("# A", crate::config::MarkdownFlavor::Standard, None);
+        let actual = rule.extract_headings(&ctx);
+
+        assert!(matches!(
+            rule.alignment(&actual).events.as_slice(),
+            [
+                AlignmentEvent::LiteralMatch {
+                    expected_index: 0,
+                    actual_index: 0
+                },
+                AlignmentEvent::MissingLiteral { expected_index: 1, .. }
+            ]
+        ));
+
+        let rule = MD043RequiredHeadings::new(vec!["# A".into()]);
+        let ctx = LintContext::new("# A\n# A", crate::config::MarkdownFlavor::Standard, None);
+        let actual = rule.extract_headings(&ctx);
+        assert!(matches!(
+            rule.alignment(&actual).events.as_slice(),
+            [
+                AlignmentEvent::LiteralMatch {
+                    expected_index: 0,
+                    actual_index: 0
+                },
+                AlignmentEvent::Unexpected { actual_index: 1 }
+            ]
+        ));
+    }
+
+    fn wildcard_language_accepts(rule: &MD043RequiredHeadings, actual: &[DocumentHeading]) -> bool {
+        let mut pattern_index = 0;
+        let mut actual_index = 0;
+
+        while pattern_index < rule.config.headings.len() {
+            if !matches!(rule.config.headings[pattern_index].as_str(), "*" | "+" | "?") {
+                if actual
+                    .get(actual_index)
+                    .is_none_or(|actual| !rule.headings_match(&rule.config.headings[pattern_index], &actual.text))
+                {
+                    return false;
+                }
+                pattern_index += 1;
+                actual_index += 1;
+                continue;
+            }
+
+            let run_start = pattern_index;
+            while pattern_index < rule.config.headings.len()
+                && matches!(rule.config.headings[pattern_index].as_str(), "*" | "+" | "?")
+            {
+                pattern_index += 1;
+            }
+            let required = rule.config.headings[run_start..pattern_index]
+                .iter()
+                .filter(|pattern| matches!(pattern.as_str(), "+" | "?"))
+                .count();
+            if actual.len().saturating_sub(actual_index) < required {
+                return false;
+            }
+            actual_index += required;
+
+            let repeats = rule.config.headings[run_start..pattern_index]
+                .iter()
+                .any(|pattern| matches!(pattern.as_str(), "*" | "+"));
+            if repeats {
+                if let Some(anchor) = rule.config.headings.get(pattern_index) {
+                    while actual_index < actual.len() && !rule.headings_match(anchor, &actual[actual_index].text) {
+                        actual_index += 1;
+                    }
+                } else {
+                    actual_index = actual.len();
+                }
+            }
+        }
+
+        actual_index == actual.len()
     }
 }
