@@ -349,15 +349,16 @@ impl Rule for MD013LineLength {
 
         let lines = ctx.raw_lines();
 
-        // Create a quick lookup set for heading lines
-        // We need this for both the heading skip check AND the paragraphs check
-        let heading_lines_set: std::collections::HashSet<usize> = ctx
-            .lines
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| line.heading.is_some())
-            .map(|(idx, _)| idx + 1)
-            .collect();
+        // Whether a 1-indexed line is a heading. `LineInfo::heading` is an O(1)
+        // per-line field, so check it directly at each use site instead of
+        // materializing a full-document HashSet (an extra O(n) pass and
+        // allocation on a rule that runs on virtually every file).
+        let is_heading_line_num = |line_number: usize| -> bool {
+            line_number
+                .checked_sub(1)
+                .and_then(|idx| ctx.lines.get(idx))
+                .is_some_and(|line| line.heading.is_some())
+        };
 
         // Use pre-computed table blocks from context
         // We need this for both the table skip check AND the paragraphs check
@@ -383,7 +384,7 @@ impl Rule for MD013LineLength {
             // Headings dominate over code-block context if a setext underline ever
             // overlaps a fenced range (defensive — these are mutually exclusive in
             // practice, but the explicit ordering documents intent).
-            let is_heading_line = heading_lines_set.contains(&line_number);
+            let is_heading_line = is_heading_line_num(line_number);
             let in_code_block = ctx.line_info(line_number).is_some_and(|info| info.in_code_block);
             let line_limit = if is_heading_line {
                 effective_config.effective_heading_line_length().get()
@@ -509,7 +510,7 @@ impl Rule for MD013LineLength {
                 // Skip block elements according to config flags
                 // The flags mean: true = check these elements, false = skip these elements
                 // So we skip when the flag is FALSE and the line is in that element type
-                if (!effective_config.headings && heading_lines_set.contains(&line_number))
+                if (!effective_config.headings && is_heading_line_num(line_number))
                     || (!effective_config.code_blocks
                         && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                     || (!effective_config.tables && table_lines_set.contains(&line_number))
@@ -529,7 +530,7 @@ impl Rule for MD013LineLength {
                 // Blockquote content is treated as paragraph text, so it's not
                 // included in the special blocks list here.
                 if !effective_config.paragraphs {
-                    let is_special_block = heading_lines_set.contains(&line_number)
+                    let is_special_block = is_heading_line_num(line_number)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_code_block)
                         || table_lines_set.contains(&line_number)
                         || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
