@@ -920,3 +920,41 @@ fn test_md047_linear_complexity() {
 
     assert_linear_complexity("MD047", &durations, 6.0);
 }
+
+/// Generate a monotonically deepening list: every line is a list item indented
+/// one level more than the last. This is the adversarial shape for MD077, whose
+/// per-item continuation walk once re-scanned the entire tail for every item
+/// (O(n^2) in depth; ~13s at depth 2000 before the fix).
+fn generate_deeply_nested_list(depth: usize) -> String {
+    let mut content = String::with_capacity(depth * depth / 8 + 16);
+    content.push_str("# Deep\n\n");
+    for i in 0..depth {
+        for _ in 0..i {
+            content.push_str("  ");
+        }
+        content.push_str("- item\n");
+    }
+    content
+}
+
+#[test]
+fn test_md077_deeply_nested_linear_complexity() {
+    // Depth doubles each step; a linear rule's time also roughly doubles. The
+    // pre-fix O(n^2) walk showed ~4x+ per doubling. Test both continuation
+    // styles - "aligned" additionally runs the latent-structure scan, which the
+    // same guard must also short-circuit.
+    let sizes = [500, 1000, 2000];
+    let iterations = 3;
+
+    for style in [ContinuationStyle::Any, ContinuationStyle::Aligned] {
+        let rule = MD077ListContinuationIndent::new(style);
+        let durations: Vec<_> = sizes
+            .iter()
+            .map(|&size| {
+                let content = generate_deeply_nested_list(size);
+                measure_rule_time(&rule, &content, iterations)
+            })
+            .collect();
+        assert_linear_complexity(&format!("MD077 ({style:?})"), &durations, 6.0);
+    }
+}

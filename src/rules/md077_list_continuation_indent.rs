@@ -593,22 +593,84 @@ impl Rule for MD077ListContinuationIndent {
         items.sort_unstable();
         items.dedup_by_key(|&mut (ln, _, _, _)| ln);
 
+        // Precompute each item's owned-range end. The range ends at the line
+        // before the next item whose marker column is <= this item's (its next
+        // sibling or an ancestor), or the last line if none follows.
+        //
+        // The direct "scan forward for the next marker_col <= mine" is O(n^2) on
+        // a monotonically deepening list, where no later item ever qualifies so
+        // every item scans to the end. A monotonic stack (nearest
+        // smaller-or-equal marker column to the right) computes all range ends in
+        // one linear pass. Walking right-to-left, pop every stacked item whose
+        // marker column is strictly greater than the current one (they can never
+        // be the sibling/ancestor of anything further left that is <= current),
+        // leaving the nearest qualifying item on top.
+        let mut range_ends = vec![total_lines; items.len()];
+        let mut stack: Vec<usize> = Vec::new();
+        for i in (0..items.len()).rev() {
+            let marker_col = items[i].1;
+            while let Some(&top) = stack.last() {
+                if items[top].1 > marker_col {
+                    stack.pop();
+                } else {
+                    break;
+                }
+            }
+            range_ends[i] = stack.last().map_or(total_lines, |&j| items[j].0 - 1);
+            stack.push(i);
+        }
+
         // Precompute each item's required indent and owned line range so both
-        // passes below scope identically. The owned range ends at the line
-        // before the next sibling-or-higher item, or end of document.
+        // passes below scope identically.
         let scoped: Vec<(usize, usize, usize, Option<usize>, usize, usize)> = items
             .iter()
             .enumerate()
             .map(|(item_idx, &(item_line, marker_col, content_col, task_col))| {
                 let required = if strict_indent { content_col.max(4) } else { content_col };
-                let range_end = items
-                    .iter()
-                    .skip(item_idx + 1)
-                    .find(|&&(_, mc, _, _)| mc <= marker_col)
-                    .map_or(total_lines, |&(ln, _, _, _)| ln - 1);
-                (item_line, marker_col, content_col, task_col, required, range_end)
+                (
+                    item_line,
+                    marker_col,
+                    content_col,
+                    task_col,
+                    required,
+                    range_ends[item_idx],
+                )
             })
             .collect();
+
+        // Precompute which lines can ever reach the per-line continuation
+        // callback. `walk_item_continuation` unconditionally skips (regardless of
+        // which item owns the line) blank lines, list-item lines, headings,
+        // horizontal rules, `should_skip_line` lines, and block-level constructs;
+        // only the lines that survive all of those can be flagged. An item whose
+        // owned range contains none of them produces no warning, so both passes
+        // can skip it without walking the range at all.
+        //
+        // This keeps a document of purely deeply-nested list items linear: such a
+        // document has no continuation prose, so every item skips its walk
+        // instead of re-scanning the whole tail (which was O(n^2) in the item
+        // count). Documents that do have continuation prose are unaffected - the
+        // guard only ever skips items that could not have produced a warning.
+        let prose_candidate_lines: Vec<usize> = (1..=total_lines)
+            .filter(|&line_num| {
+                let Some(info) = ctx.line_info(line_num) else {
+                    return false;
+                };
+                let trimmed = info.content(ctx.content).trim_start();
+                !Self::should_skip_line(info, trimmed)
+                    && !info.is_blank
+                    && info.list_item.is_none()
+                    && info.heading.is_none()
+                    && !info.is_horizontal_rule
+                    && !Self::is_block_level_construct(trimmed)
+            })
+            .collect();
+        // True when a continuation candidate falls in `(after_line, range_end]`,
+        // i.e. the half-open range `walk_item_continuation` actually visits.
+        let range_has_prose_candidate = |after_line: usize, range_end: usize| -> bool {
+            let start = prose_candidate_lines.partition_point(|&l| l <= after_line);
+            prose_candidate_lines.get(start).is_some_and(|&l| l <= range_end)
+        };
 
         // Pass 1 - under-indented continuation.
         //
@@ -637,6 +699,11 @@ impl Rule for MD077ListContinuationIndent {
         // ancestor as an over-indent and snap it the wrong way.
         let aligned = self.config.style == ContinuationStyle::Aligned;
         for &(item_line, marker_col, _content_col, _task_col, required, range_end) in &scoped {
+            // No continuation candidate in this item's range: it cannot produce a
+            // warning, so skip the walk (and the latent-structure scan) entirely.
+            if !range_has_prose_candidate(item_line, range_end) {
+                continue;
+            }
             // "Latent structure": a line in this item's continuation that the
             // parser has NOT yet promoted to a list item or table, but that
             // would be once an earlier continuation line is reindented. Such a
@@ -704,6 +771,10 @@ impl Rule for MD077ListContinuationIndent {
         // `in_code_block`, so a blank line before such a body does not exempt
         // it from being recognized as code rather than over-indented prose.
         for &(item_line, marker_col, content_col, task_col, required, range_end) in &scoped {
+            // No continuation candidate in this item's range: nothing to flag.
+            if !range_has_prose_candidate(item_line, range_end) {
+                continue;
+            }
             // For task items, gather sibling-column usage once so the auto-fix
             // can tie-break equidistant over-indents toward whichever valid
             // column the author is already using.
