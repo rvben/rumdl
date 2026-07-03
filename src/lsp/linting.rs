@@ -117,18 +117,35 @@ impl RumdlLanguageServer {
             }
         }
 
-        // Run rumdl linting with the configured flavor
-        let mut all_warnings = match crate::lint(
-            text,
-            &filtered_rules,
-            false,
-            flavor,
-            file_path.clone(),
-            Some(&rumdl_config),
-        ) {
-            Ok(warnings) => warnings,
-            Err(e) => {
+        // Run rumdl linting with the configured flavor.
+        //
+        // Isolate rule execution with `catch_unwind`: a panic in any single rule
+        // (a slice on a non-char boundary, an unexpected `unwrap`) must not unwind
+        // through the async request handler and take down the whole language
+        // server for every open document. On panic we degrade to no diagnostics
+        // for this document and keep serving. (A stack overflow is not catchable,
+        // which is why the known recursion vectors are fixed at the source rather
+        // than relied upon to be caught here.)
+        let lint_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::lint(
+                text,
+                &filtered_rules,
+                false,
+                flavor,
+                file_path.clone(),
+                Some(&rumdl_config),
+            )
+        }));
+        let mut all_warnings = match lint_outcome {
+            Ok(Ok(warnings)) => warnings,
+            Ok(Err(e)) => {
                 log::error!("Failed to lint document {uri}: {e}");
+                return Ok(Vec::new());
+            }
+            Err(_panic) => {
+                log::error!(
+                    "A rule panicked while linting {uri}; skipping diagnostics for this document to keep the server alive"
+                );
                 return Ok(Vec::new());
             }
         };
