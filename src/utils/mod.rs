@@ -3,6 +3,7 @@
 //! Provides reusable traits and functions for rule implementations and core linter logic.
 
 pub mod anchor_styles;
+pub mod atomic_write;
 pub mod blockquote;
 pub mod code_block_utils;
 pub mod emphasis_utils;
@@ -35,7 +36,6 @@ pub mod range_utils;
 pub mod regex_cache;
 pub mod sentence_utils;
 pub mod skip_context;
-pub mod string_interner;
 pub mod table_utils;
 pub mod text_reflow;
 pub mod thematic_break;

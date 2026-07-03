@@ -16,6 +16,9 @@ pub struct PrintResultsArgs<'a> {
     pub total_fixable_issues: usize,
     pub total_files_processed: usize,
     pub duration_ms: u64,
+    /// A file could not be read during the run (details already printed to
+    /// stderr). Suppresses the misleading "No issues found" success summary.
+    pub had_tool_error: bool,
 }
 
 /// Print summary of check/fix results
@@ -31,6 +34,7 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
         total_fixable_issues,
         total_files_processed,
         duration_ms,
+        had_tool_error,
     } = params;
     // Choose singular or plural form of "file" based on count
     let file_text = if total_files_processed == 1 { "file" } else { "files" };
@@ -74,6 +78,14 @@ pub fn print_results_from_checkargs(params: PrintResultsArgs) {
             // Display the exact count of fixable issues
             println!("Run `rumdl fmt` to automatically fix {total_fixable_issues} of the {total_issues} issues");
         }
+    } else if had_tool_error {
+        // No lint findings, but at least one file could not be read: don't claim
+        // success. The specific read errors were already printed to stderr.
+        println!(
+            "\n{} could not read one or more files ({}ms)",
+            "Error:".red().bold(),
+            duration_ms
+        );
     } else {
         println!(
             "\n{} No issues found in {} {} ({}ms)",

@@ -214,7 +214,15 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         isolated,
     };
 
-    let (has_issues, has_warnings, has_errors, total_issues_fixed) = crate::check_runner::perform_check_run(&ctx);
+    let (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error) =
+        crate::check_runner::perform_check_run(&ctx);
+
+    // A file that could not be read is a tool error (exit code 2). It takes
+    // precedence over lint findings: the run was incomplete, so reporting it as
+    // "clean" or "violations found" would be misleading in CI.
+    if had_tool_error {
+        exit::tool_error();
+    }
 
     // In --check mode (for fmt), exit with code 1 if any formatting changes would be made
     if args.check && total_issues_fixed > 0 {

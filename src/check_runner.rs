@@ -36,12 +36,14 @@ pub struct CheckRunContext<'a> {
 }
 
 /// Perform a single check run.
-/// Returns (has_issues, has_warnings, has_errors, total_issues_fixed):
+/// Returns (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error):
 ///   - has_issues: any violations (info, warning, or error)
 ///   - has_warnings: any Warning or Error severity violations
 ///   - has_errors: any Error-severity violations
 ///   - total_issues_fixed: number of issues fixed (or would be fixed in diff mode)
-pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize) {
+///   - had_tool_error: a file could not be read (missing/unreadable/invalid UTF-8);
+///     a tool error that must exit with code 2, not a lint result
+pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize, bool) {
     let CheckRunContext {
         args,
         config,
@@ -64,7 +66,8 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         Ok(fmt) => fmt,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
-            return (true, true, true, 0);
+            // An invalid --output-format is a tool error (exit code 2).
+            return (false, false, false, 0, true);
         }
     };
 
@@ -72,7 +75,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
         crate::stdin_processor::process_stdin(&enabled_rules, args, config);
-        return (false, false, false, 0);
+        return (false, false, false, 0, false);
     }
 
     // Find all markdown files to check
@@ -85,14 +88,17 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
             }
-            return (true, true, true, 0);
+            // A target path that does not exist (or is otherwise unreadable) is a
+            // tool error (exit code 2), not a lint finding: flag had_tool_error
+            // rather than reporting phantom violations.
+            return (false, false, false, 0, true);
         }
     };
     if file_paths.is_empty() {
         if !quiet {
             println!("No markdown files found to check.");
         }
-        return (false, false, false, 0);
+        return (false, false, false, 0, false);
     }
 
     // Resolve files into config groups (per-directory config discovery)
@@ -191,6 +197,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
     // For JUnit, the display paths of every checked file (clean and dirty).
     let mut batch_all_files: Vec<String> = Vec::new();
 
+    // Set when a file could not be read (missing, unreadable, invalid UTF-8).
+    // This is a tool error (exit code 2), distinct from lint violations, so it
+    // is tracked separately from `has_issues`/`has_errors` and reported to the
+    // caller regardless of which processing branch ran.
+    let mut had_tool_error = false;
+
     let (
         mut has_issues,
         mut has_warnings,
@@ -255,7 +267,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                     warnings,
                     file_index,
                     file_index_reused,
+                    errored: file_errored,
                 } = result;
+
+                if file_errored {
+                    had_tool_error = true;
+                }
 
                 summary_issues_fixed += file_summary_issues_fixed;
                 total_issues_fixed += issues_fixed;
@@ -345,6 +362,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                     warnings,
                     file_index,
                     file_index_reused,
+                    errored: file_errored,
                 } = crate::file_processor::process_file_with_formatter(
                     file_path,
                     &group.rules,
@@ -362,6 +380,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
                     args.show_full_path,
                     group.cache_hashes.as_deref(),
                 );
+
+                if file_errored {
+                    had_tool_error = true;
+                }
 
                 if needs_cross_file {
                     let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
@@ -598,6 +620,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
             total_fixable_issues,
             total_files_processed,
             duration_ms,
+            had_tool_error,
         });
     }
 
@@ -633,5 +656,5 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize)
         }
     }
 
-    (has_issues, has_warnings, has_errors, total_issues_fixed)
+    (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error)
 }
