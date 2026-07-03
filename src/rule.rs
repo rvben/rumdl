@@ -174,7 +174,6 @@ pub enum CrossFileScope {
     Workspace,
 }
 
-/// Remove marker /// TRAIT_MARKER_V1
 pub trait Rule: DynClone + Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;

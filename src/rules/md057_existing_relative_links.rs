@@ -121,7 +121,10 @@ const MARKDOWN_EXTENSIONS: &[&str] = &[
 /// Rule MD057: Existing relative links should point to valid files or directories.
 #[derive(Debug, Clone)]
 pub struct MD057ExistingRelativeLinks {
-    /// Base directory for resolving relative links
+    /// Base directory for resolving relative links. Behind an `Arc<Mutex<..>>`
+    /// so it is shared across clones (the rule is cloned per config group and
+    /// for inline-config overrides); the base is resolved from the file under
+    /// check and consulted while validating that file's links.
     base_path: Arc<Mutex<Option<PathBuf>>>,
     /// Configuration for the rule
     config: MD057Config,

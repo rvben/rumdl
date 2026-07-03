@@ -86,7 +86,14 @@ pub struct MD044ProperNames {
     combined_pattern: Option<String>,
     // Precomputed lowercase name variants for fast pre-checks
     name_variants: Vec<String>,
-    // Cache for name violations by content hash
+    // Memoizes name violations keyed by content hash. Deliberately behind an
+    // `Arc<Mutex<..>>` so it is SHARED across clones: rule instances are cloned
+    // per config group and recreated for inline-config overrides, and the same
+    // file's content is frequently re-checked (check then fix), so a shared
+    // cache avoids recomputing. `check()` stays observationally pure (same ctx
+    // in, same warnings out); the cache only affects how fast that answer is
+    // produced. The lock is held only for the map get/insert, never across the
+    // regex scan.
     content_cache: Arc<Mutex<HashMap<u64, Vec<WarningPosition>>>>,
 }
 
