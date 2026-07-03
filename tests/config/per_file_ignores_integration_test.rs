@@ -3,7 +3,12 @@ use rumdl_lib::rules;
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use tempfile::tempdir;
+
+fn rumdl_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_rumdl")
+}
 
 #[test]
 fn test_per_file_ignores_integration_actual_linting() {
@@ -119,6 +124,69 @@ disable = ["MD013"]
     // For other files, per-file ignores should be empty
     let ignored_other = config.get_ignored_rules_for_file(Path::new("other.md"));
     assert!(ignored_other.is_empty());
+}
+
+/// Regression test for issue #707: `rumdl fmt` must not apply a rule listed in
+/// `[per-file-ignores]` as a side effect of fixing another (non-ignored) rule.
+///
+/// The bug lived in the fmt pipeline, not in rule filtering: the fix coordinator
+/// was handed the *unfiltered* rule set, so it re-checked and re-fixed every rule
+/// (honoring only global fixable/unfixable and inline disables) - including the
+/// per-file-ignored one. This must be exercised through the real `fmt` binary
+/// because the gap is in which rule set `process_file_with_formatter` passes to
+/// the coordinator; a rule- or config-level test cannot catch it.
+#[test]
+fn test_per_file_ignores_honored_by_fmt_side_effect() {
+    let temp_dir = tempdir().unwrap();
+
+    // Ignore MD004 (list marker style) for everything under slides/.
+    let config_content = r#"
+[per-file-ignores]
+"slides/**/*.md" = ["MD004"]
+"#;
+    fs::write(temp_dir.path().join(".rumdl.toml"), config_content).unwrap();
+
+    // The file has a non-ignored fixable violation (MD032: list not preceded by a
+    // blank line) AND an ignored one (MD004: the nested `*` differs from the `-`
+    // top-level marker). Fixing MD032 must not drag MD004 along.
+    let slides_dir = temp_dir.path().join("slides");
+    fs::create_dir(&slides_dir).unwrap();
+    let deck_path = slides_dir.join("deck.md");
+    fs::write(&deck_path, "# Title\n\ntext\n- parent\n  * child\n").unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["fmt", "--no-cache", "slides/deck.md"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let formatted = fs::read_to_string(&deck_path).unwrap().replace("\r\n", "\n");
+
+    // MD032 (non-ignored) must be fixed: a blank line is inserted before the list.
+    assert!(
+        formatted.contains("text\n\n- parent"),
+        "MD032 should have been fixed (blank line before list), got:\n{formatted}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // MD004 (ignored) must NOT be applied: the nested `*` marker is preserved.
+    assert!(
+        formatted.contains("  * child"),
+        "MD004 is in per-file-ignores and must NOT be applied by fmt; the nested `*` \
+         marker was rewritten. Got:\n{formatted}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        !formatted.contains("  - child"),
+        "MD004 was applied as a side effect of the MD032 fix despite per-file-ignores. \
+         Got:\n{formatted}\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // Full expected output: only MD032 applied, MD004 left untouched.
+    assert_eq!(
+        formatted, "# Title\n\ntext\n\n- parent\n  * child\n",
+        "fmt output should reflect only the non-ignored fix.\nstdout: {stdout}\nstderr: {stderr}"
+    );
 }
 
 /// Test for issue #246: per-file-ignores doesn't work when config is in a subdirectory

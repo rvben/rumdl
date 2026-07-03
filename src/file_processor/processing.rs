@@ -124,8 +124,11 @@ pub fn process_file_with_formatter(
         cache_hashes,
     );
 
-    // Compute filtered rules based on per-file-ignores for embedded markdown formatting
-    // This ensures embedded markdown formatting respects per-file-ignores just like linting does
+    // Compute filtered rules based on per-file-ignores. The fix coordinator, embedded
+    // markdown formatting, and Rust doc-comment formatting all run against this set so
+    // `fmt` never applies a per-file-ignored rule - matching what linting already does.
+    // Passing the unfiltered `rules` here would let the coordinator re-check and re-fix
+    // an ignored rule as a side effect of fixing a non-ignored one (issue #707).
     let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
     let filtered_rules: Vec<Box<dyn Rule>> = if !ignored_rules_for_file.is_empty() {
         rules
@@ -220,7 +223,7 @@ pub fn process_file_with_formatter(
         // In diff mode, apply fixes to a copy and show diff
         let original_content = content.clone();
         warnings_fixed = apply_fixes_coordinated(
-            rules,
+            &filtered_rules,
             &all_warnings,
             &mut content,
             true,
@@ -300,7 +303,7 @@ pub fn process_file_with_formatter(
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
         warnings_fixed = apply_fixes_coordinated(
-            rules,
+            &filtered_rules,
             &all_warnings,
             &mut content,
             quiet,
