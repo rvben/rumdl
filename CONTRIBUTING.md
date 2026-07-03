@@ -123,77 +123,25 @@ The scope should be a noun describing the section of the codebase:
 
 ## Changelog Workflow
 
-rumdl uses [git-cliff](https://git-cliff.org/) to automatically generate changelog drafts from conventional commits.
+`CHANGELOG.md` is generated from [conventional commits](#commit-message-convention)
+using [git-cliff](https://git-cliff.org/) (configured in `cliff.toml`). You do
+not edit `CHANGELOG.md` by hand for routine changes: the release tooling
+regenerates it from the commit history when a release is cut (see
+[Release Process](#release-process)).
 
-### Generating Changelog Drafts
-
-```bash
-# Preview unreleased changes
-make changelog-draft
-
-# View latest release changelog
-make changelog-latest
-
-# Generate full changelog
-make changelog-all
-
-# Show available changelog commands
-make changelog-help
-```
-
-### Updating CHANGELOG.md
-
-**The changelog generation is semi-automated:**
-
-1. **Generate draft** from conventional commits:
-
-   ```bash
-   make changelog-draft > /tmp/draft.md
-   ```
-
-2. **Review and enhance** the generated content:
-   - Add detailed explanations
-   - Include sub-bullets for complex changes
-   - Add performance metrics if applicable
-   - Provide migration guidance for breaking changes
-
-3. **Update CHANGELOG.md** manually with enhanced content
-
-4. **Commit** the updated changelog:
-
-   ```bash
-   git add CHANGELOG.md
-   git commit -m "chore(changelog): update for v0.0.165"
-   ```
+The single most important thing you can do for the changelog is write a good
+conventional commit message, because that text becomes the changelog entry.
 
 ### Best Practices
 
 - ✅ **Do write detailed commit messages** - they become changelog entries
-- ✅ **Do use scopes** - helps organize changelog sections
-- ✅ **Do enhance generated content** - add context and details
-- ❌ **Don't rely solely on generated text** - manual refinement is expected
-- ❌ **Don't skip commits** - unconventional commits won't appear in changelog
+- ✅ **Do use scopes** - they organize changelog sections
+- ❌ **Don't hand-edit generated entries** - they are regenerated at release time
+- ❌ **Don't skip conventional format** - unconventional commits won't appear
 
-### Example Workflow
-
-```bash
-# Make changes
-git add src/cache.rs
-
-# Commit with conventional format
-git commit -m "feat(cache): add Blake3-based content hashing"
-
-# Later, when preparing release
-make changelog-draft
-
-# Copy relevant section to CHANGELOG.md
-# Enhance with details:
-#
-# - **File-Level Caching**: Blake3-based content hashing for fast lookups
-#   - Automatic cache invalidation on content/config changes
-#   - Cache stored in `.rumdl_cache/{version}/{hash}.json`
-#   - Enabled by default for instant subsequent runs
-```
+Manual edits to `CHANGELOG.md` are reserved for things the tooling cannot infer
+(for example, thanking a contributor), and are made after the automated
+generation, not before.
 
 ## Testing
 
@@ -318,30 +266,34 @@ Brief description of changes
 ## Checklist
 
 - [ ] Code follows project style (`make fmt` && `make lint`)
-- [ ] Conventional commit messages used
+- [ ] Conventional commit messages used (they generate the changelog)
 - [ ] Documentation updated (if needed)
-- [ ] CHANGELOG.md updated (if user-facing)
 ```
 
 ## Release Process
 
-The release process is automated and documented in `CLAUDE.md`. Key points:
-
-1. **Update version** in `Cargo.toml`
-2. **Update CHANGELOG.md** with release notes
-3. **Commit and tag**: Make targets handle this automatically
-4. **Push tag**: Triggers CI/CD to build and publish
+Releases are cut by maintainers with [`vership`](https://github.com/rvben/vership),
+which performs the whole flow in one step: bump the version across every
+manifest, regenerate `CHANGELOG.md` from conventional commits, create the commit
+and annotated tag, and push. Pushing the `v*` tag triggers the release workflow,
+which builds and publishes to crates.io, PyPI, npm, the container registry, and
+GitHub Releases.
 
 ```bash
-# Create patch release (0.0.164 → 0.0.165)
-make version-patch
+# Patch release (the default; use for fixes and most features)
+make release-patch      # == vership bump patch
 
-# Push to trigger release
-make version-push
+# Minor / major (maintainers only, by explicit decision)
+make release-minor      # == vership bump minor
+make release-major      # == vership bump major
 
-# Or combined
-make release-patch
+# Preview without publishing
+vership bump patch --dry-run
 ```
+
+You do not need to edit the version or `CHANGELOG.md` by hand; `vership` does
+both. Contributors never cut releases directly - open a PR and a maintainer
+handles the release.
 
 ## Questions?
 

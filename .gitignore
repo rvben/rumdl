@@ -1,5 +1,14 @@
 target/
 target-*/
+# Local caches and environments (shared here so a fresh clone is covered, not
+# just clones that happen to have a matching .git/info/exclude).
+.venv/
+.cache/
+.rumdl_cache/
+.ruff_cache/
+# Local-only working directories not part of the published project.
+marketing-video/
+wasm-demo/
 # wasm-pack output (make build-wasm); wasm-pack also writes pkg/.gitignore
 pkg/
 .test-repos/
