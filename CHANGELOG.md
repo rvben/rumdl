@@ -67,6 +67,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.28](https://github.com/rvben/rumdl/compare/v0.2.27...v0.2.28) - 2026-07-03
+
+### Added
+
+- **md043**: report each heading mismatch via sequence alignment ([d46dbef](https://github.com/rvben/rumdl/commit/d46dbef806dd627ca2a9eb0f5828c3adca543bd7))
+
+### Fixed
+
+- **lsp**: isolate rule panics from the document lint path ([020d4a2](https://github.com/rvben/rumdl/commit/020d4a26d5cf17a3ce2eee02ea47da39a8300ea5))
+- prevent stack overflow on deeply nested blockquote markers ([1dd3ce5](https://github.com/rvben/rumdl/commit/1dd3ce584bf8b6e333db915cf29d0bff51f1b8e6))
+- write fixes atomically and exit non-zero on unreadable files ([085d7fe](https://github.com/rvben/rumdl/commit/085d7fe4bd59954c0ecb0bd074d02c186468ac65))
+- **per-file-ignores**: enforce centrally in the fix coordinator ([c4b9899](https://github.com/rvben/rumdl/commit/c4b9899bca2209230e435a1d8f08b819222d6f85))
+- **fmt**: honor per-file-ignores on the stdin pipeline ([5b5e779](https://github.com/rvben/rumdl/commit/5b5e77935262d0e11a92cf44ec30250bf5fe2622))
+- **fmt**: honor per-file-ignores in the fix pipeline ([cb2d7f7](https://github.com/rvben/rumdl/commit/cb2d7f7e950c0ff3fd89a3b8bcd143b1563ff5c4))
+- **md043**: say 'pattern position' in unsatisfied-wildcard warnings ([9ffc105](https://github.com/rvben/rumdl/commit/9ffc105d1ba0ef0cbc81da300bc73034cd89b55b))
+
+### Performance
+
+- **md013**: drop the per-check heading lookup allocation ([f76a209](https://github.com/rvben/rumdl/commit/f76a2098b26a486108c7273a0ed3f804841cc67b))
+- make semantic-line-break reflow iterative ([5692564](https://github.com/rvben/rumdl/commit/5692564408c8c06580c0ac591864425da8aefa34))
+- **md077**: compute list-continuation ranges in linear time ([d36b017](https://github.com/rvben/rumdl/commit/d36b0173b203b064f4b07869c3433fe9b7875c52))
+
 ## [0.2.27](https://github.com/rvben/rumdl/compare/v0.2.26...v0.2.27) - 2026-06-30
 
 ### Fixed
