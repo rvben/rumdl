@@ -7,8 +7,10 @@ rules:
   # marginal defense against tag force-push incidents — not worth it here.
   unpinned-uses:
     ignore:
+      - audit.yml
       - ci.yml
       - docs.yml
+      - fuzz.yml
       - idempotency.yml
       - performance.yml
       - release.yml

@@ -1,0 +1,59 @@
+name: Fuzz
+
+# Runs every libFuzzer target for a bounded time on a weekly cadence (and on
+# demand). The per-PR suite only runs the idempotency proptests; this gives the
+# fix/lint/config/context parsing paths adversarial byte-level coverage so a
+# panic or non-idempotent fix on hostile input is caught on a schedule rather
+# than only when someone runs `make fuzz` locally. A crash uploads the
+# reproducing input as an artifact.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      fuzz_time:
+        description: Seconds to fuzz each target
+        default: '120'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz all targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install nightly Rust
+        run: |
+          rustup toolchain install nightly --profile minimal --no-self-update
+          rustup default nightly
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fuzz
+
+      - name: Fuzz all targets
+        env:
+          FUZZ_TIME: ${{ github.event.inputs.fuzz_time || '120' }}
+        run: make fuzz-all FUZZ_TIME="$FUZZ_TIME"
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

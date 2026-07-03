@@ -51,6 +51,9 @@ jobs:
       - name: Check code-block-tools docs in sync with registry
         run: make check-code-block-tools
 
+      - name: Check rumdl.schema.json in sync with config
+        run: make check-schema
+
       - name: Check Rust formatting
         run: make fmt-check
 
@@ -79,6 +82,9 @@ jobs:
 
       - name: Run tests
         run: make test-ci
+
+      - name: Run doctests
+        run: make test-doc
 
   # Run the full test suite on Windows to catch platform-divergent behavior.
   # Part of `all-checks-passed`, so a Windows failure fails the aggregate check on
@@ -232,8 +238,17 @@ jobs:
         with:
           shared-key: ci-wasi
 
-      - name: Build for wasm32-wasip1-threads
-        run: make build-wasi
+      # Pinned below v47.0.0, which turns the wasi-threads `-S threads` flag into
+      # a hard error. Bump alongside the smoke-wasi invocation when migrating.
+      - name: Install wasmtime
+        run: |
+          set -eux
+          curl -sSfL https://github.com/bytecodealliance/wasmtime/releases/download/v46.0.1/wasmtime-v46.0.1-x86_64-linux.tar.xz \
+            | tar -xJ
+          echo "${PWD}/wasmtime-v46.0.1-x86_64-linux" >> "$GITHUB_PATH"
+
+      - name: Build and smoke-test the WASI CLI under wasmtime
+        run: make smoke-wasi
 
   # Build the browser/npm wasm package on every push so the `wasm` feature path
   # (published to npm) can't silently regress between releases. Mirrors the
@@ -264,10 +279,29 @@ jobs:
       - name: Build browser wasm package
         run: make build-wasm
 
+  # Verify the crate still builds on its declared MSRV (Cargo.toml
+  # `rust-version`). CI otherwise builds on a newer pinned toolchain, so a
+  # feature stabilized after the MSRV floor would pass every other job while
+  # silently breaking users pinned to the MSRV.
+  msrv:
+    name: MSRV build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-msrv
+
+      - name: Check build on the declared MSRV
+        run: make msrv-check
+
   all-checks-passed:
     name: All checks passed
     runs-on: ubuntu-latest
-    needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi, build-wasm]
+    needs: [lint, test, docs-check, test-windows, code-block-tools, docker, build-wasi, build-wasm, msrv]
     if: always()
     steps:
       - name: Verify all checks passed

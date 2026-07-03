@@ -1,0 +1,46 @@
+name: Audit
+
+# Scans the dependency tree for known RUSTSEC advisories. Runs weekly (and on
+# demand, and whenever the dependency manifests change) so a newly published
+# advisory affecting a pinned dependency surfaces without waiting for someone to
+# run `cargo audit` by hand. Dev-only advisories that never reach the shipped
+# artifact are documented and ignored in .cargo/audit.toml.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  pull_request:
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/audit.toml
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - .cargo/audit.toml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit dependencies for known vulnerabilities
+        run: make audit

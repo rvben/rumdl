@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc fuzz-all audit msrv-check smoke-wasi
 
 # Development environment setup
 setup-mise:
@@ -266,6 +266,12 @@ test-push:
 test-ci:
 	cargo nextest run --profile ci
 
+# Run documentation tests. nextest cannot run doctests, so they are a separate
+# gate; without this they compile-rot silently (the crate has runnable `///`
+# examples with assertions).
+test-doc:
+	cargo test --doc
+
 # Like test-ci but reports every failure instead of stopping at the first.
 # Used by the non-blocking Windows canary so one run enumerates all
 # platform-specific failures.
@@ -299,6 +305,48 @@ fuzz:
 fuzz-long:
 	@echo "Running extended fuzz test (5 minutes)..."
 	cargo +nightly fuzz run fuzz_fix_idempotency -- -max_total_time=300
+
+# Fuzz every target for a bounded time. Used by the scheduled fuzz workflow so
+# the fix/lint/config/context paths get adversarial coverage on a cadence, not
+# just fuzz_fix_idempotency on demand.
+FUZZ_TIME ?= 120
+fuzz-all:
+	@echo "Fuzzing all targets ($(FUZZ_TIME)s each)..."
+	@for t in $$(cargo +nightly fuzz list); do \
+		echo "=== fuzzing $$t ==="; \
+		cargo +nightly fuzz run $$t -- -max_total_time=$(FUZZ_TIME) || exit 1; \
+	done
+
+# Audit dependencies for known vulnerabilities (RUSTSEC advisories). Reads
+# Cargo.lock only; installs cargo-audit if missing.
+audit:
+	@command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
+	cargo audit
+
+# Verify the crate still builds on its declared MSRV (Cargo.toml `rust-version`).
+# Uses a clippy/check against the pinned toolchain so a feature stabilized after
+# the MSRV floor is caught instead of silently passing CI on a newer toolchain.
+msrv-check:
+	@msrv=$$(awk -F '"' '/^rust-version/ {print $$2; exit}' Cargo.toml); \
+	echo "Checking build on MSRV $$msrv..."; \
+	rustup toolchain install "$$msrv" --profile minimal --no-self-update 2>/dev/null || true; \
+	cargo "+$$msrv" check --all-features --workspace
+
+# Smoke-test the WASI CLI build under wasmtime: build for wasm32-wasip1-threads
+# and actually run it on a sample file. `build-wasi` only compiles; this
+# exercises the WASI-specific fallbacks at runtime (process-id counter, real FS,
+# stdio) so a regression in them is caught, not just a type error.
+smoke-wasi: build-wasi
+	@command -v wasmtime >/dev/null 2>&1 || { echo "wasmtime not found; install it to run the WASI smoke test"; exit 1; }
+	@printf '# Title\n\nsome text   \n' > /tmp/rumdl-wasi-smoke.md
+	@echo "Running the WASI CLI under wasmtime..."
+	@out=$$(wasmtime run -W threads=y,shared-memory=y -S threads=y --dir /tmp \
+		target/wasm32-wasip1-threads/debug/rumdl.wasm check --no-cache /tmp/rumdl-wasi-smoke.md 2>&1); \
+	code=$$?; \
+	echo "$$out"; \
+	echo "$$out" | grep -q 'MD009' || { echo "WASI smoke FAILED: expected MD009 in output"; exit 1; }; \
+	test $$code -eq 1 || { echo "WASI smoke FAILED: expected exit 1 (violation found), got $$code"; exit 1; }
+	@echo "WASI smoke OK: the wasm CLI linted a file, found the trailing-space violation, and exited 1."
 
 clean:
 	cargo clean

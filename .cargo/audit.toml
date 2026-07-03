@@ -7,4 +7,13 @@ ignore = [
     # heapless 0.8 dropped this dependency, so the path forward is waiting
     # for postcard to release a version built on heapless 0.8+.
     "RUSTSEC-2023-0089",
+
+    # rustls-webpki: reachable panic in CRL parsing. Reaches rumdl only through
+    # the `jsonschema` DEV-dependency (tests/config/schema_validation_test.rs);
+    # never compiled into the shipped binary or library.
+    "RUSTSEC-2026-0104",
+
+    # paste: unmaintained. DEV-dependency only (via jsonschema / ureq test
+    # helpers); not in the released artifact.
+    "RUSTSEC-2024-0436",
 ]
