@@ -1989,8 +1989,16 @@ fn split_at_break_word(
     Some((first, rest))
 }
 
-/// Recursively cascade-split a line that exceeds line_length.
-/// Tries clause punctuation first, then break-words, then word wrap.
+/// Cascade-split a line that exceeds line_length.
+/// Tries parenthetical boundaries, then clause punctuation, then break-words,
+/// then word wrap.
+///
+/// This is iterative rather than recursive so a single very long line (tens of
+/// thousands of words) cannot overflow the stack. Each accepted split shrinks
+/// the remaining text by a non-empty prefix, so the loop always makes progress.
+/// The whole line is parsed into markdown elements once up front; every
+/// remaining suffix reuses those element spans (re-based to the suffix offset)
+/// instead of re-parsing, which keeps repeated element parsing out of the loop.
 fn cascade_split_line(
     text: &str,
     line_length: usize,
@@ -2007,53 +2015,56 @@ fn cascade_split_line(
     let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles, defined_references);
     let element_spans = compute_element_spans(&elements);
 
-    // Try parenthetical boundary split (before clause punctuation so that
-    // multi-word parentheticals are kept intact as semantic units)
-    if let Some((first, rest)) = split_at_parenthetical(text, line_length, &element_spans, length_mode) {
-        let mut result = vec![first];
-        result.extend(cascade_split_line(
-            &rest,
-            line_length,
-            abbreviations,
-            length_mode,
-            attr_lists,
-            myst_roles,
-            defined_references,
-        ));
-        return result;
+    // Element spans of the remaining suffix `text[start..]`, re-based so their
+    // offsets are relative to the suffix. Split points never fall inside an
+    // element, so every span lies wholly before or wholly at/after `start`.
+    let rebased_spans = |start: usize| -> Vec<(usize, usize)> {
+        if start == 0 {
+            return element_spans.clone();
+        }
+        element_spans
+            .iter()
+            .filter(|&&(_, end)| end > start)
+            .map(|&(s, e)| (s.saturating_sub(start), e.saturating_sub(start)))
+            .collect()
+    };
+
+    let mut result = Vec::new();
+    let mut start = 0usize;
+
+    loop {
+        let remaining = &text[start..];
+        if display_len(remaining, length_mode) <= line_length {
+            result.push(remaining.to_string());
+            return result;
+        }
+
+        let spans = rebased_spans(start);
+
+        // `rest` is always a suffix of `remaining` (the splitters only trim its
+        // leading whitespace), so `remaining.len() - rest.len()` is the number of
+        // bytes consumed, and the new absolute offset is `start + consumed`.
+        let split = split_at_parenthetical(remaining, line_length, &spans, length_mode)
+            .or_else(|| split_at_clause_punctuation(remaining, line_length, &spans, length_mode))
+            .or_else(|| split_at_break_word(remaining, line_length, &spans, length_mode));
+
+        if let Some((first, rest)) = split {
+            let consumed = remaining.len().saturating_sub(rest.len());
+            // Defensive: a zero-length advance would loop forever. Splitters only
+            // return a non-empty `first`, so this never triggers, but guard anyway.
+            if consumed == 0 {
+                break;
+            }
+            result.push(first);
+            start += consumed;
+            continue;
+        }
+
+        // No semantic split point: word-wrap the remaining suffix and finish.
+        break;
     }
 
-    // Try clause punctuation split
-    if let Some((first, rest)) = split_at_clause_punctuation(text, line_length, &element_spans, length_mode) {
-        let mut result = vec![first];
-        result.extend(cascade_split_line(
-            &rest,
-            line_length,
-            abbreviations,
-            length_mode,
-            attr_lists,
-            myst_roles,
-            defined_references,
-        ));
-        return result;
-    }
-
-    // Try break-word split
-    if let Some((first, rest)) = split_at_break_word(text, line_length, &element_spans, length_mode) {
-        let mut result = vec![first];
-        result.extend(cascade_split_line(
-            &rest,
-            line_length,
-            abbreviations,
-            length_mode,
-            attr_lists,
-            myst_roles,
-            defined_references,
-        ));
-        return result;
-    }
-
-    // Fallback: word wrap using existing reflow_elements
+    // Fallback: word wrap the still-oversized suffix using reflow_elements.
     let options = ReflowOptions {
         line_length,
         break_on_sentences: false,
@@ -2070,7 +2081,14 @@ fn cascade_split_line(
         // re-parses links, so shortcut definedness is never consulted.
         defined_references: None,
     };
-    reflow_elements(&elements, &options)
+    let remaining = &text[start..];
+    let tail_elements = if start == 0 {
+        elements
+    } else {
+        parse_markdown_elements_inner(remaining, attr_lists, myst_roles, defined_references)
+    };
+    result.extend(reflow_elements(&tail_elements, &options));
+    result
 }
 
 /// Reflow elements using semantic line breaks strategy:
@@ -3329,6 +3347,32 @@ pub fn reflow_paragraph_at_line_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cascade_split_line_handles_a_very_long_line_without_overflowing() {
+        // A single line of thousands of words once drove `cascade_split_line`
+        // into deep recursion (stack overflow / hang). The iterative version
+        // must complete and split it into many lines that each fit the width and
+        // that together preserve every word. The test finishing at all is the
+        // core assertion (no stack overflow); the content checks guard behavior.
+        let words: Vec<String> = (0..4000).map(|i| format!("word{i}")).collect();
+        let line = words.join(" ");
+
+        let out = cascade_split_line(&line, 80, &None, ReflowLengthMode::Chars, false, false, None);
+
+        assert!(out.len() > 1, "a very long line should split into many lines");
+        for segment in &out {
+            assert!(
+                display_len(segment, ReflowLengthMode::Chars) <= 80 || !segment.contains(' '),
+                "each wrapped line should fit the width (or be a single unbreakable token)"
+            );
+        }
+        // Every original word survives, in order.
+        let rejoined = out.join(" ");
+        let original_words: Vec<&str> = line.split(' ').collect();
+        let result_words: Vec<&str> = rejoined.split_whitespace().collect();
+        assert_eq!(original_words, result_words, "reflow must preserve all words in order");
+    }
 
     /// Unit test for private helper function text_ends_with_abbreviation()
     ///
