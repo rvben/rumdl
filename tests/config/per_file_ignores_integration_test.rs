@@ -2,12 +2,33 @@ use rumdl_lib::config::Config;
 use rumdl_lib::rules;
 use serial_test::serial;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tempfile::tempdir;
 
 fn rumdl_bin() -> &'static str {
     env!("CARGO_BIN_EXE_rumdl")
+}
+
+/// Run the rumdl binary with `content` piped to stdin, returning normalized
+/// `(stdout, stderr)`. Used to exercise the `--stdin` fix/check pipeline the
+/// way pre-commit hooks and editors drive it.
+fn run_with_stdin(dir: &Path, content: &str, args: &[&str]) -> (String, String) {
+    let mut child = Command::new(rumdl_bin())
+        .current_dir(dir)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(content.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    (
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
+    )
 }
 
 #[test]
@@ -186,6 +207,98 @@ fn test_per_file_ignores_honored_by_fmt_side_effect() {
     assert_eq!(
         formatted, "# Title\n\ntext\n\n- parent\n  * child\n",
         "fmt output should reflect only the non-ignored fix.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+/// Regression test for issue #707 (diff path): `rumdl check --diff` previews the
+/// fixes it *would* apply. That preview must also respect `[per-file-ignores]`,
+/// so an ignored rule never shows up as a proposed change.
+#[test]
+fn test_per_file_ignores_honored_by_fmt_diff() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[per-file-ignores]\n\"slides/**/*.md\" = [\"MD004\"]\n",
+    )
+    .unwrap();
+    let slides_dir = temp_dir.path().join("slides");
+    fs::create_dir(&slides_dir).unwrap();
+    fs::write(slides_dir.join("deck.md"), "# Title\n\ntext\n- parent\n  * child\n").unwrap();
+
+    let output = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["check", "--no-cache", "--diff", "slides/deck.md"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n");
+
+    // The MD032 fix (blank line) is previewed; the MD004 marker rewrite is not.
+    assert!(
+        stdout.contains("* child"),
+        "diff preview must keep the ignored `*` marker, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("- child"),
+        "diff preview proposed the per-file-ignored MD004 rewrite (`*` -> `-`), got:\n{stdout}"
+    );
+}
+
+/// Regression test for issue #707 (stdin path): piping a file's content through
+/// `rumdl check --stdin` must honor `[per-file-ignores]` keyed on `--stdin-filename`,
+/// exactly like linting the file directly. Pre-commit hooks and editors drive rumdl
+/// this way, so an ignored rule must not be reported.
+#[test]
+fn test_per_file_ignores_honored_by_stdin_check() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[per-file-ignores]\n\"slides/**/*.md\" = [\"MD004\"]\n",
+    )
+    .unwrap();
+
+    let content = "# Title\n\ntext\n- parent\n  * child\n";
+    let (stdout, stderr) = run_with_stdin(
+        temp_dir.path(),
+        content,
+        &["check", "--no-cache", "--stdin", "--stdin-filename", "slides/deck.md"],
+    );
+
+    // The non-ignored MD032 is still reported.
+    assert!(
+        stdout.contains("MD032") || stderr.contains("MD032"),
+        "expected MD032 to be reported via stdin, got stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // MD004 is ignored for slides/**, so it must NOT be reported.
+    assert!(
+        !stdout.contains("MD004") && !stderr.contains("MD004"),
+        "MD004 is in per-file-ignores and must not be reported for stdin content keyed to \
+         slides/deck.md, got stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+}
+
+/// Regression test for issue #707 (stdin fix path): `rumdl fmt --stdin` writes the
+/// fixed content to stdout and must not apply a per-file-ignored rule.
+#[test]
+fn test_per_file_ignores_honored_by_stdin_fmt() {
+    let temp_dir = tempdir().unwrap();
+    fs::write(
+        temp_dir.path().join(".rumdl.toml"),
+        "[per-file-ignores]\n\"slides/**/*.md\" = [\"MD004\"]\n",
+    )
+    .unwrap();
+
+    let content = "# Title\n\ntext\n- parent\n  * child\n";
+    let (stdout, stderr) = run_with_stdin(
+        temp_dir.path(),
+        content,
+        &["fmt", "--no-cache", "--stdin", "--stdin-filename", "slides/deck.md"],
+    );
+
+    // Only the non-ignored MD032 fix is applied: blank line inserted, `*` preserved.
+    assert_eq!(
+        stdout, "# Title\n\ntext\n\n- parent\n  * child\n",
+        "stdin fmt should apply only the non-ignored fix (MD032) and preserve the ignored \
+         MD004 marker, got stdout:\n{stdout}\nstderr:\n{stderr}"
     );
 }
 
