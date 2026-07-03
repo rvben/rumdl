@@ -12,14 +12,6 @@ use rumdl_lib::rules::emphasis_style::EmphasisStyle;
 use rumdl_lib::rules::heading_utils::HeadingStyle;
 use rumdl_lib::rules::strong_style::StrongStyle;
 
-#[allow(dead_code)]
-/// Apply a single fix to content
-fn apply_fix(content: &str, fix: &rumdl_lib::rule::Fix) -> String {
-    let mut result = content.to_string();
-    result.replace_range(fix.range.clone(), &fix.replacement);
-    result
-}
-
 /// Apply all fixes from warnings to content, processing in reverse order to maintain valid indices
 fn apply_all_fixes(content: &str, warnings: &[LintWarning]) -> String {
     // Sort fixes by start position in reverse order to apply from end to start
@@ -44,25 +36,6 @@ fn assert_fix_idempotent(rule: &dyn Rule, content: &str, rule_name: &str) {
 
     // Second fix
     let ctx2 = LintContext::new(&content1, MarkdownFlavor::Standard, None);
-    let warnings2 = rule.check(&ctx2).unwrap_or_default();
-    let content2 = apply_all_fixes(&content1, &warnings2);
-
-    assert_eq!(
-        content1, content2,
-        "{rule_name} fix is not idempotent!\nAfter first fix:\n{content1:?}\nAfter second fix:\n{content2:?}"
-    );
-}
-
-#[allow(dead_code)]
-/// Helper to test idempotency with custom config - currently unused but kept for future tests
-fn assert_fix_idempotent_with_flavor(rule: &dyn Rule, content: &str, rule_name: &str, flavor: MarkdownFlavor) {
-    // First fix
-    let ctx1 = LintContext::new(content, flavor, None);
-    let warnings1 = rule.check(&ctx1).unwrap_or_default();
-    let content1 = apply_all_fixes(content, &warnings1);
-
-    // Second fix
-    let ctx2 = LintContext::new(&content1, flavor, None);
     let warnings2 = rule.check(&ctx2).unwrap_or_default();
     let content2 = apply_all_fixes(&content1, &warnings2);
 

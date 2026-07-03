@@ -37,7 +37,6 @@ mod md031_test;
 mod md032_test;
 mod md033_blockquote_test;
 mod md033_kramdown_test;
-// mod md033_extended_test; // Temporarily disabled - needs LintContext fixes
 mod md033_test;
 mod md034_comprehensive_test;
 mod md034_ipv6_test;
@@ -108,9 +107,3 @@ mod mkdocs_edge_cases_test;
 mod mkdocs_extensions_test;
 mod mkdocs_snippets_test;
 mod rule_interaction_test;
-
-// Test cases for MD003 - Heading Style
-#[test]
-fn test_md003_fix_consistent_style() {
-    // ... existing code ...
-}
