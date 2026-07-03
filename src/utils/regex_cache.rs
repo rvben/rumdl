@@ -327,17 +327,22 @@ pub static BLOCKQUOTE_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r
 /// assert!(!is_blank_in_blockquote_context("text"));      // Regular text
 /// ```
 pub fn is_blank_in_blockquote_context(line: &str) -> bool {
-    if line.trim().is_empty() {
-        return true;
-    }
-    // Check if line is a blockquote prefix with no content after it
-    // Handle spaced nested blockquotes like "> > " by recursively checking remainder
-    if let Some(m) = BLOCKQUOTE_PREFIX_RE.find(line) {
-        let remainder = &line[m.end()..];
-        // The remainder should be empty/whitespace OR another blockquote prefix (for spaced nesting)
-        is_blank_in_blockquote_context(remainder)
-    } else {
-        false
+    // Peel one `\s*>+\s*` prefix at a time. A line is blank-in-blockquote iff,
+    // after removing every blockquote prefix, nothing but whitespace remains.
+    // This is iterative rather than recursive so a line of hundreds of thousands
+    // of spaced markers ("> > > ...") cannot overflow the stack: each prefix
+    // match consumes at least one `>`, so `rest` strictly shrinks every pass.
+    let mut rest = line;
+    loop {
+        if rest.trim().is_empty() {
+            return true;
+        }
+        match BLOCKQUOTE_PREFIX_RE.find(rest) {
+            // `>+` guarantees the match consumes at least one byte; the explicit
+            // `end > 0` guard keeps the loop total even if the pattern changes.
+            Some(m) if m.end() > 0 => rest = &rest[m.end()..],
+            _ => return false,
+        }
     }
 }
 
@@ -860,5 +865,21 @@ mod tests {
         assert!(!is_blank_in_blockquote_context("> a")); // Single char content
         assert!(is_blank_in_blockquote_context(">   ")); // Multiple spaces after >
         assert!(!is_blank_in_blockquote_context(">  text")); // Multiple spaces before content
+    }
+
+    #[test]
+    fn test_is_blank_in_blockquote_context_deeply_nested_no_stack_overflow() {
+        // Adversarial input: a line built from hundreds of thousands of spaced
+        // blockquote markers. Each "> " is a separate prefix match, so a
+        // recursive implementation overflows the stack and aborts the process.
+        // The iterative implementation returns in bounded stack. The test
+        // completing at all is the assertion; the return value is also checked.
+        let blank_markers = "> ".repeat(500_000);
+        assert!(is_blank_in_blockquote_context(&blank_markers));
+
+        // Same depth, but with trailing content: must be recognized as non-blank
+        // without overflowing either.
+        let markers_with_content = format!("{}text", "> ".repeat(500_000));
+        assert!(!is_blank_in_blockquote_context(&markers_with_content));
     }
 }
