@@ -403,7 +403,11 @@ impl Linter {
         }
 
         let all = all_rules(&self.config);
-        let rules = filter_rules(&all, &self.config.global);
+        let mut rules = filter_rules(&all, &self.config.global);
+        // Honor [per-file-ignores] when a path is provided, matching the CLI check.
+        if let Some(ref p) = path {
+            rules = crate::rules::filter_rules_for_file(&rules, &self.config, std::path::Path::new(p));
+        }
 
         match crate::lint(content, &rules, false, self.flavor, None, Some(&self.config)) {
             Ok(warnings) => {
@@ -441,8 +445,11 @@ impl Linter {
         let coordinator = FixCoordinator::new();
         let mut fixed_content = content.to_string();
 
-        // WASM doesn't have file paths, so use None (falls back to global flavor)
-        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10, None) {
+        // Pass the path (when the host provides one) so the coordinator honors
+        // [per-file-ignores] and per-file flavor overrides, matching the CLI fix
+        // pipeline. Without a path it falls back to the global flavor.
+        let path_ref = path.as_deref().map(std::path::Path::new);
+        match coordinator.apply_fixes_iterative(&rules, &warnings, &mut fixed_content, &self.config, 10, path_ref) {
             Ok(_) => fixed_content,
             Err(_) => content.to_string(),
         }
@@ -529,6 +536,46 @@ mod tests {
 
         let has_md001 = rules.iter().any(|r| r["name"] == "MD001");
         assert!(has_md001);
+    }
+
+    #[test]
+    fn test_per_file_ignores_honored_by_check_and_fix() {
+        // The npm/browser surface must honor [per-file-ignores] on both check and
+        // fix when the host supplies a path, matching the CLI (issue #707).
+        let mut config = crate::config::Config::default();
+        config
+            .per_file_ignores
+            .insert("slides/**/*.md".to_string(), vec!["MD004".to_string()]);
+        config.canonicalize_rule_lists();
+        let linter = Linter {
+            config,
+            flavor: MarkdownFlavor::Standard,
+            config_warnings: vec![],
+        };
+
+        let content = "# Title\n\ntext\n- parent\n  * child\n";
+
+        // check: MD032 (non-ignored) reported; MD004 (ignored for slides/**) not.
+        let json = linter.check(content, Some("slides/deck.md".to_string()));
+        assert!(json.contains("MD032"), "MD032 should be reported: {json}");
+        assert!(
+            !json.contains("MD004"),
+            "MD004 is per-file-ignored for slides/** and must not be reported: {json}"
+        );
+
+        // fix: the nested `*` marker (MD004) must survive; the MD032 blank line is added.
+        let fixed = linter.fix(content, Some("slides/deck.md".to_string()));
+        assert_eq!(
+            fixed, "# Title\n\ntext\n\n- parent\n  * child\n",
+            "fix must apply only the non-ignored MD032 fix, preserving the MD004 marker"
+        );
+
+        // Control: without a slides path, MD004 is reported and applied.
+        let json_other = linter.check(content, Some("docs/other.md".to_string()));
+        assert!(
+            json_other.contains("MD004"),
+            "MD004 should be reported when not ignored: {json_other}"
+        );
     }
 
     #[test]

@@ -717,6 +717,30 @@ pub fn filter_rules(rules: &[Box<dyn Rule>], global_config: &GlobalConfig) -> Ve
     enabled_rules
 }
 
+/// Return `rules` with every rule excluded for `path` by `[per-file-ignores]`
+/// removed.
+///
+/// This is the lint/check-side counterpart to the fix coordinator's internal
+/// per-file-ignore handling: callers that lint a specific file run their rule
+/// set through this so diagnostics never report a rule the file has excluded,
+/// mirroring what the coordinator guarantees on the fix side. Returns a clone
+/// of `rules` unchanged when the file excludes nothing.
+pub fn filter_rules_for_file(
+    rules: &[Box<dyn Rule>],
+    config: &crate::config::Config,
+    path: &std::path::Path,
+) -> Vec<Box<dyn Rule>> {
+    let ignored = config.get_ignored_rules_for_file(path);
+    if ignored.is_empty() {
+        return rules.to_vec();
+    }
+    rules
+        .iter()
+        .filter(|rule| !ignored.contains(rule.name()))
+        .map(|r| dyn_clone::clone_box(&**r))
+        .collect()
+}
+
 #[cfg(test)]
 mod filter_rules_alias_tests {
     use super::*;

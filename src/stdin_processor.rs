@@ -71,24 +71,14 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
 
     // Apply per-file-ignores keyed on the stdin filename, so piping a file's
     // content (as pre-commit hooks and editors do) honors `[per-file-ignores]`
-    // exactly like `rumdl check/fmt <file>`. Without this, both linting and the
-    // fix pass below would report and rewrite rules the file has excluded.
-    let ignored_rules_for_file = args
-        .stdin_filename
-        .as_deref()
-        .map(|name| config.get_ignored_rules_for_file(std::path::Path::new(name)))
-        .unwrap_or_default();
-    let filtered_rules: Vec<Box<dyn Rule>>;
-    let effective_rules: &[Box<dyn Rule>] = if ignored_rules_for_file.is_empty() {
-        rules
-    } else {
-        filtered_rules = rules
-            .iter()
-            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-            .map(|r| dyn_clone::clone_box(&**r))
-            .collect();
-        &filtered_rules
+    // exactly like `rumdl check/fmt <file>`. Without this, linting would report
+    // rules the file has excluded; the fix coordinator enforces the same
+    // exclusion on the fix pass, so check and fix stay consistent.
+    let filtered_rules: Vec<Box<dyn Rule>> = match args.stdin_filename.as_deref() {
+        Some(name) => rumdl_lib::rules::filter_rules_for_file(rules, config, std::path::Path::new(name)),
+        None => rules.to_vec(),
     };
+    let effective_rules: &[Box<dyn Rule>] = &filtered_rules;
 
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity

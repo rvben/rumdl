@@ -218,6 +218,15 @@ impl FixCoordinator {
         let fixable_rules: HashSet<String> = config.global.fixable.iter().cloned().collect();
         let has_fixable_allowlist = !fixable_rules.is_empty();
 
+        // Per-file-ignores are config-driven, per-file rule exclusions. The
+        // coordinator is the single engine every fix path funnels through, so
+        // resolving them here guarantees `fmt`/fix never rewrites a rule the file
+        // has excluded - no caller can reintroduce issue #707 by forgetting to
+        // pre-filter. Empty when no path is available (e.g. WASM without a path).
+        let ignored_for_file: HashSet<String> = file_path
+            .map(|p| config.get_ignored_rules_for_file(p))
+            .unwrap_or_default();
+
         // Ruff-style fix loop: keep applying fixes until content stabilizes
         while iterations < max_iterations {
             iterations += 1;
@@ -259,6 +268,10 @@ impl FixCoordinator {
                     continue;
                 }
                 if has_fixable_allowlist && !fixable_rules.contains(rule.name()) {
+                    continue;
+                }
+                // Skip rules excluded for this file via [per-file-ignores].
+                if ignored_for_file.contains(rule.name()) {
                     continue;
                 }
 
@@ -973,6 +986,70 @@ mod tests {
         assert_eq!(
             content, "`<svg>`. Fortunately\n",
             "MD064 collapses the sentence double space when not overridden"
+        );
+    }
+
+    #[test]
+    fn test_per_file_ignores_skipped_even_with_unfiltered_rules() {
+        // The coordinator is the single engine every fix path funnels through. Handed
+        // the UNFILTERED rule set plus a file path, it must still skip any rule the
+        // path excludes via [per-file-ignores] - so no caller can reintroduce #707 by
+        // forgetting to pre-filter.
+        let coordinator = FixCoordinator::new();
+        let rules: Vec<Box<dyn Rule>> = vec![
+            Box::new(ConditionalFixRule {
+                name: "MD004",
+                check_fn: |c| c.contains('*'),
+                fix_fn: |c| c.replace('*', "-"),
+            }),
+            Box::new(ConditionalFixRule {
+                name: "MD032",
+                check_fn: |c| c.contains("PARENT"),
+                fix_fn: |c| c.replace("PARENT", "parent"),
+            }),
+        ];
+
+        let mut config = Config::default();
+        config
+            .per_file_ignores
+            .insert("slides/**/*.md".to_string(), vec!["MD004".to_string()]);
+        config.canonicalize_rule_lists();
+
+        // Path matches the ignore glob: MD004 must be skipped, MD032 must still apply.
+        let mut content = "* PARENT".to_string();
+        let result = coordinator
+            .apply_fixes_iterative(
+                &rules,
+                &[],
+                &mut content,
+                &config,
+                10,
+                Some(std::path::Path::new("slides/deck.md")),
+            )
+            .unwrap();
+        assert_eq!(
+            content, "* parent",
+            "MD032 applied, MD004 (`*` -> `-`) skipped for slides/**"
+        );
+        assert!(result.fixed_rule_names.contains("MD032"));
+        assert!(!result.fixed_rule_names.contains("MD004"));
+
+        // Control: a path NOT matching the glob applies both rules, proving the skip
+        // above is driven by per-file-ignores and not something else.
+        let mut other = "* PARENT".to_string();
+        coordinator
+            .apply_fixes_iterative(
+                &rules,
+                &[],
+                &mut other,
+                &config,
+                10,
+                Some(std::path::Path::new("docs/other.md")),
+            )
+            .unwrap();
+        assert_eq!(
+            other, "- parent",
+            "both rules apply when the path is not per-file-ignored"
         );
     }
 
