@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.29](https://github.com/rvben/rumdl/compare/v0.2.28...v0.2.29) - 2026-07-09
+
+### Fixed
+
+- **lint-context**: keep indented continuation lines when a different list type follows ([5dd3c3f](https://github.com/rvben/rumdl/commit/5dd3c3fcdfef353ce8f0aaf575e704ce3754d2fc))
+- **MD013**: treat tabs and extra spaces after a list marker as marker padding ([f0f97a2](https://github.com/rvben/rumdl/commit/f0f97a29a3d768f8728d5650c63ccb1046cc279c))
+
 ## [0.2.28](https://github.com/rvben/rumdl/compare/v0.2.27...v0.2.28) - 2026-07-03
 
 ### Added
