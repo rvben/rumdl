@@ -132,7 +132,13 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
                     );
                 }
             }
-            return (format!("{indent}{bullet}"), trim_preserving_hard_break(rest));
+            let spaces_len = rest.len() - rest.trim_start().len();
+            let extra_spaces = &rest[..spaces_len];
+            let content = &rest[spaces_len..];
+            return (
+                format!("{indent}{marker_prefix} {extra_spaces}"),
+                trim_preserving_hard_break(content),
+            );
         }
     }
 
@@ -158,8 +164,13 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
                         );
                     }
                 }
-                let content = trim_preserving_hard_break(rest);
-                return (format!("{indent}{marker_content}"), content);
+                let spaces_len = rest.len() - rest.trim_start().len();
+                let extra_spaces = &rest[..spaces_len];
+                let content = &rest[spaces_len..];
+                return (
+                    format!("{indent}{marker_content}{extra_spaces}"),
+                    trim_preserving_hard_break(content),
+                );
             }
             break;
         }
