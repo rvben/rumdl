@@ -34,30 +34,6 @@ fn indent_after_blockquote(raw_content: &str, expected_bq_level: usize) -> Optio
     Some(after_bq.len() - after_bq.trim_start().len())
 }
 
-/// Whether a block line carries the item's content rather than continuing it lazily.
-/// A lazy continuation sits at column 0; anything indented belongs to the item, as
-/// does a line inside a code span that spans several lines.
-///
-/// Inside a blockquote the raw indent is 0 because the line starts with `>`, so the
-/// indent that matters is the one after the quote markers.
-fn is_indented_continuation(content: &str, lines: &[LineInfo], line_num: usize, bq_level: usize) -> bool {
-    let Some(line) = lines.get(line_num - 1) else {
-        return false;
-    };
-    if line.is_blank {
-        return false;
-    }
-    if line.in_code_span_continuation {
-        return true;
-    }
-    let indent = if bq_level > 0 {
-        indent_after_blockquote(line.content(content), bq_level).unwrap_or(0)
-    } else {
-        line.indent
-    };
-    indent > 0
-}
-
 /// Parse all list blocks in the content (legacy line-by-line approach)
 ///
 /// Uses a forward-scanning O(n) algorithm that tracks two variables during iteration:
@@ -382,27 +358,10 @@ pub(super) fn parse_list_blocks(content: &str, lines: &[LineInfo]) -> Vec<ListBl
                         &mut min_continuation_for_tracking,
                     );
                 } else {
-                    // End current block and start a new one
-                    // When a different list type starts AT THE SAME LEVEL (not nested),
-                    // trim back lazy continuation lines
-                    if !same_type
-                        && !is_nested
-                        && let Some(&last_item) = block.item_lines.last()
-                    {
-                        // Only the genuinely lazy lines (column 0) are trimmed. Lines
-                        // indented into the item's content belong to it, and dropping
-                        // them makes the item end at its marker, which leads MD032 to
-                        // insert a blank line inside the item.
-                        let block_bq_level = block.blockquote_prefix.chars().filter(|&c| c == '>').count();
-                        let mut end_line = block.end_line;
-                        while end_line > last_item
-                            && !is_indented_continuation(content, lines, end_line, block_bq_level)
-                        {
-                            end_line -= 1;
-                        }
-                        block.end_line = end_line;
-                    }
-
+                    // End current block and start a new one. The block keeps every
+                    // continuation line it collected, including lazy (column 0) ones:
+                    // per CommonMark those continue the item's paragraph, so cutting
+                    // them off would make MD032 insert its blank line inside the item.
                     let new_block = ListBlock {
                         start_line: line_num,
                         end_line: line_num,

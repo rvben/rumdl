@@ -1,6 +1,7 @@
 // Regression tests: a list block that ends because a list of a *different type*
-// follows must keep its properly indented continuation lines. Only genuinely
-// lazy continuations (indented to column 0) are trimmed back.
+// follows must keep its continuation lines, both properly indented ones and
+// lazy (column 0) ones. Per CommonMark a lazy line continues the item's
+// paragraph, so it belongs to the block.
 //
 // When the block was truncated to its last marker line, MD032 saw the item as
 // ending at the marker and inserted a blank line *inside* the item, splitting
@@ -40,11 +41,19 @@ fn test_multiple_continuation_lines_kept() {
 }
 
 #[test]
-fn test_lazy_continuation_still_trimmed_when_different_type_follows() {
-    // A column-0 continuation is what the original trim was written for. This
-    // pins that behavior as the boundary of the fix above; whether MD032 should
-    // then split the lazy line off into its own paragraph is a separate question.
-    assert_eq!(blocks("- alpha beta\nlazy\n1. ordered item\n"), vec![(1, 1), (3, 3)]);
+fn test_lazy_continuation_kept_when_different_type_follows() {
+    // A column-0 line after a list item lazily continues the item's paragraph,
+    // so the block owns it. Ending the block at the marker line instead made
+    // MD032 insert its blank there, splitting the paragraph in two.
+    assert_eq!(blocks("- alpha beta\nlazy\n1. ordered item\n"), vec![(1, 2), (3, 3)]);
+}
+
+#[test]
+fn test_multiple_lazy_continuations_kept() {
+    assert_eq!(
+        blocks("- alpha beta\nlazy one\nlazy two\n1. ordered item\n"),
+        vec![(1, 3), (4, 4)]
+    );
 }
 
 #[test]
@@ -69,10 +78,10 @@ fn test_blockquote_continuation_kept_when_different_type_follows() {
 }
 
 #[test]
-fn test_blockquote_lazy_continuation_still_trimmed() {
+fn test_blockquote_lazy_continuation_kept() {
     // No indentation after the `>`, so this line is lazy, as at the root level.
     assert_eq!(
         blocks("> - alpha beta\n> lazy\n> 1. ordered item\n"),
-        vec![(1, 1), (3, 3)]
+        vec![(1, 2), (3, 3)]
     );
 }
