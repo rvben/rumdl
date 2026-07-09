@@ -662,10 +662,26 @@ jobs:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
           # Upload only Python packages (wheels and sdist), not Homebrew archives.
-          # --check-url skips files already present on PyPI so re-runs stay
-          # idempotent (the equivalent of twine's --skip-existing).
-          uv publish --check-url https://pypi.org/simple/rumdl/ \
-            artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz
+          # --check-url skips a file only when its bytes already exist on PyPI, so
+          # re-running the publish job with the SAME artifacts is idempotent. A
+          # re-run that REBUILT the artifacts produces different bytes (Rust
+          # builds are not reproducible), uv then attempts the upload, and PyPI
+          # rejects the filename collision with "400 File already exists".
+          # Publish per file and tolerate that rejection, the way the crates.io
+          # and npm steps do, so a re-run keeps going and still uploads any file
+          # PyPI does not have yet. PyPI keeps the first upload of a filename.
+          status=0
+          for f in artifacts/wheel-*/*.whl artifacts/sdist/*.tar.gz; do
+            if output=$(uv publish --check-url https://pypi.org/simple/rumdl/ "$f" 2>&1); then
+              echo "$output"
+            elif echo "$output" | grep -qi "already exists"; then
+              echo "⏭️ $(basename "$f") already on PyPI (first upload wins), skipping"
+            else
+              echo "$output"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Test PyPI upload (dry run)
         if: ${{ inputs.dry_run == true && inputs.skip_pypi != true }}
