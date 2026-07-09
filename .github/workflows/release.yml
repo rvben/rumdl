@@ -694,10 +694,14 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # Pinned, not @latest: npm 12.0.0 ships a provenance path that fails with
+      # "Cannot find module 'sigstore'", so `npm publish --provenance` aborts.
+      # An unpinned upgrade puts every release at the mercy of the newest npm.
+      # 11.18.0 is the last 11.x and supports the OIDC publishing this needs.
       - name: Upgrade npm for OIDC support
         if: ${{ inputs.skip_npm != true }}
         run: |
-          npm install -g npm@latest
+          npm install -g npm@11.18.0
           echo "npm version: $(npm --version)"
 
       - name: Publish WASM to npm
