@@ -137,6 +137,66 @@ fn strip_task_checkbox(after_marker: &str) -> Option<(&'static str, &str)> {
         .find_map(|checkbox| content.strip_prefix(checkbox).map(|text| (*checkbox, text)))
 }
 
+/// Display width of `s`, expanding tabs to CommonMark's four-column tab stops.
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .fold(0, |col, c| if c == '\t' { col + 4 - col % 4 } else { col + 1 })
+}
+
+/// The source marker of a list item: the text before the item's content, exactly as
+/// written, plus the column at which that content begins.
+///
+/// This is distinct from the marker that [`extract_list_marker_and_content`] returns.
+/// That one is *normalized* to a single space and is what gets re-emitted; this one
+/// describes the source and is what indentation arithmetic must measure against. A
+/// reflowed item's nested blocks move by `new_content_column - source.content_col`,
+/// so measuring the shift against the normalized marker silently corrupts any item
+/// whose author wrote more than one space after the marker.
+///
+/// `content_col` is a display column, so a tab in the padding counts as the columns
+/// it actually occupies rather than its single byte.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct SourceMarker {
+    pub text: String,
+    pub content_col: usize,
+}
+
+/// Returns `None` when the line does not open a list item.
+pub(crate) fn source_list_marker(line: &str) -> Option<SourceMarker> {
+    let indent_len = line.len() - line.trim_start().len();
+    let trimmed = &line[indent_len..];
+
+    let after_marker = if let Some(rest) = trimmed.strip_prefix(['-', '*', '+']) {
+        rest
+    } else {
+        // Ordered marker: digits then '.'
+        let digits = trimmed.find('.')?;
+        if digits == 0 || !trimmed[..digits].chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        &trimmed[digits + 1..]
+    };
+
+    // A marker must be followed by padding.
+    if !after_marker.starts_with(MARKER_PADDING) {
+        return None;
+    }
+    let after_padding = after_marker.trim_start_matches(MARKER_PADDING);
+    // The checkbox is glued to the marker so reflow never rewrites it, matching the
+    // width that `extract_list_marker_and_content` reports for a task item.
+    let consumed = TASK_CHECKBOXES
+        .iter()
+        .find_map(|checkbox| after_padding.strip_prefix(checkbox).map(|_| checkbox.len()))
+        .unwrap_or(0);
+
+    let marker_end = line.len() - after_padding.len() + consumed;
+    let text = line[..marker_end].to_string();
+    Some(SourceMarker {
+        content_col: display_width(&text),
+        text,
+    })
+}
+
 pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     // First, find the leading indentation
     let indent_len = line.len() - line.trim_start().len();

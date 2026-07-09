@@ -9239,3 +9239,44 @@ fn test_md013_reflow_consecutive_long_lines() {
     assert!(result[0].fix.is_some(), "First warning should have a fix");
     assert!(result[1].fix.is_some(), "Second warning should have a fix");
 }
+
+#[test]
+fn test_text_reflow_preserves_nested_code_blocks_in_lists() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::from_const(40),
+        reflow: true,
+        ..Default::default()
+    };
+    let mut rule = MD013LineLength::from_config_struct(config);
+    rule.list_spacing = MD030Config {
+        ul_single: crate::types::PositiveUsize::from_const(3),
+        ul_multi: crate::types::PositiveUsize::from_const(3),
+        ..Default::default()
+    };
+
+    let content = indoc! {"
+        -   This is a very long list item text that will definitely exceed the forty character limit and force a reflow.
+
+            ```
+            code block line 1
+            code block line 2
+            ```
+    "};
+
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    let expected = indoc! {"
+        -   This is a very long list item text
+            that will definitely exceed the
+            forty character limit and force a
+            reflow.
+
+            ```
+            code block line 1
+            code block line 2
+            ```
+    "};
+
+    assert_eq!(fixed, expected);
+}

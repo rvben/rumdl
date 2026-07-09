@@ -26,7 +26,7 @@ use crate::utils::is_template_directive_only;
 use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
-    is_list_item, is_standalone_link_or_image_line, is_unwrappable_line, split_into_segments,
+    is_list_item, is_standalone_link_or_image_line, is_unwrappable_line, source_list_marker, split_into_segments,
     trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
@@ -1284,11 +1284,11 @@ impl MD013LineLength {
         // content from column 2 to 4), its nested list/blockquote children are reflowed
         // independently and would otherwise keep their original indent — leaving them
         // under the parent's new content column, where a CommonMark parser reparses them
-        // as siblings rather than children. Each frame is (source content column,
+        // as siblings rather than children. Each frame is (normalized marker width,
         // cumulative shift applied to that item's content column); a descendant adds its
         // innermost open ancestor's shift to its own indent so the whole subtree moves
-        // together. With default MD030 every shift is 0, so this is inert and the output
-        // is byte-identical.
+        // together. With a default MD030 and no marker padding every shift is 0, so this
+        // is inert and the output is byte-identical.
         let mut list_shift_stack: Vec<(usize, isize)> = Vec::new();
 
         let mut i = 0;
@@ -1977,6 +1977,12 @@ impl MD013LineLength {
                 let list_start = i;
                 let (marker, first_content) = extract_list_marker_and_content(lines[i]);
                 let marker_len = marker.len();
+                // The normalized marker above is what gets re-emitted; the source marker
+                // is where the item's content actually starts. Nested blocks move by the
+                // difference between the two content columns, so the shift must be
+                // measured against the source, not against the normalized width.
+                let source_marker = source_list_marker(lines[i]);
+                let source_content_col = source_marker.as_ref().map_or(marker_len, |m| m.content_col);
 
                 // Checkbox ([ ]/[x]/[X]) is inline content, not part of the list marker.
                 // Use the base bullet/number marker width for continuation recognition
@@ -2428,9 +2434,14 @@ impl MD013LineLength {
                         let spaces = self.list_spacing.expected_spaces(li.is_ordered, is_multi, bullet_len);
                         let new_marker = format!("{indent_prefix}{}{}{checkbox_tail}", li.marker, " ".repeat(spaces));
                         let new_col = new_marker.chars().count();
-                        let shift = new_col as isize - marker_len as isize;
+                        let shift = new_col as isize - source_content_col as isize;
                         (new_marker, new_col, shift)
                     } else {
+                        // MkDocs enforces a rigid structural indent, so the item is emitted
+                        // exactly as written and its nested blocks never move. Re-emitting
+                        // the normalized marker here would narrow the content column while
+                        // leaving those blocks behind.
+                        let marker = source_marker.map_or(marker, |m| m.text);
                         (marker, indent_size, 0isize)
                     };
                 let expected_indent = " ".repeat(indent_size);
@@ -2503,8 +2514,11 @@ impl MD013LineLength {
                 // Record this item's frame so its nested children inherit the shift.
                 // Only a reflowed item's marker actually moves; an unreflowed one keeps
                 // its source position and so contributes no shift to its children. The
-                // source content column (`marker_len`) is the threshold that decides
-                // which following lines are inside this item.
+                // threshold that decides which following lines are inside this item is
+                // the normalized marker width, NOT `source_content_col`: the collection
+                // loop above gathers continuations by that same width, so the frame
+                // boundary must match it or the two would disagree about ownership of
+                // lines indented between the normalized and the source content column.
                 list_shift_stack.push((marker_len, if needs_reflow { code_indent_shift } else { 0 }));
 
                 if needs_reflow {
