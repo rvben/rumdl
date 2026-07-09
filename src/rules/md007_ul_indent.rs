@@ -156,6 +156,7 @@ impl MD007ULIndent {
         &self,
         nesting_level: usize,
         parent_info: Option<(bool, usize)>, // (is_ordered, content_visual_col)
+        has_ordered_ancestor: bool,
     ) -> usize {
         if nesting_level == 0 {
             return 0;
@@ -179,6 +180,19 @@ impl MD007ULIndent {
                     // Parent is ordered: return text-aligned as primary expected value.
                     // The caller also accepts the fixed indent as an alternative.
                     return parent_content_col;
+                }
+                Some((false, parent_content_col)) if has_ordered_ancestor => {
+                    // Parent is unordered, but we have an ordered ancestor.
+                    // This means text-aligned style is allowed in this chain.
+                    // If parent is offset, we should follow its offset (text-aligned).
+                    let parent_level = nesting_level.saturating_sub(1);
+                    let expected_parent_marker = parent_level * self.config.indent.get() as usize;
+                    let parent_marker_col = parent_content_col.saturating_sub(2);
+                    if parent_marker_col == expected_parent_marker {
+                        return nesting_level * self.config.indent.get() as usize;
+                    } else {
+                        return parent_content_col;
+                    }
                 }
                 _ => {
                     // Parent is unordered or no parent: use fixed indent
@@ -435,7 +449,8 @@ impl Rule for MD007ULIndent {
                     .rev()
                     .find(|item| item.4 == bq_depth)
                     .is_some_and(|item| item.2 || item.5);
-                if ctx.flavor != crate::config::MarkdownFlavor::MkDocs && threshold_ok && chain_ok {
+                let is_explicit = self.config.indent_explicit || self.config.style_explicit;
+                if ctx.flavor != crate::config::MarkdownFlavor::MkDocs && !is_explicit && threshold_ok && chain_ok {
                     list_stack.push((
                         visual_marker_column,
                         line_idx,
@@ -465,7 +480,7 @@ impl Rule for MD007ULIndent {
                 let mut expected_indent = if self.config.start_indented && nesting_level == 0 {
                     self.config.start_indent.get() as usize
                 } else {
-                    self.calculate_expected_indent(nesting_level, parent_info)
+                    self.calculate_expected_indent(nesting_level, parent_info, threshold_ok)
                 };
 
                 // When indent is explicitly set and parent is ordered, also accept
@@ -2470,7 +2485,8 @@ items:
 
     #[test]
     fn test_issue_638_unordered_under_ordered_style_fixed() {
-        // The reporter's exact config: indent = 2, style = "fixed".
+        // When style=fixed is explicitly set, we expect strict fixed indentation (2, 4).
+        // The input has (3, 5) which is text-aligned, so it should be flagged and fixed.
         let config = MD007Config {
             indent: crate::types::IndentSize::from_const(2),
             start_indented: false,
@@ -2482,9 +2498,18 @@ items:
         let rule = MD007ULIndent::from_config_struct(config);
         let ctx = LintContext::new(ISSUE_638_INPUT, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
-        assert!(
-            result.is_empty(),
-            "style=fixed: unordered items under an ordered list must not be flagged, got: {result:?}"
+        assert_eq!(
+            result.len(),
+            2,
+            "Should flag both levels as they don't match fixed style"
+        );
+        assert_eq!(result[0].message, "Expected 2 spaces for indent depth 1, found 3");
+        assert_eq!(result[1].message, "Expected 4 spaces for indent depth 2, found 5");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            "# Title\n\n1. Some text\n  - Indented text\n    - more indented\n"
         );
     }
 
@@ -3069,6 +3094,39 @@ items:
             indoc! {"
                 - Parent item
                   - Nested item
+            "}
+        );
+    }
+
+    #[test]
+    fn test_unordered_under_ordered_explicit_config_flagged_and_fixed() {
+        // Under explicit config, unordered items under ordered parent are NOT exempt.
+        // They are checked and fixed to the expected indent (aligned or fixed).
+        let config = MD007Config {
+            indent: crate::types::IndentSize::from_const(4),
+            start_indented: false,
+            start_indent: crate::types::IndentSize::from_const(4),
+            style: md007_config::IndentStyle::Fixed,
+            style_explicit: false,
+            indent_explicit: true,
+        };
+        let rule = MD007ULIndent::from_config_struct(config);
+
+        let content = indoc! {"
+            1.  Parent item
+                 - Nested item
+        "};
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Should flag the 5-space indent");
+        assert_eq!(result[0].message, "Expected 4 spaces for indent depth 1, found 5");
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            fixed,
+            indoc! {"
+                1.  Parent item
+                    - Nested item
             "}
         );
     }
