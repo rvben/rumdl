@@ -21,7 +21,11 @@ accept = [200, 429]
 # Exclude URLs from checking (regex). npmjs.com returns 403 to automated link
 # checkers due to bot protection; the package page is valid and is linked from
 # the stability docs alongside crates.io and PyPI.
-exclude = ['^https://www\.npmjs\.com/']
+#
+# GitHub returns 404 on /stargazers to non-browser clients, with or without a
+# token; github.com/rust-lang/rust/stargazers behaves identically. The stars
+# badge in README.md links there and resolves fine in a browser.
+exclude = ['^https://www\.npmjs\.com/', '^https://github\.com/.+/stargazers$']
 
 # Timeout per request in seconds
 timeout = 30
