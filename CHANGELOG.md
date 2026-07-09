@@ -78,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **MD013**: measure reflow shift against the source content column, so blocks nested under a padded list marker keep their position ([54f1359](https://github.com/rvben/rumdl/commit/54f1359d1a147d1f260210cd160ec86de7de70dc))
 - **lint-context**: keep lazy continuation lines in their list block ([a17f0af](https://github.com/rvben/rumdl/commit/a17f0af7b7d9c2ab71b7416472f05bb00f928d96))
 
 ## [0.2.29](https://github.com/rvben/rumdl/compare/v0.2.28...v0.2.29) - 2026-07-09
