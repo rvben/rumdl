@@ -1332,7 +1332,7 @@ fn test_issue_509_exact_repro_4space_list_admonition_code_block() {
     let expected = "\
 # Test
 
-1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note
@@ -1372,7 +1372,7 @@ fn test_issue_509_unordered_list_variant() {
     let fixed = rule.fix(&ctx).unwrap();
 
     let expected = "\
-- Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+-   Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note
@@ -1413,7 +1413,7 @@ fn test_issue_509_admonition_code_block_long_text_after_4space() {
     let fixed = rule.fix(&ctx).unwrap();
 
     let expected = "\
-1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note
@@ -1496,7 +1496,7 @@ fn test_issue_509_code_block_with_blank_lines_and_deep_indent() {
     // MD030 normalizes "1.  " to "1. " — only the overlong line and
     // marker spacing should change, everything else verbatim.
     let expected = "\
-1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note
@@ -1546,7 +1546,7 @@ fn test_issue_509_mixed_fence_types_not_confused() {
     let fixed = rule.fix(&ctx).unwrap();
 
     let expected = "\
-1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note
@@ -1595,7 +1595,7 @@ fn test_issue_509_info_string_not_treated_as_closing_fence() {
     let fixed = rule.fix(&ctx).unwrap();
 
     let expected = "\
-1. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
+1.  Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
     tempor incididunt ut labore et dolore magna aliqua.
 
     !!! note

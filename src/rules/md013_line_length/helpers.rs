@@ -123,18 +123,21 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     for bullet in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(bullet) {
             let marker_prefix = &bullet[..bullet.len() - 1]; // "-", "*", or "+"
+
+            // Hoist space extraction and exclude tabs
+            let spaces_len = rest.len() - rest.trim_start_matches(' ').len();
+            let extra_spaces = &rest[..spaces_len];
+            let content = &rest[spaces_len..];
+
             // Include GFM task list checkboxes in the non-wrappable marker prefix
             for checkbox in ["[ ] ", "[x] ", "[X] "] {
-                if let Some(content) = rest.strip_prefix(checkbox) {
+                if let Some(actual_content) = content.strip_prefix(checkbox) {
                     return (
-                        format!("{indent}{marker_prefix} {checkbox}"),
-                        trim_preserving_hard_break(content),
+                        format!("{indent}{marker_prefix} {extra_spaces}{checkbox}"),
+                        trim_preserving_hard_break(actual_content),
                     );
                 }
             }
-            let spaces_len = rest.len() - rest.trim_start().len();
-            let extra_spaces = &rest[..spaces_len];
-            let content = &rest[spaces_len..];
             return (
                 format!("{indent}{marker_prefix} {extra_spaces}"),
                 trim_preserving_hard_break(content),
@@ -155,18 +158,21 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
             {
                 marker_content.push(next);
                 let rest = chars.as_str();
+
+                // Hoist space extraction and exclude tabs
+                let spaces_len = rest.len() - rest.trim_start_matches(' ').len();
+                let extra_spaces = &rest[..spaces_len];
+                let content = &rest[spaces_len..];
+
                 // Check for GFM task list checkboxes
                 for checkbox in ["[ ] ", "[x] ", "[X] "] {
-                    if let Some(content) = rest.strip_prefix(checkbox) {
+                    if let Some(actual_content) = content.strip_prefix(checkbox) {
                         return (
-                            format!("{indent}{marker_content}{checkbox}"),
-                            trim_preserving_hard_break(content),
+                            format!("{indent}{marker_content}{extra_spaces}{checkbox}"),
+                            trim_preserving_hard_break(actual_content),
                         );
                     }
                 }
-                let spaces_len = rest.len() - rest.trim_start().len();
-                let extra_spaces = &rest[..spaces_len];
-                let content = &rest[spaces_len..];
                 return (
                     format!("{indent}{marker_content}{extra_spaces}"),
                     trim_preserving_hard_break(content),
@@ -548,6 +554,34 @@ mod tests {
         assert_eq!(
             extract_list_marker_and_content("99. [x] multi-digit ordered"),
             ("99. [x] ".to_string(), "multi-digit ordered".to_string())
+        );
+
+        // Extra spaces preservation
+        assert_eq!(
+            extract_list_marker_and_content("-   item"),
+            ("-   ".to_string(), "item".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("1.   item"),
+            ("1.   ".to_string(), "item".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("-   [ ] item"),
+            ("-   [ ] ".to_string(), "item".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("1.   [ ] item"),
+            ("1.   [ ] ".to_string(), "item".to_string())
+        );
+
+        // Tabs should not be preserved in marker
+        assert_eq!(
+            extract_list_marker_and_content("- \titem"),
+            ("- ".to_string(), "\titem".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("1. \titem"),
+            ("1. ".to_string(), "\titem".to_string())
         );
     }
 
