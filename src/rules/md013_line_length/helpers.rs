@@ -112,6 +112,31 @@ pub(crate) fn split_into_segments(para_lines: &[String]) -> Vec<Vec<String>> {
     segments
 }
 
+/// GFM task list checkboxes, including the space that separates them from the item text.
+const TASK_CHECKBOXES: [&str; 3] = ["[ ] ", "[x] ", "[X] "];
+
+/// Whitespace that separates a list marker from the item text. CommonMark
+/// expands tabs, so a tab is marker padding rather than content, and rumdl's
+/// own parser accepts `-\tfoo` as a list item.
+const MARKER_PADDING: [char; 2] = [' ', '\t'];
+
+/// Strip a GFM task list checkbox from the text that follows a list marker.
+///
+/// Authors may pad between the marker and the checkbox (`-   [ ] task`). That
+/// padding belongs to the marker, so it is skipped before matching. Without
+/// this the checkbox reaches the reflow engine as prose, which normalizes the
+/// space inside it and rewrites `[ ]` as `[]`, silently turning a task item
+/// into plain text.
+///
+/// Returns the checkbox and the item text after it, or `None` when the item
+/// carries no checkbox.
+fn strip_task_checkbox(after_marker: &str) -> Option<(&'static str, &str)> {
+    let content = after_marker.trim_start_matches(MARKER_PADDING);
+    TASK_CHECKBOXES
+        .iter()
+        .find_map(|checkbox| content.strip_prefix(checkbox).map(|text| (*checkbox, text)))
+}
+
 pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     // First, find the leading indentation
     let indent_len = line.len() - line.trim_start().len();
@@ -120,20 +145,27 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
 
     // Handle bullet lists
     // Trim trailing whitespace while preserving hard breaks
-    for bullet in ["- ", "* ", "+ "] {
-        if let Some(rest) = trimmed.strip_prefix(bullet) {
-            let marker_prefix = &bullet[..bullet.len() - 1]; // "-", "*", or "+"
-            // Include GFM task list checkboxes in the non-wrappable marker prefix
-            for checkbox in ["[ ] ", "[x] ", "[X] "] {
-                if let Some(content) = rest.strip_prefix(checkbox) {
-                    return (
-                        format!("{indent}{marker_prefix} {checkbox}"),
-                        trim_preserving_hard_break(content),
-                    );
-                }
-            }
-            return (format!("{indent}{bullet}"), trim_preserving_hard_break(rest));
+    for bullet in ['-', '*', '+'] {
+        let Some(after_bullet) = trimmed.strip_prefix(bullet) else {
+            continue;
+        };
+        let mut padding = after_bullet.chars();
+        if !padding.next().is_some_and(|c| MARKER_PADDING.contains(&c)) {
+            continue;
         }
+        // Include GFM task list checkboxes in the non-wrappable marker prefix
+        if let Some((checkbox, content)) = strip_task_checkbox(after_bullet) {
+            return (
+                format!("{indent}{bullet} {checkbox}"),
+                trim_preserving_hard_break(content),
+            );
+        }
+        // Only the first padding character belongs to the marker. Any further
+        // padding stays with the content, where reflow normalizes it away.
+        return (
+            format!("{indent}{bullet} "),
+            trim_preserving_hard_break(padding.as_str()),
+        );
     }
 
     // Handle numbered lists on trimmed content
@@ -143,20 +175,20 @@ pub(crate) fn extract_list_marker_and_content(line: &str) -> (String, String) {
     while let Some(c) = chars.next() {
         marker_content.push(c);
         if c == '.' {
-            // Check if next char is a space
+            // Check if next char is marker padding
             if let Some(next) = chars.next()
-                && next == ' '
+                && MARKER_PADDING.contains(&next)
             {
-                marker_content.push(next);
+                // Normalize the padding: a tab would otherwise land in the marker,
+                // where its byte length misreports the content column.
+                marker_content.push(' ');
                 let rest = chars.as_str();
                 // Check for GFM task list checkboxes
-                for checkbox in ["[ ] ", "[x] ", "[X] "] {
-                    if let Some(content) = rest.strip_prefix(checkbox) {
-                        return (
-                            format!("{indent}{marker_content}{checkbox}"),
-                            trim_preserving_hard_break(content),
-                        );
-                    }
+                if let Some((checkbox, content)) = strip_task_checkbox(rest) {
+                    return (
+                        format!("{indent}{marker_content}{checkbox}"),
+                        trim_preserving_hard_break(content),
+                    );
                 }
                 let content = trim_preserving_hard_break(rest);
                 return (format!("{indent}{marker_content}"), content);
@@ -187,9 +219,9 @@ pub(crate) fn is_numbered_list_item(line: &str) -> bool {
     // Can have more digits
     while let Some(c) = chars.next() {
         if c == '.' {
-            // After period, must have a space (consistent with extract_list_marker_and_content)
+            // After period, must have marker padding (consistent with extract_list_marker_and_content)
             // "2019." alone is NOT treated as a list item to avoid false positives
-            return chars.next() == Some(' ');
+            return chars.next().is_some_and(|c| MARKER_PADDING.contains(&c));
         }
         if !c.is_numeric() {
             return false;
@@ -201,8 +233,7 @@ pub(crate) fn is_numbered_list_item(line: &str) -> bool {
 pub(crate) fn is_list_item(line: &str) -> bool {
     // Bullet lists
     if (line.starts_with('-') || line.starts_with('*') || line.starts_with('+'))
-        && line.len() > 1
-        && line.chars().nth(1) == Some(' ')
+        && line.chars().nth(1).is_some_and(|c| MARKER_PADDING.contains(&c))
     {
         return true;
     }
@@ -537,6 +568,73 @@ mod tests {
         assert_eq!(
             extract_list_marker_and_content("99. [x] multi-digit ordered"),
             ("99. [x] ".to_string(), "multi-digit ordered".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_list_marker_task_checkbox_with_wide_marker_spacing() {
+        // Extra spaces between the marker and the checkbox are marker padding.
+        // The checkbox must still be recognized, otherwise it is handed to the
+        // reflow engine as prose and "[ ]" collapses to "[]", silently turning
+        // a task item into plain text.
+        assert_eq!(
+            extract_list_marker_and_content("-   [ ] wide unchecked"),
+            ("- [ ] ".to_string(), "wide unchecked".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("*  [x] wide checked"),
+            ("* [x] ".to_string(), "wide checked".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("+    [X] wide checked upper"),
+            ("+ [X] ".to_string(), "wide checked upper".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("  -  [ ] indented and wide"),
+            ("  - [ ] ".to_string(), "indented and wide".to_string())
+        );
+        // Ordered markers pad after the period.
+        assert_eq!(
+            extract_list_marker_and_content("1.   [ ] wide ordered"),
+            ("1. [ ] ".to_string(), "wide ordered".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("99.  [x] wide multi-digit"),
+            ("99. [x] ".to_string(), "wide multi-digit".to_string())
+        );
+        // A tab is padding too: CommonMark expands it, rumdl's parser accepts
+        // it, and leaving it in place mangles the checkbox as extra spaces did.
+        assert_eq!(
+            extract_list_marker_and_content("- \t[ ] tab padded"),
+            ("- [ ] ".to_string(), "tab padded".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("-\t[ ] tab only"),
+            ("- [ ] ".to_string(), "tab only".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("1.\t[x] ordered tab only"),
+            ("1. [x] ".to_string(), "ordered tab only".to_string())
+        );
+        // A tab-padded item without a checkbox normalizes the marker too.
+        assert_eq!(
+            extract_list_marker_and_content("-\tplain tab item"),
+            ("- ".to_string(), "plain tab item".to_string())
+        );
+        assert_eq!(
+            extract_list_marker_and_content("1.\tplain ordered tab item"),
+            ("1. ".to_string(), "plain ordered tab item".to_string())
+        );
+        // Padding without a checkbox keeps the existing shape: the marker is
+        // normalized to one space and the padding stays with the content.
+        assert_eq!(
+            extract_list_marker_and_content("-   plain wide item"),
+            ("- ".to_string(), "  plain wide item".to_string())
+        );
+        // A bracket pair that is not a checkbox is content, not a marker.
+        assert_eq!(
+            extract_list_marker_and_content("-   [link] text"),
+            ("- ".to_string(), "  [link] text".to_string())
         );
     }
 

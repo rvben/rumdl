@@ -1033,6 +1033,13 @@ impl MD013LineLength {
             start_bq.prefix.clone()
         };
 
+        // A thematic break opens with what looks like a bullet marker (`- - -`).
+        // It is not a list item, and reflowing it as prose destroys the break.
+        // The top-level reflow path applies the same exemption.
+        if is_horizontal_rule(&start_bq.content) {
+            return (None, start_idx + 1);
+        }
+
         let (marker, first_body) = extract_list_marker_and_content(&start_bq.content);
         if marker.is_empty() {
             return (None, start_idx + 1);

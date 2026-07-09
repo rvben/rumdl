@@ -4302,6 +4302,30 @@ fn test_nested_blockquote_list_item_reflows() {
     );
 }
 
+/// A thematic break inside a blockquote is not a bullet list, whichever
+/// whitespace separates its markers. Reflowing it as list prose destroys it.
+#[test]
+fn test_blockquote_thematic_break_is_not_reflowed() {
+    let config = MD013Config {
+        line_length: crate::types::LineLength::new(40),
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    };
+    let rule = MD013LineLength::from_config_struct(config);
+
+    for separator in [" ", "\t"] {
+        let body = std::iter::repeat_n("-", 41).collect::<Vec<_>>().join(separator);
+        let content = format!("> {body}\n");
+        let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "thematic break separated by {separator:?} was rewritten"
+        );
+    }
+}
+
 /// A GFM task-list checkbox item in a blockquote wraps with continuation lines
 /// aligned under the content (the checkbox is part of the marker, not the body).
 #[test]
@@ -4759,6 +4783,56 @@ mod test_task_list_reflow {
                 fix.replacement
             );
         }
+    }
+
+    #[test]
+    fn test_task_item_wide_marker_spacing_does_not_corrupt_checkbox() {
+        // Padding between the list marker and the checkbox is marker spacing,
+        // not content. Reflow must still recognize the task item; handing
+        // "[ ]" to the reflow engine as prose collapses it to "[]" and the
+        // item silently stops being a task item.
+        let rule = make_rule(80);
+        let tail = "This task has a really long description that exceeds the line limit and should wrap";
+        for marker in ["-  ", "-   ", "*  ", "+   ", "1.  ", "10.   ", "- \t", "-\t", "1.\t"] {
+            let content = format!("{marker}[ ] {tail}\n");
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert!(
+                !fixed.contains("[]"),
+                "marker {marker:?} corrupted the checkbox: {fixed:?}"
+            );
+            assert!(
+                fixed.contains("[ ] "),
+                "marker {marker:?} dropped the checkbox: {fixed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tab_padded_item_stays_a_list_item() {
+        // rumdl's parser accepts a tab as marker padding. When MD013's own
+        // heuristic did not, the item was reflowed as a plain paragraph and its
+        // continuation landed at column 0, dissolving the list.
+        let rule = make_rule(40);
+        let ctx = LintContext::new(
+            "-\tAlpha beta gamma delta epsilon zeta eta theta\n",
+            MarkdownFlavor::Standard,
+            None,
+        );
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "- Alpha beta gamma delta epsilon zeta\n  eta theta\n");
+    }
+
+    #[test]
+    fn test_task_item_wide_marker_spacing_wraps_at_content_column() {
+        // The rebuilt marker is normalized to MD030's single space, so the
+        // continuation aligns under the checkbox content column, exactly as it
+        // does for a single-space source marker.
+        let rule = make_rule(40);
+        let content = "-   [ ] Alpha beta gamma delta epsilon zeta eta theta\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "- [ ] Alpha beta gamma delta epsilon\n      zeta eta theta\n");
     }
 
     #[test]
