@@ -101,11 +101,11 @@ try_install_binary() {
     local checksum_asset="${asset}.sha256"
     local base_url="https://github.com/rvben/rumdl/releases/download/${tag}"
     local workdir
-    workdir=$(mktemp -d)
+    workdir=$(mktemp -d) || exit 1
 
     local subshell_status=0
     (
-        cd "$workdir"
+        cd "$workdir" || exit 1
 
         echo "Downloading $asset"
         http_code=$(curl -sL --retry 3 -o "$asset" -w '%{http_code}' "${base_url}/${asset}" || echo "000")
@@ -128,7 +128,7 @@ try_install_binary() {
         fi
 
         echo "Verifying checksum"
-        expected_hash=$(awk '{print $1}' "$checksum_asset" | tr '[:upper:]' '[:lower:]')
+        expected_hash=$(awk '{print $1}' "$checksum_asset" | tr -d '\r' | tr '[:upper:]' '[:lower:]')
         actual_hash=$(sha256_of "$asset" | tr '[:upper:]' '[:lower:]')
         if [ "$expected_hash" != "$actual_hash" ]; then
             echo "::error::Checksum mismatch for $asset (expected $expected_hash, got $actual_hash)"
@@ -137,7 +137,11 @@ try_install_binary() {
 
         echo "Extracting $asset"
         if [ "$ext" = "zip" ]; then
-            /c/Windows/System32/tar.exe -xf "$asset"
+            if [ -x "/c/Windows/System32/tar.exe" ]; then
+                /c/Windows/System32/tar.exe -xf "$asset"
+            else
+                powershell -NoProfile -Command "Expand-Archive -Path '$asset' -DestinationPath '.' -Force"
+            fi
         else
             tar -xzf "$asset"
         fi
@@ -162,8 +166,13 @@ try_install_binary() {
 echo
 target_info=$(resolve_target)
 if [ -n "$target_info" ]; then
-    read -r target ext <<<"$target_info"
-    if ! try_install_binary "$target" "$ext"; then
+    if command -v curl >/dev/null 2>&1; then
+        read -r target ext <<<"$target_info"
+        if ! try_install_binary "$target" "$ext"; then
+            install_via_pip
+        fi
+    else
+        echo "curl not found — falling back to pip"
         install_via_pip
     fi
 else
