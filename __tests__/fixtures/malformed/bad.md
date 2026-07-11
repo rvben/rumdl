@@ -1,3 +1,2 @@
 # Bad markdown
-
-## No space after hash
+##No space after hash
