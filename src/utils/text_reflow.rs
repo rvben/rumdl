@@ -123,61 +123,31 @@ pub fn normalize_reference_label(label: &str) -> String {
 /// Build a boolean mask indicating which character positions are inside inline code spans.
 /// Handles single, double, and triple backtick delimiters.
 fn compute_inline_code_mask(text: &str) -> Vec<bool> {
+    let code_spans = extract_code_spans(text);
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut mask = vec![false; len];
-    let mut i = 0;
-
-    while i < len {
-        if chars[i] == '`' {
-            // Count opening backticks
-            let open_start = i;
-            let mut backtick_count = 0;
-            while i < len && chars[i] == '`' {
-                backtick_count += 1;
-                i += 1;
+    let mut mask = vec![false; chars.len()];
+    let mut span_it = code_spans.iter().peekable();
+    let mut byte_idx = 0;
+    // Map character indices to byte-offset based code spans in a single pass.
+    // Since code spans are sorted by start offset, we advance the span iterator
+    // as our character byte index passes the end of the current span.
+    for (char_idx, ch) in chars.iter().enumerate() {
+        let next_byte_idx = byte_idx + ch.len_utf8();
+        while let Some(span) = span_it.peek() {
+            if span.end <= byte_idx {
+                span_it.next();
+            } else {
+                break;
             }
-
-            // Find matching closing backticks (same count)
-            let mut found_close = false;
-            let content_start = i;
-            while i < len {
-                if chars[i] == '`' {
-                    let close_start = i;
-                    let mut close_count = 0;
-                    while i < len && chars[i] == '`' {
-                        close_count += 1;
-                        i += 1;
-                    }
-                    if close_count == backtick_count {
-                        // Mark the content between the delimiters (not the backticks themselves)
-                        for item in mask.iter_mut().take(close_start).skip(content_start) {
-                            *item = true;
-                        }
-                        // Also mark the opening and closing backticks
-                        for item in mask.iter_mut().take(content_start).skip(open_start) {
-                            *item = true;
-                        }
-                        for item in mask.iter_mut().take(i).skip(close_start) {
-                            *item = true;
-                        }
-                        found_close = true;
-                        break;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-
-            if !found_close {
-                // No matching close — backticks are literal, not code span
-                i = open_start + backtick_count;
-            }
-        } else {
-            i += 1;
         }
+        if let Some(span) = span_it.peek()
+            && byte_idx >= span.start
+            && byte_idx < span.end
+        {
+            mask[char_idx] = true;
+        }
+        byte_idx = next_byte_idx;
     }
-
     mask
 }
 
@@ -820,6 +790,26 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
 
     // Sort by start position
     spans.sort_by_key(|s| s.start);
+    spans
+}
+
+#[derive(Debug, Clone)]
+struct CodeSpan {
+    start: usize,
+    end: usize,
+}
+
+fn extract_code_spans(text: &str) -> Vec<CodeSpan> {
+    let mut spans = Vec::new();
+    let parser = Parser::new(text).into_offset_iter();
+    for (event, range) in parser {
+        if let Event::Code(_) = event {
+            spans.push(CodeSpan {
+                start: range.start,
+                end: range.end,
+            });
+        }
+    }
     spans
 }
 
