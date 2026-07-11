@@ -645,7 +645,7 @@ impl std::fmt::Display for Element {
             Element::HugoShortcode(s) => write!(f, "{s}"),
             Element::AttrList(s) => write!(f, "{s}"),
             Element::MystRole(s) => write!(f, "{s}"),
-            Element::Code(s) => write!(f, "`{s}`"),
+            Element::Code(s) => write!(f, "{s}"),
             Element::Bold { content, underscore } => {
                 if *underscore {
                     write!(f, "__{content}__")
@@ -1004,8 +1004,8 @@ fn parse_markdown_elements_inner(
     let mut elements = Vec::new();
     let mut remaining = text;
 
-    // Pre-extract emphasis spans and link spans using pulldown-cmark. These run
-    // as two separate parses rather than one shared parser: link resolution
+    // Pre-extract emphasis spans, link spans, and code spans using pulldown-cmark.
+    // These run as separate parses rather than one shared parser: link resolution
     // (the broken-link callback, needed to keep undefined shortcuts/references
     // atomic) changes which bracket runs collapse into link nodes, which shifts
     // where nearby emphasis delimiters pair up in edge cases (e.g. an unresolved
@@ -1013,6 +1013,7 @@ fn parse_markdown_elements_inner(
     // emphasis_spans; each parse keeps its own event stream self-consistent.
     let emphasis_spans = extract_emphasis_spans(text);
     let link_spans = extract_link_spans(text, defined_references);
+    let code_spans = extract_code_spans(text);
 
     while !remaining.is_empty() {
         // Calculate current byte offset in original text
@@ -1118,12 +1119,20 @@ fn parse_markdown_elements_inner(
         let mut attr_list_len: usize = 0;
         let mut myst_role_len: usize = 0;
 
-        // Check for code spans (not handled by pulldown-cmark in this context)
-        if let Some(pos) = remaining.find('`')
-            && pos < next_special
-        {
-            next_special = pos;
-            special_type = "code";
+        let mut next_code_span: Option<&CodeSpan> = None;
+        // Check for code spans using pulldown-cmark pre-extracted spans
+        for span in &code_spans {
+            if span.start >= current_offset {
+                next_code_span = Some(span);
+                break;
+            }
+        }
+        if let Some(span) = next_code_span {
+            let pos_in_remaining = span.start - current_offset;
+            if pos_in_remaining < next_special {
+                next_special = pos_in_remaining;
+                special_type = "pulldown_code";
+            }
         }
 
         // Check for MyST inline roles - {role}`content` (e.g. {cite:p}`ref`).
@@ -1302,17 +1311,12 @@ fn parse_markdown_elements_inner(
 
             // Process the special element
             match special_type {
-                "code" => {
-                    // Find end of code
-                    if let Some(code_end) = remaining[1..].find('`') {
-                        let code = &remaining[1..=code_end];
-                        elements.push(Element::Code(code.to_string()));
-                        remaining = &remaining[1 + code_end + 1..];
-                    } else {
-                        // No closing backtick, treat as text
-                        elements.push(Element::Text(remaining.to_string()));
-                        break;
-                    }
+                "pulldown_code" => {
+                    let span = next_code_span.unwrap();
+                    let span_len = span.end - span.start;
+                    let code = &remaining[..span_len];
+                    elements.push(Element::Code(code.to_string()));
+                    remaining = &remaining[span_len..];
                 }
                 "attr_list" => {
                     elements.push(Element::AttrList(remaining[..attr_list_len].to_string()));
@@ -3520,5 +3524,40 @@ mod tests {
         // Line 3 is the div marker — should not be reflowed
         let result = reflow_paragraph_at_line(content, 3, 80);
         assert!(result.is_none(), "Div marker line should not be reflowed");
+    }
+
+    #[test]
+    fn test_code_span_parsing() {
+        // 1. Single backtick
+        let elements = parse_markdown_elements_inner("`code`", false, false, None);
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], Element::Code(s) if s == "`code`"));
+
+        // 2. Double backtick
+        let elements = parse_markdown_elements_inner("``code``", false, false, None);
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], Element::Code(s) if s == "``code``"));
+
+        // 3. Double backtick with single backtick inside
+        let elements = parse_markdown_elements_inner("``code`inside``", false, false, None);
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], Element::Code(s) if s == "``code`inside``"));
+
+        // 4. Spaces inside
+        let elements = parse_markdown_elements_inner("`` code ``", false, false, None);
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], Element::Code(s) if s == "`` code ``"));
+
+        // 5. Unclosed backtick (should be parsed as Text)
+        let elements = parse_markdown_elements_inner("`unclosed", false, false, None);
+        assert_eq!(elements.len(), 1);
+        assert!(matches!(&elements[0], Element::Text(s) if s == "`unclosed"));
+
+        // 6. Unclosed backtick followed by a link (the link should be parsed as Link, not Text)
+        let elements = parse_markdown_elements_inner("`unclosed [link](url)", false, false, None);
+        // We expect: Text("`unclosed "), Link("[link](url)")
+        assert_eq!(elements.len(), 2);
+        assert!(matches!(&elements[0], Element::Text(s) if s == "`unclosed "));
+        assert!(matches!(&elements[1], Element::Link(s) if s == "[link](url)"));
     }
 }
