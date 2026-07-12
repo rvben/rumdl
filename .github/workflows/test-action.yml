@@ -2,9 +2,9 @@ name: Test Action
 on:
   push:
     branches: [main]
-    paths: ["action.yml", "scripts/rumdl-action.sh"]
+    paths: ["action.yml", "scripts/rumdl-action.sh", "__tests__/fixtures/**", ".github/workflows/test-action.yml"]
   pull_request:
-    paths: ["action.yml", "scripts/rumdl-action.sh"]
+    paths: ["action.yml", "scripts/rumdl-action.sh", "__tests__/fixtures/**", ".github/workflows/test-action.yml"]
   workflow_dispatch:
 
 concurrency:
