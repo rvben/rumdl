@@ -423,8 +423,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
-    if let Err(e) = result {
-        eprintln!("[rumdl panic handler] Uncaught panic: {e:?}");
+    if result.is_err() {
+        eprintln!(
+            "\n[rumdl panic handler] rumdl crashed unexpectedly (v{}). This is a bug -- please report it at https://github.com/rvben/rumdl/issues and include the panic message printed above.",
+            env!("CARGO_PKG_VERSION")
+        );
         exit::tool_error();
     } else {
         Ok(())
