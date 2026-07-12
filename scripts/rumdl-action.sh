@@ -4,14 +4,180 @@ set -eou pipefail
 
 # Version: use input or default to latest
 rumdl_version="${GHA_RUMDL_VERSION:-}"
+rumdl_cmd="rumdl"
+
+install_via_pip() {
+    if [ -n "$rumdl_version" ]; then
+        echo "Installing rumdl (v$rumdl_version) via pip"
+        pip install rumdl=="$rumdl_version"
+    else
+        echo "Installing rumdl (latest) via pip"
+        pip install rumdl
+    fi
+    rumdl_cmd="rumdl"
+}
+
+# Prints "<target-triple> <archive-ext>" for this runner's OS/arch, or nothing if unmapped.
+resolve_target() {
+    local os_name arch_name platform_os platform_arch
+
+    os_name="${RUNNER_OS:-}"
+    case "$os_name" in
+    Linux) platform_os="linux" ;;
+    macOS) platform_os="macos" ;;
+    Windows) platform_os="windows" ;;
+    *)
+        case "$(uname -s)" in
+        Linux*) platform_os="linux" ;;
+        Darwin*) platform_os="macos" ;;
+        MINGW* | MSYS* | CYGWIN*) platform_os="windows" ;;
+        *) platform_os="" ;;
+        esac
+        ;;
+    esac
+
+    arch_name="${RUNNER_ARCH:-}"
+    case "$arch_name" in
+    X64 | x86_64 | AMD64) platform_arch="x86_64" ;;
+    ARM64 | arm64 | aarch64) platform_arch="aarch64" ;;
+    *)
+        case "$(uname -m)" in
+        x86_64 | amd64) platform_arch="x86_64" ;;
+        aarch64 | arm64) platform_arch="aarch64" ;;
+        *) platform_arch="" ;;
+        esac
+        ;;
+    esac
+
+    case "${platform_os}-${platform_arch}" in
+    linux-x86_64) echo "x86_64-unknown-linux-musl tar.gz" ;;
+    linux-aarch64) echo "aarch64-unknown-linux-musl tar.gz" ;;
+    macos-x86_64) echo "x86_64-apple-darwin tar.gz" ;;
+    macos-aarch64) echo "aarch64-apple-darwin tar.gz" ;;
+    windows-x86_64) echo "x86_64-pc-windows-msvc zip" ;;
+    *) echo "" ;;
+    esac
+}
+
+# Portable lowercase sha256 of $1: prefers sha256sum (Linux/Git Bash), falls back to
+# shasum -a 256 (macOS default toolset does not guarantee sha256sum).
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
+
+# Attempts the prebuilt-binary install for target triple $1 / archive extension $2.
+# On success, sets rumdl_cmd to the binary's absolute path and returns 0.
+# Returns 1 (graceful fallback to pip) only for the 3 defined cases: unparseable "latest"
+# redirect, 404 on the asset, or 404 on its checksum. Any other failure (network error,
+# unexpected HTTP status, checksum mismatch) is a hard exit — never silently falls back,
+# since that would mask connectivity flakiness or a corrupted/tampered download as an
+# unsupported-platform case.
+try_install_binary() {
+    local target="$1" ext="$2" tag effective_url curl_status
+
+    if [ -n "$rumdl_version" ]; then
+        tag="v${rumdl_version}"
+    else
+        curl_status=0
+        effective_url=$(curl -fsSLo /dev/null --retry 3 -w '%{url_effective}' "https://github.com/rvben/rumdl/releases/latest") || curl_status=$?
+        if [ "$curl_status" -ne 0 ]; then
+            echo "::error::Could not reach GitHub to resolve the latest rumdl release (curl exit $curl_status)"
+            exit 1
+        fi
+        if [[ "$effective_url" =~ /tag/(v[0-9][^/]*)$ ]]; then
+            tag="${BASH_REMATCH[1]}"
+        else
+            echo "Latest-release redirect did not resolve to a parseable tag ($effective_url) — falling back to pip"
+            return 1
+        fi
+    fi
+    echo "Resolved release: $tag"
+
+    local asset="rumdl-${tag}-${target}.${ext}"
+    local checksum_asset="${asset}.sha256"
+    local base_url="https://github.com/rvben/rumdl/releases/download/${tag}"
+    local workdir
+    workdir=$(mktemp -d) || exit 1
+
+    local subshell_status=0
+    (
+        cd "$workdir" || exit 1
+
+        echo "Downloading $asset"
+        http_code=$(curl -sL --retry 3 -o "$asset" -w '%{http_code}' "${base_url}/${asset}" || echo "000")
+        if [ "$http_code" = "404" ]; then
+            echo "No prebuilt binary published for $target — falling back to pip"
+            exit 2
+        elif [ "$http_code" != "200" ]; then
+            echo "::error::Failed to download $asset (HTTP $http_code)"
+            exit 1
+        fi
+
+        echo "Downloading $checksum_asset"
+        http_code=$(curl -sL --retry 3 -o "$checksum_asset" -w '%{http_code}' "${base_url}/${checksum_asset}" || echo "000")
+        if [ "$http_code" = "404" ]; then
+            echo "No checksum published for $asset — falling back to pip"
+            exit 2
+        elif [ "$http_code" != "200" ]; then
+            echo "::error::Failed to download $checksum_asset (HTTP $http_code)"
+            exit 1
+        fi
+
+        echo "Verifying checksum"
+        expected_hash=$(awk '{print $1}' "$checksum_asset" | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+        actual_hash=$(sha256_of "$asset" | tr '[:upper:]' '[:lower:]')
+        if [ "$expected_hash" != "$actual_hash" ]; then
+            echo "::error::Checksum mismatch for $asset (expected $expected_hash, got $actual_hash)"
+            exit 1
+        fi
+
+        echo "Extracting $asset"
+        if [ "$ext" = "zip" ]; then
+            if [ -x "/c/Windows/System32/tar.exe" ]; then
+                /c/Windows/System32/tar.exe -xf "$asset"
+            else
+                powershell -NoProfile -Command "Expand-Archive -Path '$asset' -DestinationPath '.' -Force"
+            fi
+        else
+            tar -xzf "$asset"
+        fi
+    ) || subshell_status=$?
+
+    case "$subshell_status" in
+    0) : ;;
+    2) return 1 ;;
+    *) exit "$subshell_status" ;;
+    esac
+
+    if [ "$ext" = "zip" ]; then
+        rumdl_cmd="${workdir}/rumdl.exe"
+    else
+        rumdl_cmd="${workdir}/rumdl"
+        chmod +x "$rumdl_cmd"
+    fi
+    echo "Installed rumdl binary: $rumdl_cmd"
+    return 0
+}
 
 echo
-if [ -n "$rumdl_version" ]; then
-    echo "Installing rumdl (v$rumdl_version)"
-    pip install rumdl=="$rumdl_version"
+target_info=$(resolve_target)
+if [ -n "$target_info" ]; then
+    if command -v curl >/dev/null 2>&1; then
+        read -r target ext <<<"$target_info"
+        if ! try_install_binary "$target" "$ext"; then
+            install_via_pip
+        fi
+    else
+        echo "curl not found — falling back to pip"
+        install_via_pip
+    fi
 else
-    echo "Installing rumdl (latest)"
-    pip install rumdl
+    echo "No prebuilt rumdl binary for RUNNER_OS='${RUNNER_OS:-}' RUNNER_ARCH='${RUNNER_ARCH:-}' — falling back to pip"
+    install_via_pip
 fi
 
 echo
@@ -75,7 +241,7 @@ fi
 
 # Run rumdl and capture output
 set +e
-results=$(rumdl check "${lint_paths[@]}" "${rumdl_args[@]}" 2>&1)
+results=$("$rumdl_cmd" check "${lint_paths[@]}" "${rumdl_args[@]}" 2>&1)
 exit_code=$?
 set -e
 
