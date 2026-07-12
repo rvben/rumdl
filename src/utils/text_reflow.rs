@@ -694,6 +694,12 @@ struct EmphasisSpan {
 ///
 /// Returns spans sorted by start position.
 fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
+    // Every emphasis, strong, or strikethrough marker starts with one of these
+    // bytes, so their absence rules out any span without running the parser.
+    if !text.contains(['*', '_', '~']) {
+        return Vec::new();
+    }
+
     let mut spans = Vec::new();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
@@ -800,6 +806,11 @@ struct CodeSpan {
 }
 
 fn extract_code_spans(text: &str) -> Vec<CodeSpan> {
+    // A code span always needs a backtick; skip the parser entirely without one.
+    if !text.contains('`') {
+        return Vec::new();
+    }
+
     let mut spans = Vec::new();
     let parser = Parser::new(text).into_offset_iter();
     for (event, range) in parser {
@@ -823,6 +834,12 @@ struct LinkSpan {
 }
 
 fn extract_link_spans(text: &str, defined_references: Option<&HashSet<String>>) -> Vec<LinkSpan> {
+    // Links, images, and footnote references all open with `[`; skip the
+    // parser entirely without one.
+    if !text.contains('[') {
+        return Vec::new();
+    }
+
     let mut spans = Vec::new();
     let mut options = Options::empty();
     options.insert(Options::ENABLE_FOOTNOTES);
@@ -987,7 +1004,13 @@ fn parse_markdown_elements_inner(
     let mut elements = Vec::new();
     let mut remaining = text;
 
-    // Pre-extract emphasis spans and link spans using pulldown-cmark
+    // Pre-extract emphasis spans and link spans using pulldown-cmark. These run
+    // as two separate parses rather than one shared parser: link resolution
+    // (the broken-link callback, needed to keep undefined shortcuts/references
+    // atomic) changes which bracket runs collapse into link nodes, which shifts
+    // where nearby emphasis delimiters pair up in edge cases (e.g. an unresolved
+    // shortcut containing `**`). Sharing a parser would leak that shift into
+    // emphasis_spans; each parse keeps its own event stream self-consistent.
     let emphasis_spans = extract_emphasis_spans(text);
     let link_spans = extract_link_spans(text, defined_references);
 
