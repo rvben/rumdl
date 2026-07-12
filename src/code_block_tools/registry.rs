@@ -210,6 +210,28 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
+    // Shell - shuck (lint only; faster shellcheck alternative). `--output-format
+    // concise` keeps shuck's legacy one-line-per-diagnostic output, which parses
+    // via the same generic "file:line:col: message" path as other tools instead
+    // of needing a dedicated parser. Requires shuck >= 0.0.43 for `check -` stdin
+    // support (see rvben/rumdl#655 and ewhauser/shuck#1123).
+    m.insert(
+        "shuck",
+        ToolDefinition {
+            command: vec![
+                "shuck".to_string(),
+                "check".to_string(),
+                "--output-format".to_string(),
+                "concise".to_string(),
+                "-".to_string(),
+            ],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
     // Rust - rustfmt
     m.insert(
         "rustfmt",
@@ -726,6 +748,14 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Shell",
         kind: ToolKind::Format,
         doc_group: "shfmt",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "shuck",
+        language: "Shell",
+        kind: ToolKind::Lint,
+        doc_group: "shuck",
         display_command: None,
         runtime: true,
     },

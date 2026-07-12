@@ -148,6 +148,20 @@ fn shellcheck_lints_shell() {
 }
 
 #[test]
+fn shuck_lints_shell() {
+    require_tool!("shuck");
+    // Regression guard for the stdin fix upstream (ewhauser/shuck#1123, shipped in
+    // v0.0.43): a pre-0.0.43 shuck treats `-` as a literal filename instead of
+    // reading stdin and would report a missing-file error here instead of a
+    // real diagnostic.
+    let out = lint("shell", "shuck", "shell", "name=\"world\"\necho \"hello $nombre\"\n");
+    assert!(
+        out.contains("referenced before assignment") || out.contains("C006"),
+        "shuck should flag the reference to the undefined variable:\n{out}"
+    );
+}
+
+#[test]
 fn jq_lints_invalid_json() {
     require_tool!("jq");
     let out = lint("json", "jq", "json", "{\"a\": 1,}");
@@ -367,6 +381,7 @@ const VERIFIED: &[&str] = &[
     "prettier",
     "shellcheck",
     "shfmt",
+    "shuck",
     "rustfmt",
     "gofmt",
     "goimports",
