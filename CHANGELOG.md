@@ -70,6 +70,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.31](https://github.com/rvben/rumdl/compare/v0.2.30...v0.2.31) - 2026-07-12
+
+### Added
+
+- **action**: install rumdl from GitHub Releases instead of pip ([7f69695](https://github.com/rvben/rumdl/commit/7f69695238e1ebffba75a82cf8336e777a965f4a))
+
+### Performance
+
+- **reflow**: optimize inline code mask calculation using pre-extracted spans ([27e5507](https://github.com/rvben/rumdl/commit/27e55072be01e075a8b6f72b7409c4b29c5f56e1))
+
 ## [0.2.30](https://github.com/rvben/rumdl/compare/v0.2.29...v0.2.30) - 2026-07-09
 
 ### Added
