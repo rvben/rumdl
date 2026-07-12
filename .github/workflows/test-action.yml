@@ -19,11 +19,32 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+      - uses: ./
+        with:
+          path: __tests__/fixtures/clean/
+
+  test-pip-fallback:
+    # A python-only container without curl cannot use the binary install path,
+    # so this proves the pip fallback keeps such environments working.
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.12-slim
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Assert curl is absent so the fallback is actually exercised
+        shell: bash
+        run: |
+          if command -v curl; then
+            echo "curl is unexpectedly present; this test would be vacuous"
+            exit 1
+          fi
       - uses: ./
         with:
           path: __tests__/fixtures/clean/
@@ -239,6 +260,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - test-default
+      - test-pip-fallback
       - test-with-version
       - test-with-config
       - test-annotations
