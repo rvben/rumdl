@@ -1002,6 +1002,54 @@ echo again
         assert_eq!(result[0].severity, Severity::Warning);
     }
 
+    /// Regression test for a category of bugs, not one instance: rumdl's generated
+    /// Linguist alias table must recognize every high-traffic language alias, not
+    /// just the exact one reported (`py`). Each alias below is confirmed present in
+    /// GitHub Linguist's current `aliases:` list for its language (`py` and `py3`
+    /// were added upstream after the `e51c2270` generation pin, see the header
+    /// comment in `src/linguist_data.rs`); none of them should ever trigger an
+    /// unknown-language warning.
+    #[test]
+    fn test_unknown_language_warn_known_aliases_not_flagged() {
+        let known_aliases = [
+            "py",
+            "python",
+            "sh",
+            "bash",
+            "shell",
+            "zsh",
+            "js",
+            "javascript",
+            "ts",
+            "typescript",
+            "rb",
+            "ruby",
+            "rs",
+            "rust",
+            "yml",
+            "yaml",
+            "cpp",
+            "c++",
+            "csharp",
+            "golang",
+            "dockerfile",
+            "jsonc",
+            "kotlin",
+        ];
+        for alias in known_aliases {
+            let content = format!("```{alias}\ncode\n```");
+            let config = MD040Config {
+                unknown_language_action: UnknownLanguageAction::Warn,
+                ..Default::default()
+            };
+            let result = run_check_with_config(&content, config).unwrap();
+            assert!(
+                result.is_empty(),
+                "known Linguist alias '{alias}' should not be flagged as unknown: {result:?}"
+            );
+        }
+    }
+
     #[test]
     fn test_unknown_language_error() {
         let content = "```mycustomlang\ncode\n```";

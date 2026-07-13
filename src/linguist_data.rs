@@ -4,6 +4,12 @@
 //! Linguist commit: e51c2270 (2026-01-14)
 //!
 //! To regenerate: `uv run --with pyyaml python /tmp/gen_linguist.py > src/linguist_data.rs`
+//!
+//! Manual addition on top of the e51c2270 generation: `py` and `py3` as aliases
+//! for Python in both `ALIAS_TO_CANONICAL` and `CANONICAL_TO_ALIASES`. Upstream
+//! added these in commit 6fc1cc65b3 ("Add `py` and `py3` to Python aliases",
+//! PR #7791, merged 2026-03-02), after the e51c2270 pin (2026-01-14), so a
+//! regeneration from that pinned commit alone would not include them.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -16,7 +22,7 @@ pub const LINGUIST_DATE: &str = "2026-01-14";
 
 /// Maps lowercase alias -> canonical language name
 pub static ALIAS_TO_CANONICAL: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    let mut m = HashMap::with_capacity(1208);
+    let mut m = HashMap::with_capacity(1210);
     m.insert("1c enterprise", "1C Enterprise");
     m.insert("2-dimensional array", "2-Dimensional Array");
     m.insert("4d", "4D");
@@ -864,6 +870,8 @@ pub static ALIAS_TO_CANONICAL: LazyLock<HashMap<&'static str, &'static str>> = L
     m.insert("purebasic", "PureBasic");
     m.insert("purescript", "PureScript");
     m.insert("pwsh", "PowerShell");
+    m.insert("py", "Python");
+    m.insert("py3", "Python");
     m.insert("pycon", "Python");
     m.insert("pyret", "Pyret");
     m.insert("pyrex", "Cython");
@@ -1975,6 +1983,8 @@ pub static CANONICAL_TO_ALIASES: LazyLock<HashMap<&'static str, HashSet<&'static
         HashSet::from([
             "easybuild",
             "numpy",
+            "py",
+            "py3",
             "pycon",
             "python",
             "python console",
@@ -2412,6 +2422,94 @@ pub fn get_aliases(canonical: &str) -> Option<&HashSet<&'static str>> {
 }
 
 // Statistics:
-// - 1208 aliases
+// - 1210 aliases (1208 generated + 2 manual: py, py3)
 // - 720 canonical languages
 // - 39 curated default aliases
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for a category of bugs, not one instance: rumdl's generated
+    /// Linguist alias table must resolve every high-traffic language alias. Each
+    /// alias below is confirmed present in GitHub Linguist's `aliases:` list for its
+    /// language (verified against the current upstream `languages.yml`; `py` and
+    /// `py3` were added to Python's aliases after the `e51c2270` generation pin, see
+    /// the module header comment).
+    #[test]
+    fn test_high_traffic_aliases_resolve_to_expected_canonical() {
+        let cases = [
+            ("py", "Python"),
+            ("py3", "Python"),
+            ("python", "Python"),
+            ("sh", "Shell"),
+            ("bash", "Shell"),
+            ("shell", "Shell"),
+            ("zsh", "Shell"),
+            ("js", "JavaScript"),
+            ("javascript", "JavaScript"),
+            ("ts", "TypeScript"),
+            ("typescript", "TypeScript"),
+            ("rb", "Ruby"),
+            ("ruby", "Ruby"),
+            ("rs", "Rust"),
+            ("rust", "Rust"),
+            ("yml", "YAML"),
+            ("yaml", "YAML"),
+            ("cpp", "C++"),
+            ("c++", "C++"),
+            ("csharp", "C#"),
+            ("golang", "Go"),
+            ("dockerfile", "Dockerfile"),
+            ("jsonc", "JSON"),
+            ("kotlin", "Kotlin"),
+        ];
+        for (alias, expected_canonical) in cases {
+            assert_eq!(
+                resolve_canonical(alias),
+                Some(expected_canonical),
+                "alias '{alias}' should resolve to '{expected_canonical}'"
+            );
+        }
+    }
+
+    /// `cs`, `kt`, and `pl` are file extensions but never appear in Linguist's
+    /// `aliases:` list for C#, Kotlin, or Perl, so they must stay unresolved rather
+    /// than being guessed at.
+    #[test]
+    fn test_extension_lookalikes_are_not_aliases() {
+        for alias in ["cs", "kt", "pl"] {
+            assert_eq!(
+                resolve_canonical(alias),
+                None,
+                "'{alias}' is a file extension, not a Linguist alias, and must not resolve"
+            );
+        }
+    }
+
+    /// `ALIAS_TO_CANONICAL` and `CANONICAL_TO_ALIASES` are two independent lookup
+    /// tables built from the same source data; they must never disagree about which
+    /// canonical language an alias belongs to.
+    #[test]
+    fn test_alias_maps_are_mutually_consistent() {
+        for (&canonical, aliases) in CANONICAL_TO_ALIASES.iter() {
+            for &alias in aliases {
+                assert_eq!(
+                    ALIAS_TO_CANONICAL.get(alias),
+                    Some(&canonical),
+                    "CANONICAL_TO_ALIASES['{canonical}'] contains '{alias}', \
+                     but ALIAS_TO_CANONICAL['{alias}'] does not map back to '{canonical}'"
+                );
+            }
+        }
+        for (&alias, &canonical) in ALIAS_TO_CANONICAL.iter() {
+            if let Some(aliases) = CANONICAL_TO_ALIASES.get(canonical) {
+                assert!(
+                    aliases.contains(alias),
+                    "ALIAS_TO_CANONICAL['{alias}'] maps to '{canonical}', \
+                     but CANONICAL_TO_ALIASES['{canonical}'] does not contain '{alias}'"
+                );
+            }
+        }
+    }
+}
