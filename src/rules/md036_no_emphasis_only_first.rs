@@ -132,7 +132,11 @@ impl MD036NoEmphasisAsHeading {
             return None;
         }
 
-        // Skip if line is in a list, blockquote, code block, or HTML comment
+        // Skip if line is in a list, blockquote, code block, HTML comment, or an
+        // indentation-scoped MkDocs container (admonition or content tab), where
+        // an emphasis-only line is container content rather than a standalone
+        // paragraph. markdown="1" HTML divs are deliberately not skipped: they
+        // are tag-scoped and detected in every flavor.
         if LIST_MARKER.is_match(line)
             || BLOCKQUOTE_MARKER.is_match(line)
             || ctx.line_info(line_num + 1).is_some_and(|info| {
@@ -141,6 +145,8 @@ impl MD036NoEmphasisAsHeading {
                     || info.in_mdx_comment
                     || info.in_pymdown_block
                     || info.in_mkdocstrings
+                    || info.in_admonition
+                    || info.in_content_tab
             })
         {
             return None;
@@ -882,5 +888,107 @@ mod tests {
 
         // With default punctuation including colon, this should NOT be flagged
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_body_not_flagged() {
+        // An emphasis-only line indented inside a MkDocs
+        // admonition body is container content, not a standalone paragraph,
+        // so it must not be flagged as emphasis-as-heading.
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "!!! note\n\n    _Foo_";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "emphasis inside an admonition body should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_content_tab_body_not_flagged() {
+        // The same false positive occurs inside a MkDocs content tab body.
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "=== \"Tab A\"\n\n    _Foo_";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "emphasis inside a content tab body should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_top_level_emphasis_still_flagged() {
+        // Control: a top-level emphasis-only line outside any admonition/tab
+        // must still be flagged under MkDocs flavor.
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "_Foo_\n\nRegular text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "top-level emphasis should still be flagged under mkdocs flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_indented_emphasis_unchanged() {
+        // Control: without mkdocs flavor, a 4-space indented emphasis-only line
+        // is CommonMark indented code and was already not flagged. Confirms the
+        // new guard doesn't change standard-flavor behavior.
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "Intro\n\n    _Foo_\n\nMore text";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            0,
+            "indented emphasis is indented code under standard flavor, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_cascade_fix_does_not_corrupt_admonition() {
+        // With MD036 autofix enabled, the admonition-nested
+        // emphasis must not be converted to a heading (which MD023 would then
+        // de-indent out of the admonition in the same --fix pass).
+        let rule = MD036NoEmphasisAsHeading::new_with_fix(".,;:!?".to_string(), true, HeadingStyle::Atx, 2);
+        let content = "!!! note\n\n    _Foo_";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let fixed = rule.fix(&ctx).unwrap();
+
+        assert_eq!(
+            fixed, content,
+            "admonition-nested emphasis must not be converted to a heading"
+        );
+    }
+
+    #[test]
+    fn test_html_markdown_div_emphasis_still_flagged() {
+        // A markdown="1" HTML div is tag-scoped, not indentation-scoped, so
+        // emphasis-as-heading detection keeps applying inside it in every
+        // flavor.
+        let rule = MD036NoEmphasisAsHeading::new(".,;:!?".to_string());
+        let content = "<div markdown=\"1\">\n\n_Foo_\n\n</div>";
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(
+                result.len(),
+                1,
+                "emphasis inside a markdown=\"1\" div must stay flagged under {flavor:?}, got: {result:?}"
+            );
+        }
     }
 }

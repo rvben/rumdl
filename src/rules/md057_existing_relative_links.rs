@@ -553,6 +553,24 @@ enum Resolution {
     NotFound { resolved: PathBuf },
 }
 
+/// Search `re` in `line` starting at `expected_start`, accepting the match
+/// only if it begins exactly there.
+///
+/// `Regex::captures_at` searches starting at the given offset but does not
+/// require the match to *begin* there. A bracket's own destination that
+/// fails to match at its own position (a fragment-only `(#bar)`, an empty
+/// `()`) would otherwise silently slide forward and return a later,
+/// unrelated match belonging to a different bracket on the same line.
+/// Rejecting a non-anchored match treats that case as "no destination for
+/// this bracket" instead of borrowing a sibling bracket's URL.
+fn extract_url_at<'a>(re: &Regex, line: &'a str, expected_start: usize) -> Option<regex::Captures<'a>> {
+    let caps = re.captures_at(line, expected_start)?;
+    if caps.get(0)?.start() != expected_start {
+        return None;
+    }
+    Some(caps)
+}
+
 impl Rule for MD057ExistingRelativeLinks {
     fn name(&self) -> &'static str {
         "MD057"
@@ -666,6 +684,23 @@ impl Rule for MD057ExistingRelativeLinks {
 
                 // Find all links in this line using optimized regex
                 for link_match in LINK_START_REGEX.find_iter(line) {
+                    // Skip image syntax (`![...]`) here, images are already fully
+                    // validated by the dedicated ctx.images loop below, and processing
+                    // them again here would duplicate that warning. A bang preceded by
+                    // an odd number of backslashes is escaped, literal text per
+                    // CommonMark, making the bracket a normal link that the image loop
+                    // never sees, so it must stay in this loop.
+                    if link_match.as_str().starts_with('!') {
+                        let escapes = line[..link_match.start()]
+                            .bytes()
+                            .rev()
+                            .take_while(|&b| b == b'\\')
+                            .count();
+                        if escapes % 2 == 0 {
+                            continue;
+                        }
+                    }
+
                     let start_pos = link_match.start();
                     let end_pos = link_match.end();
 
@@ -685,13 +720,14 @@ impl Rule for MD057ExistingRelativeLinks {
 
                     // Find the URL part after the link text
                     // Try angle-bracket regex first (handles URLs with parens like `<path/(with)/parens.md>`)
-                    // Then fall back to normal URL regex
-                    let caps_and_url = URL_EXTRACT_ANGLE_BRACKET_REGEX
-                        .captures_at(line, end_pos - 1)
+                    // Then fall back to normal URL regex. Both searches are anchored to
+                    // this bracket's own position so a destination that cannot match
+                    // here (fragment-only, empty) yields no URL instead of borrowing
+                    // the next bracket's destination.
+                    let caps_and_url = extract_url_at(&URL_EXTRACT_ANGLE_BRACKET_REGEX, line, end_pos - 1)
                         .and_then(|caps| caps.get(1).map(|g| (caps, g)))
                         .or_else(|| {
-                            URL_EXTRACT_REGEX
-                                .captures_at(line, end_pos - 1)
+                            extract_url_at(&URL_EXTRACT_REGEX, line, end_pos - 1)
                                 .and_then(|caps| caps.get(1).map(|g| (caps, g)))
                         });
 
@@ -1197,9 +1233,21 @@ impl Rule for MD057ExistingRelativeLinks {
         let mut fixes: Vec<_> = warnings.iter().filter_map(|w| w.fix.as_ref()).collect();
         fixes.sort_by_key(|f| std::cmp::Reverse(f.range.start));
 
+        // Applying fixes right-to-left lets each range stay valid against the
+        // still-unshifted content to its left. A duplicate or overlapping fix
+        // would otherwise be applied a second time against content already
+        // rewritten by an earlier fix, corrupting it; skip any fix whose range
+        // overlaps the one most recently applied.
+        let mut last_applied_start: Option<usize> = None;
         for fix in fixes {
+            if let Some(prev_start) = last_applied_start
+                && fix.range.end > prev_start
+            {
+                continue;
+            }
             if fix.range.end <= content.len() {
                 content.replace_range(fix.range.clone(), &fix.replacement);
+                last_applied_start = Some(fix.range.start);
             }
         }
 

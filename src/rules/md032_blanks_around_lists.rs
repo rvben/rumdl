@@ -534,25 +534,70 @@ impl MD032BlanksAroundLists {
                 if line_idx > 0 {
                     let prev_line = lines[line_idx - 1];
                     let prev_is_blank = is_blank_in_context(prev_line);
-                    let prev_excluded = ctx
-                        .line_info(line_idx)
-                        .is_some_and(|info| info.in_code_block || info.in_front_matter);
+                    let prev_line_info = ctx.line_info(line_idx);
+                    let prev_excluded = prev_line_info.is_some_and(|info| info.in_code_block || info.in_front_matter);
+
+                    // Inside a recognized MkDocs admonition or content tab body, the
+                    // list-item metadata for nested lists is stale (the flavor-blind
+                    // parse classifies the indented body as code), so real list items
+                    // land in this fallback. Exempt an item only when an ordered list
+                    // marker line at the same indent precedes it in the container run,
+                    // walking over more-indented lines (wrapped continuations, deeper
+                    // nesting) and stopping at any same-or-less indented non-marker
+                    // line: prose there means the item cannot start a new list, which
+                    // is exactly the ambiguity this fallback exists to flag. Checked
+                    // directly on in_admonition/in_content_tab rather than the
+                    // in_mkdocs_container() helper: that helper's third component,
+                    // in_mkdocs_html_markdown, is populated in every flavor
+                    // (markdown="1" HTML divs are tag-scoped, not indentation-scoped),
+                    // so using it would also change behavior for standard-flavor
+                    // documents.
+                    let prev_in_mkdocs_container =
+                        prev_line_info.is_some_and(|info| info.in_admonition || info.in_content_tab);
+                    let continues_stale_container_list = prev_in_mkdocs_container && {
+                        let item_indent = calculate_indentation_width_default(line);
+                        let mut found_marker = false;
+                        for j in (0..line_idx).rev() {
+                            let in_container = ctx
+                                .line_info(j + 1)
+                                .is_some_and(|info| info.in_admonition || info.in_content_tab);
+                            if !in_container {
+                                break;
+                            }
+                            let candidate = lines[j];
+                            if is_blank_in_context(candidate) {
+                                continue;
+                            }
+                            let candidate_indent = calculate_indentation_width_default(candidate);
+                            if crate::utils::regex_cache::ORDERED_LIST_MARKER_REGEX.is_match(candidate)
+                                && candidate_indent == item_indent
+                            {
+                                found_marker = true;
+                                break;
+                            }
+                            if candidate_indent <= item_indent {
+                                break;
+                            }
+                        }
+                        found_marker
+                    };
 
                     // Check if previous line looks like a sentence continuation
                     // If the previous line is non-blank text that doesn't end with a sentence
                     // terminator, this is likely a paragraph continuation, not a list item
                     // e.g., "...in Chapter\n19. For now..." is a broken sentence, not a list
                     let prev_trimmed = prev_line.trim();
-                    let is_sentence_continuation = !prev_is_blank
-                        && !prev_trimmed.is_empty()
-                        && !prev_trimmed.ends_with('.')
-                        && !prev_trimmed.ends_with('!')
-                        && !prev_trimmed.ends_with('?')
-                        && !prev_trimmed.ends_with(':')
-                        && !prev_trimmed.ends_with(';')
-                        && !prev_trimmed.ends_with('>')
-                        && !prev_trimmed.ends_with('-')
-                        && !prev_trimmed.ends_with('*');
+                    let is_sentence_continuation = continues_stale_container_list
+                        || (!prev_is_blank
+                            && !prev_trimmed.is_empty()
+                            && !prev_trimmed.ends_with('.')
+                            && !prev_trimmed.ends_with('!')
+                            && !prev_trimmed.ends_with('?')
+                            && !prev_trimmed.ends_with(':')
+                            && !prev_trimmed.ends_with(';')
+                            && !prev_trimmed.ends_with('>')
+                            && !prev_trimmed.ends_with('-')
+                            && !prev_trimmed.ends_with('*'));
 
                     if !prev_is_blank && !prev_excluded && !is_sentence_continuation {
                         // This ordered list item starting with non-1 needs a blank line before it
@@ -3260,5 +3305,172 @@ Root level lazy continuation.
             warnings.is_empty(),
             "MD032 should not require blank lines around lists inside HTML comments: {warnings:?}"
         );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_nested_ordered_list_not_flagged() {
+        // A properly indented ordered list nested inside a MkDocs
+        // admonition must not be flagged just because the preceding item's
+        // text happens to end in sentence-terminating punctuation. The
+        // fallback "non-1 ordered item not in any known list block" heuristic
+        // exists for ambiguous prose, not for recognized container content.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. no error here.\n    2. error here because previous line ends with a \".\"\n    3. no error here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "admonition-nested ordered list should not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_nested_ordered_list_cascade_not_flagged() {
+        // When item 2 also ends in a period, the false positive previously
+        // cascaded to item 3 as well (its preceding line then also looked
+        // like a finished sentence). Both items must stay unflagged.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. no error here.\n    2. error here because previous line ends with a period.\n    3. no error here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "cascading admonition-nested ordered list should not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_content_tab_nested_ordered_list_not_flagged() {
+        // The same false positive occurs inside a MkDocs content tab body.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n=== \"Tab A\"\n\n    1. no error here.\n    2. error here because previous line ends with a \".\"\n    3. no error here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "content-tab-nested ordered list should not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_prose_then_non1_item_still_flagged() {
+        // Prose followed by a non-1 ordered item inside an admonition has the
+        // same missing-blank ambiguity as outside one: the item cannot
+        // interrupt the paragraph, so the fallback warning must survive. Only
+        // stale nested lists (an ordered marker line above at the same
+        // indent) are exempt.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    Intro.\n    2. item\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "prose then non-1 item inside an admonition must stay flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_prose_after_list_item_breaks_continuation() {
+        // A same-indent prose line between a list item and a non-1 item is a
+        // lazy continuation of the earlier item, so the non-1 item cannot
+        // start a new item there; the warning must survive even though an
+        // ordered marker exists further up.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. one.\n    Intro prose.\n    2. two\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "prose at item indent breaks the list continuation, item must stay flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_wrapped_item_continuation_not_flagged() {
+        // A non-1 item whose predecessor is the wrapped continuation line of
+        // an earlier item belongs to the same stale nested list: the deeper
+        // indented continuation must not break the walk back to the item
+        // marker at the same indent.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. item one that wraps\n       onto a second line.\n    2. item two\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "wrapped continuation of a nested list item must not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_ambiguous_prose_non1_ordered_item_still_flagged() {
+        // Control: outside any recognized container, a non-1 ordered item
+        // directly following a line that reads as a finished sentence is
+        // genuinely ambiguous - CommonMark won't parse it as a new list
+        // item without a blank line, so the fallback heuristic must keep
+        // warning here under MkDocs flavor exactly as it does elsewhere.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\nno error here.\n2. error here because previous line ends with a period.\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "ambiguous non-1 ordered item outside any container should still be flagged: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 4);
+        assert!(warnings[0].message.contains("non-1"));
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_nested_list_without_trailing_punctuation_not_flagged() {
+        // Sanity control: with item 1 not ending in sentence punctuation, the
+        // fallback heuristic already treated item 2 as a sentence continuation
+        // (no warning) even before the fix. This proves the regression tests
+        // above are not vacuously passing - the guard is exercised only when
+        // the preceding text ends in sentence-terminating punctuation.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. no error here\n    2. error here because previous line ends with a \".\"\n    3. no error here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "admonition-nested ordered list without trailing punctuation should not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_standard_flavor_admonition_indented_list_unchanged() {
+        // Control: under standard flavor there is no MkDocs admonition
+        // concept, so the 4-space-indented block after `!!! example` is
+        // genuine indented code, already excluded by the code-block guard.
+        // This must stay unflagged, unaffected by the MkDocs-only fix.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n!!! example\n\n    1. no error here.\n    2. error here because previous line ends with a \".\"\n    3. no error here\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert!(
+            warnings.is_empty(),
+            "indented code block under standard flavor should not be flagged: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_html_markdown_div_nested_ordered_list_still_flagged() {
+        // A markdown="1" HTML div is tag-scoped, not indentation-scoped, and
+        // is detected in every flavor (see in_mkdocs_html_markdown). The
+        // guard for this fix deliberately checks only in_admonition and
+        // in_content_tab, so behavior for this div case is unchanged by it.
+        let rule = MD032BlanksAroundLists::default();
+        let content = "1. no error here\n\n<div markdown=\"1\">\n\n    1. no error here.\n    2. error here because previous line ends with a \".\"\n    3. no error here\n\n</div>\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let warnings = rule.check(&ctx).unwrap();
+        assert_eq!(
+            warnings.len(),
+            1,
+            "markdown=\"1\" div nested ordered list behavior must stay unchanged: {warnings:?}"
+        );
+        assert_eq!(warnings[0].line, 6);
     }
 }

@@ -201,6 +201,75 @@ fn test_multi_sentence_paragraph_with_backticks() {
 }
 
 #[test]
+fn test_issue_716_footnote_after_period_splits_and_fixes() {
+    // Reported in issue #716: a footnote reference glued to the sentence-ending
+    // period hid the boundary, so a merged single line was never split.
+    let rule = create_sentence_per_line_rule();
+    let content = "Sentence one needs an annotation.[^1] Sentence two works fine.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        !result.is_empty(),
+        "should detect that the footnote hides a sentence boundary"
+    );
+    let fix = result[0].fix.as_ref().unwrap();
+    assert_eq!(
+        fix.replacement.trim(),
+        "Sentence one needs an annotation.[^1]\nSentence two works fine."
+    );
+}
+
+#[test]
+fn test_issue_716_reporter_paragraph_check_and_fix() {
+    // The exact reproduction from issue #716: four already-correctly-split
+    // physical lines, where the first line's sentence-ending period is
+    // immediately followed by a footnote reference. Before the fix, `check`
+    // under-counted the sentences ("found 3 sentences across 4 lines") and
+    // `fix` actively merged the first two lines together.
+    let rule = create_sentence_per_line_rule();
+    let content = "Sentence one needs an annotation.[^1]\n\
+                   Sentence two works fine.\n\
+                   Sentence three as well.\n\
+                   Four too.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "an already-correctly-split paragraph must not be flagged: {result:?}"
+    );
+}
+
+#[test]
+fn test_issue_716_multiple_footnotes_after_period_splits_and_fixes() {
+    // Same bug with multiple consecutive footnote references after the period.
+    let rule = create_sentence_per_line_rule();
+    let content = "Notes here.[^1][^2] Second sentence.";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(!result.is_empty());
+    let fix = result[0].fix.as_ref().unwrap();
+    assert_eq!(fix.replacement.trim(), "Notes here.[^1][^2]\nSecond sentence.");
+}
+
+#[test]
+fn test_issue_716_already_split_output_is_not_flagged_again() {
+    // Idempotency: once the footnote-adjacent sentences are already split onto
+    // separate lines, re-checking must not flag them again.
+    let rule = create_sentence_per_line_rule();
+    let already_correct = "Sentence one needs an annotation.[^1]\nSentence two works fine.";
+    let ctx = LintContext::new(already_correct, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert!(
+        result.is_empty(),
+        "already-split output should not be flagged again: {result:?}"
+    );
+}
+
+#[test]
 fn test_single_sentence_exceeds_line_length() {
     // Single sentence spanning multiple lines that exceeds line-length constraint
     // This sentence is 85 chars when joined, so with line-length=80 it should NOT be reflowed

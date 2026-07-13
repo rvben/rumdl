@@ -154,6 +154,27 @@ code_blocks = false
 - This shorthand is only available in `.rumdl.toml` / `rumdl.toml`. In `pyproject.toml`, use
   `[tool.rumdl]` as shown in the pyproject.toml example above.
 
+### Rule section names and aliases
+
+Every rule section accepts the rule's name alias as well as its MD number, so you can pick
+whichever reads better. The alias for each rule is listed at the top of its documentation page.
+
+```toml
+# These two sections configure the same rule (MD049)
+[emphasis-style]
+style = "asterisk"
+```
+
+```toml
+[MD049]
+style = "asterisk"
+```
+
+Aliases work in every configuration form: `[emphasis-style]` or `[rules.emphasis-style]` in
+`.rumdl.toml` / `rumdl.toml`, and `[tool.rumdl.emphasis-style]` in `pyproject.toml`. The same
+applies to rule lists such as `enable` and `disable`, which accept `"emphasis-style"` and
+`"MD049"` interchangeably.
+
 ## Rule Selection Model
 
 rumdl uses four settings to control which rules are active. These follow the same model as [Ruff's lint rule selection](https://docs.astral.sh/ruff/settings/#lint_select):
@@ -1376,7 +1397,7 @@ find . -name "*.md" -o -name "*.markdown" | head -10
 
 ```yaml
 - repo: https://github.com/rvben/rumdl-pre-commit
-  rev: v0.2.31
+  rev: v0.2.32
   hooks:
     - id: rumdl
       args: [--config=.rumdl.toml]

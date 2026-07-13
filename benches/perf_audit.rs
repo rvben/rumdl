@@ -270,7 +270,7 @@ fn bench_atx_headings(c: &mut Criterion) {
     let content = gen_headings(800);
     let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
     let md018 = MD018NoMissingSpaceAtx::default();
-    let md021 = MD021NoMultipleSpaceClosedAtx::default();
+    let md021 = MD021NoMultipleSpaceClosedAtx;
     c.bench_function("atx_headings/md018_check", |b| b.iter(|| md018.check(black_box(&ctx))));
     c.bench_function("atx_headings/md021_check", |b| b.iter(|| md021.check(black_box(&ctx))));
 
