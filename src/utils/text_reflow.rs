@@ -1038,6 +1038,13 @@ fn myst_role_len_at(text: &str) -> Option<usize> {
     None
 }
 
+/// Absolute byte offsets of a cached regex match within the full input text.
+#[derive(Clone, Copy, Debug)]
+struct PatternMatch {
+    start: usize,
+    end: usize,
+}
+
 /// Parse markdown elements from text preserving the raw syntax.
 ///
 /// Detection order is critical:
@@ -1048,12 +1055,6 @@ fn myst_role_len_at(text: &str) -> Option<usize> {
 /// 5. Reference links [text][ref] - before shortcut references
 /// 6. Shortcut reference links [ref] - detected last to avoid false positives
 /// 7. Other elements (code, bold, italic, MyST roles, etc.) - processed normally
-#[derive(Clone, Copy, Debug)]
-struct PatternMatch {
-    start: usize,
-    end: usize,
-}
-
 fn parse_markdown_elements_inner(
     text: &str,
     attr_lists: bool,
@@ -1084,18 +1085,22 @@ fn parse_markdown_elements_inner(
     let mut cached_html_tag: Option<Option<PatternMatch>> = None;
     let mut cached_next_curly: Option<Option<usize>> = None;
 
+    // Cursor indices into the sorted span lists: spans behind the parse cursor
+    // can never match again, so each list is advanced monotonically instead of
+    // rescanned from the start on every iteration.
+    let mut link_span_idx = 0usize;
+    let mut emphasis_span_idx = 0usize;
+    let mut code_span_idx = 0usize;
+
     while !remaining.is_empty() {
         let current_offset = text.len() - remaining.len();
         let mut earliest_match: Option<(usize, usize, &str)> = None;
 
         // Find the earliest link span
-        let mut next_link: Option<&LinkSpan> = None;
-        for span in &link_spans {
-            if span.start >= current_offset {
-                next_link = Some(span);
-                break;
-            }
+        while link_span_idx < link_spans.len() && link_spans[link_span_idx].start < current_offset {
+            link_span_idx += 1;
         }
+        let next_link: Option<&LinkSpan> = link_spans.get(link_span_idx);
 
         if let Some(span) = next_link {
             let pos_in_remaining = span.start - current_offset;
@@ -1134,11 +1139,21 @@ fn parse_markdown_elements_inner(
 
         macro_rules! get_or_update_fancy_match {
             ($cache:expr, $regex:expr) => {{
-                let need_search = match &$cache {
-                    Some(Some(pm)) => pm.start < current_offset,
-                    Some(None) => false,
-                    None => true,
-                };
+                // The fancy regex used here (INLINE_MATH_REGEX) starts with the
+                // lookbehind `(?<!\$)`, which is slice-start-sensitive: at the
+                // start of the searched slice there is no preceding character,
+                // so the lookbehind trivially passes there, while a search
+                // anchored earlier sees the real predecessor and can reject the
+                // same position. A cached result is therefore only valid while
+                // the cursor is not sitting directly after a `$`; when it is,
+                // re-search from the cursor exactly like the uncached code did.
+                let lookbehind_hole = current_offset > 0 && text.as_bytes()[current_offset - 1] == b'$';
+                let need_search = lookbehind_hole
+                    || match &$cache {
+                        Some(Some(pm)) => pm.start < current_offset,
+                        Some(None) => false,
+                        None => true,
+                    };
                 if need_search {
                     if let Ok(Some(m)) = $regex.find(&text[current_offset..]) {
                         $cache = Some(Some(PatternMatch {
@@ -1279,14 +1294,11 @@ fn parse_markdown_elements_inner(
         let mut attr_list_len: usize = 0;
         let mut myst_role_len: usize = 0;
 
-        let mut next_code_span: Option<&CodeSpan> = None;
         // Check for code spans using pulldown-cmark pre-extracted spans
-        for span in &code_spans {
-            if span.start >= current_offset {
-                next_code_span = Some(span);
-                break;
-            }
+        while code_span_idx < code_spans.len() && code_spans[code_span_idx].start < current_offset {
+            code_span_idx += 1;
         }
+        let next_code_span: Option<&CodeSpan> = code_spans.get(code_span_idx);
         if let Some(span) = next_code_span {
             let pos_in_remaining = span.start - current_offset;
             if pos_in_remaining < next_special {
@@ -1339,15 +1351,15 @@ fn parse_markdown_elements_inner(
         }
 
         // Check for emphasis using pulldown-cmark's pre-extracted spans
-        for span in &emphasis_spans {
-            if span.start >= current_offset && span.start < current_offset + remaining.len() {
-                let pos_in_remaining = span.start - current_offset;
-                if pos_in_remaining < next_special {
-                    next_special = pos_in_remaining;
-                    special_type = "pulldown_emphasis";
-                    pulldown_emphasis = Some(span);
-                }
-                break;
+        while emphasis_span_idx < emphasis_spans.len() && emphasis_spans[emphasis_span_idx].start < current_offset {
+            emphasis_span_idx += 1;
+        }
+        if let Some(span) = emphasis_spans.get(emphasis_span_idx) {
+            let pos_in_remaining = span.start - current_offset;
+            if pos_in_remaining < next_special {
+                next_special = pos_in_remaining;
+                special_type = "pulldown_emphasis";
+                pulldown_emphasis = Some(span);
             }
         }
 
@@ -4156,6 +4168,23 @@ mod tests {
                 "sentence-per-line output opens a block construct: {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn inline_math_directly_after_display_math_stays_atomic() {
+        // The inline-math regex's lookbehind `(?<!\$)` is slice-start-sensitive:
+        // a search anchored at the cursor accepts a `$` whose real predecessor
+        // is a `$` (the lookbehind sees nothing before the slice), while a
+        // cached search anchored earlier sees the `$` and rejects it. After
+        // display math consumes `$$a$$`, the cursor sits directly after a `$`;
+        // the match cache must re-search there or `$bb cc dd$` degrades to
+        // plain text and gets wrapped apart, breaking math rendering.
+        let options = ReflowOptions {
+            line_length: 8,
+            ..Default::default()
+        };
+        let lines = reflow_line("$$a$$$bb cc dd$ x", &options);
+        assert_eq!(lines, vec!["$$a$$$bb cc dd$".to_string(), "x".to_string()]);
     }
 
     #[test]
