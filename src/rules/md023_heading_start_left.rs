@@ -26,8 +26,12 @@ impl Rule for MD023HeadingStartLeft {
 
         // Process all headings using cached heading information
         for (line_num, line_info) in ctx.lines.iter().enumerate() {
-            // Skip lines inside PyMdown blocks
-            if line_info.in_pymdown_block {
+            // Skip lines inside PyMdown blocks, admonitions, and content tabs:
+            // those containers are indentation-scoped, so a heading indented
+            // there is intentionally nested, not an accidental indent. This
+            // deliberately excludes markdown="1" HTML divs (tag-scoped, content
+            // needs no indentation, and detected in every flavor).
+            if line_info.in_pymdown_block || line_info.in_admonition || line_info.in_content_tab {
                 continue;
             }
 
@@ -287,5 +291,96 @@ mod tests {
             result.is_empty(),
             "Properly aligned headings should pass. Got: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_mkdocs_admonition_indented_heading_not_flagged() {
+        // A heading intentionally indented to stay nested
+        // inside a MkDocs admonition body must not be flagged, since the
+        // indentation is required for it to belong to the admonition.
+        let rule = MD023HeadingStartLeft;
+        let content = "!!! note\n\n    # Foo";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "heading nested in an admonition body should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_content_tab_indented_heading_not_flagged() {
+        // The same false positive occurs inside a MkDocs content tab body.
+        let rule = MD023HeadingStartLeft;
+        let content = "=== \"Tab A\"\n\n    # Foo";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "heading nested in a content tab body should not be flagged, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_mkdocs_accidental_indent_still_flagged() {
+        // Control: a heading indented outside any admonition/tab (accidental
+        // indentation, not container nesting) must still be flagged under
+        // MkDocs flavor, and its fix must still de-indent it.
+        let rule = MD023HeadingStartLeft;
+        let content = "Some text\n\n  # Foo";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::MkDocs, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "accidentally indented top-level heading should still be flagged, got: {result:?}"
+        );
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Some text\n\n# Foo", "fix should still de-indent it");
+    }
+
+    #[test]
+    fn test_standard_flavor_indented_heading_still_flagged_and_fixed() {
+        // Control: standard flavor has no MkDocs container concept, so an
+        // indented heading is still an accidental indent and must still be
+        // flagged and de-indented by the fix. Uses 3 spaces: at 4+ spaces
+        // CommonMark parses the line as an indented code block rather than a
+        // heading at all, which is unrelated to this rule's guard.
+        let rule = MD023HeadingStartLeft;
+        let content = "Some text\n\n   # Foo";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "indented heading should still be flagged under standard flavor, got: {result:?}"
+        );
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(fixed, "Some text\n\n# Foo", "fix should still de-indent it");
+    }
+
+    #[test]
+    fn test_html_markdown_div_indented_heading_still_flagged() {
+        // A markdown="1" HTML div is tag-scoped, not indentation-scoped:
+        // content needs no indentation to belong to it, so an indented
+        // heading inside one is an accidental indent in every flavor.
+        let rule = MD023HeadingStartLeft;
+        let content = "<div markdown=\"1\">\n\n  # Bar\n\n</div>";
+        for flavor in [
+            crate::config::MarkdownFlavor::Standard,
+            crate::config::MarkdownFlavor::MkDocs,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let result = rule.check(&ctx).unwrap();
+            assert_eq!(
+                result.len(),
+                1,
+                "indented heading inside a markdown=\"1\" div must stay flagged under {flavor:?}, got: {result:?}"
+            );
+        }
     }
 }
