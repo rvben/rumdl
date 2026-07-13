@@ -151,6 +151,34 @@ fn compute_inline_code_mask(text: &str) -> Vec<bool> {
     mask
 }
 
+/// If `chars` starts at `start` with one or more consecutive footnote
+/// references (`[^label]`, matching the same `[a-zA-Z0-9_-]+` label grammar as
+/// `FOOTNOTE_REF` in `mkdocs_footnotes.rs`), return the position just past the
+/// last one. Returns `None` if `start` is not the beginning of a footnote
+/// reference, so a bare `[1]` or `[text]` never matches.
+fn footnote_refs_end(chars: &[char], start: usize) -> Option<usize> {
+    let mut pos = start;
+    let mut found = false;
+
+    loop {
+        if chars.get(pos) != Some(&'[') || chars.get(pos + 1) != Some(&'^') {
+            break;
+        }
+        let label_start = pos + 2;
+        let mut label_end = label_start;
+        while matches!(chars.get(label_end), Some(c) if c.is_ascii_alphanumeric() || *c == '_' || *c == '-') {
+            label_end += 1;
+        }
+        if label_end == label_start || chars.get(label_end) != Some(&']') {
+            break;
+        }
+        pos = label_end + 1;
+        found = true;
+    }
+
+    found.then_some(pos)
+}
+
 /// Detect if a character position is a sentence boundary
 /// Based on the approach from github.com/JoshuaKGoldberg/sentences-per-line
 /// Supports both ASCII punctuation (. ! ?) and CJK punctuation (。 ！ ？)
@@ -245,6 +273,16 @@ fn is_sentence_boundary(
     } else if next_char == '~' && pos + 3 < chars.len() && chars[pos + 2] == '~' && chars[pos + 3] == ' ' {
         // Sentence ends with strikethrough: "sentence.~~ "
         (pos + 3, pos + 4)
+    } else if next_char == '[' {
+        // Sentence ends with one or more footnote references glued directly to
+        // the punctuation, e.g. "sentence.[^1]" or "sentence.[^1][^2]". A bare
+        // `[1]` or `[text]` doesn't match `footnote_refs_end` and falls through
+        // to `return false` below, since that's link/citation-like text, not
+        // footnote syntax.
+        match footnote_refs_end(chars, pos + 1) {
+            Some(end_pos) if chars.get(end_pos) == Some(&' ') => (end_pos, end_pos + 1),
+            _ => return false,
+        }
     } else {
         return false;
     };
@@ -348,6 +386,17 @@ fn split_into_sentences_with_set(
         current_sentence.push(c);
 
         if !in_code[pos] && is_sentence_boundary(text, &char_vec, pos, abbreviations, require_sentence_capital) {
+            // Consume any trailing footnote references glued to the punctuation
+            // (they belong to the current sentence, e.g. "sentence.[^1]" keeps
+            // the marker attached to the sentence it annotates rather than
+            // leaking onto the next one).
+            if let Some(end_pos) = footnote_refs_end(&char_vec, pos + 1) {
+                while pos + 1 < end_pos {
+                    current_sentence.push(chars.next().unwrap());
+                    pos += 1;
+                }
+            }
+
             // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
             while let Some(&next) = chars.peek() {
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
@@ -3417,6 +3466,103 @@ mod tests {
         assert!(!text_ends_with_abbreviation("paradigms?", &abbreviations)); // question mark
         assert!(!text_ends_with_abbreviation("word", &abbreviations)); // no punctuation
         assert!(!text_ends_with_abbreviation("", &abbreviations)); // empty string
+    }
+
+    #[test]
+    fn test_footnote_after_period_splits_sentence() {
+        // A footnote reference glued to the period (no space) must not swallow
+        // the sentence boundary; the reference stays attached to the sentence
+        // it annotates.
+        let text = "First sentence.[^1] Second sentence.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec!["First sentence.[^1]".to_string(), "Second sentence.".to_string()],
+            "footnote glued to the period should keep the boundary and stay attached to the first sentence"
+        );
+    }
+
+    #[test]
+    fn test_multiple_consecutive_footnotes_after_period_splits_sentence() {
+        // Multiple footnote references glued back-to-back after the period.
+        let text = "Notes here.[^1][^2] Second sentence.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec!["Notes here.[^1][^2]".to_string(), "Second sentence.".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_footnote_before_period_still_splits_sentence() {
+        // Control: a footnote reference before the period was already followed
+        // by a space, so this boundary worked before this fix and must keep
+        // working.
+        let text = "Annotation here[^1]. Second sentence.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec!["Annotation here[^1].".to_string(), "Second sentence.".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_mid_sentence_footnote_does_not_split() {
+        // A footnote reference not glued to sentence-ending punctuation must not
+        // introduce a spurious boundary at the bracket itself.
+        let text = "The system word[^1] more words. Next sentence.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec![
+                "The system word[^1] more words.".to_string(),
+                "Next sentence.".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_bare_numeric_bracket_after_period_does_not_split() {
+        // A bare `[1]` is link/citation-like text, not footnote syntax; the fix
+        // is scoped to `[^label]` only.
+        let text = "Citation here.[1] Second sentence.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec![text.to_string()],
+            "a bare numeric bracket must not be treated as a sentence boundary"
+        );
+    }
+
+    #[test]
+    fn test_footnote_glued_to_following_word_does_not_split() {
+        // No whitespace after the footnote reference means there is nowhere a
+        // next sentence can start, so this must not be treated as a boundary.
+        let text = "First sentence.[^1]Continued glued text.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(sentences, vec![text.to_string()]);
+    }
+
+    #[test]
+    fn test_footnote_at_end_of_text_is_preserved() {
+        // A footnote reference at the very end of the text has nothing after it
+        // to split off; it is preserved as part of the single trailing sentence.
+        let text = "Sentence.[^1]";
+        let sentences = split_into_sentences(text);
+        assert_eq!(sentences, vec![text.to_string()]);
+    }
+
+    #[test]
+    fn test_abbreviation_before_footnote_does_not_split() {
+        // The existing abbreviation guard must still apply when a footnote
+        // reference immediately follows the abbreviation's period.
+        let text = "See the notes, e.g.[^1] this one.";
+        let sentences = split_into_sentences(text);
+        assert_eq!(
+            sentences,
+            vec![text.to_string()],
+            "e.g. is an abbreviation, not a sentence boundary"
+        );
     }
 
     #[test]
