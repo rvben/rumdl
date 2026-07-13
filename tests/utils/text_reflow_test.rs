@@ -5159,14 +5159,33 @@ fn test_reflow_blockquote_content_hard_break_preserved() {
 
 #[test]
 fn test_reflow_blockquote_content_force_explicit_for_structural_lines() {
-    // Content starting with "#" must always get an explicit prefix, even when lazy
-    // style is requested, because lazy syntax would make the renderer treat it as a
-    // heading rather than blockquote content.
-    //
-    // "Normal line." (12 chars) + "# Heading" (9 chars) joined as one paragraph,
-    // then wrapped at line_length=13. This forces "# Heading" onto its own line,
-    // where should_force_explicit_blockquote_line detects the "#" and upgrades it
-    // to explicit even though continuation_style is Lazy.
+    // A segment that begins with "#" must always get an explicit prefix, even
+    // when lazy style is requested, because lazy syntax would make the renderer
+    // treat it as a heading rather than blockquote content. A hard break ends
+    // the first segment, so "# Heading" starts the next segment and lands at
+    // line start legitimately (wrapping itself never places a marker there).
+    let lines = vec![
+        BlockquoteLineData::explicit("First segment.\\".to_string(), "> ".to_string()),
+        BlockquoteLineData::explicit("# Heading".to_string(), "> ".to_string()),
+    ];
+    let options = ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    };
+    let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Lazy, &options);
+    // The line carrying "# Heading" must have an explicit ">" prefix.
+    assert!(
+        result.iter().any(|l| l.starts_with("> # ")),
+        "Heading content must carry explicit prefix even in lazy mode: {result:?}"
+    );
+}
+
+#[test]
+fn test_reflow_blockquote_wrap_never_emits_bare_marker_lines() {
+    // Prose containing a "#" word wrapped at a width that would once have
+    // pushed the "#" to line start: the wrapper must now keep the marker
+    // mid-line (issue #728), so no lazy continuation line can begin with a
+    // block marker in the first place.
     let lines = vec![
         BlockquoteLineData::explicit("Normal line.".to_string(), "> ".to_string()),
         BlockquoteLineData::explicit("# Heading".to_string(), "> ".to_string()),
@@ -5176,11 +5195,13 @@ fn test_reflow_blockquote_content_force_explicit_for_structural_lines() {
         ..Default::default()
     };
     let result = reflow_blockquote_content(&lines, "> ", BlockquoteContinuationStyle::Lazy, &options);
-    // The line carrying "# Heading" must have an explicit ">" prefix.
-    assert!(
-        result.iter().any(|l| l.starts_with("> # ")),
-        "Heading content must carry explicit prefix even in lazy mode: {result:?}"
-    );
+    for line in &result {
+        let content = line.strip_prefix("> ").unwrap_or(line);
+        assert!(
+            !content.starts_with('#'),
+            "Wrapped blockquote content must not start with a bare marker: {result:?}"
+        );
+    }
 }
 
 // ============================================================
@@ -6587,4 +6608,116 @@ fn test_reflow_strikethrough_marker_width_roundtrips() {
         collapse_ws(double_input),
         "double-tilde span content/marker corrupted by wrapping; got:\n{double}"
     );
+}
+
+// ============================================================
+// Issue #728: reflow must never start a continuation line with
+// text that re-parses as a block construct
+// ============================================================
+
+/// Independent oracle (deliberately not the production guard): does this
+/// line, as a paragraph continuation, open a block construct per CommonMark?
+fn oracle_opens_block_construct(line: &str) -> bool {
+    let t = line.trim_start();
+    let bytes = t.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    let boundary = |i: usize| bytes.len() == i || bytes[i] == b' ' || bytes[i] == b'\t';
+    let only_of = |chars: &[u8], min: usize| {
+        let mut n = 0;
+        for &b in bytes {
+            if chars.contains(&b) {
+                n += 1;
+            } else if b != b' ' && b != b'\t' {
+                return false;
+            }
+        }
+        n >= min
+    };
+    match first {
+        b'>' => true,
+        b'-' => boundary(1) || only_of(b"-", 1),
+        b'*' => boundary(1) || only_of(b"*", 3),
+        b'+' => boundary(1),
+        b'_' => only_of(b"_", 3),
+        b'=' => bytes.iter().all(|&b| b == b'='),
+        b'#' => {
+            let n = bytes.iter().take_while(|&&b| b == b'#').count();
+            n <= 6 && boundary(n)
+        }
+        b'`' => bytes.iter().take_while(|&&b| b == b'`').count() >= 3,
+        b'~' => bytes.iter().take_while(|&&b| b == b'~').count() >= 3,
+        b'0'..=b'9' => {
+            let n = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            n <= 9 && bytes.len() > n && (bytes[n] == b'.' || bytes[n] == b')') && boundary(n + 1)
+        }
+        // Footnote / link-reference definition: the label's own closing
+        // bracket must be immediately followed by a colon
+        b'[' => t[1..].find(']').is_some_and(|i| bytes[1..].get(i + 1) == Some(&b':')),
+        // Block-level HTML tags (subset of CommonMark type-1/6 sufficient to
+        // cover the generated corpus; production recognizes a superset)
+        b'<' => {
+            let rest = t.strip_prefix('<').unwrap_or(t);
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            ["div", "p>", "p ", "pre", "table", "li", "h1", "section", "blockquote"]
+                .iter()
+                .any(|tag| rest.to_lowercase().starts_with(tag))
+        }
+        _ => false,
+    }
+}
+
+proptest::proptest! {
+    #[test]
+    fn reflow_continuation_lines_never_open_block_constructs(
+        words in proptest::collection::vec(
+            proptest::prop_oneof![
+                proptest::prelude::Just("-".to_string()),
+                proptest::prelude::Just("*".to_string()),
+                proptest::prelude::Just("+".to_string()),
+                proptest::prelude::Just(">".to_string()),
+                proptest::prelude::Just("#".to_string()),
+                proptest::prelude::Just("##".to_string()),
+                proptest::prelude::Just("1.".to_string()),
+                proptest::prelude::Just("12)".to_string()),
+                proptest::prelude::Just("```".to_string()),
+                proptest::prelude::Just("---".to_string()),
+                proptest::prelude::Just("===".to_string()),
+                proptest::prelude::Just("[^1]:".to_string()),
+                proptest::prelude::Just("[ref]:".to_string()),
+                proptest::prelude::Just("<div>".to_string()),
+                proptest::prelude::Just("</div>".to_string()),
+                proptest::prelude::Just("<p>tag".to_string()),
+                proptest::prelude::Just("<span>ok</span>".to_string()),
+                proptest::prelude::Just("`code`".to_string()),
+                proptest::prelude::Just("*em*".to_string()),
+                proptest::prelude::Just("[a](b)".to_string()),
+                proptest::prelude::Just("done.".to_string()),
+                proptest::prelude::Just("Sure?".to_string()),
+                proptest::prelude::Just("(so".to_string()),
+                proptest::prelude::Just("far)".to_string()),
+                "[a-zA-Z]{1,10}",
+            ],
+            1..25,
+        ),
+        width in 4usize..50,
+        mode in 0u8..3,
+    ) {
+        let input = words.join(" ");
+        let options = ReflowOptions {
+            line_length: width,
+            sentence_per_line: mode == 1,
+            semantic_line_breaks: mode == 2,
+            ..Default::default()
+        };
+        let lines = reflow_line(&input, &options);
+        for line in lines.iter().skip(1) {
+            proptest::prop_assert!(
+                !oracle_opens_block_construct(line),
+                "continuation line opens a block construct\ninput: {:?}\nwidth: {} mode: {}\nlines: {:#?}",
+                input, width, mode, lines,
+            );
+        }
+    }
 }

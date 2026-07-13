@@ -322,68 +322,7 @@ pub(super) fn detect_headings_and_blockquotes(
 /// contain blank lines. All other recognised block elements are treated as
 /// Type-6-style blocks that terminate at the first blank line.
 pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
-    /// Type-1 tags per CommonMark: blank lines inside these blocks do not
-    /// terminate them — only a matching end tag (or EOF) does.
-    const TYPE_1_BLOCK_ELEMENTS: &[&str] = &["pre", "script", "style", "textarea"];
-
-    const BLOCK_ELEMENTS: &[&str] = &[
-        "address",
-        "article",
-        "aside",
-        "audio",
-        "blockquote",
-        "canvas",
-        "details",
-        "dialog",
-        "dd",
-        "div",
-        "dl",
-        "dt",
-        "embed",
-        "fieldset",
-        "figcaption",
-        "figure",
-        "footer",
-        "form",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "header",
-        "hr",
-        "iframe",
-        "li",
-        "main",
-        "menu",
-        "nav",
-        "noscript",
-        "object",
-        "ol",
-        "p",
-        "picture",
-        "pre",
-        "script",
-        "search",
-        "section",
-        "source",
-        "style",
-        "summary",
-        "svg",
-        "table",
-        "tbody",
-        "td",
-        "template",
-        "textarea",
-        "tfoot",
-        "th",
-        "thead",
-        "tr",
-        "track",
-        "ul",
-        "video",
-    ];
+    use crate::utils::html_block::{TYPE_1_BLOCK_ELEMENTS, parse_html_block_start};
 
     let mut i = 0;
     while i < lines.len() {
@@ -394,18 +333,8 @@ pub(super) fn detect_html_blocks(content: &str, lines: &mut [LineInfo]) {
 
         let trimmed = lines[i].content(content).trim_start();
 
-        if trimmed.starts_with('<') && trimmed.len() > 1 {
-            let after_bracket = &trimmed[1..];
-            let is_closing = after_bracket.starts_with('/');
-            let tag_start = if is_closing { &after_bracket[1..] } else { after_bracket };
-
-            let tag_name = tag_start
-                .chars()
-                .take_while(|c| c.is_ascii_alphabetic() || *c == '-' || c.is_ascii_digit())
-                .collect::<String>()
-                .to_lowercase();
-
-            if !tag_name.is_empty() && BLOCK_ELEMENTS.contains(&tag_name.as_str()) {
+        {
+            if let Some((tag_name, is_closing)) = parse_html_block_start(trimmed) {
                 lines[i].in_html_block = true;
 
                 if !is_closing {

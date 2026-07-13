@@ -9,6 +9,7 @@ pub mod code_block_utils;
 pub mod emphasis_utils;
 pub mod fix_utils;
 pub mod header_id_utils;
+pub mod html_block;
 pub mod jinja_utils;
 pub mod kramdown_utils;
 pub mod line_ending;

@@ -578,13 +578,17 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
-        return reflow_elements_sentence_per_line(&elements, &options.abbreviations, options.require_sentence_capital);
+        return merge_block_construct_continuations(reflow_elements_sentence_per_line(
+            &elements,
+            &options.abbreviations,
+            options.require_sentence_capital,
+        ));
     }
 
     // For semantic line breaks mode, use cascading split strategy
     if options.semantic_line_breaks {
         let elements = parse_elements(line, options);
-        return reflow_elements_semantic(&elements, options);
+        return merge_block_construct_continuations(reflow_elements_semantic(&elements, options));
     }
 
     // Quick check: if line is already short enough or no wrapping requested, return as-is
@@ -597,7 +601,7 @@ pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
     let elements = parse_elements(line, options);
 
     // Reflow the elements into lines
-    reflow_elements(&elements, options)
+    merge_block_construct_continuations(reflow_elements(&elements, options))
 }
 
 /// Represents a piece of content in the markdown
@@ -1418,6 +1422,124 @@ fn should_insert_space_before_join(current: &str) -> bool {
         && !current.ends_with('-')
 }
 
+/// True when `text` consists solely of setext-underline or thematic-break
+/// characters: a run of `=` or `-` (setext underline, any count, no internal
+/// spaces) or 3+ `-`/`*`/`_` optionally separated by spaces (thematic break).
+/// A paragraph-continuation line like this converts the previous line into a
+/// heading or inserts a horizontal rule.
+fn is_setext_or_thematic(text: &str) -> bool {
+    let mut marker = '\0';
+    let mut count = 0usize;
+    let mut has_space = false;
+    for c in text.chars() {
+        match c {
+            ' ' | '\t' => has_space = true,
+            '-' | '=' | '*' | '_' => {
+                if marker == '\0' {
+                    marker = c;
+                } else if c != marker {
+                    return false;
+                }
+                count += 1;
+            }
+            _ => return false,
+        }
+    }
+    match marker {
+        '=' => !has_space,
+        '-' => !has_space || count >= 3,
+        '*' | '_' => count >= 3,
+        _ => false,
+    }
+}
+
+/// True when `text`, placed at the start of a paragraph-continuation line,
+/// would be re-parsed as opening a block construct - a list item (`- `, `* `,
+/// `+ `, `1. `, `1) `), blockquote (`>`), ATX heading (`# `), code fence
+/// (3+ backticks or tildes), thematic break, setext underline, footnote or
+/// link-reference definition (`[^note]:`, `[label]: url`), or HTML block
+/// (`<div>` and the other block-level tags rumdl's parser recognizes).
+/// Reflow must never start a wrapped line with such content: prose that was
+/// harmless mid-line becomes real block syntax at line start, silently
+/// changing the document's structure (a `- ` clause becomes a nested list
+/// item, a `# ` becomes a heading, a `[ref]: url` turns a dangling reference
+/// elsewhere in the document into a live link, and so on).
+fn starts_block_construct(text: &str) -> bool {
+    let text = text.trim_start();
+    let bytes = text.as_bytes();
+    let Some(&first) = bytes.first() else {
+        return false;
+    };
+    let marker_then_boundary = |len: usize| bytes.len() == len || bytes[len] == b' ' || bytes[len] == b'\t';
+    match first {
+        // A blockquote marker needs no following space
+        b'>' => true,
+        b'-' | b'*' | b'+' => marker_then_boundary(1) || is_setext_or_thematic(text),
+        b'_' | b'=' => is_setext_or_thematic(text),
+        b'#' => {
+            let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
+            hashes <= 6 && marker_then_boundary(hashes)
+        }
+        b'`' => bytes.iter().take_while(|&&b| b == b'`').count() >= 3,
+        b'~' => bytes.iter().take_while(|&&b| b == b'~').count() >= 3,
+        b'0'..=b'9' => {
+            let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+            digits <= 9
+                && bytes.len() > digits
+                && (bytes[digits] == b'.' || bytes[digits] == b')')
+                && marker_then_boundary(digits + 1)
+        }
+        // Footnote/link-reference definition: `[label]:` anchored at line
+        // start, meaning the label's own closing bracket is immediately
+        // followed by a colon ("[ref]: url", "[^1]: note" - but not
+        // "[a](b) [ref]:", whose first bracket is an inline link). rumdl's
+        // parser recognizes definitions even on paragraph-continuation lines,
+        // so hoisting one to line start reclassifies it (and can resolve
+        // dangling references elsewhere in the document).
+        b'[' => {
+            let mut escaped = false;
+            let mut label_close = None;
+            for (i, &b) in bytes.iter().enumerate().skip(1) {
+                if escaped {
+                    escaped = false;
+                } else if b == b'\\' {
+                    escaped = true;
+                } else if b == b']' {
+                    label_close = Some(i);
+                    break;
+                }
+            }
+            label_close.is_some_and(|i| bytes.get(i + 1) == Some(&b':'))
+        }
+        // Block-level HTML tag per rumdl's parser (shared predicate, so the
+        // guard cannot drift from what lint_context classifies as a block).
+        b'<' => crate::utils::html_block::parse_html_block_start(text).is_some(),
+        _ => false,
+    }
+}
+
+/// Merge any reflowed continuation line that would open a block construct back
+/// into the previous line. This is the safety net behind the per-break-site
+/// guards: no matter which emitter produced the lines, a wrapped continuation
+/// must never turn prose into a list item, heading, blockquote, code fence, or
+/// horizontal rule. The first line keeps its position - it replaces the
+/// paragraph's original start, where the source already established the
+/// context. The merged line may exceed the configured width; a long line is
+/// the correct failure direction, corrupted structure is not.
+fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::with_capacity(lines.len());
+    for line in lines {
+        match merged.last_mut() {
+            Some(prev) if starts_block_construct(&line) => {
+                prev.push(' ');
+                prev.push_str(line.trim_start());
+            }
+            _ => merged.push(line),
+        }
+    }
+    merged
+}
+
 /// Reflow elements for sentence-per-line mode
 fn reflow_elements_sentence_per_line(
     elements: &[Element],
@@ -2224,17 +2346,20 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
 }
 
 /// Find the last space in `line` that is safe to split at.
-/// Safe spaces are those NOT inside rendered non-Text elements.
-/// `element_spans` contains (start, end) byte ranges of non-Text elements in the line.
-/// Find the last space in `line` that is not inside any element span.
-/// Spans use exclusive bounds (pos > start && pos < end) because element
-/// delimiters (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never
-/// spaces, so only interior positions need protection.
+/// Safe spaces are those NOT inside rendered non-Text elements and whose
+/// suffix would not open a block construct when placed at line start.
+/// `element_spans` contains (start, end) byte ranges of non-Text elements in
+/// the line. Spans use exclusive bounds (pos > start && pos < end) because
+/// element delimiters (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never
+/// spaces, so only interior positions need protection. The scan keeps looking
+/// left past construct-leading suffixes (e.g. a trailing `- `), so a usable
+/// earlier break point is found instead of forcing an overlong line.
 fn rfind_safe_space(line: &str, element_spans: &[(usize, usize)]) -> Option<usize> {
-    line.char_indices()
-        .rev()
-        .map(|(pos, _)| pos)
-        .find(|&pos| line.as_bytes()[pos] == b' ' && !element_spans.iter().any(|(s, e)| pos > *s && pos < *e))
+    line.char_indices().rev().map(|(pos, _)| pos).find(|&pos| {
+        line.as_bytes()[pos] == b' '
+            && !element_spans.iter().any(|(s, e)| pos > *s && pos < *e)
+            && !starts_block_construct(&line[pos + 1..])
+    })
 }
 
 /// Reflow elements into lines that fit within the line length
@@ -2290,6 +2415,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     if current_length + word_len > options.line_length && current_length > 0 {
                         // Would exceed — break before the adjacent group
                         // Use element-aware space search to avoid splitting inside links/code/etc.
+                        // Never hoist text that would open a block construct to line start.
                         if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
                             let before = current_line[..last_space].trim_end().to_string();
                             let after = current_line[last_space + 1..].to_string();
@@ -2309,11 +2435,33 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     && current_length + 1 + word_len > options.line_length
                     && !is_trailing_punct
                 {
-                    // Start a new line (but never for trailing punctuation)
-                    lines.push(current_line.trim().to_string());
-                    current_line = word.to_string();
-                    current_length = word_len;
-                    current_line_element_spans.clear();
+                    if !starts_block_construct(word) {
+                        // Start a new line (but never for trailing punctuation)
+                        lines.push(current_line.trim().to_string());
+                        current_line = word.to_string();
+                        current_length = word_len;
+                        current_line_element_spans.clear();
+                    } else if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
+                        // The overflowing word would open a block construct at line
+                        // start. Break one word earlier instead so the marker stays
+                        // mid-line: "... and then" + "- clause" becomes "... and" +
+                        // "then - clause".
+                        let before = current_line[..last_space].trim_end().to_string();
+                        let after = current_line[last_space + 1..].to_string();
+                        lines.push(before);
+                        current_line = format!("{after} {word}");
+                        current_length = display_len(&current_line, length_mode);
+                        current_line_element_spans.clear();
+                    } else {
+                        // No safe earlier break point — keep the marker attached and
+                        // accept the long line rather than corrupt the structure.
+                        if i > 0 || has_leading_space {
+                            current_line.push(' ');
+                            current_length += 1;
+                        }
+                        current_line.push_str(word);
+                        current_length += word_len;
+                    }
                 } else {
                     // Add a space only where the source had whitespace at this position.
                     // For the first word of a text run (i == 0) that means the source had a
@@ -2379,7 +2527,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         current_length > 0
                     };
 
-                    if needs_space && current_length + 1 + word_len > options.line_length {
+                    if needs_space
+                        && current_length + 1 + word_len > options.line_length
+                        && !starts_block_construct(&word_str)
+                    {
                         lines.push(current_line.trim_end().to_string());
                         current_line = word_str;
                         current_length = word_len;
@@ -2403,6 +2554,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 if current_length + element_len > options.line_length {
                     // Would exceed limit — break before the adjacent word group
                     // Use element-aware space search to avoid splitting inside links/code/etc.
+                    // Never hoist text that would open a block construct to line start.
                     if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
                         let before = current_line[..last_space].trim_end().to_string();
                         let after = current_line[last_space + 1..].to_string();
@@ -2427,12 +2579,39 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_line_element_spans.push((start, current_line.len()));
                 }
             } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
-                // Not adjacent, would exceed — start new line
-                lines.push(current_line.trim().to_string());
-                current_line.clone_from(&element_str);
-                current_length = element_len;
-                current_line_element_spans.clear();
-                current_line_element_spans.push((0, element_str.len()));
+                if !starts_block_construct(&element_str) {
+                    // Not adjacent, would exceed — start new line
+                    lines.push(current_line.trim().to_string());
+                    current_line.clone_from(&element_str);
+                    current_length = element_len;
+                    current_line_element_spans.clear();
+                    current_line_element_spans.push((0, element_str.len()));
+                } else if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
+                    // The overflowing element would open a block construct at
+                    // line start (e.g. an HtmlTag like `<div>`). Break one word
+                    // earlier instead so the element stays mid-line.
+                    let before = current_line[..last_space].trim_end().to_string();
+                    let after = current_line[last_space + 1..].to_string();
+                    lines.push(before);
+                    current_line = format!("{after} {element_str}");
+                    current_length = display_len(&current_line, length_mode);
+                    current_line_element_spans.clear();
+                    let start = after.len() + 1;
+                    current_line_element_spans.push((start, start + element_str.len()));
+                } else {
+                    // No safe earlier break point — keep the element attached
+                    // and accept the long line rather than corrupt the structure.
+                    let ends_with_opener =
+                        current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
+                    if !ends_with_opener {
+                        current_line.push(' ');
+                        current_length += 1;
+                    }
+                    let start = current_line.len();
+                    current_line.push_str(&element_str);
+                    current_length += element_len;
+                    current_line_element_spans.push((start, current_line.len()));
+                }
             } else {
                 // Not adjacent, fits — add with space
                 let ends_with_opener =
@@ -3666,5 +3845,189 @@ mod tests {
         // Line 3 is the div marker — should not be reflowed
         let result = reflow_paragraph_at_line(content, 3, 80);
         assert!(result.is_none(), "Div marker line should not be reflowed");
+    }
+
+    #[test]
+    fn starts_block_construct_detects_block_openers() {
+        // Bullet list markers: marker char followed by space or end
+        for case in ["- item", "-", "* item", "*", "+ item", "+", "-\titem"] {
+            assert!(starts_block_construct(case), "bullet: {case:?}");
+        }
+        // Ordered list markers: up to 9 digits, `.` or `)`, then space or end
+        for case in ["1. item", "1) item", "9. x", "123456789. x", "1.", "42) x"] {
+            assert!(starts_block_construct(case), "ordered: {case:?}");
+        }
+        // Blockquote: `>` needs no following space
+        for case in ["> quote", ">quote", ">"] {
+            assert!(starts_block_construct(case), "blockquote: {case:?}");
+        }
+        // ATX headings: 1-6 hashes then space or end
+        for case in ["# heading", "###### h6", "#", "##"] {
+            assert!(starts_block_construct(case), "heading: {case:?}");
+        }
+        // Code fences: 3+ backticks or tildes
+        for case in ["```", "```rust", "````", "~~~", "~~~text"] {
+            assert!(starts_block_construct(case), "fence: {case:?}");
+        }
+        // Setext underlines and thematic breaks
+        for case in ["---", "--", "===", "=", "***", "___", "_ _ _", "- - -"] {
+            assert!(starts_block_construct(case), "setext/thematic: {case:?}");
+        }
+        // Footnote and link-reference definitions: hoisting one to line start
+        // reclassifies it and can resolve dangling references elsewhere
+        for case in [
+            "[^1]: text",
+            "[^note]:",
+            "[ref]: http://example.com",
+            "[wat]: url follows",
+        ] {
+            assert!(starts_block_construct(case), "definition: {case:?}");
+        }
+        // Block-level HTML tags (rumdl parser's HTML block classification)
+        for case in ["<div>content", "</div>", "<p>text", "<table>", "<pre>code", "<h1>x"] {
+            assert!(starts_block_construct(case), "html block: {case:?}");
+        }
+    }
+
+    #[test]
+    fn starts_block_construct_allows_ordinary_prose() {
+        for case in [
+            "",
+            "word",
+            "-5 degrees",
+            "--flag",
+            "-item",
+            "#hashtag",
+            "####### seven hashes is not a heading",
+            "1.5 million",
+            "1234567890. ten digits is not a list marker",
+            "1:30 pm",
+            "*emphasis*",
+            "**bold** text",
+            "__bold__ text",
+            "_emphasis_ text",
+            "`code` span",
+            "`` double backtick span ``",
+            "~~strikethrough~~",
+            "=x",
+            "== ==",
+            "(parenthetical)",
+            "[link](url)",
+            "[text][ref] more",
+            "[bracketed] aside",
+            "[a](b) [ref]: first bracket is a link, not a label",
+            "[esc\\]: not a close] text",
+            "<span>inline</span>",
+            "<b>bold</b>",
+            "<https://example.com> autolink",
+            "<mailto:a@b.com>",
+            "<notarealtag>",
+        ] {
+            assert!(!starts_block_construct(case), "prose: {case:?}");
+        }
+    }
+
+    #[test]
+    fn merge_block_construct_continuations_merges_marker_led_lines() {
+        let lines = vec![
+            "First sentence?".to_string(),
+            "- looks like a list item".to_string(),
+            "Second sentence.".to_string(),
+        ];
+        assert_eq!(
+            merge_block_construct_continuations(lines),
+            vec![
+                "First sentence? - looks like a list item".to_string(),
+                "Second sentence.".to_string(),
+            ]
+        );
+
+        // The first line keeps its position: it replaces the paragraph's
+        // original start, where the source already established the context.
+        let lines = vec!["- real list content".to_string(), "continuation".to_string()];
+        assert_eq!(
+            merge_block_construct_continuations(lines.clone()),
+            lines,
+            "first line must never be merged"
+        );
+    }
+
+    #[test]
+    fn wrap_never_starts_a_line_with_a_block_marker() {
+        let options = ReflowOptions {
+            line_length: 25,
+            ..Default::default()
+        };
+        // The dash lands exactly at the wrap point; the wrapper must break one
+        // word earlier so the dash stays mid-line.
+        let lines = reflow_line(
+            "Some words here and then - a dash clause that wraps around the limit.",
+            &options,
+        );
+        assert_eq!(
+            lines,
+            vec![
+                "Some words here and",
+                "then - a dash clause that",
+                "wraps around the limit."
+            ]
+        );
+
+        // Every marker category must stay mid-line in wrap mode, whatever the width.
+        for input in [
+            "Alpha beta gamma delta epsilon - dash clause here to wrap",
+            "Alpha beta gamma delta epsilon > quote lookalike here to wrap",
+            "Alpha beta gamma delta epsilon # heading lookalike here to wrap",
+            "Alpha beta gamma delta epsilon 1. ordered lookalike here to wrap",
+            "Alpha beta gamma delta epsilon * star clause here to wrap",
+            "Alpha beta gamma delta epsilon + plus clause here to wrap",
+        ] {
+            for width in 10..40 {
+                let options = ReflowOptions {
+                    line_length: width,
+                    ..Default::default()
+                };
+                for line in reflow_line(input, &options) {
+                    assert!(
+                        !starts_block_construct(&line),
+                        "width {width}: wrapped line opens a block construct: {line:?} (input {input:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sentence_per_line_keeps_block_markers_mid_line() {
+        let options = ReflowOptions {
+            line_length: 80,
+            sentence_per_line: true,
+            ..Default::default()
+        };
+        // A sentence "starting" with a dash must stay attached to the previous
+        // sentence instead of becoming a list item (issue #728).
+        let lines = reflow_line(
+            "Google Calendar (Can't we get rid of this dependency? - I don't really see the need)",
+            &options,
+        );
+        assert_eq!(
+            lines,
+            vec!["Google Calendar (Can't we get rid of this dependency? - I don't really see the need)".to_string()]
+        );
+
+        // Same for heading, blockquote, and ordered-list lookalikes.
+        let lines = reflow_line("See section 4? # is the marker we use. Fine.", &options);
+        assert_eq!(lines, vec!["See section 4? # is the marker we use.", "Fine."]);
+
+        let lines = reflow_line("Is this a problem? > I quote someone here.", &options);
+        assert_eq!(lines, vec!["Is this a problem? > I quote someone here."]);
+
+        let lines = reflow_line("Another case! 1. Not a list. More text follows here.", &options);
+        for line in &lines {
+            assert!(
+                !starts_block_construct(line),
+                "sentence-per-line output opens a block construct: {line:?}"
+            );
+        }
     }
 }

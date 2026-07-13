@@ -1596,3 +1596,192 @@ reflow-mode = "semantic-line-breaks"
         "Pipeline prose missing from output:\n{after}",
     );
 }
+
+// Reflow must never start a wrapped or split line with text that re-parses as
+// a block construct (issue #728): a `- ` clause becomes a nested list item, a
+// `# ` becomes a heading, `> ` a blockquote, `1. ` an ordered list. Once that
+// happens, other rules' fixes in the same pass compound the damage (MD032
+// inserts blank lines around the accidental list, heading rules rewrite the
+// accidental heading).
+
+const SENTENCE_PER_LINE_CONFIG: &str = r#"
+[MD013]
+line-length = 80
+paragraphs = false
+reflow = true
+reflow-mode = "sentence-per-line"
+"#;
+
+/// Every line of `text`, ignoring list-item lead lines present in the input,
+/// must not open an unintended block construct.
+fn assert_no_marker_led_lines(text: &str, allowed_prefixes: &[&str]) {
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if allowed_prefixes.iter().any(|p| trimmed.starts_with(p)) || trimmed.is_empty() {
+            continue;
+        }
+        let opens_construct = trimmed.starts_with("- ")
+            || trimmed == "-"
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with('>')
+            || trimmed.starts_with("# ")
+            || trimmed.starts_with("```")
+            || (trimmed.split_once(['.', ')']).is_some_and(|(n, rest)| {
+                !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && (rest.is_empty() || rest.starts_with(' '))
+            }));
+        assert!(
+            !opens_construct,
+            "Reflowed line opens a block construct: {line:?}\nFull output:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_728_sentence_per_line_dash_in_list_item() {
+    // The reported case: a mid-sentence ` - ` after a sentence boundary must
+    // not become a nested list item when the paragraph is re-split.
+    let content = "- list item before\n- Google Calendar\n  (Can't we get rid of this dependency? - I don't really see the need)\n- list item after\n";
+    let after = run_md013_fix(content, SENTENCE_PER_LINE_CONFIG);
+
+    assert_eq!(
+        after,
+        "- list item before\n- Google Calendar (Can't we get rid of this dependency? - I don't really see the need)\n- list item after\n",
+        "The parenthetical must join the item, not become a sub-item"
+    );
+}
+
+#[test]
+fn test_issue_728_sentence_per_line_paragraph_markers_stay_inline() {
+    // A paragraph already on one line whose only sentence boundary precedes a
+    // marker lookalike must be left completely unchanged (no warning loop).
+    for content in [
+        "Is this a problem? - I think so.\n",
+        "What about this? > quoted text follows.\n",
+    ] {
+        let after = run_md013_fix(content, SENTENCE_PER_LINE_CONFIG);
+        assert_eq!(
+            after, content,
+            "Marker-led sentence must not be split onto its own line"
+        );
+    }
+}
+
+#[test]
+fn test_issue_728_sentence_per_line_heading_and_ordered_lookalikes() {
+    // Sentences that do get split must never place a marker at line start.
+    let content =
+        "See section 4? # is the marker we use. Fine.\n\nAnother case! 1. Not a list. More text follows here.\n";
+    let after = run_md013_fix(content, SENTENCE_PER_LINE_CONFIG);
+
+    assert_no_marker_led_lines(&after, &[]);
+    // The prose is intact: nothing was rewritten into a heading (which
+    // heading rules would then demote and strip punctuation from).
+    assert!(
+        after.contains("# is the marker we use."),
+        "Heading lookalike was rewritten:\n{after}"
+    );
+}
+
+#[test]
+fn test_issue_728_wrap_mode_never_creates_block_constructs() {
+    let config = r#"
+[MD013]
+line-length = 25
+reflow = true
+"#;
+    // The dash lands exactly at the wrap point; the wrapper must break one
+    // word earlier so the dash stays mid-line, and every line must fit.
+    let content = "Some words here and then - a dash clause that wraps around the limit.\n";
+    let after = run_md013_fix(content, config);
+
+    assert_eq!(
+        after,
+        "Some words here and\nthen - a dash clause that\nwraps around the limit.\n"
+    );
+}
+
+#[test]
+fn test_issue_728_footnote_definition_not_created_by_wrap() {
+    // `[^1]:` hoisted to line start would flip rumdl's classification of the
+    // identical bytes from "footnote reference" to "footnote definition",
+    // detaching the trailing prose from the paragraph flow.
+    let config = r#"
+[MD013]
+line-length = 28
+reflow = true
+"#;
+    let content = "This is a long sentence that keeps on going until finally [^1]: this looks exactly like a real footnote definition after the wrap point is reached.\n";
+    let after = run_md013_fix(content, config);
+
+    for line in after.lines() {
+        assert!(
+            !line.trim_start().starts_with("[^"),
+            "Wrap must not place a footnote-definition shape at line start: {line:?}\nFull output:\n{after}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_728_link_reference_definition_not_created_by_wrap() {
+    // `[label]: url` hoisted to line start becomes a real link reference
+    // definition: a dangling `[wat]` elsewhere silently becomes a live link
+    // and the definition line's prose disappears from rendered output.
+    let config = r#"
+[MD013]
+line-length = 28
+reflow = true
+"#;
+    let content = "# Title\n\nSee [wat] for details.\n\nThis is a long sentence that keeps on going until finally [wat]: http://example.com is what appears right after the wrap point is reached here.\n";
+    let after = run_md013_fix(content, config);
+
+    for line in after.lines() {
+        assert!(
+            !(line.starts_with('[') && line.contains("]:")),
+            "Wrap must not place a link-reference-definition shape at line start: {line:?}\nFull output:\n{after}"
+        );
+    }
+}
+
+#[test]
+fn test_issue_728_html_block_not_created_by_wrap() {
+    // `<div>` at the start of a wrapped continuation line flips the line (and
+    // everything until the next blank line) into a raw HTML block in rumdl's
+    // parser, changing paragraph boundaries and inline rendering.
+    let config = r#"
+[MD013]
+line-length = 40
+reflow = true
+"#;
+    let content = "# Title\n\nThis is a long paragraph of prose that keeps going until it eventually reaches <div>a tag that could become an HTML block if it lands at the very start of a wrapped line here today</div>.\n";
+    let after = run_md013_fix(content, config);
+
+    for line in after.lines() {
+        assert!(
+            !line.trim_start().starts_with("<div"),
+            "Wrap must not place a block-level HTML tag at line start: {line:?}\nFull output:\n{after}"
+        );
+    }
+    assert!(
+        after.contains("<div>a"),
+        "The inline tag content must be preserved:\n{after}"
+    );
+}
+
+#[test]
+fn test_issue_728_semantic_line_breaks_markers_stay_inline() {
+    let config = r#"
+[MD013]
+line-length = 40
+reflow = true
+reflow-mode = "semantic-line-breaks"
+"#;
+    let content = "The meeting went well overall I think? - though we still need the follow-up notes. Send them tomorrow morning please.\n";
+    let after = run_md013_fix(content, config);
+
+    assert_no_marker_led_lines(&after, &[]);
+    assert!(
+        after.contains("? - though"),
+        "Dash clause must stay attached to its sentence:\n{after}"
+    );
+}
