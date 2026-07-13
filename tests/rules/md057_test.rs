@@ -853,6 +853,270 @@ fn test_complex_document_no_duplicates() {
 }
 
 // =============================================================================
+// Issue #727: unanchored URL extraction leaks a sibling link's URL, producing
+// duplicate warnings and (with compact-paths) corrupting fix output.
+// =============================================================================
+
+/// The reporter's exact table-cell case: a fragment-only link followed by an
+/// image whose destination cannot be found by the unanchored regex search at
+/// the fragment-only bracket's own position, so it used to leak forward and
+/// borrow the image's URL. Must produce exactly one "simplified" and one
+/// "does not exist" warning, not two of each.
+#[test]
+fn test_table_cell_fragment_then_missing_image_no_duplicate_warnings() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "| asdf |\n| --- |\n| [foo](#bar) [](./baz.png) |\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    let simplify_count = result.iter().filter(|w| w.message.contains("simplified")).count();
+    let missing_count = result.iter().filter(|w| w.message.contains("does not exist")).count();
+    assert_eq!(
+        simplify_count, 1,
+        "Expected exactly 1 'simplified' warning, got: {result:?}"
+    );
+    assert_eq!(
+        missing_count, 1,
+        "Expected exactly 1 'does not exist' warning, got: {result:?}"
+    );
+    assert_eq!(result.len(), 2, "Expected exactly 2 warnings total, got: {result:?}");
+}
+
+/// The reporter's exact corruption: applying the fix to the table row above must
+/// simplify `./baz.png` to `baz.png` and leave everything else byte-for-byte
+/// intact, including the closing `)` and the trailing table pipe.
+#[test]
+fn test_table_cell_fix_preserves_closing_paren_and_pipe() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "| asdf |\n| --- |\n| [foo](#bar) [](./baz.png) |\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+
+    assert_eq!(
+        fixed, "| asdf |\n| --- |\n| [foo](#bar) [](baz.png) |\n",
+        "Fix must only compact the path, not delete the closing paren or trailing pipe"
+    );
+}
+
+/// The identical duplication and corruption reproduce on a plain line with no
+/// table syntax at all, which confirms the bug is not table-specific.
+#[test]
+fn test_plain_line_fragment_then_missing_link_matches_table_case() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[foo](#bar) [](./baz.png)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        2,
+        "Expected exactly 2 warnings (1 simplify + 1 missing), got: {result:?}"
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[foo](#bar) [](baz.png)\n",
+        "Fix must only compact the path, not corrupt the rest of the line"
+    );
+}
+
+/// A fragment-only link followed by a real link that already EXISTS but still
+/// needs path compaction. This isolates the "simplified" duplication (and the
+/// duplicate-Fix corruption risk) from the "does not exist" path: even when
+/// the leaked-URL file exists, the fragment-only bracket must not borrow the
+/// sibling's URL and must not contribute a second identical Fix.
+#[test]
+fn test_fragment_then_existing_link_needing_compaction_no_duplicate_fix() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(sub_dir.join("file.md"), "# File").unwrap();
+
+    let content = "[foo](#bar) [link](../sub_dir/file.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 'simplified' warning, no 'does not exist' warning since the file exists. Got: {result:?}"
+    );
+    assert!(result[0].message.contains("simplified"), "Got: {:?}", result[0].message);
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[foo](#bar) [link](file.md)\n",
+        "Fix must compact only the real link, without corrupting the line"
+    );
+}
+
+/// An empty `()` destination, like a fragment-only destination, cannot be
+/// matched by the URL regex at its own position. It must not leak the next
+/// bracket's URL either.
+#[test]
+fn test_empty_parens_then_missing_link_no_duplicate() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[foo]() [](./baz.png)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for './baz.png', got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("./baz.png") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+}
+
+/// A link sharing a line with an image: `LINK_START_REGEX`'s `!?` prefix also
+/// matches image syntax, so the link-scanning loop used to re-validate the
+/// same image that the dedicated image loop already validates. The image must
+/// be reported exactly once.
+#[test]
+fn test_link_and_image_same_line_image_reported_once() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "[foo](#bar) ![alt](./baz.png)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for the missing image, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("./baz.png") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+}
+
+/// An escaped exclamation mark (`\![...]`) is literal text followed by a
+/// normal link per CommonMark, not an image. The parser never records such
+/// brackets in ctx.images, so the link loop is their only validator and the
+/// image-skip guard must not suppress them.
+#[test]
+fn test_escaped_bang_link_still_validated() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "\\![alt](./missing.md)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for the escaped-bang link, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("./missing.md") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+}
+
+/// An escaped backslash before a bang (`\\![...]`) leaves the image intact
+/// per CommonMark: the bracket is a genuine image, validated exactly once by
+/// the image loop and skipped by the link loop.
+#[test]
+fn test_escaped_backslash_before_image_reported_once() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let content = "\\\\![alt](./missing.png)\n";
+
+    let rule = MD057ExistingRelativeLinks::new().with_path(base_path);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+
+    assert_eq!(
+        result.len(),
+        1,
+        "Expected exactly 1 warning for the image after an escaped backslash, got: {result:?}"
+    );
+    assert!(
+        result[0].message.contains("./missing.png") && result[0].message.contains("does not exist"),
+        "Got: {}",
+        result[0].message
+    );
+}
+
+/// Control: a genuinely missing relative link with path traversal must still
+/// be flagged exactly once for each of the two independent conditions
+/// (simplifiable, missing) and the fix must still simplify the path
+/// correctly. Guards against the anchoring and fix-dedup changes suppressing
+/// real warnings or fixes for the single-link case.
+#[test]
+fn test_control_single_missing_link_with_traversal_still_flagged_and_fixed() {
+    let temp_dir = tempdir().unwrap();
+    let base_path = temp_dir.path();
+
+    let sub_dir = base_path.join("sub_dir");
+    fs::create_dir_all(&sub_dir).unwrap();
+    // sub_dir/missing.md is intentionally never created.
+
+    let content = "[link](../sub_dir/missing.md)\n";
+
+    let config = make_compact_paths_config();
+    let rule = MD057ExistingRelativeLinks::from_config_struct(config).with_path(&sub_dir);
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+
+    let result = rule.check(&ctx).unwrap();
+    let simplify_count = result.iter().filter(|w| w.message.contains("simplified")).count();
+    let missing_count = result.iter().filter(|w| w.message.contains("does not exist")).count();
+    assert_eq!(
+        simplify_count, 1,
+        "Expected exactly 1 'simplified' warning, got: {result:?}"
+    );
+    assert_eq!(
+        missing_count, 1,
+        "Expected exactly 1 'does not exist' warning, got: {result:?}"
+    );
+    assert_eq!(result.len(), 2, "Expected exactly 2 warnings total, got: {result:?}");
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed, "[link](missing.md)\n",
+        "Fix must still simplify the path for a single missing link"
+    );
+}
+
+// =============================================================================
 // LaTeX math span tests (Issue #289)
 // =============================================================================
 
