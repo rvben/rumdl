@@ -746,16 +746,21 @@ struct EmphasisSpan {
 /// - GFM strikethrough (~~text~~)
 ///
 /// Returns spans sorted by start position.
-fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
-    // Every emphasis, strong, or strikethrough marker starts with one of these
-    // bytes, so their absence rules out any span without running the parser.
-    if !text.contains(['*', '_', '~']) {
-        return Vec::new();
+fn extract_emphasis_and_code_spans(text: &str) -> (Vec<EmphasisSpan>, Vec<CodeSpan>) {
+    // If neither marker is present, skip the parser entirely.
+    let has_emphasis = text.contains(['*', '_', '~']);
+    let has_code = text.contains('`');
+    if !has_emphasis && !has_code {
+        return (Vec::new(), Vec::new());
     }
 
-    let mut spans = Vec::new();
+    let mut emphasis_spans = Vec::new();
+    let mut code_spans = Vec::new();
+
     let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
+    if has_emphasis {
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+    }
 
     // Stacks to track nested formatting with their start positions
     let mut emphasis_stack: Vec<(usize, bool)> = Vec::new(); // (start_byte, uses_underscore)
@@ -766,6 +771,12 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
 
     for (event, range) in parser {
         match event {
+            Event::Code(_) => {
+                code_spans.push(CodeSpan {
+                    start: range.start,
+                    end: range.end,
+                });
+            }
             Event::Start(Tag::Emphasis) => {
                 // Check if this uses underscore by looking at the original text
                 let uses_underscore = text.get(range.start..range.start + 1) == Some("_");
@@ -773,13 +784,12 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
             }
             Event::End(TagEnd::Emphasis) => {
                 if let Some((start_byte, uses_underscore)) = emphasis_stack.pop() {
-                    // Extract content between the markers (1 char marker on each side)
                     let content_start = start_byte + 1;
                     let content_end = range.end - 1;
                     if content_end > content_start
                         && let Some(content) = text.get(content_start..content_end)
                     {
-                        spans.push(EmphasisSpan {
+                        emphasis_spans.push(EmphasisSpan {
                             start: start_byte,
                             end: range.end,
                             content: content.to_string(),
@@ -792,19 +802,17 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
                 }
             }
             Event::Start(Tag::Strong) => {
-                // Check if this uses underscore by looking at the original text
                 let uses_underscore = text.get(range.start..range.start + 2) == Some("__");
                 strong_stack.push((range.start, uses_underscore));
             }
             Event::End(TagEnd::Strong) => {
                 if let Some((start_byte, uses_underscore)) = strong_stack.pop() {
-                    // Extract content between the markers (2 char marker on each side)
                     let content_start = start_byte + 2;
                     let content_end = range.end - 2;
                     if content_end > content_start
                         && let Some(content) = text.get(content_start..content_end)
                     {
-                        spans.push(EmphasisSpan {
+                        emphasis_spans.push(EmphasisSpan {
                             start: start_byte,
                             end: range.end,
                             content: content.to_string(),
@@ -821,9 +829,6 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
             }
             Event::End(TagEnd::Strikethrough) => {
                 if let Some(start_byte) = strikethrough_stack.pop() {
-                    // pulldown-cmark's GFM strikethrough accepts both ~~text~~ and
-                    // ~text~. Detect the actual marker width so single-tilde spans
-                    // keep their first and last content character.
                     let double = text.get(start_byte..start_byte + 2) == Some("~~");
                     let marker_len = if double { 2 } else { 1 };
                     let content_start = start_byte + marker_len;
@@ -831,7 +836,7 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
                     if content_end > content_start
                         && let Some(content) = text.get(content_start..content_end)
                     {
-                        spans.push(EmphasisSpan {
+                        emphasis_spans.push(EmphasisSpan {
                             start: start_byte,
                             end: range.end,
                             content: content.to_string(),
@@ -847,9 +852,8 @@ fn extract_emphasis_spans(text: &str) -> Vec<EmphasisSpan> {
         }
     }
 
-    // Sort by start position
-    spans.sort_by_key(|s| s.start);
-    spans
+    emphasis_spans.sort_by_key(|s| s.start);
+    (emphasis_spans, code_spans)
 }
 
 #[derive(Debug, Clone)]
@@ -1050,15 +1054,11 @@ fn parse_markdown_elements_inner(
     let mut remaining = text;
 
     // Pre-extract emphasis spans, link spans, and code spans using pulldown-cmark.
-    // These run as separate parses rather than one shared parser: link resolution
-    // (the broken-link callback, needed to keep undefined shortcuts/references
-    // atomic) changes which bracket runs collapse into link nodes, which shifts
-    // where nearby emphasis delimiters pair up in edge cases (e.g. an unresolved
-    // shortcut containing `**`). Sharing a parser would leak that shift into
-    // emphasis_spans; each parse keeps its own event stream self-consistent.
-    let emphasis_spans = extract_emphasis_spans(text);
+    // Emphasis and code spans are extracted in a single shared parse to reduce cmark overhead.
+    // Link spans must run as a separate parse because link resolution (the broken-link
+    // callback) changes bracket collapses, which shifts delimiter range boundaries.
+    let (emphasis_spans, code_spans) = extract_emphasis_and_code_spans(text);
     let link_spans = extract_link_spans(text, defined_references);
-    let code_spans = extract_code_spans(text);
 
     // Caching state to avoid O(N^2) worst case on long inputs
     let mut cached_wiki_link: Option<Option<PatternMatch>> = None;
