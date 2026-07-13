@@ -71,6 +71,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.32](https://github.com/rvben/rumdl/compare/v0.2.31...v0.2.32) - 2026-07-13
+
+### Fixed
+
+- **md032**: stop flagging ordered lists nested in MkDocs admonitions ([80f896e](https://github.com/rvben/rumdl/commit/80f896e61d6e64afbce115b84b934a5e6325db54))
+- **md013**: recognize sentence boundaries followed by footnote references ([04a8c78](https://github.com/rvben/rumdl/commit/04a8c78e53cbcf8c6aa0df5114f2f630e4a5b9ba))
+- **md036,md023**: skip admonition and content tab bodies under MkDocs flavor ([e8d1421](https://github.com/rvben/rumdl/commit/e8d14213c6c2d726110c5acbe72f23b37aa61c0d))
+- **md040**: recognize py and py3 as Python language aliases ([6e7f8bf](https://github.com/rvben/rumdl/commit/6e7f8bfc2a572e469f1eeef0e24de0a8cf8173d3))
+- **md057**: anchor URL extraction so links cannot borrow a sibling's destination ([5a643ca](https://github.com/rvben/rumdl/commit/5a643ca46c781dc87ced08fec6fc6ebcf0128d71))
+
+### Performance
+
+- **reflow**: skip pulldown-cmark parses when a span kind cannot be present ([66d7f7b](https://github.com/rvben/rumdl/commit/66d7f7b412625f6efb7d5ede5be3e807efd7f26b))
+
 ## [0.2.31](https://github.com/rvben/rumdl/compare/v0.2.30...v0.2.31) - 2026-07-12
 
 ### Added
