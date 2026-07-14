@@ -73,6 +73,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.34](https://github.com/rvben/rumdl/compare/v0.2.33...v0.2.34) - 2026-07-14
+
+### Added
+
+- **code-block-tools**: restore shuck as a built-in shell linter ([da66447](https://github.com/rvben/rumdl/commit/da66447ae2bea9186c436039111bd161f3e95ba2))
+
+### Performance
+
+- **reflow**: probe inline math at the cursor instead of rescanning the suffix ([1e6ea3b](https://github.com/rvben/rumdl/commit/1e6ea3b5fada915dd2bde693af058a51afec501a))
+- **reflow**: merge emphasis and code span extraction into a single cmark pass ([8e03537](https://github.com/rvben/rumdl/commit/8e035377b4971f04701cb4b0fefbbebf84844ddd))
+- **reflow**: optimize MyST inline role parsing using pre-extracted code spans ([e966899](https://github.com/rvben/rumdl/commit/e966899cd377e41e54941949ae0f9c50afb89874))
+
 ## [0.2.33](https://github.com/rvben/rumdl/compare/v0.2.32...v0.2.33) - 2026-07-14
 
 ### Fixed
