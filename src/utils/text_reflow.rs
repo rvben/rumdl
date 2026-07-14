@@ -1027,11 +1027,62 @@ fn myst_role_len_at(text: &str, absolute_pos: usize, code_spans: &[CodeSpan]) ->
     None
 }
 
-/// Absolute byte offsets of a cached regex match within the full input text.
+/// Absolute byte offsets of a cached pattern match within the full input text.
 #[derive(Clone, Copy, Debug)]
 struct PatternMatch {
     start: usize,
     end: usize,
+}
+
+/// Lazily-computed earliest match of one pattern within the unparsed suffix.
+///
+/// `parse_markdown_elements_inner` probes every pattern on every loop
+/// iteration; re-running each search against the whole remaining suffix made
+/// pathological inputs quadratic. The cache keeps the previous result as
+/// absolute offsets: until the parse cursor moves past a cached match, that
+/// match is still the earliest one, so the search is skipped.
+///
+/// This is sound only for patterns whose match at a given position does not
+/// depend on where the searched slice starts (no `^`, no lookbehind): for
+/// those, a cached miss stays a miss and a cached hit stays the earliest hit
+/// as the cursor advances. A start-sensitive pattern needs a dedicated probe
+/// at the cursor first (see the inline-math call site).
+#[derive(Clone, Copy)]
+enum PatternCache {
+    Unsearched,
+    NotFound,
+    Found(PatternMatch),
+}
+
+impl PatternCache {
+    /// Returns the earliest match at or after `cursor` as offsets relative to
+    /// `remaining` (the unparsed suffix starting at `cursor`), re-running
+    /// `find` on the suffix only when the cached result no longer applies.
+    fn earliest_in(
+        &mut self,
+        remaining: &str,
+        cursor: usize,
+        find: impl FnOnce(&str) -> Option<(usize, usize)>,
+    ) -> Option<(usize, usize)> {
+        let stale = match self {
+            PatternCache::Found(pm) => pm.start < cursor,
+            PatternCache::NotFound => false,
+            PatternCache::Unsearched => true,
+        };
+        if stale {
+            *self = match find(remaining) {
+                Some((start, end)) => PatternCache::Found(PatternMatch {
+                    start: cursor + start,
+                    end: cursor + end,
+                }),
+                None => PatternCache::NotFound,
+            };
+        }
+        match self {
+            PatternCache::Found(pm) => Some((pm.start - cursor, pm.end - cursor)),
+            _ => None,
+        }
+    }
 }
 
 /// Parse markdown elements from text preserving the raw syntax.
@@ -1060,15 +1111,16 @@ fn parse_markdown_elements_inner(
     let (emphasis_spans, code_spans) = extract_emphasis_and_code_spans(text);
     let link_spans = extract_link_spans(text, defined_references);
 
-    // Caching state to avoid O(N^2) worst case on long inputs
-    let mut cached_wiki_link: Option<Option<PatternMatch>> = None;
-    let mut cached_display_math: Option<Option<PatternMatch>> = None;
-    let mut cached_inline_math: Option<Option<PatternMatch>> = None;
-    let mut cached_emoji: Option<Option<PatternMatch>> = None;
-    let mut cached_html_entity: Option<Option<PatternMatch>> = None;
-    let mut cached_hugo_shortcode: Option<Option<PatternMatch>> = None;
-    let mut cached_html_tag: Option<Option<PatternMatch>> = None;
-    let mut cached_next_curly: Option<Option<usize>> = None;
+    // One cache per probed pattern to avoid an O(N^2) worst case on long
+    // inputs; see PatternCache for the validity rules.
+    let mut cached_wiki_link = PatternCache::Unsearched;
+    let mut cached_display_math = PatternCache::Unsearched;
+    let mut cached_inline_math = PatternCache::Unsearched;
+    let mut cached_emoji = PatternCache::Unsearched;
+    let mut cached_html_entity = PatternCache::Unsearched;
+    let mut cached_hugo_shortcode = PatternCache::Unsearched;
+    let mut cached_html_tag = PatternCache::Unsearched;
+    let mut cached_next_curly = PatternCache::Unsearched;
 
     // Cursor indices into the sorted span lists: spans behind the parse cursor
     // can never match again, so each list is advanced monotonically instead of
@@ -1078,7 +1130,10 @@ fn parse_markdown_elements_inner(
     let mut code_span_idx = 0usize;
 
     while !remaining.is_empty() {
+        // Calculate current byte offset in original text
         let current_offset = text.len() - remaining.len();
+        // Find the earliest occurrence of any markdown pattern
+        // Store (start, end, pattern_name) to unify regex and span-list results
         let mut earliest_match: Option<(usize, usize, &str)> = None;
 
         // Find the earliest link span
@@ -1098,178 +1153,102 @@ fn parse_markdown_elements_inner(
             }
         }
 
-        macro_rules! get_or_update_match {
-            ($cache:expr, $regex:expr) => {{
-                let need_search = match &$cache {
-                    Some(Some(pm)) => pm.start < current_offset,
-                    Some(None) => false,
-                    None => true,
-                };
-                if need_search {
-                    if let Some(m) = $regex.find(&text[current_offset..]) {
-                        $cache = Some(Some(PatternMatch {
-                            start: current_offset + m.start(),
-                            end: current_offset + m.end(),
-                        }));
-                    } else {
-                        $cache = Some(None);
-                    }
-                }
-                match &$cache {
-                    Some(Some(pm)) => Some(*pm),
-                    _ => None,
-                }
-            }};
+        // Check for wiki-style links - [[wiki]]
+        if let Some((start, end)) = cached_wiki_link.earliest_in(remaining, current_offset, |suffix| {
+            WIKI_LINK_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "wiki_link"));
         }
 
-        macro_rules! get_or_update_fancy_match {
-            ($cache:expr, $regex:expr) => {{
-                // The fancy regex used here (INLINE_MATH_REGEX) starts with the
-                // lookbehind `(?<!\$)`, which is slice-start-sensitive: at the
-                // start of the searched slice there is no preceding character,
-                // so the lookbehind trivially passes there, while a search
-                // anchored earlier sees the real predecessor and can reject the
-                // same position. A cached result is therefore only valid while
-                // the cursor is not sitting directly after a `$`; when it is,
-                // re-search from the cursor exactly like the uncached code did.
-                let lookbehind_hole = current_offset > 0 && text.as_bytes()[current_offset - 1] == b'$';
-                let need_search = lookbehind_hole
-                    || match &$cache {
-                        Some(Some(pm)) => pm.start < current_offset,
-                        Some(None) => false,
-                        None => true,
-                    };
-                if need_search {
-                    if let Ok(Some(m)) = $regex.find(&text[current_offset..]) {
-                        $cache = Some(Some(PatternMatch {
-                            start: current_offset + m.start(),
-                            end: current_offset + m.end(),
-                        }));
-                    } else {
-                        $cache = Some(None);
-                    }
-                }
-                match &$cache {
-                    Some(Some(pm)) => Some(*pm),
-                    _ => None,
-                }
-            }};
+        // Check for display math first (before inline) - $$math$$
+        if let Some((start, end)) = cached_display_math.earliest_in(remaining, current_offset, |suffix| {
+            DISPLAY_MATH_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "display_math"));
         }
 
-        if let Some(pm) = get_or_update_match!(cached_wiki_link, WIKI_LINK_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "wiki_link"));
-            }
+        // Check for inline math - $math$
+        // INLINE_MATH_REGEX opens with the lookbehind `(?<!\$)`, which is
+        // slice-start-sensitive: at the start of the searched slice there is
+        // no preceding character, so the lookbehind trivially passes, while
+        // the cached search, anchored earlier, saw the real `$` predecessor
+        // and can have rejected the same position. When the cursor sits
+        // directly after a `$`, drop the cache and re-search from the cursor
+        // exactly like the uncached code did.
+        if current_offset > 0 && text.as_bytes()[current_offset - 1] == b'$' {
+            cached_inline_math = PatternCache::Unsearched;
+        }
+        if let Some((start, end)) = cached_inline_math.earliest_in(remaining, current_offset, |suffix| {
+            INLINE_MATH_REGEX
+                .find(suffix)
+                .ok()
+                .flatten()
+                .map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "inline_math"));
         }
 
-        if let Some(pm) = get_or_update_match!(cached_display_math, DISPLAY_MATH_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "display_math"));
-            }
+        // Check for emoji shortcodes - :emoji:
+        if let Some((start, end)) = cached_emoji.earliest_in(remaining, current_offset, |suffix| {
+            EMOJI_SHORTCODE_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "emoji"));
         }
 
-        if let Some(pm) = get_or_update_fancy_match!(cached_inline_math, INLINE_MATH_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "inline_math"));
-            }
+        // Check for HTML entities - &nbsp; etc
+        if let Some((start, end)) = cached_html_entity.earliest_in(remaining, current_offset, |suffix| {
+            HTML_ENTITY_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "html_entity"));
         }
 
-        if let Some(pm) = get_or_update_match!(cached_emoji, EMOJI_SHORTCODE_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "emoji"));
-            }
-        }
-
-        if let Some(pm) = get_or_update_match!(cached_html_entity, HTML_ENTITY_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "html_entity"));
-            }
-        }
-
-        if let Some(pm) = get_or_update_match!(cached_hugo_shortcode, HUGO_SHORTCODE_REGEX) {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "hugo_shortcode"));
-            }
+        // Check for Hugo shortcodes - {{< ... >}} or {{% ... %}}
+        // Must be checked before other patterns to avoid false sentence breaks
+        if let Some((start, end)) = cached_hugo_shortcode.earliest_in(remaining, current_offset, |suffix| {
+            HUGO_SHORTCODE_REGEX.find(suffix).map(|m| (m.start(), m.end()))
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "hugo_shortcode"));
         }
 
         // Check for HTML tags - <tag> </tag> <tag/>
-        // But exclude autolinks like <https://...> or <mailto:...> or email autolinks <user@domain.com>
-        let need_html_tag_search = match &cached_html_tag {
-            Some(Some(pm)) => pm.start < current_offset,
-            Some(None) => false,
-            None => true,
-        };
-        if need_html_tag_search {
-            let mut search_offset = current_offset;
-            loop {
-                if let Some(m) = HTML_TAG_PATTERN.find(&text[search_offset..]) {
-                    let absolute_start = search_offset + m.start();
-                    let absolute_end = search_offset + m.end();
-                    let matched_text = &text[absolute_start..absolute_end];
-                    let is_url_autolink = matched_text.starts_with("<http://")
-                        || matched_text.starts_with("<https://")
-                        || matched_text.starts_with("<mailto:")
-                        || matched_text.starts_with("<ftp://")
-                        || matched_text.starts_with("<ftps://");
-                    let is_email_autolink = {
-                        // Use centralized EMAIL_PATTERN for consistency with MD034 and other rules
-                        let content = matched_text.trim_start_matches('<').trim_end_matches('>');
-                        EMAIL_PATTERN.is_match(content)
-                    };
-                    if is_url_autolink || is_email_autolink {
-                        search_offset = absolute_end;
-                    } else {
-                        cached_html_tag = Some(Some(PatternMatch {
-                            start: absolute_start,
-                            end: absolute_end,
-                        }));
-                        break;
-                    }
+        // But exclude autolinks like <https://...> or <mailto:...> or email
+        // autolinks <user@domain.com>: those are left for link_span handling.
+        // The search skips past autolinks instead of giving up so the cache
+        // lands on the first real tag; bailing out at an autolink would re-run
+        // this scan from the same spot on every iteration.
+        if let Some((start, end)) = cached_html_tag.earliest_in(remaining, current_offset, |suffix| {
+            let mut from = 0;
+            while let Some(m) = HTML_TAG_PATTERN.find(&suffix[from..]) {
+                let (tag_start, tag_end) = (from + m.start(), from + m.end());
+                let tag = &suffix[tag_start..tag_end];
+                // Autolink starting with a protocol or mailto:?
+                let is_url_autolink = tag.starts_with("<http://")
+                    || tag.starts_with("<https://")
+                    || tag.starts_with("<mailto:")
+                    || tag.starts_with("<ftp://")
+                    || tag.starts_with("<ftps://");
+                // Email autolink (per CommonMark spec: <local@domain.tld>)?
+                // Use centralized EMAIL_PATTERN for consistency with MD034 and other rules
+                let is_email_autolink = {
+                    let content = tag.trim_start_matches('<').trim_end_matches('>');
+                    EMAIL_PATTERN.is_match(content)
+                };
+                if is_url_autolink || is_email_autolink {
+                    from = tag_end;
                 } else {
-                    cached_html_tag = Some(None);
-                    break;
+                    return Some((tag_start, tag_end));
                 }
             }
-        }
-        if let Some(Some(pm)) = &cached_html_tag {
-            let pos_in_remaining = pm.start - current_offset;
-            if earliest_match
-                .as_ref()
-                .is_none_or(|(start, _, _)| pos_in_remaining < *start)
-            {
-                let match_end = pm.end - current_offset;
-                earliest_match = Some((pos_in_remaining, match_end, "html_tag"));
-            }
+            None
+        }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
+        {
+            earliest_match = Some((start, end, "html_tag"));
         }
 
         // Find earliest non-link special characters
@@ -1292,22 +1271,13 @@ fn parse_markdown_elements_inner(
             }
         }
 
-        let need_curly_search = match &cached_next_curly {
-            Some(Some(idx)) => *idx < current_offset,
-            Some(None) => false,
-            None => true,
-        };
-        if need_curly_search {
-            if let Some(pos) = remaining.find('{') {
-                cached_next_curly = Some(Some(current_offset + pos));
-            } else {
-                cached_next_curly = Some(None);
-            }
-        }
-        let next_curly_pos = match &cached_next_curly {
-            Some(Some(idx)) => Some(*idx - current_offset),
-            _ => None,
-        };
+        // Position of the next `{`, shared by the MyST-role and attr-list
+        // probes below
+        let next_curly_pos = cached_next_curly
+            .earliest_in(remaining, current_offset, |suffix| {
+                suffix.find('{').map(|pos| (pos, pos + 1))
+            })
+            .map(|(start, _)| start);
 
         // Check for MyST inline roles - {role}`content` (e.g. {cite:p}`ref`).
         // Checked before the bare code-span handling so the role's trailing code
