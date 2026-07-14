@@ -9,5 +9,5 @@ Thank you to all our sponsors who support rumdl development!
 ## Supporters
 
 - [Luke W. Johnston](https://github.com/lwjohnst86)
-- [Ray Kohler](https://github.com/ataraxia937)
+- [Stuart Ellis](https://github.com/stuartellis)
 - [Tony Burns](https://github.com/tbhb)
