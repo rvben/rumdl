@@ -1467,11 +1467,7 @@ fn parse_markdown_elements_inner(
                     elements.push(Element::HtmlTag(remaining[pos..match_end].to_string()));
                     remaining = &remaining[match_end..];
                 }
-                _ => {
-                    // Unknown pattern, treat as text
-                    elements.push(Element::Text("[".to_string()));
-                    remaining = &remaining[1..];
-                }
+                _ => unreachable!("unknown pattern type: {}", pattern_type),
             }
         } else {
             // Process non-link special characters
@@ -1501,30 +1497,25 @@ fn parse_markdown_elements_inner(
                 }
                 "pulldown_emphasis" => {
                     // Use pre-extracted emphasis/strikethrough span from pulldown-cmark
-                    if let Some(span) = pulldown_emphasis {
-                        let span_len = span.end - span.start;
-                        if span.is_strikethrough {
-                            elements.push(Element::Strikethrough {
-                                content: span.content.clone(),
-                                double: span.strikethrough_double,
-                            });
-                        } else if span.is_strong {
-                            elements.push(Element::Bold {
-                                content: span.content.clone(),
-                                underscore: span.uses_underscore,
-                            });
-                        } else {
-                            elements.push(Element::Italic {
-                                content: span.content.clone(),
-                                underscore: span.uses_underscore,
-                            });
-                        }
-                        remaining = &remaining[span_len..];
+                    let span = pulldown_emphasis.expect("pulldown_emphasis must be set");
+                    let span_len = span.end - span.start;
+                    if span.is_strikethrough {
+                        elements.push(Element::Strikethrough {
+                            content: span.content.clone(),
+                            double: span.strikethrough_double,
+                        });
+                    } else if span.is_strong {
+                        elements.push(Element::Bold {
+                            content: span.content.clone(),
+                            underscore: span.uses_underscore,
+                        });
                     } else {
-                        // Fallback - shouldn't happen
-                        elements.push(Element::Text(remaining[..1].to_string()));
-                        remaining = &remaining[1..];
+                        elements.push(Element::Italic {
+                            content: span.content.clone(),
+                            underscore: span.uses_underscore,
+                        });
                     }
+                    remaining = &remaining[span_len..];
                 }
                 _ => {
                     // No special elements found, add all remaining text
@@ -1535,7 +1526,21 @@ fn parse_markdown_elements_inner(
         }
     }
 
-    elements
+    // Merge contiguous text elements to clean up the output.
+    let mut merged_elements = Vec::new();
+    for el in elements {
+        match el {
+            Element::Text(s) => {
+                if let Some(Element::Text(last_s)) = merged_elements.last_mut() {
+                    last_s.push_str(&s);
+                } else {
+                    merged_elements.push(Element::Text(s));
+                }
+            }
+            other => merged_elements.push(other),
+        }
+    }
+    merged_elements
 }
 
 fn should_insert_space_before_join(current: &str) -> bool {
