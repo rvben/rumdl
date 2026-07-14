@@ -57,6 +57,16 @@ fn tool_available(tool: &str) -> bool {
                 .map(|o| o.status.success())
                 .unwrap_or(false)
         }
+        "shuck" => {
+            // `shuck` is a contested binary name: the shell linter ships as the
+            // `shuck-cli` package, while an unrelated microVM manager also
+            // installs a `shuck`. Only the linter has a `check` subcommand.
+            Command::new("shuck")
+                .args(["check", "--help"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
         _ => {
             // Default spawn check (safe, won't block even if tool expects stdin,
             // because we pass --version and kill it immediately if it spawns)
@@ -144,6 +154,20 @@ fn shellcheck_lints_shell() {
     assert!(
         !out.contains("target shell"),
         "shellcheck should not emit the shell-unknown tip with --shell=bash:\n{out}"
+    );
+}
+
+#[test]
+fn shuck_lints_shell() {
+    require_tool!("shuck");
+    // Regression guard for the stdin fix upstream (ewhauser/shuck#1123, shipped in
+    // v0.0.43): a pre-0.0.43 shuck treats `-` as a literal filename instead of
+    // reading stdin and would report a missing-file error here instead of a
+    // real diagnostic.
+    let out = lint("shell", "shuck", "shell", "name=\"world\"\necho \"hello $nombre\"\n");
+    assert!(
+        out.contains("referenced before assignment") || out.contains("C006"),
+        "shuck should flag the reference to the undefined variable:\n{out}"
     );
 }
 
@@ -367,6 +391,7 @@ const VERIFIED: &[&str] = &[
     "prettier",
     "shellcheck",
     "shfmt",
+    "shuck",
     "rustfmt",
     "gofmt",
     "goimports",
