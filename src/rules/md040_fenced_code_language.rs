@@ -190,7 +190,10 @@ impl MD040FencedCodeLanguage {
 
     /// Check for unknown language based on config
     fn check_unknown_language(&self, label: &str) -> Option<(String, Severity)> {
-        if resolve_canonical(label).is_some() {
+        // GitHub accepts names, aliases, AND file extensions as fence labels
+        // (```pytb highlights via the .pytb extension), so the unknown check
+        // consults the full accept-set, not just resolvable aliases.
+        if crate::linguist_data::is_known_language(label) {
             return None;
         }
 
@@ -1046,6 +1049,26 @@ echo again
             assert!(
                 result.is_empty(),
                 "known Linguist alias '{alias}' should not be flagged as unknown: {result:?}"
+            );
+        }
+    }
+
+    /// GitHub also accepts file extensions as fence labels (a ```pytb block
+    /// renders with the Python-traceback grammar even though `pytb` appears
+    /// only in Linguist's `extensions:`, never `aliases:`), so extension
+    /// labels must not be flagged as unknown either.
+    #[test]
+    fn test_unknown_language_extension_labels_not_flagged() {
+        for label in ["pytb", "cs", "kt", "pl", "pyi", "cjs", "mts"] {
+            let content = format!("```{label}\ncode\n```");
+            let config = MD040Config {
+                unknown_language_action: UnknownLanguageAction::Error,
+                ..Default::default()
+            };
+            let result = run_check_with_config(&content, config).unwrap();
+            assert!(
+                result.is_empty(),
+                "Linguist file extension '{label}' should not be flagged as unknown: {result:?}"
             );
         }
     }
