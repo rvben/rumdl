@@ -57,6 +57,16 @@ fn tool_available(tool: &str) -> bool {
                 .map(|o| o.status.success())
                 .unwrap_or(false)
         }
+        "shuck" => {
+            // `shuck` is a contested binary name: the shell linter ships as the
+            // `shuck-cli` package, while an unrelated microVM manager also
+            // installs a `shuck`. Only the linter has a `check` subcommand.
+            Command::new("shuck")
+                .args(["check", "--help"])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        }
         _ => {
             // Default spawn check (safe, won't block even if tool expects stdin,
             // because we pass --version and kill it immediately if it spawns)
