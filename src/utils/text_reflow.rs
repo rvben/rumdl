@@ -988,7 +988,7 @@ fn extract_link_spans(text: &str, defined_references: Option<&HashSet<String>>) 
 /// a `{`, a name starting with an ASCII letter or `_` and continuing with
 /// alphanumerics / `-` / `_` / `:` / `.`, a closing `}`, then a balanced inline
 /// code span using one or more backticks. Returns `None` when any part is missing.
-fn myst_role_len_at(text: &str) -> Option<usize> {
+fn myst_role_len_at(text: &str, absolute_pos: usize, code_spans: &[CodeSpan]) -> Option<usize> {
     let bytes = text.as_bytes();
     if bytes.first() != Some(&b'{') {
         return None;
@@ -1013,26 +1013,11 @@ fn myst_role_len_at(text: &str) -> Option<usize> {
     j += 1; // past '}'
 
     // Must be immediately followed by an inline code span.
-    if bytes.get(j) != Some(&b'`') {
-        return None;
-    }
-    let backtick_start = j;
-    while bytes.get(j) == Some(&b'`') {
-        j += 1;
-    }
-    let backtick_count = j - backtick_start;
-
-    // Find the matching run of `backtick_count` backticks.
-    while j + backtick_count <= bytes.len() {
-        if bytes[j] == b'`' {
-            let close_count = bytes[j..].iter().take_while(|&&b| b == b'`').count();
-            if close_count == backtick_count {
-                return Some(j + close_count);
-            }
-            j += close_count;
-        } else {
-            j += 1;
-        }
+    let code_span_start = absolute_pos + j;
+    if let Ok(idx) = code_spans.binary_search_by_key(&code_span_start, |span| span.start) {
+        let span = &code_spans[idx];
+        let code_span_len = span.end - span.start;
+        return Some(j + code_span_len);
     }
 
     None
@@ -1331,7 +1316,7 @@ fn parse_markdown_elements_inner(
         if myst_roles
             && let Some(pos) = next_curly_pos
             && pos < next_special
-            && let Some(role_len) = myst_role_len_at(&remaining[pos..])
+            && let Some(role_len) = myst_role_len_at(&remaining[pos..], current_offset + pos, &code_spans)
         {
             next_special = pos;
             special_type = "myst_role";
