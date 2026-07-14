@@ -72,6 +72,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.33](https://github.com/rvben/rumdl/compare/v0.2.32...v0.2.33) - 2026-07-14
+
+### Fixed
+
+- **md044**: stop flagging proper names inside bare URLs ([5e9b51a](https://github.com/rvben/rumdl/commit/5e9b51a9936b9e009a332914951b1b89d91c4655))
+- **md040**: recognize file-extension fence labels as known languages ([686ba20](https://github.com/rvben/rumdl/commit/686ba20b9bfa573cf6fdd66193a0736f3f50cbd0))
+- **cli**: replace unhelpful panic message with an actionable one (#717) ([37ac880](https://github.com/rvben/rumdl/commit/37ac880b9804322dee3523e200592b3e4d82d524))
+- **reflow**: re-search cached inline-math after a dollar sign ([a30a4f9](https://github.com/rvben/rumdl/commit/a30a4f97cd0328e60347e402b3332e2bf896741e))
+- **reflow**: support multiple backticks and optimize code span parsing ([81944c5](https://github.com/rvben/rumdl/commit/81944c5addd6579b729f438c8768cedd55a2816d))
+- **md013**: stop reflow from starting lines with block markers ([eebd18b](https://github.com/rvben/rumdl/commit/eebd18b751bfe880e5a16fab8544e07070f08de2))
+
+### Performance
+
+- **reflow**: implement cached match lookups to prevent quadratic suffix scanning ([1cc8d2b](https://github.com/rvben/rumdl/commit/1cc8d2bc6ea3b37848ab4253cb1059bc7e77b69e))
+
 ## [0.2.32](https://github.com/rvben/rumdl/compare/v0.2.31...v0.2.32) - 2026-07-13
 
 ### Fixed
