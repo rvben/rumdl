@@ -653,6 +653,10 @@ pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[
         });
     }
 
+    // URLs and emails are collected in two separate passes; sort so consumers
+    // can binary-search by byte offset.
+    bare_urls.sort_by_key(|u| u.byte_offset);
+
     bare_urls
 }
 
