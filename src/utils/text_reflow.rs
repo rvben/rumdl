@@ -1027,6 +1027,28 @@ fn myst_role_len_at(text: &str, absolute_pos: usize, code_spans: &[CodeSpan]) ->
     None
 }
 
+/// Byte length of an inline-math span (`$math$`) starting at the very
+/// beginning of `s`, if one starts there.
+///
+/// Mirrors INLINE_MATH_REGEX (`(?<!\$)\$(?!\$)([^\$]+)\$(?!\$)`) with the
+/// leading lookbehind dropped: callers probe only at a slice start, where
+/// the lookbehind passes vacuously.
+fn inline_math_len_at_start(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    // Opening `$` not followed by another `$` (that would be display math).
+    if bytes.first() != Some(&b'$') || bytes.get(1) == Some(&b'$') {
+        return None;
+    }
+    // Content is `[^$]+`: everything up to the closing `$`. It is non-empty
+    // whenever a closing `$` exists, because the byte at index 1 is not `$`.
+    let close = 1 + s[1..].find('$')?;
+    // Closing `$` not followed by another `$`.
+    if bytes.get(close + 1) == Some(&b'$') {
+        return None;
+    }
+    Some(close + 1)
+}
+
 /// Absolute byte offsets of a cached pattern match within the full input text.
 #[derive(Clone, Copy, Debug)]
 struct PatternMatch {
@@ -1174,18 +1196,27 @@ fn parse_markdown_elements_inner(
         // slice-start-sensitive: at the start of the searched slice there is
         // no preceding character, so the lookbehind trivially passes, while
         // the cached search, anchored earlier, saw the real `$` predecessor
-        // and can have rejected the same position. When the cursor sits
-        // directly after a `$`, drop the cache and re-search from the cursor
-        // exactly like the uncached code did.
-        if current_offset > 0 && text.as_bytes()[current_offset - 1] == b'$' {
-            cached_inline_math = PatternCache::Unsearched;
-        }
-        if let Some((start, end)) = cached_inline_math.earliest_in(remaining, current_offset, |suffix| {
-            INLINE_MATH_REGEX
-                .find(suffix)
-                .ok()
-                .flatten()
-                .map(|m| (m.start(), m.end()))
+        // and can have rejected the same position. Positions past the cursor
+        // are unaffected by where the slice starts, so the cache stays valid
+        // for them; only a match beginning exactly at the cursor can be
+        // missing from it. When the cursor sits directly after a `$`, probe
+        // for that one match in place, leaving the cache untouched. (Either
+        // rescanning the suffix here or storing the probe hit in the cache is
+        // quadratic on math-heavy inputs: each consumed span would trigger a
+        // fresh scan of everything that follows.)
+        let inline_math_probe = if current_offset > 0 && text.as_bytes()[current_offset - 1] == b'$' {
+            inline_math_len_at_start(remaining).map(|len| (0, len))
+        } else {
+            None
+        };
+        if let Some((start, end)) = inline_math_probe.or_else(|| {
+            cached_inline_math.earliest_in(remaining, current_offset, |suffix| {
+                INLINE_MATH_REGEX
+                    .find(suffix)
+                    .ok()
+                    .flatten()
+                    .map(|m| (m.start(), m.end()))
+            })
         }) && earliest_match.as_ref().is_none_or(|(s, _, _)| start < *s)
         {
             earliest_match = Some((start, end, "inline_math"));
@@ -4200,5 +4231,90 @@ mod tests {
         // Ensure it completes in under 100ms.
         assert!(duration.as_millis() < 100, "Parsing took too long: {duration:?}");
         assert!(!elements.is_empty());
+    }
+
+    #[test]
+    fn test_reflow_performance_display_math_heavy() {
+        // Every consumed `$$a$$` leaves the cursor directly after a `$`. The
+        // inline-math slice-start probe must run in place at the cursor; a
+        // suffix rescan there makes this input quadratic (~9s in a debug
+        // build for these 4000 spans).
+        let text = "$$a$$".repeat(4000);
+
+        let start = std::time::Instant::now();
+        let elements = parse_markdown_elements_inner(&text, false, false, None);
+        let duration = start.elapsed();
+
+        assert!(duration.as_millis() < 100, "Parsing took too long: {duration:?}");
+        assert_eq!(elements.len(), 4000);
+    }
+
+    #[test]
+    fn inline_math_len_at_start_matches_regex_at_slice_start() {
+        // Exhaustive parity with INLINE_MATH_REGEX over short `$`-soup
+        // strings: the helper must equal "regex match starting at position 0"
+        // exactly, since the regex's leading lookbehind is vacuous at a slice
+        // start. Any drift silently changes which math spans stay atomic.
+        let alphabet = ['$', 'a', ' '];
+        let mut inputs: Vec<String> = vec![String::new()];
+        let mut frontier: Vec<String> = vec![String::new()];
+        for _ in 0..6 {
+            let mut longer = Vec::new();
+            for prefix in &frontier {
+                for ch in alphabet {
+                    let mut s = prefix.clone();
+                    s.push(ch);
+                    longer.push(s);
+                }
+            }
+            inputs.extend(longer.iter().cloned());
+            frontier = longer;
+        }
+        // Multi-byte content must count bytes, not characters.
+        inputs.push("$αβ$x".to_string());
+        inputs.push("$α$$".to_string());
+
+        for s in &inputs {
+            let expected = INLINE_MATH_REGEX
+                .find(s)
+                .ok()
+                .flatten()
+                .filter(|m| m.start() == 0)
+                .map(|m| m.end());
+            assert_eq!(inline_math_len_at_start(s), expected, "input: {s:?}");
+        }
+    }
+
+    #[test]
+    fn inline_math_probe_after_dollar_matches_uncached_parse() {
+        // Expected element lists verified against the uncached parser (the
+        // parent of the match-cache commit): when a consumed span leaves the
+        // cursor directly after a `$`, the at-cursor probe must reproduce
+        // exactly what rescanning the suffix used to find - both the hits
+        // (the lookbehind is vacuous at the cursor) and the misses.
+        let cases = [
+            ("$$a$$$b c$ x", r#"[DisplayMath("a"), InlineMath("b c"), Text(" x")]"#),
+            (
+                "$$a$$$b$ $$a$$$b$",
+                r#"[DisplayMath("a"), InlineMath("b"), Text(" "), DisplayMath("a"), InlineMath("b")]"#,
+            ),
+            // Probe hit whose content is only whitespace.
+            (
+                "$$a$$$ x $y z$",
+                r#"[DisplayMath("a"), InlineMath(" x "), Text("y z$")]"#,
+            ),
+            // Probe miss: `$$` after the cursor is not inline math.
+            ("$$a$$$$ x", r#"[DisplayMath("a"), Text("$$ x")]"#),
+            ("$$a$$$$b$$ x", r#"[DisplayMath("a"), DisplayMath("b"), Text(" x")]"#),
+            // Probe miss: the trailing lookahead rejects `$c$$`.
+            (
+                "$a$$b$$c$$d$ tail",
+                r#"[Text("$a"), DisplayMath("b"), Text("c$$d$ tail")]"#,
+            ),
+        ];
+        for (input, expected) in cases {
+            let elements = parse_markdown_elements_inner(input, false, false, None);
+            assert_eq!(format!("{elements:?}"), expected, "input: {input:?}");
+        }
     }
 }
