@@ -25,7 +25,8 @@ use block_builder::{Block, BlockBuilder};
 use helpers::{
     extract_list_marker_and_content, has_hard_break, is_github_alert_marker, is_horizontal_rule, is_html_only_line,
     is_list_item, is_setext_heading_text_line, is_setext_underline_content, is_standalone_link_or_image_line,
-    is_unwrappable_line, source_list_marker, split_into_segments, trim_preserving_hard_break,
+    is_unwrappable_line, is_unwrappable_standalone_link_or_image, source_list_marker, split_into_segments,
+    trim_preserving_hard_break,
 };
 pub use md013_config::MD013Config;
 use md013_config::{LengthMode, ReflowMode};
@@ -1533,7 +1534,13 @@ impl MD013LineLength {
                 || is_link_ref_def
                 || ctx.line_info(line_num).is_some_and(|info| info.is_div_marker)
                 || is_html_only_line(lines[i])
-                || (!config.strict && is_standalone_link_or_image_line(ctx, line_num))
+                || (!config.strict
+                    && is_unwrappable_standalone_link_or_image(
+                        ctx,
+                        line_num,
+                        config.line_length.get(),
+                        config.ignore_link_urls,
+                    ))
             {
                 i += 1;
                 continue;

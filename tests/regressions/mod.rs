@@ -18,6 +18,7 @@ mod md013_reflow_break_placement_issue_770_test;
 mod md013_reflow_emphasis_content_loss_issue_767_test;
 mod md013_reflow_french_punctuation_issue_740_test;
 mod md013_reflow_length_exemptions_test;
+mod md013_reflow_link_text_breaking_test;
 mod md013_reflow_math_blocks_issue_762_test;
 mod md013_reflow_ordered_lookalike_issue_760_test;
 mod md013_reflow_setext_heading_issue_825_test;

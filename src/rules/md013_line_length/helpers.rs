@@ -417,6 +417,49 @@ pub(crate) fn is_standalone_link_or_image_line(ctx: &LintContext, line_num: usiz
     is_link_with_optional_emphasis(ctx, stripped, line_info.byte_offset + offset)
 }
 
+/// Check if a line contains only an unbreakable link or image (for reflow).
+/// A link is breakable if its link text contains whitespace AND the line exceeds `line_limit`.
+pub(crate) fn is_unwrappable_standalone_link_or_image(
+    ctx: &LintContext,
+    line_num: usize,
+    line_limit: usize,
+    ignore_link_urls: bool,
+) -> bool {
+    let Some(line_info) = ctx.lines.get(line_num - 1) else {
+        return false;
+    };
+
+    let line = line_info.content(ctx.content);
+    let (stripped, offset) = strip_structural_prefixes_slice(line);
+    if !is_link_with_optional_emphasis(ctx, stripped, line_info.byte_offset + offset) {
+        return false;
+    }
+
+    let trimmed = stripped.trim();
+    let after_marker = trimmed.trim_start_matches(['*', '_']);
+    if !after_marker.starts_with('[') {
+        // Image `![...]` or non-link element: cannot break
+        return true;
+    }
+
+    let Some(inner) = crate::utils::text_reflow::bracketed_text(after_marker, 0) else {
+        return true;
+    };
+
+    if !inner.chars().any(crate::utils::text_reflow::is_breakable_whitespace) {
+        return true;
+    }
+
+    if ignore_link_urls {
+        let non_url_len = offset + 2 + inner.len();
+        if non_url_len <= line_limit {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Check if a line consists entirely of HTML structure that cannot be
 /// meaningfully shortened. Used to exempt HTML-only lines from MD013 in
 /// non-strict mode.
