@@ -169,11 +169,7 @@ pub struct MD013Config {
     /// Whether to allow reflow breaking inside emphasis/strong/strikethrough spans.
     /// When true, emphasis text is wrapped word-by-word like normal text.
     /// When false (default), emphasis spans are treated as atomic units.
-    #[serde(
-        default = "default_emphasis_spans",
-        alias = "emphasis_spans",
-        alias = "emphasis-spans"
-    )]
+    #[serde(default = "default_emphasis_spans", alias = "emphasis_spans")]
     pub emphasis_spans: bool,
 }
 
