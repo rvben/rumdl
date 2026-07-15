@@ -165,6 +165,12 @@ pub struct MD013Config {
         alias = "strict-sentences"
     )]
     pub require_sentence_capital: bool,
+
+    /// Whether to hold emphasis/strong/strikethrough and code spans atomic during reflow.
+    /// When true (default), these spans are treated as atomic units.
+    /// When false, they can be wrapped word-by-word like normal text.
+    #[serde(default = "default_atomic_spans", alias = "atomic_spans")]
+    pub atomic_spans: bool,
 }
 
 fn default_line_length() -> LineLength {
@@ -203,6 +209,10 @@ fn default_ignore_link_urls() -> bool {
     true
 }
 
+fn default_atomic_spans() -> bool {
+    true
+}
+
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -223,6 +233,7 @@ impl Default for MD013Config {
             length_mode: LengthMode::default(),
             abbreviations: Vec::new(),
             require_sentence_capital: default_require_sentence_capital(),
+            atomic_spans: default_atomic_spans(),
         }
     }
 }
@@ -244,21 +255,16 @@ impl MD013Config {
     /// pre-filter candidate lines: any line shorter than this can never
     /// violate, regardless of which context it falls under.
     pub fn min_effective_line_length(&self) -> LineLength {
-        let mut limits: Vec<LineLength> = vec![self.line_length];
-        if let Some(h) = self.heading_line_length {
-            limits.push(h);
-        }
-        if let Some(c) = self.code_block_line_length {
-            limits.push(c);
-        }
-        // "Unlimited" (0) is the laxest possible budget, so it must not win
-        // the minimum unless all budgets are unlimited.
-        let bounded: Vec<LineLength> = limits.iter().copied().filter(|l| !l.is_unlimited()).collect();
-        if bounded.is_empty() {
-            LineLength::from_const(0)
-        } else {
-            bounded.into_iter().min_by_key(|l| l.get()).unwrap()
-        }
+        [
+            Some(self.line_length),
+            self.heading_line_length,
+            self.code_block_line_length,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|l| !l.is_unlimited())
+        .min_by_key(|l| l.get())
+        .unwrap_or(LineLength::from_const(0))
     }
 
     /// Convert abbreviations Vec to Option for ReflowOptions
@@ -300,6 +306,7 @@ impl MD013Config {
             // No document context here (config-only), so shortcut references
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
+            atomic_spans: self.atomic_spans,
         }
     }
 }
@@ -405,6 +412,7 @@ mod tests {
             abbreviations: Vec::new(),
             require_sentence_capital: true,
             ignore_link_urls: true,
+            atomic_spans: true,
         };
 
         let toml_str = toml::to_string(&config).unwrap();
