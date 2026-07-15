@@ -7,7 +7,10 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 82 rules as defined in the RULES array (MD001-MD088)
+    // Should return all rules as defined in the RULES array
+    #[cfg(feature = "html-fmt")]
+    assert_eq!(rules.len(), 83);
+    #[cfg(not(feature = "html-fmt"))]
     assert_eq!(rules.len(), 82);
 
     // Verify some specific rules are present

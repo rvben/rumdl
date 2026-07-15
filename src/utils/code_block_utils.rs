@@ -213,6 +213,20 @@ impl CodeBlockUtils {
         Self::is_in_code_block(blocks, pos)
     }
 
+    /// Check if an HTML block is a JSX block (starts with uppercase tag or fragment).
+    pub fn is_jsx_block(html: &str) -> bool {
+        let trimmed = html.trim_start();
+        if trimmed.starts_with("<>") {
+            return true;
+        }
+        if let Some(stripped) = trimmed.strip_prefix('<')
+            && let Some(first_char) = stripped.chars().next()
+        {
+            return first_char.is_ascii_uppercase();
+        }
+        false
+    }
+
     /// Check if a byte position falls within any of the given sorted, non-overlapping ranges.
     ///
     /// Uses binary search on the sorted block ranges for O(log n) lookup.

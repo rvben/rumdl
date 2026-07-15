@@ -934,19 +934,43 @@ impl MD033NoInlineHtml {
     /// Returns (range, replacement_text) where range is the bytes to replace
     /// and replacement_text is what to put there (content without tags, or empty for self-closing).
     ///
-    /// When `in_html_block` is true, returns None in conservative mode.  In
-    /// relaxed mode two exceptions apply:
-    /// - Strippable wrapper elements (e.g. `<p>`) bypass the block guard so
-    ///   they can be stripped even though they ARE the HTML block.
-    /// - Self-closing tags whose direct parent is a strippable wrapper also
-    ///   bypass the guard so inner content can be converted first.
+    fn is_nested_in_html_block(
+        &self,
+        ctx: &crate::lint_context::LintContext,
+        tag_start: usize,
+        tag_end: usize,
+    ) -> bool {
+        let line_num = ctx.line_index.byte_to_line_col(tag_start).0;
+        if !ctx.is_in_html_block(line_num) {
+            return false;
+        }
+        if let Some((block_start, block_end)) = ctx.html_block_range_at(tag_start) {
+            let block_text = &ctx.content[block_start..block_end];
+            let start_trim = block_text.len() - block_text.trim_start().len();
+            let end_trim = block_text.len() - block_text.trim_end().len();
+            let block_trimmed_start = block_start + start_trim;
+            let block_trimmed_end = block_end - end_trim;
+
+            tag_start > block_trimmed_start || tag_end < block_trimmed_end
+        } else {
+            false
+        }
+    }
+
+    /// Calculate fix to remove HTML tags while keeping content.
+    ///
+    /// For self-closing tags like `<br/>`, returns a single fix to remove the tag.
+    /// For paired tags like `<span>text</span>`, returns the replacement text (just the content).
+    ///
+    /// Returns (range, replacement_text) where range is the bytes to replace
+    /// and replacement_text is what to put there (content without tags, or empty for self-closing).
     fn calculate_fix(
         &self,
-        content: &str,
+        ctx: &crate::lint_context::LintContext,
         opening_tag: &str,
         tag_byte_start: usize,
-        in_html_block: bool,
     ) -> Option<(std::ops::Range<usize>, String)> {
+        let content = ctx.content;
         // Extract tag name from opening tag
         let tag_name = opening_tag
             .trim_start_matches('<')
@@ -959,12 +983,9 @@ impl MD033NoInlineHtml {
             opening_tag.ends_with("/>") || matches!(tag_name.as_str(), "br" | "hr" | "img" | "input" | "meta" | "link");
 
         if is_self_closing {
-            // When fix is enabled, try to convert to Markdown equivalent.
-            // Skip tags inside HTML blocks (would break structure), UNLESS we
-            // are in relaxed mode and the containing block is a strippable
-            // wrapper -- this lets the inner element be converted first so the
-            // wrapper can be stripped on a subsequent pass.
-            let block_ok = !in_html_block
+            let tag_byte_end = tag_byte_start + opening_tag.len();
+            let is_nested = self.is_nested_in_html_block(ctx, tag_byte_start, tag_byte_end);
+            let block_ok = !is_nested
                 || (self.is_relaxed_fix_mode() && self.is_inside_strippable_wrapper(content, tag_byte_start));
             if self.config.fix
                 && MD033Config::is_safe_fixable_tag(&tag_name)
@@ -995,7 +1016,7 @@ impl MD033NoInlineHtml {
             // Extract the content between tags
             let inner_content = &content[search_start..closing_byte_start];
 
-            // In relaxed mode, check wrapper stripping BEFORE the in_html_block
+            // In relaxed mode, check wrapper stripping BEFORE the HTML block
             // guard because the wrapper element itself IS the HTML block. We only
             // strip when:
             //  - the wrapper is not nested inside another HTML element
@@ -1011,9 +1032,10 @@ impl MD033NoInlineHtml {
                 return Some((tag_byte_start..closing_byte_end, inner_content.trim().to_string()));
             }
 
-            // Skip auto-fix if inside an HTML block (like <pre>, <div>, etc.)
+            // Skip auto-fix if nested inside a non-convertible HTML block (like <pre>, <div>, etc.)
             // Converting tags inside HTML blocks would break the intended structure
-            if in_html_block {
+            let is_nested = self.is_nested_in_html_block(ctx, tag_byte_start, closing_byte_end);
+            if is_nested {
                 return None;
             }
 
@@ -1180,12 +1202,9 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Check if we're inside an HTML block (like <pre>, <div>, etc.)
-            let in_html_block = ctx.is_in_html_block(line_num);
-
             // Calculate fix to remove HTML tags but keep content
             let fix = self
-                .calculate_fix(content, tag, tag_byte_start, in_html_block)
+                .calculate_fix(ctx, tag, tag_byte_start)
                 .map(|(range, replacement)| Fix::new(range, replacement));
 
             // Calculate actual end line and column for multiline tags

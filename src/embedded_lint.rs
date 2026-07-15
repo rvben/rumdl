@@ -150,20 +150,40 @@ pub fn strip_common_indent(content: &str) -> (String, String) {
     let lines: Vec<&str> = content.lines().collect();
     let has_trailing_newline = content.ends_with('\n');
 
-    let min_indent = lines
+    let line_indents: Vec<Vec<char>> = lines
         .iter()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| line.len() - line.trim_start().len())
-        .min()
-        .unwrap_or(0);
+        .map(|line| line.chars().take_while(|c| c.is_whitespace()).collect())
+        .collect();
+
+    let common_indent_chars = if line_indents.is_empty() {
+        Vec::new()
+    } else {
+        let mut common = line_indents[0].clone();
+        for indent in &line_indents[1..] {
+            let mut new_common = Vec::new();
+            for (c1, c2) in common.iter().zip(indent.iter()) {
+                if c1 == c2 {
+                    new_common.push(*c1);
+                } else {
+                    break;
+                }
+            }
+            common = new_common;
+        }
+        common
+    };
+
+    let indent_str: String = common_indent_chars.iter().collect();
+    let common_prefix_byte_len = indent_str.len();
 
     let mut stripped: String = lines
         .iter()
         .map(|line| {
             if line.trim().is_empty() {
                 ""
-            } else if line.len() >= min_indent {
-                &line[min_indent..]
+            } else if line.starts_with(&indent_str) {
+                &line[common_prefix_byte_len..]
             } else {
                 line.trim_start()
             }
@@ -175,6 +195,5 @@ pub fn strip_common_indent(content: &str) -> (String, String) {
         stripped.push('\n');
     }
 
-    let indent_str = " ".repeat(min_indent);
     (stripped, indent_str)
 }

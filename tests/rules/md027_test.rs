@@ -158,12 +158,11 @@ fn test_md027_html5_media_elements() {
 #[test]
 fn test_md027_self_closing_tags() {
     let rule = MD027MultipleSpacesBlockquote::default();
-    // Self-closing tags like <br/> don't create block context
-    // So >  after them should flag
-    let content = "<br/>\n>  After self-closing\n";
+    // Self-closing tags like <br/> don't create block context across blank lines
+    let content = "<br/>\n\n>  After self-closing\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Self-closing tag doesn't create block context, so this should flag
+    // Self-closing tag doesn't create block context across blank lines, so this should flag
     assert_eq!(result.len(), 1, "Content after self-closing tag should flag");
 }
 
@@ -174,9 +173,8 @@ fn test_md027_style_tag_allows_blanks() {
     let content = "<style>\n.class {\n  color: red;\n}\n\n.other {\n  color: blue;\n}\n</style>\n>  After style\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Style tag context should continue through blank lines
-    // And content after </style> (no blank) should not flag
-    assert!(result.is_empty(), "Content after style tag should not flag");
+    // Content after </style> is outside the style block, so the blockquote with multiple spaces is flagged
+    assert_eq!(result.len(), 1, "Content after style tag should flag");
 }
 
 // =============================================================================
@@ -264,6 +262,6 @@ fn test_md027_script_tag_allows_blanks() {
     let content = "<script>\nfunction test() {\n  return true;\n}\n\nconsole.log();\n</script>\n>  After script\n";
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
-    // Script tag context should continue through blank lines
-    assert!(result.is_empty(), "Content after script tag should not flag");
+    // Content after </script> is outside the script block, so the blockquote with multiple spaces is flagged
+    assert_eq!(result.len(), 1, "Content after script tag should flag");
 }

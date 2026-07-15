@@ -78,6 +78,8 @@ mod md085_paragraph_continuation_indent;
 mod md086_no_unclosed_comments;
 mod md087_unused_disable_comment;
 mod md088_quotes_dashes;
+#[cfg(feature = "html-fmt")]
+mod md089_embedded_html_fmt;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
@@ -158,6 +160,8 @@ pub use md085_paragraph_continuation_indent::MD085ParagraphContinuationIndent;
 pub use md086_no_unclosed_comments::MD086NoUnclosedComments;
 pub use md087_unused_disable_comment::MD087UnusedDisableComment;
 pub use md088_quotes_dashes::MD088QuotesDashes;
+#[cfg(feature = "html-fmt")]
+pub use md089_embedded_html_fmt::MD089EmbeddedHtmlFmt;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -612,6 +616,12 @@ const RULES: &[RuleEntry] = &[
         name: "MD088",
         ctor: crate::rules::md088_quotes_dashes::MD088QuotesDashes::from_config,
         opt_in: true,
+    },
+    #[cfg(feature = "html-fmt")]
+    RuleEntry {
+        name: "MD089",
+        ctor: MD089EmbeddedHtmlFmt::from_config,
+        opt_in: false,
     },
 ];
 
