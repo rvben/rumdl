@@ -938,6 +938,7 @@ nav:
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_cache_prevents_duplicate_validation() {
         let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
@@ -978,6 +979,7 @@ nav:
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_cache_invalidates_when_content_changes() {
         let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
