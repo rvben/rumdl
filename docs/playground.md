@@ -22,7 +22,9 @@ Try rumdl directly in your browser — no installation needed. Powered by [rumdl
       <option value="links">Links and images</option>
       <option value="clean">Clean document</option>
     </select>
-    <button id="pg-fix-btn" class="pg-btn pg-btn-primary" disabled>Fix all</button>
+    <button id="pg-fix-btn" class="pg-btn pg-btn-primary" disabled>
+      Fix all
+    </button>
     <button id="pg-clear-btn" class="pg-btn">Clear</button>
   </div>
 </div>
@@ -33,7 +35,12 @@ Try rumdl directly in your browser — no installation needed. Powered by [rumdl
       <span>Markdown input</span>
       <span id="pg-char-count" class="pg-meta"></span>
     </div>
-    <textarea id="pg-input" class="pg-editor" spellcheck="false" placeholder="Type or paste markdown here…"></textarea>
+    <textarea
+      id="pg-input"
+      class="pg-editor"
+      spellcheck="false"
+      placeholder="Type or paste markdown here…"
+    ></textarea>
   </div>
   <div class="pg-panel">
     <div class="pg-panel-header">

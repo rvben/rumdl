@@ -10,6 +10,8 @@ Looking for something more specific?
   [Global Settings](../global-settings.md).
 - For per-document overrides via HTML comments, see
   [Inline Configuration](../inline-configuration.md).
+- For formatting HTML and scripts embedded in Markdown, see
+  [Embedded HTML Formatting](../embedded-html-formatting.md).
 
 ## Supported config files
 
