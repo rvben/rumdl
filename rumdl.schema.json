@@ -64,6 +64,23 @@
         "language-aliases": {},
         "tools": {}
       }
+    },
+    "html": {
+      "description": "HTML formatting options",
+      "$ref": "#/$defs/HtmlConfig",
+      "default": {
+        "enabled": true,
+        "print-width": 80,
+        "indent-width": 2,
+        "use-tabs": false,
+        "quotes": "double",
+        "script": {
+          "enabled": true,
+          "semi-colons": "prefer",
+          "quote-style": "prefer-double"
+        },
+        "format-comments-as-markdown": false
+      }
     }
   },
   "additionalProperties": {
@@ -443,6 +460,76 @@
         "warning",
         "info"
       ]
+    },
+    "HtmlConfig": {
+      "description": "HTML formatting configuration options",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether HTML formatting is enabled",
+          "type": "boolean",
+          "default": true
+        },
+        "print-width": {
+          "description": "Target line width for HTML formatter",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 80
+        },
+        "indent-width": {
+          "description": "Indentation size for HTML formatter",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 2
+        },
+        "use-tabs": {
+          "description": "Use tab characters for indentation",
+          "type": "boolean",
+          "default": false
+        },
+        "quotes": {
+          "description": "Quote character preference for attributes (\"double\" or \"single\")",
+          "type": "string",
+          "default": "double"
+        },
+        "script": {
+          "description": "Configuration for script tags inside HTML",
+          "$ref": "#/$defs/ScriptConfig",
+          "default": {
+            "enabled": true,
+            "semi-colons": "prefer",
+            "quote-style": "prefer-double"
+          }
+        },
+        "format-comments-as-markdown": {
+          "description": "Format HTML comment content as markdown",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "ScriptConfig": {
+      "description": "Script formatting configuration options inside HTML blocks",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Whether to format script tags",
+          "type": "boolean",
+          "default": true
+        },
+        "semi-colons": {
+          "description": "Semicolon style preference (\"always\", \"prefer\", \"asi\")",
+          "type": "string",
+          "default": "prefer"
+        },
+        "quote-style": {
+          "description": "Quote style preference (\"always-double\", \"always-single\", \"prefer-double\", \"prefer-single\")",
+          "type": "string",
+          "default": "prefer-double"
+        }
+      }
     }
   }
 }

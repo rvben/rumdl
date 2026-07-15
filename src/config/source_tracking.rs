@@ -195,6 +195,7 @@ pub struct SourcedConfigFragment {
     pub per_file_ignores: SourcedValue<BTreeMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
+    pub html: SourcedHtmlConfig,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     /// Maps canonical rule IDs to their preferred display names (used by import).
     /// When importing from markdownlint configs, this preserves the user's original
@@ -225,6 +226,7 @@ impl Default for SourcedConfigFragment {
                 crate::code_block_tools::CodeBlockToolsConfig::default(),
                 ConfigSource::Default,
             ),
+            html: SourcedHtmlConfig::default(),
             rules: BTreeMap::new(),
             rule_display_names: HashMap::new(),
             unknown_keys: Vec::new(),
@@ -264,6 +266,7 @@ pub struct SourcedConfig<State = ConfigLoaded> {
     pub per_file_ignores: SourcedValue<BTreeMap<String, Vec<String>>>,
     pub per_file_flavor: SourcedValue<IndexMap<String, MarkdownFlavor>>,
     pub code_block_tools: SourcedValue<crate::code_block_tools::CodeBlockToolsConfig>,
+    pub html: SourcedHtmlConfig,
     pub rules: BTreeMap<String, SourcedRuleConfig>,
     /// Every config file that contributed, by resolved path, in load order.
     ///
@@ -300,6 +303,7 @@ impl Default for SourcedConfig<ConfigLoaded> {
                 crate::code_block_tools::CodeBlockToolsConfig::default(),
                 ConfigSource::Default,
             ),
+            html: SourcedHtmlConfig::default(),
             rules: BTreeMap::new(),
             loaded_files: Vec::new(),
             unknown_keys: Vec::new(),
@@ -308,5 +312,68 @@ impl Default for SourcedConfig<ConfigLoaded> {
             validation_warnings: Vec::new(),
             _state: PhantomData,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourcedHtmlConfig {
+    pub enabled: SourcedValue<bool>,
+    pub print_width: SourcedValue<usize>,
+    pub indent_width: SourcedValue<usize>,
+    pub use_tabs: SourcedValue<bool>,
+    pub quotes: SourcedValue<String>,
+    pub script: SourcedScriptConfig,
+    pub format_comments_as_markdown: SourcedValue<bool>,
+}
+
+impl Default for SourcedHtmlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: SourcedValue::new(true, ConfigSource::Default),
+            print_width: SourcedValue::new(80, ConfigSource::Default),
+            indent_width: SourcedValue::new(2, ConfigSource::Default),
+            use_tabs: SourcedValue::new(false, ConfigSource::Default),
+            quotes: SourcedValue::new("double".to_string(), ConfigSource::Default),
+            script: SourcedScriptConfig::default(),
+            format_comments_as_markdown: SourcedValue::new(false, ConfigSource::Default),
+        }
+    }
+}
+
+impl SourcedHtmlConfig {
+    pub fn merge_from(&mut self, other: SourcedHtmlConfig) {
+        self.enabled.merge_from(other.enabled);
+        self.print_width.merge_from(other.print_width);
+        self.indent_width.merge_from(other.indent_width);
+        self.use_tabs.merge_from(other.use_tabs);
+        self.quotes.merge_from(other.quotes);
+        self.script.merge_from(other.script);
+        self.format_comments_as_markdown
+            .merge_from(other.format_comments_as_markdown);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SourcedScriptConfig {
+    pub enabled: SourcedValue<bool>,
+    pub semi_colons: SourcedValue<String>,
+    pub quote_style: SourcedValue<String>,
+}
+
+impl Default for SourcedScriptConfig {
+    fn default() -> Self {
+        Self {
+            enabled: SourcedValue::new(true, ConfigSource::Default),
+            semi_colons: SourcedValue::new("prefer".to_string(), ConfigSource::Default),
+            quote_style: SourcedValue::new("preferDouble".to_string(), ConfigSource::Default),
+        }
+    }
+}
+
+impl SourcedScriptConfig {
+    pub fn merge_from(&mut self, other: SourcedScriptConfig) {
+        self.enabled.merge_from(other.enabled);
+        self.semi_colons.merge_from(other.semi_colons);
+        self.quote_style.merge_from(other.quote_style);
     }
 }
