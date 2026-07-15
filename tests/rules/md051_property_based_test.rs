@@ -93,7 +93,7 @@ fn property_reasonable_fragment_length() {
     let rule = MD051LinkFragments::new();
 
     let extremely_long = "A".repeat(1000);
-    let unicode_long = "Unicode: ".to_string() + &"日".repeat(100);
+    let unicode_long = "Unicode: ".to_string() + "日".repeat(100).as_str();
     let test_inputs = vec![
         "",
         "A",

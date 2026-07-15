@@ -952,18 +952,18 @@ mod tests {
         // Test ReDoS resistance with pathological inputs
 
         // Nested patterns that could cause exponential backtracking
-        let nested_emphasis = "*".repeat(50) + "text" + &"*".repeat(50);
+        let nested_emphasis = "*".repeat(50) + "text" + "*".repeat(50).as_str();
         let result = heading_to_fragment(&nested_emphasis);
         // Should not hang and should produce reasonable output
         assert!(result.len() < 200); // Bounded output
 
         // Deeply nested code blocks
-        let nested_code = "`".repeat(100) + "code" + &"`".repeat(100);
+        let nested_code = "`".repeat(100) + "code" + "`".repeat(100).as_str();
         let result = heading_to_fragment(&nested_code);
         assert!(result.len() < 300); // Bounded output
 
         // Pathological link patterns
-        let nested_links = "[".repeat(50) + "text" + &"]".repeat(50);
+        let nested_links = "[".repeat(50) + "text" + "]".repeat(50).as_str();
         let result = heading_to_fragment(&nested_links);
         assert!(result.len() < 200); // Bounded output
     }

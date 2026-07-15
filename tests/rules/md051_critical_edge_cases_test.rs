@@ -47,9 +47,9 @@ fn test_redos_vulnerability_prevention() {
     // Patterns known to cause exponential backtracking in poorly written regex
     let malicious_patterns = vec![
         // Nested quantifiers - classic ReDoS pattern
-        "a".repeat(50) + &"a*".repeat(20) + "X",
+        "a".repeat(50) + "a*".repeat(20).as_str() + "X",
         // Alternation with repetition
-        ("(a|a)*".to_string() + &"b".repeat(30)),
+        ("(a|a)*".to_string() + "b".repeat(30).as_str()),
         // Catastrophic backtracking pattern
         "a".repeat(30) + "(a+)+",
         // Unicode variation that might stress char iteration
