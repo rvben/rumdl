@@ -165,16 +165,6 @@ pub struct MD013Config {
         alias = "strict-sentences"
     )]
     pub require_sentence_capital: bool,
-
-    /// Whether to allow reflow breaking inside emphasis/strong/strikethrough spans.
-    /// When true, emphasis text is wrapped word-by-word like normal text.
-    /// When false (default), emphasis spans are treated as atomic units.
-    #[serde(
-        default = "default_emphasis_spans",
-        alias = "emphasis_spans",
-        alias = "emphasis-spans"
-    )]
-    pub emphasis_spans: bool,
 }
 
 fn default_line_length() -> LineLength {
@@ -213,10 +203,6 @@ fn default_ignore_link_urls() -> bool {
     true
 }
 
-fn default_emphasis_spans() -> bool {
-    false
-}
-
 impl Default for MD013Config {
     fn default() -> Self {
         Self {
@@ -237,7 +223,6 @@ impl Default for MD013Config {
             length_mode: LengthMode::default(),
             abbreviations: Vec::new(),
             require_sentence_capital: default_require_sentence_capital(),
-            emphasis_spans: default_emphasis_spans(),
         }
     }
 }
@@ -315,7 +300,6 @@ impl MD013Config {
             // No document context here (config-only), so shortcut references
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
-            emphasis_spans: self.emphasis_spans,
         }
     }
 }
@@ -421,7 +405,6 @@ mod tests {
             abbreviations: Vec::new(),
             require_sentence_capital: true,
             ignore_link_urls: true,
-            emphasis_spans: false,
         };
 
         let toml_str = toml::to_string(&config).unwrap();

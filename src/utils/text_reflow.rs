@@ -109,9 +109,6 @@ pub struct ReflowOptions {
     /// atomic regardless, because their `][ref]` / `[]` syntax is an explicit
     /// link signal that does not depend on a definition being in scope.
     pub defined_references: Option<HashSet<String>>,
-    /// Whether to allow reflow breaking inside emphasis/strong/strikethrough spans
-    /// when they would otherwise exceed line length or fit on a new line.
-    pub emphasis_spans: bool,
 }
 
 impl Default for ReflowOptions {
@@ -129,7 +126,6 @@ impl Default for ReflowOptions {
             require_sentence_capital: true,
             max_list_continuation_indent: None,
             defined_references: None,
-            emphasis_spans: false,
         }
     }
 }
@@ -2340,12 +2336,15 @@ fn split_at_break_word(
 /// The whole line is parsed into markdown elements once up front; every
 /// remaining suffix reuses those element spans (re-based to the suffix offset)
 /// instead of re-parsing, which keeps repeated element parsing out of the loop.
-fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
-    let line_length = options.line_length;
-    let length_mode = options.length_mode;
-    let attr_lists = options.attr_lists;
-    let myst_roles = options.myst_roles;
-    let defined_references = options.defined_references.as_ref();
+fn cascade_split_line(
+    text: &str,
+    line_length: usize,
+    abbreviations: &Option<Vec<String>>,
+    length_mode: ReflowLengthMode,
+    attr_lists: bool,
+    myst_roles: bool,
+    defined_references: Option<&HashSet<String>>,
+) -> Vec<String> {
     if line_length == 0 || display_len(text, length_mode) <= line_length {
         return vec![text.to_string()];
     }
@@ -2403,21 +2402,29 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
     }
 
     // Fallback: word wrap the still-oversized suffix using reflow_elements.
-    let mut fallback_options = options.clone();
-    fallback_options.break_on_sentences = false;
-    fallback_options.preserve_breaks = false;
-    fallback_options.sentence_per_line = false;
-    fallback_options.semantic_line_breaks = false;
-    fallback_options.require_sentence_capital = true;
-    fallback_options.max_list_continuation_indent = None;
-    fallback_options.defined_references = None;
+    let options = ReflowOptions {
+        line_length,
+        break_on_sentences: false,
+        preserve_breaks: false,
+        sentence_per_line: false,
+        semantic_line_breaks: false,
+        abbreviations: abbreviations.clone(),
+        length_mode,
+        attr_lists,
+        myst_roles,
+        require_sentence_capital: true,
+        max_list_continuation_indent: None,
+        // Unused here: this fallback arranges already-parsed elements and never
+        // re-parses links, so shortcut definedness is never consulted.
+        defined_references: None,
+    };
     let remaining = &text[start..];
     let tail_elements = if start == 0 {
         elements
     } else {
         parse_markdown_elements_inner(remaining, attr_lists, myst_roles, defined_references)
     };
-    result.extend(reflow_elements(&tail_elements, &fallback_options));
+    result.extend(reflow_elements(&tail_elements, &options));
     result
 }
 
@@ -2441,7 +2448,15 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
         if display_len(&line, length_mode) <= options.line_length {
             result.push(line);
         } else {
-            result.extend(cascade_split_line(&line, options));
+            result.extend(cascade_split_line(
+                &line,
+                options.line_length,
+                &options.abbreviations,
+                length_mode,
+                options.attr_lists,
+                options.myst_roles,
+                options.defined_references.as_ref(),
+            ));
         }
     }
 
@@ -2684,7 +2699,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
         } else if matches!(
             element,
             Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
-        ) && (options.emphasis_spans || element_len > options.line_length)
+        ) && element_len > options.line_length
         {
             // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
             // Split content word-by-word, attach the opening marker to the first word
@@ -3796,12 +3811,7 @@ mod tests {
         let words: Vec<String> = (0..4000).map(|i| format!("word{i}")).collect();
         let line = words.join(" ");
 
-        let options = ReflowOptions {
-            line_length: 80,
-            length_mode: ReflowLengthMode::Chars,
-            ..Default::default()
-        };
-        let out = cascade_split_line(&line, &options);
+        let out = cascade_split_line(&line, 80, &None, ReflowLengthMode::Chars, false, false, None);
 
         assert!(out.len() > 1, "a very long line should split into many lines");
         for segment in &out {
@@ -4388,38 +4398,5 @@ mod tests {
             let elements = parse_markdown_elements_inner(input, false, false, None);
             assert_eq!(format!("{elements:?}"), expected, "input: {input:?}");
         }
-    }
-
-    #[test]
-    fn test_emphasis_spans() {
-        let text = "hello **word1 word2**";
-
-        // With emphasis_spans = false (default), the short emphasis span is kept atomic
-        // because its total length (15) <= line_length (18), even though it doesn't fit on line 1.
-        let options_disabled = ReflowOptions {
-            line_length: 18,
-            emphasis_spans: false,
-            ..Default::default()
-        };
-        let lines_disabled = reflow_line(text, &options_disabled);
-        assert_eq!(lines_disabled, vec!["hello", "**word1 word2**"]);
-
-        // With emphasis_spans = true, the emphasis span is split across lines.
-        let options_enabled = ReflowOptions {
-            line_length: 18,
-            emphasis_spans: true,
-            ..Default::default()
-        };
-        let lines_enabled = reflow_line(text, &options_enabled);
-        assert_eq!(lines_enabled, vec!["hello **word1", "word2**"]);
-
-        // Verify other markers work too (italic and strikethrough)
-        let text_italic = "hello *word1 word2*";
-        let lines_italic = reflow_line(text_italic, &options_enabled);
-        assert_eq!(lines_italic, vec!["hello *word1", "word2*"]);
-
-        let text_strike = "hello ~~word1 word2~~";
-        let lines_strike = reflow_line(text_strike, &options_enabled);
-        assert_eq!(lines_strike, vec!["hello ~~word1", "word2~~"]);
     }
 }

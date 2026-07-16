@@ -73,7 +73,6 @@ impl MD013LineLength {
                 abbreviations: Vec::new(),
                 require_sentence_capital: true,
                 ignore_link_urls: true,
-                emphasis_spans: false,
             },
             list_spacing: MD030Config::default(),
         }
@@ -135,7 +134,6 @@ impl MD013LineLength {
                 None
             },
             defined_references: Some(Self::defined_reference_labels(ctx)),
-            emphasis_spans: config.emphasis_spans,
         }
     }
 
