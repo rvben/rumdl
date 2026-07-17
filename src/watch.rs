@@ -148,6 +148,9 @@ pub fn run_watch_mode(
         inline_overrides,
         explicit_config,
         isolated,
+        // Watch never owns a process exit and re-runs continuously; the
+        // --deny-config-warnings decision does not apply here.
+        external_config_warning: false,
     });
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
@@ -240,6 +243,8 @@ pub fn run_watch_mode(
                             inline_overrides,
                             explicit_config,
                             isolated,
+                            // Watch never owns a process exit; the flag does not apply.
+                            external_config_warning: false,
                         });
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());

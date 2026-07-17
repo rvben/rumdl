@@ -220,6 +220,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         inline_overrides,
         explicit_config: global_config_path.is_some(),
         isolated,
+        external_config_warning,
     };
 
     let outcome = crate::check_runner::perform_check_run(&ctx);

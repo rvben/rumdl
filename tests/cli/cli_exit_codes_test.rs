@@ -200,3 +200,76 @@ fn inline_config_warning_is_non_fatal_by_default() {
         "an inline config warning must not affect the exit code by default"
     );
 }
+
+/// stdin path: an inline disable comment with an unknown rule exits 2 under the
+/// flag, even though stdin has its own exit path.
+#[test]
+fn deny_config_warnings_stdin_inline_comment() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["check", "--no-cache", "--stdin", "--deny-config-warnings"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}
+
+/// stdin FIX/format path: `fmt --stdin` has its own exit before the check-mode
+/// --fail-on block, so the deny decision must also guard that branch.
+#[test]
+fn deny_config_warnings_stdin_fmt_inline_comment() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["fmt", "--no-cache", "--stdin", "--deny-config-warnings"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "fmt --stdin must honor --deny-config-warnings despite its separate exit path"
+    );
+}
+
+/// stdin without the flag stays non-fatal (exit 0 on clean content).
+#[test]
+fn stdin_inline_config_warning_non_fatal_by_default() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["check", "--no-cache", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "stdin inline config warning must not affect exit code by default"
+    );
+}

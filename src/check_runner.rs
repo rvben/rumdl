@@ -33,6 +33,11 @@ pub struct CheckRunContext<'a> {
     pub inline_overrides: &'a [toml::Table],
     pub explicit_config: bool,
     pub isolated: bool,
+    /// Whether a config-file, CLI-flag, or discovery config warning was already
+    /// seen before the run (the classes visible in `run_check`). The stdin
+    /// processor combines it with its own inline-comment detection to honor
+    /// --deny-config-warnings, since stdin owns its own exit path.
+    pub external_config_warning: bool,
 }
 
 /// Result of a single check run.
@@ -88,6 +93,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         inline_overrides,
         explicit_config,
         isolated,
+        external_config_warning,
     } = *ctx;
     use rumdl_lib::output::OutputWriter;
     use rumdl_lib::rule::Severity;
@@ -107,7 +113,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
-        crate::stdin_processor::process_stdin(&enabled_rules, args, config);
+        crate::stdin_processor::process_stdin(&enabled_rules, args, config, external_config_warning);
         // stdin owns its own exit (including the --deny-config-warnings decision,
         // wired in the stdin processor), so nothing to report here.
         return CheckRunOutcome::empty();
