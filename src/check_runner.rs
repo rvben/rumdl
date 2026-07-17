@@ -35,15 +35,48 @@ pub struct CheckRunContext<'a> {
     pub isolated: bool,
 }
 
+/// Result of a single check run.
+pub struct CheckRunOutcome {
+    /// Any violations (info, warning, or error severity).
+    pub has_issues: bool,
+    /// Any Warning- or Error-severity violations.
+    pub has_warnings: bool,
+    /// Any Error-severity violations.
+    pub has_errors: bool,
+    /// Number of issues fixed (or that would be fixed in diff mode).
+    pub total_issues_fixed: usize,
+    /// A file could not be read (missing/unreadable/invalid UTF-8); a tool error
+    /// that must exit with code 2, not a lint result.
+    pub had_tool_error: bool,
+    /// An inline disable comment referenced an unknown rule name in at least one
+    /// processed file. Feeds the --deny-config-warnings exit decision.
+    pub config_warning: bool,
+}
+
+impl CheckRunOutcome {
+    /// A run that produced no findings and no tool error.
+    fn empty() -> Self {
+        Self {
+            has_issues: false,
+            has_warnings: false,
+            has_errors: false,
+            total_issues_fixed: 0,
+            had_tool_error: false,
+            config_warning: false,
+        }
+    }
+
+    /// A run aborted by a tool error (exit code 2).
+    fn tool_error() -> Self {
+        Self {
+            had_tool_error: true,
+            ..Self::empty()
+        }
+    }
+}
+
 /// Perform a single check run.
-/// Returns (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error):
-///   - has_issues: any violations (info, warning, or error)
-///   - has_warnings: any Warning or Error severity violations
-///   - has_errors: any Error-severity violations
-///   - total_issues_fixed: number of issues fixed (or would be fixed in diff mode)
-///   - had_tool_error: a file could not be read (missing/unreadable/invalid UTF-8);
-///     a tool error that must exit with code 2, not a lint result
-pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize, bool) {
+pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let CheckRunContext {
         args,
         config,
@@ -67,7 +100,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
         Err(e) => {
             eprintln!("{}: {}", "Error".red().bold(), e);
             // An invalid --output-format is a tool error (exit code 2).
-            return (false, false, false, 0, true);
+            return CheckRunOutcome::tool_error();
         }
     };
 
@@ -75,7 +108,9 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
         let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
         crate::stdin_processor::process_stdin(&enabled_rules, args, config);
-        return (false, false, false, 0, false);
+        // stdin owns its own exit (including the --deny-config-warnings decision,
+        // wired in the stdin processor), so nothing to report here.
+        return CheckRunOutcome::empty();
     }
 
     // Find all markdown files to check
@@ -91,14 +126,14 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
             // A target path that does not exist (or is otherwise unreadable) is a
             // tool error (exit code 2), not a lint finding: flag had_tool_error
             // rather than reporting phantom violations.
-            return (false, false, false, 0, true);
+            return CheckRunOutcome::tool_error();
         }
     };
     if file_paths.is_empty() {
         if !quiet {
             println!("No markdown files found to check.");
         }
-        return (false, false, false, 0, false);
+        return CheckRunOutcome::empty();
     }
 
     // Resolve files into config groups (per-directory config discovery)
@@ -203,6 +238,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
     // caller regardless of which processing branch ran.
     let mut had_tool_error = false;
 
+    // Set when any processed file had an inline disable comment naming an unknown
+    // rule. OR-aggregated across files and reported so run_check can honor
+    // --deny-config-warnings.
+    let mut config_warning = false;
+
     let (
         mut has_issues,
         mut has_warnings,
@@ -268,11 +308,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
                     file_index,
                     file_index_reused,
                     errored: file_errored,
+                    config_warning: file_config_warning,
                 } = result;
 
                 if file_errored {
                     had_tool_error = true;
                 }
+                config_warning |= file_config_warning;
 
                 summary_issues_fixed += file_summary_issues_fixed;
                 total_issues_fixed += issues_fixed;
@@ -363,6 +405,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
                     file_index,
                     file_index_reused,
                     errored: file_errored,
+                    config_warning: file_config_warning,
                 } = crate::file_processor::process_file_with_formatter(
                     file_path,
                     &group.rules,
@@ -384,6 +427,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
                 if file_errored {
                     had_tool_error = true;
                 }
+                config_warning |= file_config_warning;
 
                 if needs_cross_file {
                     let canonical = std::fs::canonicalize(file_path).unwrap_or_else(|_| PathBuf::from(file_path));
@@ -656,5 +700,12 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> (bool, bool, bool, usize,
         }
     }
 
-    (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error)
+    CheckRunOutcome {
+        has_issues,
+        has_warnings,
+        has_errors,
+        total_issues_fixed,
+        had_tool_error,
+        config_warning,
+    }
 }

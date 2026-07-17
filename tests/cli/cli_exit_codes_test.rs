@@ -154,3 +154,49 @@ fn deny_config_warnings_clean_config_exits_zero() {
         .expect("run rumdl check");
     assert_eq!(status.code(), Some(0), "no config problem means the flag has no effect");
 }
+
+/// The issue's headline case: an unknown rule in an inline disable comment is a
+/// non-fatal warning by default, fatal (exit 2) under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_inline_comment() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("inline.md"),
+        "# Title\n\nSome text.<!-- rumdl-disable-line asdf -->\n",
+    )
+    .unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "inline.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "an unknown rule in an inline disable comment must exit 2 under the flag"
+    );
+}
+
+/// The inline case without the flag stays a non-fatal warning (exit 0 on an
+/// otherwise clean file).
+#[test]
+fn inline_config_warning_is_non_fatal_by_default() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("inline.md"),
+        "# Title\n\nSome text.<!-- rumdl-disable-line asdf -->\n",
+    )
+    .unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "inline.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "an inline config warning must not affect the exit code by default"
+    );
+}

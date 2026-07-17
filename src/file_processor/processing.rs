@@ -34,6 +34,8 @@ pub struct FileProcessResult {
     /// The file could not be read. A tool error (exit code 2), distinct from a
     /// lint violation (exit code 1).
     pub errored: bool,
+    /// An inline disable comment referenced an unknown rule name.
+    pub config_warning: bool,
 }
 
 pub fn is_rule_actually_fixable(config: &rumdl_config::Config, rule_name: &str) -> bool {
@@ -116,6 +118,7 @@ pub fn process_file_with_formatter(
         file_index,
         file_index_reused,
         errored,
+        inline_config_warning,
     ) = process_file_inner(
         file_path,
         rules,
@@ -141,6 +144,7 @@ pub fn process_file_with_formatter(
             file_index,
             file_index_reused,
             errored: true,
+            config_warning: false,
         };
     }
 
@@ -172,6 +176,7 @@ pub fn process_file_with_formatter(
             file_index,
             file_index_reused,
             errored: false,
+            config_warning: inline_config_warning,
         };
     }
 
@@ -198,6 +203,7 @@ pub fn process_file_with_formatter(
                 file_index,
                 file_index_reused,
                 errored: false,
+                config_warning: inline_config_warning,
             };
         }
     }
@@ -322,6 +328,7 @@ pub fn process_file_with_formatter(
             file_index,
             file_index_reused,
             errored: false,
+            config_warning: inline_config_warning,
         };
     } else if fix_mode != crate::FixMode::Check {
         // Apply fixes using Fix Coordinator
@@ -413,6 +420,7 @@ pub fn process_file_with_formatter(
                 file_index,
                 file_index_reused,
                 errored: false,
+                config_warning: inline_config_warning,
             };
         }
 
@@ -504,6 +512,7 @@ pub fn process_file_with_formatter(
             file_index,
             file_index_reused,
             errored: false,
+            config_warning: inline_config_warning,
         };
     }
 
@@ -517,6 +526,7 @@ pub fn process_file_with_formatter(
         file_index,
         file_index_reused,
         errored: false,
+        config_warning: inline_config_warning,
     }
 }
 
@@ -593,6 +603,8 @@ pub struct ProcessFileResult {
     /// The file could not be read (missing, unreadable, or not valid UTF-8).
     /// A tool-level error, not a lint finding: it must surface as exit code 2.
     pub errored: bool,
+    /// An inline disable comment referenced an unknown rule name.
+    pub inline_config_warning: bool,
 }
 
 pub struct CacheHashes {
@@ -629,6 +641,7 @@ pub fn process_file_inner(
     rumdl_lib::workspace_index::FileIndex,
     bool,
     bool,
+    bool,
 ) {
     let result = process_file_with_index(
         file_path,
@@ -650,6 +663,7 @@ pub fn process_file_inner(
         result.file_index,
         result.file_index_reused,
         result.errored,
+        result.inline_config_warning,
     )
 }
 
@@ -688,6 +702,10 @@ pub fn process_file_with_index(
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,
         errored: false,
+        // Inline-comment detection has not run at this point (the errored and
+        // empty-content early returns spread this template); those paths have no
+        // inline warning.
+        inline_config_warning: false,
     };
 
     // Read file content efficiently
@@ -725,15 +743,19 @@ pub fn process_file_with_index(
         return process_rust_file_doc_comments(file_path, &content, rules, config, original_line_ending);
     }
 
-    // Validate inline config comments and warn about unknown rules
-    if !silent {
-        rumdl_lib::time_section!("file: validate inline config", {
-            let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+    // Detect unknown rule names in inline disable comments. The result feeds the
+    // exit code under --deny-config-warnings, so it is computed even when
+    // --silent suppresses the printed notices.
+    let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
+        let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let had_any = !inline_warnings.is_empty();
+        if !silent {
             for warn in inline_warnings {
                 warn.print_warning(file_path);
             }
-        });
-    }
+        }
+        had_any
+    });
 
     // Early content analysis for ultra-fast skip decisions
     if content.is_empty() {
@@ -818,6 +840,7 @@ pub fn process_file_with_index(
                     file_index,
                     file_index_reused,
                     errored: false,
+                    inline_config_warning,
                 };
             }
             Err(reason) => {
@@ -949,6 +972,7 @@ pub fn process_file_with_index(
         file_index,
         file_index_reused: false,
         errored: false,
+        inline_config_warning,
     }
 }
 
@@ -1268,6 +1292,9 @@ fn process_rust_file_doc_comments(
         file_index: rumdl_lib::workspace_index::FileIndex::new(),
         file_index_reused: false,
         errored: false,
+        // Rust doc-comment linting does not process markdown inline disable
+        // comments (the rust path returns before that detection runs).
+        inline_config_warning: false,
     }
 }
 

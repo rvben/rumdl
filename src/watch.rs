@@ -137,7 +137,7 @@ pub fn run_watch_mode(
     println!();
 
     let explicit_config = global_config_path.is_some();
-    let _has_issues = perform_check_run(&CheckRunContext {
+    let _outcome = perform_check_run(&CheckRunContext {
         args,
         config: &config,
         quiet,
@@ -229,7 +229,7 @@ pub fn run_watch_mode(
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(&CheckRunContext {
+                        let _outcome = perform_check_run(&CheckRunContext {
                             args,
                             config: &config,
                             quiet,
