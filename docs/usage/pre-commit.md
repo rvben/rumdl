@@ -13,7 +13,7 @@ Add to your `.pre-commit-config.yaml`:
 ```yaml title=".pre-commit-config.yaml"
 repos:
   - repo: https://github.com/rvben/rumdl-pre-commit
-    rev: v0.2.34  # Use latest version
+    rev: v0.2.35  # Use latest version
     hooks:
       - id: rumdl      # Lint only; add args [--fix] to auto-fix
       - id: rumdl-fmt  # Pure format, always exits 0

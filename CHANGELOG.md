@@ -74,6 +74,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.35](https://github.com/rvben/rumdl/compare/v0.2.34...v0.2.35) - 2026-07-17
+
+### Added
+
+- **cli**: honor --deny-config-warnings on the stdin path ([0f93ca5](https://github.com/rvben/rumdl/commit/0f93ca5187176e459bbbae4a43a8468983ae8176))
+- **cli**: make --deny-config-warnings cover inline disable-comment rule names ([96d75f5](https://github.com/rvben/rumdl/commit/96d75f56b5f114983ec1163413d779f48a2ad8e7))
+- **cli**: add --deny-config-warnings for config-file and CLI-flag problems ([5045daf](https://github.com/rvben/rumdl/commit/5045daf52e13d0e308740df7253177f24411a0e7))
+- **reflow**: support breaking within emphasis spans ([2e8bded](https://github.com/rvben/rumdl/commit/2e8bded170f917ab00deef193aa5996a301c3bd4))
+
+### Fixed
+
+- **reflow**: preserve non-breaking spaces and the space before French double punctuation ([f66021f](https://github.com/rvben/rumdl/commit/f66021f067713fa28b481a457cb99b3dc7a7804b))
+- **cli**: walk directory arguments even when file paths are also passed ([d058273](https://github.com/rvben/rumdl/commit/d058273dd177eb0d41059215c21cb1e598a3ab18))
+- **lsp**: honor line anchors in goto-definition ([17a21e7](https://github.com/rvben/rumdl/commit/17a21e796f6f18ef1abf88e7b64d2a7f33647987))
+- **md077**: attribute middle-level continuation lines to their own list item ([c73763b](https://github.com/rvben/rumdl/commit/c73763ba2e0149548703e8733346967e1eca1d28))
+
 ## [0.2.34](https://github.com/rvben/rumdl/compare/v0.2.33...v0.2.34) - 2026-07-14
 
 ### Added
