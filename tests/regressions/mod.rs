@@ -14,6 +14,7 @@ mod md009_md013_integration_test;
 mod md009_md013_order_test;
 mod md013_hard_breaks_test;
 mod md013_html_test;
+mod md013_reflow_french_punctuation_issue_740_test;
 mod md030_grid_cards_issue_583_test;
 mod md032_edge_cases_test;
 mod md032_ordered_list_bug_test;
