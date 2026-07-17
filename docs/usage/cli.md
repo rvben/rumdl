@@ -20,19 +20,20 @@ rumdl check --fix .              # Lint and auto-fix issues
 
 **Options:**
 
-| Option                 | Description                                          |
-| ---------------------- | ---------------------------------------------------- |
-| `--fix`                | Auto-fix issues (exits 1 if unfixable issues remain) |
-| `--config <PATH>`      | Path to configuration file                           |
-| `--disable <RULES>`    | Disable specific rules (e.g., `MD013,MD033`)         |
-| `--enable <RULES>`     | Enable only specific rules                           |
-| `--exclude <PATTERNS>` | Exclude files matching patterns                      |
-| `--include <PATTERNS>` | Include only files matching patterns                 |
-| `--watch`              | Watch for changes and re-lint                        |
-| `--verbose`            | Show detailed output                                 |
-| `--quiet`              | Print diagnostics, but suppress summaries            |
-| `--silent`             | Suppress diagnostics and summaries                   |
-| `--no-exclude`         | Disable exclude patterns defined in config           |
+| Option                   | Description                                          |
+| ------------------------ | ---------------------------------------------------- |
+| `--fix`                  | Auto-fix issues (exits 1 if unfixable issues remain) |
+| `--config <PATH>`        | Path to configuration file                           |
+| `--disable <RULES>`      | Disable specific rules (e.g., `MD013,MD033`)         |
+| `--enable <RULES>`       | Enable only specific rules                           |
+| `--exclude <PATTERNS>`   | Exclude files matching patterns                      |
+| `--include <PATTERNS>`   | Include only files matching patterns                 |
+| `--watch`                | Watch for changes and re-lint                        |
+| `--verbose`              | Show detailed output                                 |
+| `--quiet`                | Print diagnostics, but suppress summaries            |
+| `--silent`               | Suppress diagnostics and summaries                   |
+| `--no-exclude`           | Disable exclude patterns defined in config           |
+| `--deny-config-warnings` | Treat configuration warnings as errors (exit code 2) |
 
 ### `fmt [PATHS...]`
 
@@ -57,6 +58,7 @@ rumdl fmt --silent -             # Format stdin to stdout without diagnostics
 | `--watch`                 | Re-run formatting when files change                         |
 | `--quiet`                 | Print diagnostics, but suppress summaries                   |
 | `--silent`                | Suppress diagnostics and summaries                          |
+| `--deny-config-warnings`  | Treat configuration warnings as errors (exit code 2)        |
 
 Use `--silent` whenever stdout should contain only formatted Markdown. Plain `rumdl fmt -` may also emit remaining diagnostics.
 
@@ -186,6 +188,15 @@ These options are commonly used with `check` and `fmt`:
 !!! note "fmt vs check --fix"
     - `rumdl fmt` always exits 0 (formatter mode)
     - `rumdl check --fix` exits 1 if unfixable issues remain
+
+!!! note "Failing on configuration problems"
+    Configuration problems (an unknown rule or option in a config file or a CLI
+    flag, an unknown rule in an inline `rumdl-disable-line` comment, or a
+    shadowed config file) are non-fatal warnings by default and do not affect the
+    exit code. Pass `--deny-config-warnings` to make any of them exit with code
+    `2`, so CI catches a typo'd rule name. This is distinct from `--fail-on`,
+    which governs the severity of Markdown violations (exit `1`); a config
+    problem exits `2` and takes precedence over Markdown violations.
 
 ## Usage Examples
 

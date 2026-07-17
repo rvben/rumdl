@@ -273,3 +273,77 @@ fn stdin_inline_config_warning_non_fatal_by_default() {
         "stdin inline config warning must not affect exit code by default"
     );
 }
+
+/// --silent suppresses the printed notice but the flag must still exit 2.
+#[test]
+fn deny_config_warnings_silent_still_exits_two() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let output = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "--silent", "clean.md"])
+        .current_dir(dir.path())
+        .output()
+        .expect("run rumdl check");
+    assert_eq!(output.status.code(), Some(TOOL_ERROR));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).is_empty(),
+        "--silent must suppress the printed warning even while the flag makes it fatal. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A config warning outranks a real Markdown violation: exit 2, not 1.
+#[test]
+fn deny_config_warnings_take_precedence_over_violations() {
+    let dir = tempdir().unwrap();
+    // MD041: first line is not a top-level heading -> a real violation.
+    std::fs::write(dir.path().join("dirty.md"), "no heading here\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "dirty.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "a config problem must exit 2 even when Markdown violations (exit 1) are also present"
+    );
+}
+
+/// Sanity check the precedence test's premise: the same violation WITHOUT a
+/// config problem exits 1, not 2.
+#[test]
+fn violations_without_config_problem_exit_one() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("dirty.md"), "no heading here\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "dirty.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "a plain Markdown violation exits 1; the flag only changes config-problem exits"
+    );
+}
+
+/// `fmt` shares config loading and the flag; it also exits 2 on a config problem.
+#[test]
+fn deny_config_warnings_applies_to_fmt() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["fmt", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl fmt");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}
