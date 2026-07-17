@@ -133,6 +133,14 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         }
     }
 
+    // Whether any configuration problem outside per-file inline comments was
+    // seen (a shadowed config, an unknown rule/option in a config file, or an
+    // unknown rule in a CLI flag). Combined with the inline-comment class from
+    // the run below to decide the --deny-config-warnings exit. Computed before
+    // `sourced` is consumed, since `discovery_warnings` lives on it.
+    let external_config_warning =
+        !sourced.discovery_warnings.is_empty() || !validation_warnings.is_empty() || !cli_warnings.is_empty();
+
     // 3c. Apply CLI argument overrides (e.g., --flavor)
     apply_cli_overrides(&mut sourced, args);
 
@@ -221,6 +229,14 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // precedence over lint findings: the run was incomplete, so reporting it as
     // "clean" or "violations found" would be misleading in CI.
     if had_tool_error {
+        exit::tool_error();
+    }
+
+    // A configuration problem is a tooling error (exit code 2), reported after
+    // the best-effort lint pass so every warning is still printed. It takes
+    // precedence over Markdown violations (exit code 1), and stays orthogonal
+    // to --fail-on (which governs violation severity).
+    if args.deny_config_warnings && external_config_warning {
         exit::tool_error();
     }
 

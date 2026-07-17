@@ -73,3 +73,84 @@ fn nonexistent_target_is_a_tool_error() {
         "a nonexistent target path must exit with the tool-error code, not the violations code"
     );
 }
+
+// --- issue #726: --deny-config-warnings turns config problems into tool errors ---
+//
+// Configuration problems (unknown rule/option in a config file or CLI flag,
+// unknown rule in an inline disable comment, shadowed config) are non-fatal
+// stderr warnings by default. `--deny-config-warnings` makes any of them exit
+// with the tool-error code (2), so CI catches config typos.
+
+/// An unknown rule name in a config file exits 2 under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_config_file() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "an unknown rule in the config file must exit 2 under --deny-config-warnings"
+    );
+}
+
+/// The same config problem WITHOUT the flag stays a non-fatal warning: exit 0
+/// on a clean file. Locks in that the default behavior is unchanged.
+#[test]
+fn config_warnings_are_non_fatal_by_default() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "config warnings must not affect the exit code by default"
+    );
+}
+
+/// An unknown rule passed via a CLI flag exits 2 under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_cli_flag() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+
+    let status = rumdl()
+        .args([
+            "check",
+            "--no-cache",
+            "--deny-config-warnings",
+            "--disable",
+            "MD9999",
+            "clean.md",
+        ])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}
+
+/// A clean config plus the flag must not exit 2 (no false positive).
+#[test]
+fn deny_config_warnings_clean_config_exits_zero() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(status.code(), Some(0), "no config problem means the flag has no effect");
+}
