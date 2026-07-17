@@ -1,5 +1,6 @@
 mod code_block_blockquote_edge_cases;
 mod consistency_regression_tests;
+mod discovery_mixed_dir_file_args_issue_741_test;
 mod embedded_markdown_fix_gate_issue_643_test;
 mod escaped_brackets_test;
 mod fenced_code_on_list_marker_test;
