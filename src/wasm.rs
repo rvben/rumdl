@@ -104,12 +104,11 @@ fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
 
     // Convert byte-based columns to character-based columns
     let column = get_line_content(content, warning.line)
-        .map(|line| byte_column_to_char_column(line, warning.column))
-        .unwrap_or(warning.column);
+        .map_or(warning.column, |line| byte_column_to_char_column(line, warning.column));
 
-    let end_column = get_line_content(content, warning.end_line)
-        .map(|line| byte_column_to_char_column(line, warning.end_column))
-        .unwrap_or(warning.end_column);
+    let end_column = get_line_content(content, warning.end_line).map_or(warning.end_column, |line| {
+        byte_column_to_char_column(line, warning.end_column)
+    });
 
     JsWarning {
         message: warning.message.clone(),
@@ -228,21 +227,21 @@ impl LinterConfig {
 
         // Apply disabled rules
         if let Some(ref disable) = self.disable {
-            config.global.disable = disable.clone();
+            config.global.disable.clone_from(disable);
         }
 
         // Apply enabled rules (presence of `enable` key means explicit mode)
         if let Some(ref enable) = self.enable {
-            config.global.enable = enable.clone();
+            config.global.enable.clone_from(enable);
             config.global.enable_is_explicit = true;
         }
 
         // Apply extend-enable / extend-disable
         if let Some(ref extend_enable) = self.extend_enable {
-            config.global.extend_enable = extend_enable.clone();
+            config.global.extend_enable.clone_from(extend_enable);
         }
         if let Some(ref extend_disable) = self.extend_disable {
-            config.global.extend_disable = extend_disable.clone();
+            config.global.extend_disable.clone_from(extend_disable);
         }
 
         // Apply line length
@@ -255,15 +254,15 @@ impl LinterConfig {
 
         // Apply fixable / unfixable
         if let Some(ref fixable) = self.fixable {
-            config.global.fixable = fixable.clone();
+            config.global.fixable.clone_from(fixable);
         }
         if let Some(ref unfixable) = self.unfixable {
-            config.global.unfixable = unfixable.clone();
+            config.global.unfixable.clone_from(unfixable);
         }
 
         // Apply exclude patterns
         if let Some(ref exclude) = self.exclude {
-            config.global.exclude = exclude.clone();
+            config.global.exclude.clone_from(exclude);
         }
 
         // Apply rule-specific configurations
@@ -356,7 +355,7 @@ impl Linter {
         let linter_config: LinterConfig = if options.is_undefined() || options.is_null() {
             LinterConfig::default()
         } else {
-            serde_wasm_bindgen::from_value(options).map_err(|e| JsValue::from_str(&format!("Invalid config: {}", e)))?
+            serde_wasm_bindgen::from_value(options).map_err(|e| JsValue::from_str(&format!("Invalid config: {e}")))?
         };
 
         let (config, config_warnings) = linter_config.to_config_with_warnings();
@@ -395,6 +394,10 @@ impl Linter {
     ///
     /// Note: Fix ranges use character offsets (not byte offsets) for JavaScript compatibility.
     /// This is important for multi-byte UTF-8 characters like `æ` or emoji.
+    // `path: Option<String>` is the wasm_bindgen boundary signature the npm/browser API
+    // exposes; taking an owned Option is idiomatic there and must stay stable for JS
+    // callers, so the by-value pass is intentional rather than a missed borrow.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn check(&self, content: &str, path: Option<String>) -> String {
         if let Some(ref p) = path
             && path_matches_exclude(&self.config.global.exclude, p)
@@ -415,7 +418,7 @@ impl Linter {
                 let js_warnings: Vec<JsWarning> = warnings.iter().map(|w| convert_warning_for_js(w, content)).collect();
                 serde_json::to_string(&js_warnings).unwrap_or_else(|_| "[]".to_string())
             }
-            Err(e) => format!(r#"[{{"error": "{}"}}]"#, e),
+            Err(e) => format!(r#"[{{"error": "{e}"}}]"#),
         }
     }
 
@@ -427,6 +430,9 @@ impl Linter {
     ///   pattern, the content is returned unchanged.
     ///
     /// Uses the same fix coordinator as the CLI for consistent behavior.
+    // `path: Option<String>` mirrors `check`: the owned Option is the stable wasm_bindgen
+    // boundary signature for JS callers, so passing by value here is intentional.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn fix(&self, content: &str, path: Option<String>) -> String {
         if let Some(ref p) = path
             && path_matches_exclude(&self.config.global.exclude, p)
@@ -437,9 +443,8 @@ impl Linter {
         let all = all_rules(&self.config);
         let rules = filter_rules(&all, &self.config.global);
 
-        let warnings = match crate::lint(content, &rules, false, self.flavor, None, Some(&self.config)) {
-            Ok(w) => w,
-            Err(_) => return content.to_string(),
+        let Ok(warnings) = crate::lint(content, &rules, false, self.flavor, None, Some(&self.config)) else {
+            return content.to_string();
         };
 
         let coordinator = FixCoordinator::new();
@@ -718,8 +723,7 @@ mod tests {
             assert_eq!(
                 config.markdown_flavor(),
                 flavor,
-                "Round-trip failed for flavor: {:?}",
-                flavor
+                "Round-trip failed for flavor: {flavor:?}"
             );
         }
     }

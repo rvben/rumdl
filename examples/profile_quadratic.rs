@@ -4,9 +4,9 @@ fn main() {
     }
 
     let sep = "=".repeat(80);
-    println!("{}", sep);
+    println!("{sep}");
     println!("PROFILING EACH OPERATION AT DIFFERENT SCALES");
-    println!("{}", sep);
+    println!("{sep}");
 
     let sizes = vec![
         (1_000, "1K lines"),
@@ -21,9 +21,9 @@ fn main() {
         let actual_lines = content.lines().count();
 
         let dash_line = "-".repeat(80);
-        println!("\n{}", dash_line);
-        println!("{} ({} KB, {} lines)", label, content.len() / 1024, actual_lines);
-        println!("{}", dash_line);
+        println!("\n{dash_line}");
+        println!("{label} ({} KB, {actual_lines} lines)", content.len() / 1024);
+        println!("{dash_line}");
 
         // Run once to see timings
         let _ = rumdl_lib::lint_context::LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
