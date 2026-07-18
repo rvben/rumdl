@@ -190,7 +190,8 @@ jobs:
           go install golang.org/x/tools/cmd/goimports@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           # shuck ships prebuilt binaries (the linter is the shuck-cli package;
-          # `shuck check -` needs >= 0.0.43 for stdin support).
+          # `shuck check -` needs >= 0.0.43 for stdin support, `shuck format -`
+          # is exercised by shuck:format; latest covers both).
           curl -fsSL https://github.com/ewhauser/shuck/releases/latest/download/shuck-cli-x86_64-unknown-linux-gnu.tar.xz | tar -xJ -C /tmp
           sudo install /tmp/shuck-cli-x86_64-unknown-linux-gnu/shuck /usr/local/bin/
 

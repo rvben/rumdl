@@ -210,11 +210,14 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
         },
     );
 
-    // Shell - shuck (lint only; faster shellcheck alternative). `--output-format
-    // concise` keeps shuck's legacy one-line-per-diagnostic output, which parses
-    // via the same generic "file:line:col: message" path as other tools instead
-    // of needing a dedicated parser. Requires shuck >= 0.0.43 for `check -` stdin
-    // support (see rvben/rumdl#655 and ewhauser/shuck#1123).
+    // Shell - shuck (faster shellcheck/shfmt alternative). Bare `shuck` lints via the
+    // `check` subcommand; `shuck:format` formats via `format` (the processor resolves a
+    // bare `shuck` in a format slot to `shuck:format`). `--output-format concise` keeps
+    // shuck's one-line-per-diagnostic output, which parses via the same generic
+    // "file:line:col: message" path as other tools instead of needing a dedicated
+    // parser. Requires shuck >= 0.0.43 for `check -` stdin support (see rvben/rumdl#655
+    // and ewhauser/shuck#1123); `format -` reads stdin and writes the formatted source
+    // to stdout with no report contamination (verified against shuck 0.0.45).
     m.insert(
         "shuck",
         ToolDefinition {
@@ -225,6 +228,17 @@ static BUILTIN_TOOLS: LazyLock<HashMap<&'static str, ToolDefinition>> = LazyLock
                 "concise".to_string(),
                 "-".to_string(),
             ],
+            stdin: true,
+            stdout: true,
+            lint_args: vec![],
+            format_args: vec![],
+        },
+    );
+
+    m.insert(
+        "shuck:format",
+        ToolDefinition {
+            command: vec!["shuck".to_string(), "format".to_string(), "-".to_string()],
             stdin: true,
             stdout: true,
             lint_args: vec![],
@@ -756,6 +770,14 @@ const BUILTIN_TOOLS_DOCS: &[ToolDocMeta] = &[
         language: "Shell",
         kind: ToolKind::Lint,
         doc_group: "shuck",
+        display_command: None,
+        runtime: true,
+    },
+    ToolDocMeta {
+        id: "shuck:format",
+        language: "Shell",
+        kind: ToolKind::Format,
+        doc_group: "shuck:format",
         display_command: None,
         runtime: true,
     },

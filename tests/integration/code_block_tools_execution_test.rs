@@ -249,6 +249,17 @@ fn shfmt_formats_shell() {
 }
 
 #[test]
+fn shuck_formats_shell() {
+    require_tool!("shuck");
+    // `shuck:format` runs `shuck format -`, which reads the block from stdin and writes
+    // the formatted source to stdout (verified against shuck 0.0.45, where `format` is
+    // ungated). A build that treats `-` as a filename leaves the block unchanged and the
+    // assertion below fails.
+    let out = format("shell", "shuck:format", "shell", "if [ \"$x\" = 1 ];then echo hi;fi");
+    assert!(out.contains("; then"), "shuck:format should reformat the block:\n{out}");
+}
+
+#[test]
 fn goimports_formats_go() {
     require_tool!("goimports");
     let out = format("go", "goimports", "go", "package main\nfunc  main(){}");
@@ -392,6 +403,7 @@ const VERIFIED: &[&str] = &[
     "shellcheck",
     "shfmt",
     "shuck",
+    "shuck:format",
     "rustfmt",
     "gofmt",
     "goimports",

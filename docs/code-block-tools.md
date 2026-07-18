@@ -116,6 +116,7 @@ rumdl includes definitions for common tools:
 | `shellcheck`      | Shell      | Lint   | `shellcheck --shell=bash -`             |
 | `shfmt`           | Shell      | Format | `shfmt`                                 |
 | `shuck`           | Shell      | Lint   | `shuck check --output-format concise -` |
+| `shuck:format`    | Shell      | Format | `shuck format -`                        |
 | `rustfmt`         | Rust       | Format | `rustfmt`                               |
 | `gofmt`           | Go         | Format | `gofmt`                                 |
 | `goimports`       | Go         | Format | `goimports`                             |
@@ -374,7 +375,7 @@ zsh = "shell"
 
 | Feature          | rumdl          | mdsf       |
 | ---------------- | -------------- | ---------- |
-| Built-in tools   | 33             | 339        |
+| Built-in tools   | 34             | 339        |
 | Custom tools     | Yes            | Yes        |
 | Linting          | Yes            | No         |
 | Formatting       | Yes            | Yes        |
