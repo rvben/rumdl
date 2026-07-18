@@ -264,16 +264,6 @@ pub fn find_markdown_files(
 ) -> Result<Vec<String>, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
-    // --- Configure ignore::WalkBuilder ---
-    // Start with the first path, add others later
-    let first_path = paths.first().cloned().unwrap_or_else(|| ".".to_string());
-    let mut walk_builder = WalkBuilder::new(first_path);
-
-    // Add remaining paths
-    for path in paths.iter().skip(1) {
-        walk_builder.add(path);
-    }
-
     // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
     let is_discovery_mode = paths.is_empty() || paths == ["."];
 
@@ -289,38 +279,6 @@ pub fn find_markdown_files(
     } else {
         ExplicitIncludeMatchers::new(&[])
     };
-
-    // --- Add Lintable File Type Filter ---
-    // CLI --include: no type filter (user controls which files to process)
-    // Config include: expanded filter (markdown + rust + explicitly named
-    // files, since the user spelled those out)
-    // Default: markdown-only filter
-    if args.include.is_none() {
-        let mut types_builder = ignore::types::TypesBuilder::new();
-        types_builder.add_defaults();
-        for ext in MARKDOWN_EXTENSIONS {
-            types_builder.add("markdown", &format!("*.{ext}"))?;
-        }
-        // Type globs match case-sensitively; cover the conventional
-        // capitalized R Markdown extension explicitly.
-        types_builder.add("markdown", "*.Rmd")?;
-        types_builder.select("markdown");
-        if has_config_include {
-            // Config include is active: also allow Rust files for doc comment linting
-            types_builder.add("rustdoc", "*.rs")?;
-            types_builder.select("rustdoc");
-        }
-        if !explicit_includes.is_empty() {
-            // Type names must be purely alphanumeric in the ignore crate.
-            for glob in explicit_includes.file_name_globs() {
-                types_builder.add("configinclude", glob)?;
-            }
-            types_builder.select("configinclude");
-        }
-        let types = types_builder.build()?;
-        walk_builder.types(types);
-    }
-    // -----------------------------------------
 
     // --- Determine Effective Include/Exclude Patterns ---
 
@@ -376,10 +334,152 @@ pub fn find_markdown_files(
     let canonical_project_root = project_root.and_then(|root| root.canonicalize().ok());
     // --- End Pattern Determination ---
 
+    // --- Split explicit paths into named files and directory roots ---
+    // A file named on the command line is trusted as-is: it is linted even
+    // without a markdown extension and bypasses the walker's type/ignore
+    // filters, subject only to exclude patterns (issue #99). Directory
+    // arguments are walked below exactly like discovery-mode roots, so a
+    // mixed invocation checks the union of both (issue #741).
+    let mut explicit_files: Vec<String> = Vec::new();
+    let mut explicit_dirs: Vec<&str> = Vec::new();
+
+    if !is_discovery_mode {
+        for path_str in paths {
+            let path = Path::new(path_str);
+            if !path.exists() {
+                return Err(format!("File not found: {path_str}").into());
+            }
+            if !path.is_file() {
+                explicit_dirs.push(path_str.as_str());
+                continue;
+            }
+            // Convert to relative path for pattern matching
+            // This ensures patterns like "docs/*" work with both relative and absolute paths
+            let cleaned_path = if path.is_absolute() {
+                // Try to make it relative to the current directory
+                // Use canonicalized paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
+                if let Ok(cwd) = std::env::current_dir() {
+                    // Canonicalize both paths to resolve symlinks
+                    if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), path.canonicalize()) {
+                        if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
+                            relative.to_string_lossy().to_string()
+                        } else {
+                            // Path is absolute but not under cwd, keep as-is
+                            path_str.clone()
+                        }
+                    } else {
+                        // Canonicalization failed, keep path as-is
+                        path_str.clone()
+                    }
+                } else {
+                    path_str.clone()
+                }
+            } else if let Some(stripped) = path_str.strip_prefix("./") {
+                stripped.to_string()
+            } else {
+                path_str.clone()
+            };
+
+            // Check if this file should be excluded based on exclude patterns
+            // This is the default behavior to match user expectations and avoid
+            // duplication between rumdl config and pre-commit config (issue #99)
+            if !exclude_matchers.is_empty() {
+                // Compute path relative to project_root for pattern matching
+                // This ensures patterns like "subdir/file.md" work regardless of cwd
+                let path_for_matching = if let Some(canonical_root) = canonical_project_root.as_deref() {
+                    if let Ok(canonical_path) = path.canonicalize() {
+                        if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
+                            relative.to_string_lossy().to_string()
+                        } else {
+                            // Path is not under project_root, fall back to cleaned_path
+                            cleaned_path.clone()
+                        }
+                    } else {
+                        cleaned_path.clone()
+                    }
+                } else {
+                    cleaned_path.clone()
+                };
+
+                if let Some(pattern) = exclude_matchers.matched_pattern(&path_for_matching) {
+                    // Excluding an explicitly provided file is a deliberate config choice, so
+                    // this is an informational notice, not a warning, and it is surfaced only
+                    // under --verbose. This keeps explicit-path mode as quiet as discovery
+                    // mode (which excludes silently) while still letting `--verbose` explain
+                    // why a named file was skipped. --silent suppresses it entirely.
+                    if args.verbose && !args.silent {
+                        let display_path = normalize_separators(cleaned_path.clone());
+                        eprintln!(
+                            "{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
+                        );
+                    }
+                } else {
+                    explicit_files.push(canonicalize_path_safe(&cleaned_path));
+                }
+            } else {
+                explicit_files.push(canonicalize_path_safe(&cleaned_path));
+            }
+        }
+
+        // Nothing to walk when every argument is a file. Returns the explicit
+        // set even if exclusions emptied it, so the caller reports "no files"
+        // instead of silently falling back to a cwd walk.
+        if explicit_dirs.is_empty() {
+            explicit_files.sort();
+            explicit_files.dedup();
+            return Ok(explicit_files);
+        }
+    }
+
+    // --- Configure ignore::WalkBuilder over the directory roots ---
+    // Discovery mode walks the cwd (`.`); explicit mode walks only the
+    // directory arguments (named files were collected above).
+    let mut walk_builder = if is_discovery_mode {
+        WalkBuilder::new(paths.first().map(String::as_str).unwrap_or("."))
+    } else {
+        let mut builder = WalkBuilder::new(explicit_dirs[0]);
+        for dir in &explicit_dirs[1..] {
+            builder.add(dir);
+        }
+        builder
+    };
+
+    // --- Add Lintable File Type Filter ---
+    // CLI --include: no type filter (user controls which files to process)
+    // Config include: expanded filter (markdown + rust + explicitly named
+    // files, since the user spelled those out)
+    // Default: markdown-only filter
+    if args.include.is_none() {
+        let mut types_builder = ignore::types::TypesBuilder::new();
+        types_builder.add_defaults();
+        for ext in MARKDOWN_EXTENSIONS {
+            types_builder.add("markdown", &format!("*.{ext}"))?;
+        }
+        // Type globs match case-sensitively; cover the conventional
+        // capitalized R Markdown extension explicitly.
+        types_builder.add("markdown", "*.Rmd")?;
+        types_builder.select("markdown");
+        if has_config_include {
+            // Config include is active: also allow Rust files for doc comment linting
+            types_builder.add("rustdoc", "*.rs")?;
+            types_builder.select("rustdoc");
+        }
+        if !explicit_includes.is_empty() {
+            // Type names must be purely alphanumeric in the ignore crate.
+            for glob in explicit_includes.file_name_globs() {
+                types_builder.add("configinclude", glob)?;
+            }
+            types_builder.select("configinclude");
+        }
+        let types = types_builder.build()?;
+        walk_builder.types(types);
+    }
+    // -----------------------------------------
+
     // Apply overrides using the determined patterns
     if !final_include_patterns.is_empty() || !final_exclude_patterns.is_empty() {
         // Use project_root as the pattern base for OverrideBuilder
-        // The walker paths are relative to the first_path, but the ignore crate
+        // The walker paths are relative to the walk roots, but the ignore crate
         // handles the path matching internally when both are consistent directories
         let pattern_base = project_root.unwrap_or(Path::new("."));
         let mut override_builder = OverrideBuilder::new(pattern_base);
@@ -428,97 +528,6 @@ pub fn find_markdown_files(
             skip_vendor_dirs: false,
         },
     );
-
-    // --- Pre-check for explicit file paths ---
-    // If not in discovery mode, validate that specified paths exist
-    if !is_discovery_mode {
-        let mut processed_explicit_files = false;
-
-        for path_str in paths {
-            let path = Path::new(path_str);
-            if !path.exists() {
-                return Err(format!("File not found: {path_str}").into());
-            }
-            // If it's a file, process it (trust user's explicit intent)
-            if path.is_file() {
-                processed_explicit_files = true;
-                // Convert to relative path for pattern matching
-                // This ensures patterns like "docs/*" work with both relative and absolute paths
-                let cleaned_path = if path.is_absolute() {
-                    // Try to make it relative to the current directory
-                    // Use canonicalized paths to handle symlinks (e.g., /tmp -> /private/tmp on macOS)
-                    if let Ok(cwd) = std::env::current_dir() {
-                        // Canonicalize both paths to resolve symlinks
-                        if let (Ok(canonical_cwd), Ok(canonical_path)) = (cwd.canonicalize(), path.canonicalize()) {
-                            if let Ok(relative) = canonical_path.strip_prefix(&canonical_cwd) {
-                                relative.to_string_lossy().to_string()
-                            } else {
-                                // Path is absolute but not under cwd, keep as-is
-                                path_str.clone()
-                            }
-                        } else {
-                            // Canonicalization failed, keep path as-is
-                            path_str.clone()
-                        }
-                    } else {
-                        path_str.clone()
-                    }
-                } else if let Some(stripped) = path_str.strip_prefix("./") {
-                    stripped.to_string()
-                } else {
-                    path_str.clone()
-                };
-
-                // Check if this file should be excluded based on exclude patterns
-                // This is the default behavior to match user expectations and avoid
-                // duplication between rumdl config and pre-commit config (issue #99)
-                if !exclude_matchers.is_empty() {
-                    // Compute path relative to project_root for pattern matching
-                    // This ensures patterns like "subdir/file.md" work regardless of cwd
-                    let path_for_matching = if let Some(canonical_root) = canonical_project_root.as_deref() {
-                        if let Ok(canonical_path) = path.canonicalize() {
-                            if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
-                                relative.to_string_lossy().to_string()
-                            } else {
-                                // Path is not under project_root, fall back to cleaned_path
-                                cleaned_path.clone()
-                            }
-                        } else {
-                            cleaned_path.clone()
-                        }
-                    } else {
-                        cleaned_path.clone()
-                    };
-
-                    if let Some(pattern) = exclude_matchers.matched_pattern(&path_for_matching) {
-                        // Excluding an explicitly provided file is a deliberate config choice, so
-                        // this is an informational notice, not a warning, and it is surfaced only
-                        // under --verbose. This keeps explicit-path mode as quiet as discovery
-                        // mode (which excludes silently) while still letting `--verbose` explain
-                        // why a named file was skipped. --silent suppresses it entirely.
-                        if args.verbose && !args.silent {
-                            let display_path = normalize_separators(cleaned_path.clone());
-                            eprintln!(
-                                "{display_path} ignored because of exclude pattern '{pattern}'. Use --no-exclude to override"
-                            );
-                        }
-                    } else {
-                        file_paths.push(canonicalize_path_safe(&cleaned_path));
-                    }
-                } else {
-                    file_paths.push(canonicalize_path_safe(&cleaned_path));
-                }
-            }
-        }
-
-        // If we processed explicit files, return the results (even if empty due to exclusions)
-        // This prevents the walker from running when explicit files were provided
-        if processed_explicit_files {
-            file_paths.sort();
-            file_paths.dedup();
-            return Ok(file_paths);
-        }
-    }
 
     // --- Execute Walk ---
 
@@ -608,5 +617,12 @@ pub fn find_markdown_files(
     }
     // -------------------------------------
 
-    Ok(file_paths) // Ensure the function returns the result
+    // Union with the explicitly named files. Both sides hold canonicalized
+    // paths, so a file that is both named and found by the directory walk
+    // dedups away.
+    file_paths.extend(explicit_files);
+    file_paths.sort();
+    file_paths.dedup();
+
+    Ok(file_paths)
 }

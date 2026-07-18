@@ -73,3 +73,277 @@ fn nonexistent_target_is_a_tool_error() {
         "a nonexistent target path must exit with the tool-error code, not the violations code"
     );
 }
+
+// --- issue #726: --deny-config-warnings turns config problems into tool errors ---
+//
+// Configuration problems (unknown rule/option in a config file or CLI flag,
+// unknown rule in an inline disable comment, shadowed config) are non-fatal
+// stderr warnings by default. `--deny-config-warnings` makes any of them exit
+// with the tool-error code (2), so CI catches config typos.
+
+/// An unknown rule name in a config file exits 2 under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_config_file() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "an unknown rule in the config file must exit 2 under --deny-config-warnings"
+    );
+}
+
+/// The same config problem WITHOUT the flag stays a non-fatal warning: exit 0
+/// on a clean file. Locks in that the default behavior is unchanged.
+#[test]
+fn config_warnings_are_non_fatal_by_default() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "config warnings must not affect the exit code by default"
+    );
+}
+
+/// An unknown rule passed via a CLI flag exits 2 under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_cli_flag() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+
+    let status = rumdl()
+        .args([
+            "check",
+            "--no-cache",
+            "--deny-config-warnings",
+            "--disable",
+            "MD9999",
+            "clean.md",
+        ])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}
+
+/// A clean config plus the flag must not exit 2 (no false positive).
+#[test]
+fn deny_config_warnings_clean_config_exits_zero() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(status.code(), Some(0), "no config problem means the flag has no effect");
+}
+
+/// The issue's headline case: an unknown rule in an inline disable comment is a
+/// non-fatal warning by default, fatal (exit 2) under the flag.
+#[test]
+fn deny_config_warnings_flags_unknown_rule_in_inline_comment() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("inline.md"),
+        "# Title\n\nSome text.<!-- rumdl-disable-line asdf -->\n",
+    )
+    .unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "inline.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "an unknown rule in an inline disable comment must exit 2 under the flag"
+    );
+}
+
+/// The inline case without the flag stays a non-fatal warning (exit 0 on an
+/// otherwise clean file).
+#[test]
+fn inline_config_warning_is_non_fatal_by_default() {
+    let dir = tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("inline.md"),
+        "# Title\n\nSome text.<!-- rumdl-disable-line asdf -->\n",
+    )
+    .unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "inline.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "an inline config warning must not affect the exit code by default"
+    );
+}
+
+/// stdin path: an inline disable comment with an unknown rule exits 2 under the
+/// flag, even though stdin has its own exit path.
+#[test]
+fn deny_config_warnings_stdin_inline_comment() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["check", "--no-cache", "--stdin", "--deny-config-warnings"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}
+
+/// stdin FIX/format path: `fmt --stdin` has its own exit before the check-mode
+/// --fail-on block, so the deny decision must also guard that branch.
+#[test]
+fn deny_config_warnings_stdin_fmt_inline_comment() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["fmt", "--no-cache", "--stdin", "--deny-config-warnings"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "fmt --stdin must honor --deny-config-warnings despite its separate exit path"
+    );
+}
+
+/// stdin without the flag stays non-fatal (exit 0 on clean content).
+#[test]
+fn stdin_inline_config_warning_non_fatal_by_default() {
+    use std::io::Write;
+    let mut child = rumdl()
+        .args(["check", "--no-cache", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn rumdl");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"# Title\n\nText.<!-- rumdl-disable-line asdf -->\n")
+        .unwrap();
+    let status = child.wait().expect("wait rumdl");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "stdin inline config warning must not affect exit code by default"
+    );
+}
+
+/// --silent suppresses the printed notice but the flag must still exit 2.
+#[test]
+fn deny_config_warnings_silent_still_exits_two() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let output = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "--silent", "clean.md"])
+        .current_dir(dir.path())
+        .output()
+        .expect("run rumdl check");
+    assert_eq!(output.status.code(), Some(TOOL_ERROR));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).is_empty(),
+        "--silent must suppress the printed warning even while the flag makes it fatal. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// A config warning outranks a real Markdown violation: exit 2, not 1.
+#[test]
+fn deny_config_warnings_take_precedence_over_violations() {
+    let dir = tempdir().unwrap();
+    // MD041: first line is not a top-level heading -> a real violation.
+    std::fs::write(dir.path().join("dirty.md"), "no heading here\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "dirty.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "a config problem must exit 2 even when Markdown violations (exit 1) are also present"
+    );
+}
+
+/// Sanity check the precedence test's premise: the same violation WITHOUT a
+/// config problem exits 1, not 2.
+#[test]
+fn violations_without_config_problem_exit_one() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("dirty.md"), "no heading here\n").unwrap();
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "dirty.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(1),
+        "a plain Markdown violation exits 1; the flag only changes config-problem exits"
+    );
+}
+
+/// `fmt` shares config loading and the flag; it also exits 2 on a config problem.
+#[test]
+fn deny_config_warnings_applies_to_fmt() {
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("clean.md"), "# Title\n\nText.\n").unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[global]\nenable = [\"MD999\"]\n").unwrap();
+
+    let status = rumdl()
+        .args(["fmt", "--no-cache", "--deny-config-warnings", "clean.md"])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl fmt");
+    assert_eq!(status.code(), Some(TOOL_ERROR));
+}

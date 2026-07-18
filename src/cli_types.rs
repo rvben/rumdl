@@ -106,6 +106,13 @@ pub struct SharedCliArgs {
         help = "Directory to store cache files (default: .rumdl_cache, or $RUMDL_CACHE_DIR, or cache-dir in config)"
     )]
     pub cache_dir: Option<String>,
+
+    /// Exit with the tool-error code (2) if any configuration problem is
+    /// detected (unknown rule or option in a config file or CLI flag, unknown
+    /// rule in an inline disable comment, or a shadowed config file). Config
+    /// problems are non-fatal warnings by default.
+    #[arg(long, help = "Treat configuration warnings as errors (exit code 2)")]
+    pub deny_config_warnings: bool,
 }
 
 #[derive(Args, Debug)]

@@ -133,6 +133,14 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         }
     }
 
+    // Whether any configuration problem outside per-file inline comments was
+    // seen (a shadowed config, an unknown rule/option in a config file, or an
+    // unknown rule in a CLI flag). Combined with the inline-comment class from
+    // the run below to decide the --deny-config-warnings exit. Computed before
+    // `sourced` is consumed, since `discovery_warnings` lives on it.
+    let external_config_warning =
+        !sourced.discovery_warnings.is_empty() || !validation_warnings.is_empty() || !cli_warnings.is_empty();
+
     // 3c. Apply CLI argument overrides (e.g., --flavor)
     apply_cli_overrides(&mut sourced, args);
 
@@ -212,29 +220,38 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
         inline_overrides,
         explicit_config: global_config_path.is_some(),
         isolated,
+        external_config_warning,
     };
 
-    let (has_issues, has_warnings, has_errors, total_issues_fixed, had_tool_error) =
-        crate::check_runner::perform_check_run(&ctx);
+    let outcome = crate::check_runner::perform_check_run(&ctx);
 
     // A file that could not be read is a tool error (exit code 2). It takes
     // precedence over lint findings: the run was incomplete, so reporting it as
     // "clean" or "violations found" would be misleading in CI.
-    if had_tool_error {
+    if outcome.had_tool_error {
+        exit::tool_error();
+    }
+
+    // A configuration problem is a tooling error (exit code 2), reported after
+    // the best-effort lint pass so every warning is still printed. It takes
+    // precedence over Markdown violations (exit code 1), and stays orthogonal
+    // to --fail-on (which governs violation severity). Covers the three classes
+    // visible here plus the inline-comment class bubbled up from the run.
+    if args.deny_config_warnings && (external_config_warning || outcome.config_warning) {
         exit::tool_error();
     }
 
     // In --check mode (for fmt), exit with code 1 if any formatting changes would be made
-    if args.check && total_issues_fixed > 0 {
+    if args.check && outcome.total_issues_fixed > 0 {
         exit::violations_found();
     }
 
     // Determine if we should fail based on --fail-on setting
     let should_fail = match args.fail_on_mode {
         FailOn::Never => false,
-        FailOn::Error => has_errors,
-        FailOn::Warning => has_warnings,
-        FailOn::Any => has_issues,
+        FailOn::Error => outcome.has_errors,
+        FailOn::Warning => outcome.has_warnings,
+        FailOn::Any => outcome.has_issues,
     };
 
     if should_fail && args.fix_mode != FixMode::Format {

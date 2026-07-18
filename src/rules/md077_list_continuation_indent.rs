@@ -241,7 +241,10 @@ impl MD077ListContinuationIndent {
     /// Skipped silently (do not fire the callback):
     /// - Blank lines (toggle `saw_blank`).
     /// - Nested list items (reset `saw_blank`, track their content column).
-    /// - Lines inside a nested item's scope (`col >= nested_content_col`).
+    /// - Lines inside any still-open nested item's scope: the walk keeps a
+    ///   stack of open nested (marker, content) columns, so a continuation
+    ///   of a middle nesting level defers to that level's own walk instead
+    ///   of being claimed by a shallower ancestor.
     /// - Reference/footnote/abbreviation definitions and similar block
     ///   constructs that aren't list continuation.
     /// - Lines that `should_skip_line` rejects (code-block interior etc.).
@@ -256,7 +259,12 @@ impl MD077ListContinuationIndent {
     {
         let mut saw_blank = false;
         let mut saw_nested = false;
-        let mut nested_content_col: Option<usize> = None;
+        // Stack of open nested items as (marker_column, content_column),
+        // outermost first. A single scalar is not enough: with 3+ levels a
+        // continuation of a middle level sits below the innermost content
+        // column but at-or-past its own level's, and must still be skipped
+        // here so the owning level's walk evaluates it.
+        let mut nested_stack: Vec<(usize, usize)> = Vec::new();
 
         for line_num in (item_line + 1)..=range_end {
             let Some(info) = ctx.line_info(line_num) else {
@@ -276,14 +284,19 @@ impl MD077ListContinuationIndent {
 
             if let Some(ref li) = info.list_item {
                 if li.marker_column > marker_col {
-                    nested_content_col = Some(li.content_column);
+                    // A sibling-or-shallower marker closes every nested item at
+                    // or past its column before this one opens.
+                    while nested_stack.last().is_some_and(|&(m, _)| m >= li.marker_column) {
+                        nested_stack.pop();
+                    }
+                    nested_stack.push((li.marker_column, li.content_column));
                     // Sticky: once a nested child appears, every later line is a
                     // (lazy) continuation of the deeper item, which owns it under
                     // CommonMark. Ancestors must defer so the deepest item claims
                     // and aligns it.
                     saw_nested = true;
                 } else {
-                    nested_content_col = None;
+                    nested_stack.clear();
                 }
                 saw_blank = false;
                 continue;
@@ -299,11 +312,14 @@ impl MD077ListContinuationIndent {
 
             let col = info.visual_indent;
 
-            if let Some(ncc) = nested_content_col {
-                if col >= ncc {
-                    continue;
-                }
-                nested_content_col = None;
+            // The line escapes every nested item whose content column it sits
+            // below; if any nested item stays open, the line is that item's
+            // continuation and its own walk owns the judgement.
+            while nested_stack.last().is_some_and(|&(_, c)| c > col) {
+                nested_stack.pop();
+            }
+            if !nested_stack.is_empty() {
+                continue;
             }
 
             if saw_blank && col <= marker_col {
@@ -1364,13 +1380,13 @@ mod tests {
     // ── Deep nesting (3+ levels) ──────────────────────────────────────
 
     #[test]
-    fn deeply_nested_correct_indent() {
+    fn deep_nesting_correct_indent() {
         let content = "- L1\n  - L2\n    - L3\n\n      continuation of L3\n";
         assert!(check(content).is_empty());
     }
 
     #[test]
-    fn deeply_nested_under_indent() {
+    fn deep_nesting_under_indent() {
         // L3 starts at column 4 with "- " marker, content_column = 6
         // Continuation with 5 spaces is under-indented for L3.
         let content = "- L1\n  - L2\n    - L3\n\n     continuation of L3\n";
@@ -1378,6 +1394,75 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("6 spaces"));
         assert!(warnings[0].message.contains("found 5"));
+    }
+
+    #[test]
+    fn deep_nesting_middle_level_continuation_bullets() {
+        // A loose continuation of the MIDDLE level (L2, content_column = 4)
+        // after a deeper L3 list is valid; the L1 walk must not claim it as
+        // its own over-indented continuation (issue #739).
+        let content = "- L1\n  - L2\n    - L3\n\n    continuation of L2\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn deep_nesting_middle_level_continuation_ordered() {
+        // Issue #739 repro: ordered lists, continuation of the level-2 item
+        // (content_column = 6) after a level-3 bullet list.
+        let content = "1. Level 1 item.\n1. Level 1 item:\n   1. Level 2 item.\n   1. Level 2 item.\n   1. Level 2 item:\n      - Level 3 item.\n      - Level 3 item.\n\n      Level 2 list continuation.\n1. Level 1 item.\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn deep_nesting_outermost_continuation() {
+        // A loose continuation of the OUTERMOST level (L1, content_column = 2)
+        // past two open nested levels escapes both and stays valid.
+        let content = "- L1\n  - L2\n    - L3\n\n  continuation of L1\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn deep_nesting_between_levels_still_flagged() {
+        // Col 3 sits strictly between L1's content column (2) and L2's (4):
+        // the deepest applicable item (L2) claims it as loose under-indent.
+        let content = "- L1\n  - L2\n    - L3\n\n   continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("4 spaces"));
+        assert!(warnings[0].message.contains("found 3"));
+    }
+
+    #[test]
+    fn deep_nesting_beyond_deepest_still_flagged() {
+        // Col 7 exceeds even L3's content column (6): over-indent for L3.
+        let content = "- L1\n  - L2\n    - L3\n\n       continuation\n";
+        let warnings = check(content);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("over-indented"));
+        assert!(warnings[0].message.contains("expected 6, found 7"));
+    }
+
+    #[test]
+    fn four_levels_middle_continuation() {
+        // Continuation of L2 (content_column = 4) after open L3 and L4 lists:
+        // the walk must pop two deeper levels and still defer to L2.
+        let content = "- L1\n  - L2\n    - L3\n      - L4\n\n    continuation of L2\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn nested_sibling_closes_deeper_level() {
+        // L2b closes L2a's deeper L3 list; a continuation at L2b's content
+        // column belongs to L2b and stays valid.
+        let content = "- L1\n  - L2a\n    - L3\n  - L2b\n\n    continuation of L2b\n";
+        assert!(check(content).is_empty());
+    }
+
+    #[test]
+    fn deep_nesting_middle_level_continuation_fix_preserved() {
+        // The valid middle-level continuation must survive fix() unchanged.
+        let content = "- L1\n  - L2\n    - L3\n\n    continuation of L2\n";
+        assert_eq!(fix(content), content);
     }
 
     // ── Tab indentation ───────────────────────────────────────────────
@@ -1546,7 +1631,7 @@ mod tests {
     // ── Fix preserves correct content ─────────────────────────────────
 
     #[test]
-    fn fix_deeply_nested() {
+    fn fix_deep_nesting() {
         let content = "- L1\n  - L2\n    - L3\n\n     under-indented\n";
         let fixed = fix(content);
         assert_eq!(fixed, "- L1\n  - L2\n    - L3\n\n      under-indented\n");

@@ -822,8 +822,14 @@ impl RumdlLanguageServer {
 
         let target_uri = Url::from_file_path(&target_path).ok()?;
 
+        // Line anchors (`#L12`, `#L5-L8`) take precedence over heading-anchor
+        // resolution, matching hover's interpretation of the same fragment.
         let target_line = if link.anchor.is_empty() {
             0
+        } else if let Some(line_anchor) = parse_line_anchor(&link.anchor) {
+            let (LineAnchor::Single(start) | LineAnchor::Range(start, _)) = line_anchor;
+            // Line anchors are 1-indexed; LSP is 0-indexed.
+            start.saturating_sub(1) as u32
         } else {
             self.resolve_heading_line(&target_path, &link.anchor).await.unwrap_or(0)
         };

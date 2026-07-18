@@ -40,6 +40,26 @@ fn display_len(s: &str, mode: ReflowLengthMode) -> usize {
     }
 }
 
+/// Whitespace characters whose whole purpose is to forbid a line break:
+/// no-break space (U+00A0), narrow no-break space (U+202F), and figure
+/// space (U+2007).
+fn is_non_breaking_space(c: char) -> bool {
+    matches!(c, '\u{00A0}' | '\u{202F}' | '\u{2007}')
+}
+
+/// Whitespace on which reflow may break and rejoin lines. Non-breaking
+/// spaces are excluded: they stay inside the surrounding token so they
+/// survive reflow byte-for-byte and never become a wrap point (e.g. the
+/// French `mot\u{00A0}:` pair or a `10\u{00A0}000` thousands separator).
+fn is_breakable_whitespace(c: char) -> bool {
+    c.is_whitespace() && !is_non_breaking_space(c)
+}
+
+/// Split text into wrappable tokens on breakable whitespace only.
+fn split_breakable_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(is_breakable_whitespace).filter(|word| !word.is_empty())
+}
+
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -89,6 +109,9 @@ pub struct ReflowOptions {
     /// atomic regardless, because their `][ref]` / `[]` syntax is an explicit
     /// link signal that does not depend on a definition being in scope.
     pub defined_references: Option<HashSet<String>>,
+    /// Whether to allow reflow breaking inside emphasis/strong/strikethrough spans
+    /// when they would otherwise exceed line length or fit on a new line.
+    pub emphasis_spans: bool,
 }
 
 impl Default for ReflowOptions {
@@ -106,6 +129,7 @@ impl Default for ReflowOptions {
             require_sentence_capital: true,
             max_list_continuation_indent: None,
             defined_references: None,
+            emphasis_spans: false,
         }
     }
 }
@@ -1738,8 +1762,9 @@ fn reflow_elements_sentence_per_line(
                 let ends_with_sentence_punct = ends_with_sentence_punct(trimmed);
 
                 if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
-                    // Complete single sentence - emit it
-                    lines.push(trimmed.to_string());
+                    // Complete single sentence - emit it (trimming only
+                    // breakable whitespace so edge NBSPs survive)
+                    lines.push(combined.trim_matches(is_breakable_whitespace).to_string());
                     current_line.clear();
                 } else {
                     // Incomplete sentence - continue accumulating
@@ -1780,10 +1805,12 @@ fn reflow_elements_sentence_per_line(
             );
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
-            // Check if this element is adjacent to the preceding text (no space between)
+            // Check if this element is adjacent to the preceding text (no
+            // breakable space between; a non-breaking space keeps the pair
+            // attached and must not have an ASCII space appended after it)
             let is_adjacent = if idx > 0 {
                 match &elements[idx - 1] {
-                    Element::Text(t) => !t.is_empty() && !t.ends_with(char::is_whitespace),
+                    Element::Text(t) => !t.is_empty() && !t.ends_with(is_breakable_whitespace),
                     _ => true,
                 }
             } else {
@@ -1800,7 +1827,7 @@ fn reflow_elements_sentence_per_line(
 
     // Add any remaining content
     if !current_line.is_empty() {
-        lines.push(current_line.trim().to_string());
+        lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
     }
     lines
 }
@@ -2313,15 +2340,12 @@ fn split_at_break_word(
 /// The whole line is parsed into markdown elements once up front; every
 /// remaining suffix reuses those element spans (re-based to the suffix offset)
 /// instead of re-parsing, which keeps repeated element parsing out of the loop.
-fn cascade_split_line(
-    text: &str,
-    line_length: usize,
-    abbreviations: &Option<Vec<String>>,
-    length_mode: ReflowLengthMode,
-    attr_lists: bool,
-    myst_roles: bool,
-    defined_references: Option<&HashSet<String>>,
-) -> Vec<String> {
+fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
+    let line_length = options.line_length;
+    let length_mode = options.length_mode;
+    let attr_lists = options.attr_lists;
+    let myst_roles = options.myst_roles;
+    let defined_references = options.defined_references.as_ref();
     if line_length == 0 || display_len(text, length_mode) <= line_length {
         return vec![text.to_string()];
     }
@@ -2379,29 +2403,21 @@ fn cascade_split_line(
     }
 
     // Fallback: word wrap the still-oversized suffix using reflow_elements.
-    let options = ReflowOptions {
-        line_length,
-        break_on_sentences: false,
-        preserve_breaks: false,
-        sentence_per_line: false,
-        semantic_line_breaks: false,
-        abbreviations: abbreviations.clone(),
-        length_mode,
-        attr_lists,
-        myst_roles,
-        require_sentence_capital: true,
-        max_list_continuation_indent: None,
-        // Unused here: this fallback arranges already-parsed elements and never
-        // re-parses links, so shortcut definedness is never consulted.
-        defined_references: None,
-    };
+    let mut fallback_options = options.clone();
+    fallback_options.break_on_sentences = false;
+    fallback_options.preserve_breaks = false;
+    fallback_options.sentence_per_line = false;
+    fallback_options.semantic_line_breaks = false;
+    fallback_options.require_sentence_capital = true;
+    fallback_options.max_list_continuation_indent = None;
+    fallback_options.defined_references = None;
     let remaining = &text[start..];
     let tail_elements = if start == 0 {
         elements
     } else {
         parse_markdown_elements_inner(remaining, attr_lists, myst_roles, defined_references)
     };
-    result.extend(reflow_elements(&tail_elements, &options));
+    result.extend(reflow_elements(&tail_elements, &fallback_options));
     result
 }
 
@@ -2425,15 +2441,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
         if display_len(&line, length_mode) <= options.line_length {
             result.push(line);
         } else {
-            result.extend(cascade_split_line(
-                &line,
-                options.line_length,
-                &options.abbreviations,
-                length_mode,
-                options.attr_lists,
-                options.myst_roles,
-                options.defined_references.as_ref(),
-            ));
+            result.extend(cascade_split_line(&line, options));
         }
     }
 
@@ -2492,6 +2500,34 @@ fn rfind_safe_space(line: &str, element_spans: &[(usize, usize)]) -> Option<usiz
     })
 }
 
+/// Break `current_line` one word earlier so `attach` never starts a wrapped
+/// line: everything before the line's last safe space is emitted as a
+/// finished line, and the carried word plus `separator` plus `attach` becomes
+/// the new current line. Element spans are cleared; the returned byte length
+/// of the carried word lets callers re-record a span for `attach`. Returns
+/// `None` (line untouched) when the line has no safe break point.
+fn break_before_attached(
+    lines: &mut Vec<String>,
+    current_line: &mut String,
+    current_length: &mut usize,
+    element_spans: &mut Vec<(usize, usize)>,
+    attach: &str,
+    separator: &str,
+    length_mode: ReflowLengthMode,
+) -> Option<usize> {
+    let last_space = rfind_safe_space(current_line, element_spans)?;
+    let before = current_line[..last_space]
+        .trim_end_matches(is_breakable_whitespace)
+        .to_string();
+    let after = current_line[last_space + 1..].to_string();
+    lines.push(before);
+    let carried = after.len();
+    *current_line = format!("{after}{separator}{attach}");
+    *current_length = display_len(current_line, length_mode);
+    element_spans.clear();
+    Some(carried)
+}
+
 /// Reflow elements into lines that fit within the line length
 fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let mut lines = Vec::new();
@@ -2508,14 +2544,17 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
         let element_len = display_len(&element_str, length_mode);
 
         // Determine adjacency from the original elements, not from current_line.
-        // Elements are adjacent when there's no whitespace between them in the source:
+        // Elements are adjacent when there's no breakable whitespace between them
+        // in the source (a non-breaking space stays inside the neighboring token,
+        // so the pair must also stay attached):
         // - Text("v") → HugoShortcode("{{<...>}}") = adjacent (text has no trailing space)
         // - Text(" and ") → InlineLink("[a](url)") = NOT adjacent (text has trailing space)
         // - HugoShortcode("{{<...>}}") → Text(",") = adjacent (text has no leading space)
+        // - Code("`x`") → Text("\u{00A0}:") = adjacent (only a non-breaking space between)
         let is_adjacent_to_prev = if idx > 0 {
             match (&elements[idx - 1], element) {
-                (Element::Text(t), _) => !t.is_empty() && !t.ends_with(char::is_whitespace),
-                (_, Element::Text(t)) => !t.is_empty() && !t.starts_with(char::is_whitespace),
+                (Element::Text(t), _) => !t.is_empty() && !t.ends_with(is_breakable_whitespace),
+                (_, Element::Text(t)) => !t.is_empty() && !t.starts_with(is_breakable_whitespace),
                 _ => true,
             }
         } else {
@@ -2524,17 +2563,21 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
         // For text elements that might need breaking
         if let Element::Text(text) = element {
-            // Check if original text had leading whitespace
-            let has_leading_space = text.starts_with(char::is_whitespace);
+            // Check if original text had leading breakable whitespace
+            let has_leading_space = text.starts_with(is_breakable_whitespace);
             // If this is a text element, always process it word by word
-            let words: Vec<&str> = text.split_whitespace().collect();
+            let words: Vec<&str> = split_breakable_words(text).collect();
 
             for (i, word) in words.iter().enumerate() {
                 let word_len = display_len(word, length_mode);
-                // Check if this "word" is just punctuation that should stay attached
-                let is_trailing_punct = word
-                    .chars()
-                    .all(|c| matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}'));
+                // A token that is only punctuation (optionally led by a
+                // non-breaking space, e.g. French "\u{00A0}:") must never be
+                // hoisted to the start of a line. Tokens are never empty
+                // (`split_breakable_words` filters), so `all` cannot be
+                // vacuously true.
+                let is_trailing_punct = word.chars().all(|c| {
+                    matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')' | ']' | '}') || is_non_breaking_space(c)
+                });
 
                 // First word of text adjacent to preceding non-text element
                 // must stay attached (e.g., shortcode followed by punctuation or text)
@@ -2542,46 +2585,71 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
                 if is_first_adjacent {
                     // Attach directly without space, preventing line break
-                    if current_length + word_len > options.line_length && current_length > 0 {
-                        // Would exceed — break before the adjacent group
-                        // Use element-aware space search to avoid splitting inside links/code/etc.
-                        // Never hoist text that would open a block construct to line start.
-                        if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
-                            let before = current_line[..last_space].trim_end().to_string();
-                            let after = current_line[last_space + 1..].to_string();
-                            lines.push(before);
-                            current_line = format!("{after}{word}");
-                            current_length = display_len(&current_line, length_mode);
-                            current_line_element_spans.clear();
-                        } else {
-                            current_line.push_str(word);
-                            current_length += word_len;
-                        }
+                    if current_length + word_len > options.line_length
+                        && current_length > 0
+                        && break_before_attached(
+                            &mut lines,
+                            &mut current_line,
+                            &mut current_length,
+                            &mut current_line_element_spans,
+                            word,
+                            "",
+                            length_mode,
+                        )
+                        .is_some()
+                    {
+                        // Would exceed — broke before the adjacent group at the
+                        // last safe space (element-aware, so links/code stay
+                        // intact); with no safe break point the group is
+                        // attached and the long line accepted.
                     } else {
                         current_line.push_str(word);
                         current_length += word_len;
                     }
-                } else if current_length > 0
-                    && current_length + 1 + word_len > options.line_length
-                    && !is_trailing_punct
-                {
-                    if !starts_block_construct(word) {
-                        // Start a new line (but never for trailing punctuation)
-                        lines.push(current_line.trim().to_string());
+                } else if current_length > 0 && current_length + 1 + word_len > options.line_length {
+                    if is_trailing_punct {
+                        // The overflowing token is bare punctuation, which must
+                        // not start a line. Break one word earlier so the mark
+                        // travels with the word it follows ("… mot :"), keeping
+                        // the source space (French double punctuation requires
+                        // it); with no safe earlier break point, accept the
+                        // overlong line rather than rewrite content.
+                        if break_before_attached(
+                            &mut lines,
+                            &mut current_line,
+                            &mut current_length,
+                            &mut current_line_element_spans,
+                            word,
+                            " ",
+                            length_mode,
+                        )
+                        .is_none()
+                        {
+                            current_line.push(' ');
+                            current_line.push_str(word);
+                            current_length += 1 + word_len;
+                        }
+                    } else if !starts_block_construct(word) {
+                        // Start a new line
+                        lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                         current_line = word.to_string();
                         current_length = word_len;
                         current_line_element_spans.clear();
-                    } else if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
+                    } else if break_before_attached(
+                        &mut lines,
+                        &mut current_line,
+                        &mut current_length,
+                        &mut current_line_element_spans,
+                        word,
+                        " ",
+                        length_mode,
+                    )
+                    .is_some()
+                    {
                         // The overflowing word would open a block construct at line
-                        // start. Break one word earlier instead so the marker stays
+                        // start. Broke one word earlier instead so the marker stays
                         // mid-line: "... and then" + "- clause" becomes "... and" +
                         // "then - clause".
-                        let before = current_line[..last_space].trim_end().to_string();
-                        let after = current_line[last_space + 1..].to_string();
-                        lines.push(before);
-                        current_line = format!("{after} {word}");
-                        current_length = display_len(&current_line, length_mode);
-                        current_line_element_spans.clear();
                     } else {
                         // No safe earlier break point — keep the marker attached and
                         // accept the long line rather than corrupt the structure.
@@ -2593,16 +2661,18 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         current_length += word_len;
                     }
                 } else {
-                    // Add a space only where the source had whitespace at this position.
-                    // For the first word of a text run (i == 0) that means the source had a
-                    // leading space — and reaching this branch already implies the word is
-                    // not adjacent to the previous element, so the space is real and must be
-                    // kept even for punctuation. Suppressing it here would delete the space
-                    // after an inline element, e.g. `` `code` } `` -> `` `code`} ``. The
-                    // no-space (adjacent) case is handled above by `is_first_adjacent`.
-                    // Within a text run (i > 0) trailing punctuation still attaches to the
-                    // preceding word.
-                    let add_space = current_length > 0 && if i == 0 { has_leading_space } else { !is_trailing_punct };
+                    // Add a space wherever the source had breakable whitespace at
+                    // this position. For the first word of a text run (i == 0)
+                    // that means the run had a leading space — and reaching this
+                    // branch already implies the word is not adjacent to the
+                    // previous element, so the space is real. Later words
+                    // (i > 0) always had whitespace before them: that is what
+                    // separated them during tokenization. This holds for bare
+                    // punctuation too ("ligne : la" keeps its French
+                    // orthographic space): reflow moves line breaks, it does not
+                    // rewrite characters. The no-space (adjacent) case is
+                    // handled above by `is_first_adjacent`.
+                    let add_space = current_length > 0 && (i > 0 || has_leading_space);
                     if add_space {
                         current_line.push(' ');
                         current_length += 1;
@@ -2614,7 +2684,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
         } else if matches!(
             element,
             Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
-        ) && element_len > options.line_length
+        ) && (options.emphasis_spans || element_len > options.line_length)
         {
             // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
             // Split content word-by-word, attach the opening marker to the first word
@@ -2626,7 +2696,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 _ => unreachable!(),
             };
 
-            let words: Vec<&str> = content.split_whitespace().collect();
+            let words: Vec<&str> = split_breakable_words(content).collect();
             let n = words.len();
 
             if n == 0 {
@@ -2661,7 +2731,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         && current_length + 1 + word_len > options.line_length
                         && !starts_block_construct(&word_str)
                     {
-                        lines.push(current_line.trim_end().to_string());
+                        lines.push(current_line.trim_end_matches(is_breakable_whitespace).to_string());
                         current_line = word_str;
                         current_length = word_len;
                         current_line_element_spans.clear();
@@ -2681,28 +2751,23 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
             if is_adjacent_to_prev {
                 // Adjacent to preceding text — attach directly without space
-                if current_length + element_len > options.line_length {
-                    // Would exceed limit — break before the adjacent word group
-                    // Use element-aware space search to avoid splitting inside links/code/etc.
-                    // Never hoist text that would open a block construct to line start.
-                    if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
-                        let before = current_line[..last_space].trim_end().to_string();
-                        let after = current_line[last_space + 1..].to_string();
-                        lines.push(before);
-                        current_line = format!("{after}{element_str}");
-                        current_length = display_len(&current_line, length_mode);
-                        current_line_element_spans.clear();
-                        // Record the element span in the new current_line
-                        let start = after.len();
-                        current_line_element_spans.push((start, start + element_str.len()));
-                    } else {
-                        // No safe space to break at — accept the long line
-                        let start = current_line.len();
-                        current_line.push_str(&element_str);
-                        current_length += element_len;
-                        current_line_element_spans.push((start, current_line.len()));
-                    }
+                if current_length + element_len > options.line_length
+                    && let Some(carried) = break_before_attached(
+                        &mut lines,
+                        &mut current_line,
+                        &mut current_length,
+                        &mut current_line_element_spans,
+                        &element_str,
+                        "",
+                        length_mode,
+                    )
+                {
+                    // Would exceed limit — broke before the adjacent word group
+                    // at the last safe space (element-aware, so links/code stay
+                    // intact). Record the element span in the new current_line.
+                    current_line_element_spans.push((carried, carried + element_str.len()));
                 } else {
+                    // Fits, or no safe space to break at — accept the line
                     let start = current_line.len();
                     current_line.push_str(&element_str);
                     current_length += element_len;
@@ -2711,22 +2776,24 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
                 if !starts_block_construct(&element_str) {
                     // Not adjacent, would exceed — start new line
-                    lines.push(current_line.trim().to_string());
+                    lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                     current_line.clone_from(&element_str);
                     current_length = element_len;
                     current_line_element_spans.clear();
                     current_line_element_spans.push((0, element_str.len()));
-                } else if let Some(last_space) = rfind_safe_space(&current_line, &current_line_element_spans) {
+                } else if let Some(carried) = break_before_attached(
+                    &mut lines,
+                    &mut current_line,
+                    &mut current_length,
+                    &mut current_line_element_spans,
+                    &element_str,
+                    " ",
+                    length_mode,
+                ) {
                     // The overflowing element would open a block construct at
-                    // line start (e.g. an HtmlTag like `<div>`). Break one word
+                    // line start (e.g. an HtmlTag like `<div>`). Broke one word
                     // earlier instead so the element stays mid-line.
-                    let before = current_line[..last_space].trim_end().to_string();
-                    let after = current_line[last_space + 1..].to_string();
-                    lines.push(before);
-                    current_line = format!("{after} {element_str}");
-                    current_length = display_len(&current_line, length_mode);
-                    current_line_element_spans.clear();
-                    let start = after.len() + 1;
+                    let start = carried + 1;
                     current_line_element_spans.push((start, start + element_str.len()));
                 } else {
                     // No safe earlier break point — keep the element attached
@@ -2760,7 +2827,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
     // Don't forget the last line
     if !current_line.is_empty() {
-        lines.push(current_line.trim_end().to_string());
+        lines.push(current_line.trim_end_matches(is_breakable_whitespace).to_string());
     }
 
     lines
@@ -3729,7 +3796,12 @@ mod tests {
         let words: Vec<String> = (0..4000).map(|i| format!("word{i}")).collect();
         let line = words.join(" ");
 
-        let out = cascade_split_line(&line, 80, &None, ReflowLengthMode::Chars, false, false, None);
+        let options = ReflowOptions {
+            line_length: 80,
+            length_mode: ReflowLengthMode::Chars,
+            ..Default::default()
+        };
+        let out = cascade_split_line(&line, &options);
 
         assert!(out.len() > 1, "a very long line should split into many lines");
         for segment in &out {
@@ -4316,5 +4388,38 @@ mod tests {
             let elements = parse_markdown_elements_inner(input, false, false, None);
             assert_eq!(format!("{elements:?}"), expected, "input: {input:?}");
         }
+    }
+
+    #[test]
+    fn test_emphasis_spans() {
+        let text = "hello **word1 word2**";
+
+        // With emphasis_spans = false (default), the short emphasis span is kept atomic
+        // because its total length (15) <= line_length (18), even though it doesn't fit on line 1.
+        let options_disabled = ReflowOptions {
+            line_length: 18,
+            emphasis_spans: false,
+            ..Default::default()
+        };
+        let lines_disabled = reflow_line(text, &options_disabled);
+        assert_eq!(lines_disabled, vec!["hello", "**word1 word2**"]);
+
+        // With emphasis_spans = true, the emphasis span is split across lines.
+        let options_enabled = ReflowOptions {
+            line_length: 18,
+            emphasis_spans: true,
+            ..Default::default()
+        };
+        let lines_enabled = reflow_line(text, &options_enabled);
+        assert_eq!(lines_enabled, vec!["hello **word1", "word2**"]);
+
+        // Verify other markers work too (italic and strikethrough)
+        let text_italic = "hello *word1 word2*";
+        let lines_italic = reflow_line(text_italic, &options_enabled);
+        assert_eq!(lines_italic, vec!["hello *word1", "word2*"]);
+
+        let text_strike = "hello ~~word1 word2~~";
+        let lines_strike = reflow_line(text_strike, &options_enabled);
+        assert_eq!(lines_strike, vec!["hello ~~word1", "word2~~"]);
     }
 }

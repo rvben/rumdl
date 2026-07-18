@@ -6361,6 +6361,52 @@ async fn test_hover_line_anchor_out_of_range() {
 }
 
 #[tokio::test]
+async fn test_goto_definition_single_line_anchor() {
+    // Issue #738: `#L12` must navigate to line 12 (0-indexed 11), not line 1.
+    let rows = (1..=20).map(|n| format!("row {n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+    let (server, uri) = setup_line_anchor_hover("See [code](sample.py#L12) here.", &rows).await;
+
+    let position = Position { line: 0, character: 18 };
+    let result = server.handle_goto_definition(&uri, position).await;
+    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+        assert!(location.uri.path().ends_with("sample.py"));
+        assert_eq!(location.range.start.line, 11, "#L12 should land on 0-indexed line 11");
+    } else {
+        panic!("Expected Scalar goto-definition response for a line anchor");
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_line_range_anchor() {
+    // `#L5-L8` navigates to the start of the range.
+    let rows = (1..=20).map(|n| format!("row {n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+    let (server, uri) = setup_line_anchor_hover("See [code](sample.py#L5-L8) here.", &rows).await;
+
+    let position = Position { line: 0, character: 18 };
+    let result = server.handle_goto_definition(&uri, position).await;
+    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+        assert_eq!(location.range.start.line, 4, "#L5-L8 should land on 0-indexed line 4");
+    } else {
+        panic!("Expected Scalar goto-definition response for a line-range anchor");
+    }
+}
+
+#[tokio::test]
+async fn test_goto_definition_lowercase_line_anchor() {
+    // The line-anchor parser is case-insensitive; goto definition must agree.
+    let rows = (1..=20).map(|n| format!("row {n:02}")).collect::<Vec<_>>().join("\n") + "\n";
+    let (server, uri) = setup_line_anchor_hover("See [code](sample.py#l7) here.", &rows).await;
+
+    let position = Position { line: 0, character: 17 };
+    let result = server.handle_goto_definition(&uri, position).await;
+    if let Some(GotoDefinitionResponse::Scalar(location)) = result {
+        assert_eq!(location.range.start.line, 6, "#l7 should land on 0-indexed line 6");
+    } else {
+        panic!("Expected Scalar goto-definition response for a lowercase line anchor");
+    }
+}
+
+#[tokio::test]
 async fn test_hover_inline_link_with_anchor() {
     use crate::workspace_index::{FileIndex, HeadingIndex};
 

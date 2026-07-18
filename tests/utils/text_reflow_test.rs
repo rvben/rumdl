@@ -20,6 +20,7 @@ fn test_list_item_trailing_whitespace_removal() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
+        emphasis_spans: false,
     };
 
     let result = reflow_markdown(input, &options);
@@ -407,6 +408,7 @@ fn test_sentence_per_line_reflow() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
+        emphasis_spans: false,
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -740,6 +742,7 @@ fn test_ie_abbreviation_split_debug() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
+        emphasis_spans: false,
     };
 
     let result = reflow_line(input, &options);
@@ -766,6 +769,7 @@ fn test_ie_abbreviation_paragraph() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
+        emphasis_spans: false,
     };
 
     let result = reflow_markdown(input, &options);
@@ -847,6 +851,7 @@ fn test_definition_list_with_paragraphs() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
+        emphasis_spans: false,
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
@@ -6720,4 +6725,255 @@ proptest::proptest! {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Issue #740: reflow must not delete the space before French double
+// punctuation (: ; ! ?) and must preserve non-breaking spaces byte-for-byte.
+//
+// French typography requires a space before each of these marks (ideally a
+// narrow no-break space U+202F or U+00A0). Reflow only decides where line
+// breaks fall; it must never rewrite the characters themselves.
+// ---------------------------------------------------------------------------
+
+/// The exact sentence from the issue #740 report (143 chars, wraps at 80).
+const FRENCH_SENTENCE: &str = "Voici une phrase en français assez longue pour forcer un retour à la ligne : la ponctuation double doit garder son espace avant le deux-points.";
+
+fn wrap_80() -> ReflowOptions {
+    ReflowOptions {
+        line_length: 80,
+        ..Default::default()
+    }
+}
+
+/// Reflow preserves content: rejoining the wrapped lines with single spaces
+/// must reproduce the input exactly (inputs here contain only single spaces).
+fn assert_reflow_preserves(input: &str, options: &ReflowOptions) -> Vec<String> {
+    let result = reflow_line(input, options);
+    assert_eq!(
+        result.join(" "),
+        input,
+        "reflow must only move line breaks, never alter characters. lines: {result:#?}"
+    );
+    result
+}
+
+#[test]
+fn test_space_before_french_colon_preserved() {
+    let result = assert_reflow_preserves(FRENCH_SENTENCE, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("ligne :"),
+        "the French orthographic space before ':' must survive. got:\n{joined}"
+    );
+    assert!(result.len() > 1, "the 143-char sentence must actually wrap at 80");
+    for line in &result {
+        assert!(line.chars().count() <= 80, "wrapped lines must fit 80 cols: {line:?}");
+    }
+}
+
+#[test]
+fn test_space_before_semicolon_exclamation_question_preserved() {
+    for mark in [";", "!", "?"] {
+        let input = format!(
+            "Court début {mark} puis une suite assez longue pour forcer un retour à la ligne quelque part ici même."
+        );
+        let result = reflow_line(&input, &wrap_80());
+        assert_eq!(
+            result.join(" "),
+            input,
+            "space before '{mark}' must be preserved. lines: {result:#?}"
+        );
+    }
+}
+
+#[test]
+fn test_space_deletion_is_position_independent() {
+    // The colon sits far from the wrap column; the space must survive there too.
+    let input = "Court début : puis une suite assez longue pour forcer un retour à la ligne quelque part par ici.";
+    assert_reflow_preserves(input, &wrap_80());
+}
+
+#[test]
+fn test_nbsp_before_colon_survives() {
+    let input = "Voici une phrase en français assez longue pour forcer un retour à la ligne\u{00A0}: la ponctuation double garde son espace insécable.";
+    let result = reflow_line(input, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("ligne\u{00A0}:"),
+        "U+00A0 before ':' must survive reflow. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_narrow_nbsp_before_colon_survives() {
+    let input = "Voici une phrase en français assez longue pour forcer un retour à la ligne\u{202F}: la ponctuation double garde son espace insécable.";
+    let result = reflow_line(input, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("ligne\u{202F}:"),
+        "U+202F before ':' must survive reflow. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_nbsp_thousands_separator_survives_and_never_splits() {
+    // "10\u{00A0}000" straddles the wrap point: a tokenizer that treats NBSP
+    // as ordinary whitespace would break between "10" and "000".
+    let input =
+        "Le prix est de 10\u{00A0}000 euros environ, une somme assez longue pour forcer un retour à la ligne ici.";
+    let result = reflow_line(input, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("10\u{00A0}000"),
+        "the non-breaking thousands separator must survive intact. got:\n{joined}"
+    );
+    for line in &result {
+        assert!(
+            !line.ends_with("10"),
+            "a line must never break at a non-breaking space. lines: {result:#?}"
+        );
+    }
+}
+
+#[test]
+fn test_nbsp_at_wrap_boundary_stays_unbroken() {
+    // Pad so the NBSP pair lands exactly where the 30-col wrap would break.
+    let options = ReflowOptions {
+        line_length: 30,
+        ..Default::default()
+    };
+    let input = "mot mot mot mot mot mot 10\u{00A0}000 fin de la phrase ici";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("10\u{00A0}000"),
+        "NBSP pair must stay together across any wrap width. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_nbsp_after_code_span_not_replaced() {
+    let input =
+        "Utilisez la commande `rumdl`\u{00A0}: elle est assez documentée pour dépasser la limite de colonnes ici.";
+    let result = reflow_line(input, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("`rumdl`\u{00A0}:"),
+        "NBSP between an inline element and ':' must survive. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_nbsp_survives_in_emphasis_span_wrap() {
+    let options = ReflowOptions {
+        line_length: 40,
+        emphasis_spans: true,
+        ..Default::default()
+    };
+    let input = "Il y a **dix\u{00A0}mille raisons de vérifier que les espaces insécables survivent** au reflow.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("dix\u{00A0}mille"),
+        "NBSP inside a wrapped emphasis span must survive. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_double_ascii_space_still_collapses() {
+    // Ordinary breakable whitespace normalization is expected reflow behavior
+    // and must not regress: only NON-breaking spaces are preserved.
+    let input = "Un mot  suivi d'un double espace ordinaire dans une phrase assez longue pour forcer un retour ici.";
+    let result = reflow_line(input, &wrap_80());
+    let joined = result.join("\n");
+    assert!(
+        !joined.contains("  "),
+        "double ASCII spaces still collapse to one. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_no_wrapped_line_starts_with_bare_double_punctuation() {
+    // Preserving the space must not allow a break BEFORE the mark: a line
+    // starting with a lone ':' (or ; ! ?) is worse than an overlong line.
+    for filler in 1..25 {
+        let head = vec!["mot"; filler].join(" ");
+        let input = format!("{head} : la suite de la phrase continue encore un peu plus loin ici même");
+        let options = ReflowOptions {
+            line_length: 30,
+            ..Default::default()
+        };
+        let result = reflow_line(&input, &options);
+        for line in &result {
+            for mark in [":", ";", "!", "?"] {
+                assert!(
+                    line != mark && !line.starts_with(&format!("{mark} ")),
+                    "no line may start with a bare '{mark}' (filler={filler}). lines: {result:#?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_french_punctuation_reflow_is_idempotent() {
+    let options = wrap_80();
+    let once = reflow_line(FRENCH_SENTENCE, &options);
+    let twice = reflow_line(&once.join("\n").replace('\n', " "), &options);
+    assert_eq!(once, twice, "re-reflowing the wrapped output must be a no-op");
+}
+
+// The sentence-per-line and semantic-line-breaks modes share a separate join
+// path (`reflow_elements_sentence_per_line`); non-breaking spaces must survive
+// there too.
+
+#[test]
+fn test_sentence_per_line_nbsp_before_code_span_not_spaced() {
+    let options = ReflowOptions {
+        line_length: 80,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+    let input = "La commande\u{00A0}`rumdl` est utile. Une deuxième phrase suit ici pour la découpe.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("commande\u{00A0}`rumdl`"),
+        "no space may be inserted between an NBSP and an inline element. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_semantic_line_breaks_nbsp_before_code_span_not_spaced() {
+    let options = ReflowOptions {
+        line_length: 80,
+        semantic_line_breaks: true,
+        ..Default::default()
+    };
+    let input = "La commande\u{00A0}`rumdl` est utile. Une deuxième phrase suit ici pour la découpe.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("commande\u{00A0}`rumdl`"),
+        "no space may be inserted between an NBSP and an inline element. got:\n{joined}"
+    );
+}
+
+#[test]
+fn test_sentence_per_line_trailing_nbsp_preserved() {
+    let options = ReflowOptions {
+        line_length: 80,
+        sentence_per_line: true,
+        ..Default::default()
+    };
+    // No terminal punctuation, so the text reaches the final accumulated-line
+    // push, whose trim must not delete the trailing NBSP.
+    let input = "Une phrase sans ponctuation finale\u{00A0}";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.ends_with('\u{00A0}'),
+        "a trailing NBSP must survive the sentence-mode final push. got: {joined:?}"
+    );
 }

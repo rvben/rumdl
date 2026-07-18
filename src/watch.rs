@@ -137,7 +137,7 @@ pub fn run_watch_mode(
     println!();
 
     let explicit_config = global_config_path.is_some();
-    let _has_issues = perform_check_run(&CheckRunContext {
+    let _outcome = perform_check_run(&CheckRunContext {
         args,
         config: &config,
         quiet,
@@ -148,6 +148,9 @@ pub fn run_watch_mode(
         inline_overrides,
         explicit_config,
         isolated,
+        // Watch never owns a process exit and re-runs continuously; the
+        // --deny-config-warnings decision does not apply here.
+        external_config_warning: false,
     });
     if !quiet {
         println!("\n{}", "Watching for file changes...".cyan());
@@ -229,7 +232,7 @@ pub fn run_watch_mode(
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _has_issues = perform_check_run(&CheckRunContext {
+                        let _outcome = perform_check_run(&CheckRunContext {
                             args,
                             config: &config,
                             quiet,
@@ -240,6 +243,8 @@ pub fn run_watch_mode(
                             inline_overrides,
                             explicit_config,
                             isolated,
+                            // Watch never owns a process exit; the flag does not apply.
+                            external_config_warning: false,
                         });
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());

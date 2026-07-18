@@ -7,8 +7,18 @@ use rumdl_lib::exit_codes::exit;
 use rumdl_lib::rule::{Rule, Severity};
 use std::io::{self, Read};
 
-/// Process markdown content from stdin
-pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &rumdl_config::Config) {
+/// Process markdown content from stdin.
+///
+/// `external_config_warning` reports whether a config-file, CLI-flag, or
+/// discovery config warning was already seen (the classes decided in
+/// `run_check`); combined with inline-comment detection here it drives the
+/// `--deny-config-warnings` exit, which this function owns for the stdin path.
+pub fn process_stdin(
+    rules: &[Box<dyn Rule>],
+    args: &crate::CheckArgs,
+    config: &rumdl_config::Config,
+    external_config_warning: bool,
+) {
     use rumdl_lib::output::{OutputFormat, OutputWriter};
 
     let quiet = args.quiet;
@@ -47,14 +57,25 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
     // Normalize to LF for all internal processing
     content = rumdl_lib::utils::normalize_line_ending(&content, rumdl_lib::utils::LineEnding::Lf).into_owned();
 
-    // Validate inline config comments and warn about unknown rules
-    if !silent {
+    // Detect unknown rule names in inline disable comments. Computed even under
+    // --silent (which only suppresses the printed notices) so the flag can still
+    // fail the run.
+    let inline_config_warning = {
         let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
-        let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
-        for warn in inline_warnings {
-            warn.print_warning(display_name);
+        let had_any = !inline_warnings.is_empty();
+        if !silent {
+            let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");
+            for warn in inline_warnings {
+                warn.print_warning(display_name);
+            }
         }
-    }
+        had_any
+    };
+
+    // A configuration problem is a tooling error (exit 2) that outranks Markdown
+    // violations (exit 1). Computed once, checked at every exit path below so
+    // fix/format mode cannot bypass it.
+    let deny_config = args.deny_config_warnings && (external_config_warning || inline_config_warning);
 
     // Determine the filename to use for display and context
     let display_filename = args.stdin_filename.as_deref().unwrap_or("<stdin>");
@@ -238,6 +259,13 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                 }
             }
 
+            // Config problem outranks the fix-mode --fail-on exit below (and the
+            // Format-mode fall-through), for `check --fix --stdin` and
+            // `fmt --stdin` alike.
+            if deny_config {
+                exit::tool_error();
+            }
+
             if args.fix_mode != crate::FixMode::Format {
                 let remaining_has_warnings = remaining_warnings
                     .iter()
@@ -255,6 +283,11 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
             }
         } else {
             print!("{content}");
+        }
+
+        // Covers the no-issues sub-branch (which skips the gate above).
+        if deny_config {
+            exit::tool_error();
         }
 
         return;
@@ -296,6 +329,11 @@ pub fn process_stdin(rules: &[Box<dyn Rule>], args: &crate::CheckArgs, config: &
                     .ok();
             }
         }
+    }
+
+    // A config problem outranks the check-mode --fail-on exit.
+    if deny_config {
+        exit::tool_error();
     }
 
     // Exit with error code based on --fail-on setting

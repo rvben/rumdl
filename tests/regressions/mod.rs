@@ -1,5 +1,6 @@
 mod code_block_blockquote_edge_cases;
 mod consistency_regression_tests;
+mod discovery_mixed_dir_file_args_issue_741_test;
 mod embedded_markdown_fix_gate_issue_643_test;
 mod escaped_brackets_test;
 mod fenced_code_on_list_marker_test;
@@ -13,6 +14,7 @@ mod md009_md013_integration_test;
 mod md009_md013_order_test;
 mod md013_hard_breaks_test;
 mod md013_html_test;
+mod md013_reflow_french_punctuation_issue_740_test;
 mod md030_grid_cards_issue_583_test;
 mod md032_edge_cases_test;
 mod md032_ordered_list_bug_test;
