@@ -167,10 +167,10 @@ mod tests {
         ];
 
         let static_patterns = vec![
-            ("*".repeat(50) + "text" + &"*".repeat(50), "Markdown asterisks"),
-            ("`".repeat(30) + "code" + &"`".repeat(30), "Markdown backticks"),
-            ("[".repeat(20) + "link" + &"]".repeat(20), "Markdown brackets"),
-            ("🎉".repeat(50) + &"a".repeat(50), "Emoji + text pattern"),
+            ("*".repeat(50) + "text" + "*".repeat(50).as_str(), "Markdown asterisks"),
+            ("`".repeat(30) + "code" + "`".repeat(30).as_str(), "Markdown backticks"),
+            ("[".repeat(20) + "link" + "]".repeat(20).as_str(), "Markdown brackets"),
+            ("🎉".repeat(50) + "a".repeat(50).as_str(), "Emoji + text pattern"),
             ("a\u{0301}".repeat(100), "Combining character repetition"),
         ];
 

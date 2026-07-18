@@ -92,7 +92,7 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 "#;
-        let content = basic_content.to_owned() + &config_content;
+        let content = basic_content.to_owned() + config_content.as_str();
 
         match fs::write("pyproject.toml", content) {
             Ok(()) => {

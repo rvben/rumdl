@@ -2486,7 +2486,7 @@ mod boundary_tests {
         // 79 chars (within limit)
         let short = format!(
             "# Test\n\nPress {} to continue.\n",
-            "++ctrl+alt+shift+".to_string() + &"x".repeat(40) + "++"
+            "++ctrl+alt+shift+".to_string() + "x".repeat(40).as_str() + "++"
         );
         // Should work or fail gracefully
         let _ = lint_mkdocs(&short);

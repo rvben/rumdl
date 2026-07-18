@@ -162,7 +162,7 @@ fn test_config_priority() {
 
 "
     .to_owned()
-        + &"ab ".repeat(32)
+        + "ab ".repeat(32).as_str()
         + "abcd"; // 32 * 3 + 4 = 100 chars on line 3, prefix = 97
 
     // Run linting with the NEW configured rules vector

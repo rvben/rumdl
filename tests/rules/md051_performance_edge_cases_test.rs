@@ -18,15 +18,15 @@ fn test_regex_catastrophic_backtracking_prevention() {
         ("a".repeat(30) + "(a|a)*$"),
         ("a".repeat(30) + "(a*)*$"),
         // Alternation with repetition
-        ("(a|b)*".repeat(10) + &"c".repeat(20)),
+        ("(a|b)*".repeat(10) + "c".repeat(20).as_str()),
         // Complex nested groups
-        ("((a*)*)*".to_string() + &"b".repeat(20)),
+        ("((a*)*)*".to_string() + "b".repeat(20).as_str()),
         // Mixed with actual markdown-like content
-        ("*".repeat(50) + "text" + &"*".repeat(50)),
-        ("`".repeat(30) + "code" + &"`".repeat(30)),
-        ("[".repeat(20) + "link" + &"]".repeat(20)),
+        ("*".repeat(50) + "text" + "*".repeat(50).as_str()),
+        ("`".repeat(30) + "code" + "`".repeat(30).as_str()),
+        ("[".repeat(20) + "link" + "]".repeat(20).as_str()),
         // Unicode that might stress character classification
-        ("🎉".repeat(50) + &"a".repeat(50)),
+        ("🎉".repeat(50) + "a".repeat(50).as_str()),
         // Combining characters that might stress normalization
         ("a\u{0301}".repeat(100)),
     ];
@@ -434,7 +434,7 @@ fn test_performance_under_memory_pressure() {
     let document_size = 1000; // words per document
 
     for doc_num in 0..document_count {
-        let heading = "Large Document ".to_string() + &"word ".repeat(document_size);
+        let heading = "Large Document ".to_string() + "word ".repeat(document_size).as_str();
         let content = format!("# {heading}\n\n[Link](#large-document)");
         let ctx = LintContext::new(&content, rumdl_lib::config::MarkdownFlavor::Standard, None);
 

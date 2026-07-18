@@ -2659,7 +2659,7 @@ impl MD013LineLength {
                                         // First line of first block gets marker
                                         result.push(format!(
                                             "{marker}{}",
-                                            " ".repeat(orig_indent - marker_len) + content
+                                            " ".repeat(orig_indent - marker_len) + content.as_str()
                                         ));
                                         is_first_block = false;
                                     } else if content.is_empty() {
@@ -2789,7 +2789,7 @@ impl MD013LineLength {
                                         // First line of first block gets the list marker
                                         result.push(format!(
                                             "{marker}{}",
-                                            " ".repeat(orig_indent.saturating_sub(marker_len)) + content
+                                            " ".repeat(orig_indent.saturating_sub(marker_len)) + content.as_str()
                                         ));
                                         is_first_block = false;
                                     } else {
@@ -2842,7 +2842,7 @@ impl MD013LineLength {
                                 if is_first_block {
                                     result.push(format!(
                                         "{marker}{}",
-                                        " ".repeat(header_indent.saturating_sub(marker_len)) + header
+                                        " ".repeat(header_indent.saturating_sub(marker_len)) + header.as_str()
                                     ));
                                     is_first_block = false;
                                 } else {

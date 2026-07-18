@@ -313,9 +313,9 @@ fn test_pathological_regex_patterns() {
         // Many alternatives
         format!("[{}](url)", "link|".repeat(100)),
         // Complex nested structures
-        "```\n".repeat(100) + &"text\n".repeat(100) + &"```\n".repeat(100),
+        "```\n".repeat(100) + "text\n".repeat(100).as_str() + "```\n".repeat(100).as_str(),
         // Mixed quote and code patterns
-        "> ".repeat(50) + &"```\n".repeat(25) + "content\n" + &"```\n".repeat(25),
+        "> ".repeat(50) + "```\n".repeat(25).as_str() + "content\n" + "```\n".repeat(25).as_str(),
     ];
 
     let rules: Vec<Box<dyn Rule>> = vec![
