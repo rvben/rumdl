@@ -55,7 +55,7 @@ use crate::rule::{LintWarning, Severity};
 use crate::rule_config_serde::{is_rule_name, json_to_rule_config_with_warnings, toml_value_to_json};
 use crate::rules::{all_rules, filter_rules};
 use crate::types::LineLength;
-use crate::utils::utf8_offsets::{byte_column_to_char_column, byte_offset_to_char_offset, get_line_content};
+use crate::utils::utf8_offsets::byte_offset_to_char_offset;
 
 /// Warning with fix range converted to character offsets for JavaScript
 #[derive(Serialize)]
@@ -102,13 +102,13 @@ fn convert_warning_for_js(warning: &LintWarning, content: &str) -> JsWarning {
     }
     let js_fix = warning.fix.as_ref().map(|fix| fix_to_js(fix, content));
 
-    // Convert byte-based columns to character-based columns
-    let column = get_line_content(content, warning.line)
-        .map_or(warning.column, |line| byte_column_to_char_column(line, warning.column));
-
-    let end_column = get_line_content(content, warning.end_line).map_or(warning.end_column, |line| {
-        byte_column_to_char_column(line, warning.end_column)
-    });
+    // rumdl reports columns as character positions already (see LintContext and
+    // #670), so they pass straight through. Do NOT run byte->char conversion here:
+    // that would double-adjust the column and under-count on lines with multi-byte
+    // characters. Only the fix range below needs conversion, since Fix ranges are
+    // byte offsets into the content.
+    let column = warning.column;
+    let end_column = warning.end_column;
 
     JsWarning {
         message: warning.message.clone(),
@@ -896,14 +896,14 @@ mod tests {
 
     #[test]
     fn test_check_norwegian_letter_column_offset() {
-        // This tests the column conversion fix for rvben/obsidian-rumdl#4
-        // The bug was that column was byte-based (36) but should be char-based (35)
+        // Regression test for the WASM column offset (rvben/obsidian-rumdl#4).
         let content = "# Heading\n\nContent with Norwegian letter \"æ\".";
 
-        // Line 3 is "Content with Norwegian letter \"æ\"."
-        // Bytes: 35 (æ is 2 bytes), Chars: 34 (æ is 1 char)
-        // MD047 reports column at position after last char
-        // Byte column would be 36, char column should be 35
+        // Line 3 is "Content with Norwegian letter \"æ\".", which is 34 chars, 35 bytes
+        // (æ is 2 bytes / 1 char). rumdl reports columns as character positions, so MD047's
+        // "position after the last char" is char column 35. The WASM surface must
+        // surface that value unchanged; it previously re-ran a byte->char conversion
+        // on the already-char-based column and under-counted to 34.
 
         let config = LinterConfig::default();
         let linter = Linter {

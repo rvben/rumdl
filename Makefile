@@ -73,6 +73,13 @@ build-wasm:
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	wasm-pack build --target web --no-default-features --features wasm
 
+# Run the wasm binding host tests (native target, `wasm` feature). These exercise
+# the JS-facing column/offset conversion and config parsing in src/wasm.rs, which
+# the default test suite skips because wasm.rs is feature-gated. Run in CI so a
+# regression in the browser/npm surface can't slip past the build-only check.
+test-wasm:
+	cargo test --features wasm --lib wasm::
+
 # Static binary builds for Linux (musl)
 build-static-linux-x64:
 	@echo "Building static Linux x86_64 binary..."
