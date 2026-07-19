@@ -2699,7 +2699,7 @@ fn test_paragraphs_false_skips_regular_text() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2737,7 +2737,7 @@ fn test_paragraphs_false_still_checks_code_blocks() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2776,7 +2776,7 @@ fn test_paragraphs_false_still_checks_headings() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2813,7 +2813,7 @@ fn test_paragraphs_false_with_reflow_sentence_per_line() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2850,7 +2850,7 @@ fn test_paragraphs_true_checks_regular_text() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2887,7 +2887,7 @@ fn test_line_length_zero_disables_all_checks() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2924,7 +2924,7 @@ fn test_line_length_zero_with_headings() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2961,7 +2961,7 @@ fn test_line_length_zero_with_code_blocks() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -2998,7 +2998,7 @@ fn test_line_length_zero_with_sentence_per_line_reflow() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3063,7 +3063,7 @@ Final paragraph.
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
     let result = rule.check(&ctx).unwrap();
@@ -3132,7 +3132,7 @@ fn test_reflow_preserves_mkdocstrings_autodoc_block() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3167,7 +3167,7 @@ fn test_reflow_preserves_mkdocstrings_with_identifier() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3203,7 +3203,7 @@ fn test_reflow_preserves_mkdocstrings_surrounded_by_paragraphs() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3242,7 +3242,7 @@ fn test_reflow_mkdocstrings_not_detected_in_standard_flavor() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -3274,7 +3274,7 @@ fn test_reflow_preserves_mkdocstrings_with_blank_line_in_block() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5281,7 +5281,7 @@ fn test_reflow_admonition_in_list_item_basic() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5346,7 +5346,7 @@ fn test_reflow_collapsible_admonition_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5403,7 +5403,7 @@ fn test_reflow_multiple_admonitions_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5482,7 +5482,7 @@ fn test_reflow_admonition_short_content_preserved() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5530,7 +5530,7 @@ fn test_reflow_admonition_with_multiple_paragraphs() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5600,7 +5600,7 @@ fn test_reflow_admonition_not_in_standard_flavor() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5650,7 +5650,7 @@ fn test_reflow_admonition_idempotent() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5705,7 +5705,7 @@ fn test_reflow_admonition_only_in_list_no_long_text() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5765,7 +5765,7 @@ fn test_reflow_content_after_admonition_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5830,7 +5830,7 @@ fn test_reflow_content_after_admonition_short_lines() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5879,7 +5879,7 @@ fn test_reflow_multiple_blocks_after_admonition() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5936,7 +5936,7 @@ fn test_reflow_admonition_empty_body() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -5987,7 +5987,7 @@ fn test_reflow_admonition_no_blank_line_before_body() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6042,7 +6042,7 @@ fn test_reflow_admonition_body_indent_preserved() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6103,7 +6103,7 @@ fn test_reflow_admonition_with_code_block_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6169,7 +6169,7 @@ fn test_reflow_admonition_with_tilde_fence_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6229,7 +6229,7 @@ fn test_reflow_admonition_with_multiple_code_blocks_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6297,7 +6297,7 @@ fn test_reflow_admonition_code_block_idempotent() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6350,7 +6350,7 @@ fn test_reflow_tab_container_in_list_item() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -6996,7 +6996,7 @@ fn test_paragraphs_false_skips_blockquote_content() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7033,7 +7033,7 @@ fn test_blockquotes_false_skips_blockquote_content() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7070,7 +7070,7 @@ fn test_blockquotes_true_paragraphs_true_checks_blockquotes() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7106,7 +7106,7 @@ fn test_blockquotes_false_still_checks_regular_paragraphs() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7142,7 +7142,7 @@ fn test_blockquotes_false_paragraphs_false_skips_blockquotes() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7194,7 +7194,7 @@ fn test_nested_blockquote_skipped_when_blockquotes_false() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7230,7 +7230,7 @@ fn test_paragraphs_false_skips_nested_blockquote() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7267,7 +7267,7 @@ fn test_blockquotes_false_skips_reflow_warnings() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7304,7 +7304,7 @@ fn test_paragraphs_false_skips_blockquote_reflow_warnings() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7341,7 +7341,7 @@ fn test_blockquotes_true_with_reflow_still_warns() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7377,7 +7377,7 @@ fn test_blockquotes_false_skips_lazy_continuation() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7413,7 +7413,7 @@ fn test_blockquotes_false_reflow_skips_lazy_continuation() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 
@@ -7450,7 +7450,7 @@ fn test_blockquotes_false_paragraph_after_blockquote_still_warns() {
         abbreviations: Vec::new(),
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
     let rule = MD013LineLength::from_config_struct(config);
 

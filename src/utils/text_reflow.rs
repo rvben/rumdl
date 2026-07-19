@@ -109,9 +109,10 @@ pub struct ReflowOptions {
     /// atomic regardless, because their `][ref]` / `[]` syntax is an explicit
     /// link signal that does not depend on a definition being in scope.
     pub defined_references: Option<HashSet<String>>,
-    /// Whether to allow reflow breaking inside emphasis/strong/strikethrough spans
-    /// when they would otherwise exceed line length or fit on a new line.
-    pub emphasis_spans: bool,
+    /// Whether to hold emphasis/strong/strikethrough and code spans atomic during reflow.
+    /// When true (default), these spans are treated as atomic units.
+    /// When false, they can be wrapped word-by-word like normal text.
+    pub atomic_spans: bool,
 }
 
 impl Default for ReflowOptions {
@@ -129,7 +130,7 @@ impl Default for ReflowOptions {
             require_sentence_capital: true,
             max_list_continuation_indent: None,
             defined_references: None,
-            emphasis_spans: false,
+            atomic_spans: true,
         }
     }
 }
@@ -142,37 +143,6 @@ impl Default for ReflowOptions {
 /// atomic even when its use and definition differ only in case or whitespace.
 pub fn normalize_reference_label(label: &str) -> String {
     label.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
-}
-
-/// Build a boolean mask indicating which character positions are inside inline code spans.
-/// Handles single, double, and triple backtick delimiters.
-fn compute_inline_code_mask(text: &str) -> Vec<bool> {
-    let code_spans = extract_code_spans(text);
-    let chars: Vec<char> = text.chars().collect();
-    let mut mask = vec![false; chars.len()];
-    let mut span_it = code_spans.iter().peekable();
-    let mut byte_idx = 0;
-    // Map character indices to byte-offset based code spans in a single pass.
-    // Since code spans are sorted by start offset, we advance the span iterator
-    // as our character byte index passes the end of the current span.
-    for (char_idx, ch) in chars.iter().enumerate() {
-        let next_byte_idx = byte_idx + ch.len_utf8();
-        while let Some(span) = span_it.peek() {
-            if span.end <= byte_idx {
-                span_it.next();
-            } else {
-                break;
-            }
-        }
-        if let Some(span) = span_it.peek()
-            && byte_idx >= span.start
-            && byte_idx < span.end
-        {
-            mask[char_idx] = true;
-        }
-        byte_idx = next_byte_idx;
-    }
-    mask
 }
 
 /// If `chars` starts at `start` with one or more consecutive footnote
@@ -210,6 +180,7 @@ fn is_sentence_boundary(
     text: &str,
     chars: &[char],
     pos: usize,
+    byte_offset_after_punct: usize,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> bool {
@@ -350,8 +321,7 @@ fn is_sentence_boundary(
 
     if pos > 0 {
         // Check for common abbreviations
-        let byte_offset: usize = chars[..=pos].iter().map(|ch| ch.len_utf8()).sum();
-        if text_ends_with_abbreviation(&text[..byte_offset], abbreviations) {
+        if text_ends_with_abbreviation(&text[..byte_offset_after_punct], abbreviations) {
             return false;
         }
 
@@ -395,46 +365,81 @@ fn split_into_sentences_with_set(
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
 ) -> Vec<String> {
-    // Pre-compute which character positions are inside inline code spans
-    let in_code = compute_inline_code_mask(text);
-    // Collect chars once and share the slice with is_sentence_boundary, which
-    // would otherwise re-collect the whole text on every position it checks.
     let char_vec: Vec<char> = text.chars().collect();
+
+    // Precompute byte offsets for each character in text.
+    // char_offsets[i] represents the byte index of char_vec[i] in text.
+    // char_offsets[char_vec.len()] is the byte index of the end of text.
+    let mut char_offsets = Vec::with_capacity(char_vec.len() + 1);
+    let mut offset = 0;
+    for c in &char_vec {
+        char_offsets.push(offset);
+        offset += c.len_utf8();
+    }
+    char_offsets.push(offset);
+
+    // Track active inline code spans inline since they are sorted and non-overlapping.
+    let code_spans = extract_code_spans(text);
+    let mut span_it = code_spans.iter().peekable();
 
     let mut sentences = Vec::new();
     let mut current_sentence = String::new();
-    let mut chars = text.chars().peekable();
     let mut pos = 0;
 
-    while let Some(c) = chars.next() {
+    while pos < char_vec.len() {
+        let c = char_vec[pos];
         current_sentence.push(c);
 
-        if !in_code[pos] && is_sentence_boundary(text, &char_vec, pos, abbreviations, require_sentence_capital) {
+        let byte_idx = char_offsets[pos];
+
+        // Advance active code span iterator if the current char start is past its end.
+        while let Some(span) = span_it.peek() {
+            if span.end <= byte_idx {
+                span_it.next();
+            } else {
+                break;
+            }
+        }
+
+        // True if the current character position falls inside an inline code span.
+        let in_code = if let Some(span) = span_it.peek() {
+            byte_idx >= span.start && byte_idx < span.end
+        } else {
+            false
+        };
+
+        if !in_code
+            && is_sentence_boundary(
+                text,
+                &char_vec,
+                pos,
+                char_offsets[pos + 1],
+                abbreviations,
+                require_sentence_capital,
+            )
+        {
             // Consume any trailing footnote references glued to the punctuation
-            // (they belong to the current sentence, e.g. "sentence.[^1]" keeps
-            // the marker attached to the sentence it annotates rather than
-            // leaking onto the next one).
             if let Some(end_pos) = footnote_refs_end(&char_vec, pos + 1) {
                 while pos + 1 < end_pos {
-                    current_sentence.push(chars.next().unwrap());
                     pos += 1;
+                    current_sentence.push(char_vec[pos]);
                 }
             }
 
-            // Consume any trailing emphasis/strikethrough markers and quotes (they belong to the current sentence)
-            while let Some(&next) = chars.peek() {
+            // Consume any trailing emphasis/strikethrough markers and quotes
+            while pos + 1 < char_vec.len() {
+                let next = char_vec[pos + 1];
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
-                    current_sentence.push(chars.next().unwrap());
                     pos += 1;
+                    current_sentence.push(char_vec[pos]);
                 } else {
                     break;
                 }
             }
 
             // Consume the space after the sentence
-            if chars.peek() == Some(&' ') {
-                chars.next();
-                pos += 1;
+            if pos + 1 < char_vec.len() && char_vec[pos + 1] == ' ' {
+                pos += 1; // skip space (not pushed to current_sentence)
             }
 
             sentences.push(current_sentence.trim().to_string());
@@ -680,7 +685,7 @@ enum Element {
     /// exactly; treated as atomic so it is never split mid-role.
     MystRole(String),
     /// Inline code `code`
-    Code(String),
+    Code { content: String, marker: String },
     /// Bold text **text** or __text__
     Bold {
         content: String,
@@ -722,7 +727,7 @@ impl std::fmt::Display for Element {
             Element::HugoShortcode(s) => write!(f, "{s}"),
             Element::AttrList(s) => write!(f, "{s}"),
             Element::MystRole(s) => write!(f, "{s}"),
-            Element::Code(s) => write!(f, "{s}"),
+            Element::Code { content, marker } => write!(f, "{marker}{content}{marker}"),
             Element::Bold { content, underscore } => {
                 if *underscore {
                     write!(f, "__{content}__")
@@ -737,6 +742,37 @@ impl std::fmt::Display for Element {
                     write!(f, "*{content}*")
                 }
             }
+        }
+    }
+}
+
+impl Element {
+    fn display_len(&self, mode: ReflowLengthMode) -> usize {
+        match self {
+            Element::Text(s)
+            | Element::Link(s)
+            | Element::ReferenceLink(s)
+            | Element::EmptyReferenceLink(s)
+            | Element::ShortcutReference(s)
+            | Element::InlineImage(s)
+            | Element::ReferenceImage(s)
+            | Element::EmptyReferenceImage(s)
+            | Element::LinkedImage(s)
+            | Element::FootnoteReference(s)
+            | Element::Autolink(s)
+            | Element::HtmlTag(s)
+            | Element::HtmlEntity(s)
+            | Element::HugoShortcode(s)
+            | Element::AttrList(s)
+            | Element::MystRole(s) => display_len(s, mode),
+            Element::WikiLink(s) => display_len(s, mode) + 4,
+            Element::InlineMath(s) => display_len(s, mode) + 2,
+            Element::DisplayMath(s) => display_len(s, mode) + 4,
+            Element::EmojiShortcode(s) => display_len(s, mode) + 2,
+            Element::Strikethrough { content, double } => display_len(content, mode) + if *double { 4 } else { 2 },
+            Element::Code { content, marker } => display_len(content, mode) + display_len(marker, mode) * 2,
+            Element::Bold { content, .. } => display_len(content, mode) + 4,
+            Element::Italic { content, .. } => display_len(content, mode) + 2,
         }
     }
 }
@@ -1508,8 +1544,15 @@ fn parse_markdown_elements_inner(
                 "pulldown_code" => {
                     let span = next_code_span.unwrap();
                     let span_len = span.end - span.start;
-                    let code = &remaining[..span_len];
-                    elements.push(Element::Code(code.to_string()));
+                    let code_raw = &remaining[..span_len];
+                    if let Some((content, marker)) = decompose_code_span(code_raw) {
+                        elements.push(Element::Code {
+                            content: content.to_string(),
+                            marker: marker.to_string(),
+                        });
+                    } else {
+                        elements.push(Element::Text(code_raw.to_string()));
+                    }
                     remaining = &remaining[span_len..];
                 }
                 "attr_list" => {
@@ -1582,16 +1625,16 @@ fn should_insert_space_before_join(current: &str) -> bool {
 /// A paragraph-continuation line like this converts the previous line into a
 /// heading or inserts a horizontal rule.
 fn is_setext_or_thematic(text: &str) -> bool {
-    let mut marker = '\0';
+    let mut marker = 0u8;
     let mut count = 0usize;
     let mut has_space = false;
-    for c in text.chars() {
-        match c {
-            ' ' | '\t' => has_space = true,
-            '-' | '=' | '*' | '_' => {
-                if marker == '\0' {
-                    marker = c;
-                } else if c != marker {
+    for &b in text.as_bytes() {
+        match b {
+            b' ' | b'\t' => has_space = true,
+            b'-' | b'=' | b'*' | b'_' => {
+                if marker == 0 {
+                    marker = b;
+                } else if b != marker {
                     return false;
                 }
                 count += 1;
@@ -1600,9 +1643,9 @@ fn is_setext_or_thematic(text: &str) -> bool {
         }
     }
     match marker {
-        '=' => !has_space,
-        '-' => !has_space || count >= 3,
-        '*' | '_' => count >= 3,
+        b'=' => !has_space,
+        b'-' => !has_space || count >= 3,
+        b'*' | b'_' => count >= 3,
         _ => false,
     }
 }
@@ -1630,6 +1673,8 @@ fn starts_block_construct(text: &str) -> bool {
         b'>' => true,
         b'-' | b'*' | b'+' => marker_then_boundary(1) || is_setext_or_thematic(text),
         b'_' | b'=' => is_setext_or_thematic(text),
+        b':' => is_definition_list_item(text) || text.starts_with(":::"),
+        b'|' => true,
         b'#' => {
             let hashes = bytes.iter().take_while(|&&b| b == b'#').count();
             hashes <= 6 && marker_then_boundary(hashes)
@@ -1705,8 +1750,6 @@ fn reflow_elements_sentence_per_line(
     let mut current_line = String::new();
 
     for (idx, element) in elements.iter().enumerate() {
-        let element_str = format!("{element}");
-
         // For text elements, split into sentences
         if let Element::Text(text) = element {
             // Simply append text - it already has correct spacing from tokenization
@@ -1805,6 +1848,7 @@ fn reflow_elements_sentence_per_line(
             );
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
+            let element_str = format!("{element}");
             // Check if this element is adjacent to the preceding text (no
             // breakable space between; a non-breaking space keeps the pair
             // attached and must not have an ASCII space appended after it)
@@ -2109,8 +2153,7 @@ fn compute_element_spans(elements: &[Element]) -> Vec<(usize, usize)> {
     let mut spans = Vec::new();
     let mut offset = 0;
     for element in elements {
-        let rendered = format!("{element}");
-        let len = rendered.len();
+        let len = element.display_len(ReflowLengthMode::Bytes);
         if !matches!(element, Element::Text(_)) {
             spans.push((offset, offset + len));
         }
@@ -2538,10 +2581,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
     let length_mode = options.length_mode;
 
     for (idx, element) in elements.iter().enumerate() {
-        // Derive the display width from the already-formatted string rather than
-        // formatting the element a second time just to measure it.
-        let element_str = format!("{element}");
-        let element_len = display_len(&element_str, length_mode);
+        let element_len = element.display_len(length_mode);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no breakable whitespace between them
@@ -2681,126 +2721,164 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_length += word_len;
                 }
             }
-        } else if matches!(
-            element,
-            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
-        ) && (options.emphasis_spans || element_len > options.line_length)
-        {
-            // Italic, bold, and strikethrough with content longer than line_length need word wrapping.
-            // Split content word-by-word, attach the opening marker to the first word
-            // and the closing marker to the last word.
-            let (content, marker): (&str, &str) = match element {
-                Element::Italic { content, underscore } => (content.as_str(), if *underscore { "_" } else { "*" }),
-                Element::Bold { content, underscore } => (content.as_str(), if *underscore { "__" } else { "**" }),
-                Element::Strikethrough { content, double } => (content.as_str(), if *double { "~~" } else { "~" }),
-                _ => unreachable!(),
+        } else {
+            let span_info = match element {
+                Element::Italic { content, underscore } => {
+                    Some((content.as_str(), if *underscore { "_" } else { "*" }, false))
+                }
+                Element::Bold { content, underscore } => {
+                    Some((content.as_str(), if *underscore { "__" } else { "**" }, false))
+                }
+                Element::Strikethrough { content, double } => {
+                    Some((content.as_str(), if *double { "~~" } else { "~" }, false))
+                }
+                Element::Code { content, marker } => Some((content.as_str(), marker.as_str(), true)),
+                _ => None,
             };
 
-            let words: Vec<&str> = split_breakable_words(content).collect();
-            let n = words.len();
-
-            if n == 0 {
-                // Empty span — treat as atomic
-                let full = format!("{marker}{marker}");
-                let full_len = display_len(&full, length_mode);
-                if !is_adjacent_to_prev && current_length > 0 {
-                    current_line.push(' ');
-                    current_length += 1;
-                }
-                current_line.push_str(&full);
-                current_length += full_len;
-            } else {
-                for (i, word) in words.iter().enumerate() {
-                    let is_first = i == 0;
-                    let is_last = i == n - 1;
-                    let word_str: String = match (is_first, is_last) {
-                        (true, true) => format!("{marker}{word}{marker}"),
-                        (true, false) => format!("{marker}{word}"),
-                        (false, true) => format!("{word}{marker}"),
-                        (false, false) => word.to_string(),
-                    };
-                    let word_len = display_len(&word_str, length_mode);
-
-                    let needs_space = if is_first {
-                        !is_adjacent_to_prev && current_length > 0
+            let is_eligible = match span_info {
+                Some((content, _, is_code)) => {
+                    if is_code {
+                        !options.atomic_spans
                     } else {
-                        current_length > 0
-                    };
-
-                    if needs_space
-                        && current_length + 1 + word_len > options.line_length
-                        && !starts_block_construct(&word_str)
-                    {
-                        lines.push(current_line.trim_end_matches(is_breakable_whitespace).to_string());
-                        current_line = word_str;
-                        current_length = word_len;
-                        current_line_element_spans.clear();
-                    } else {
-                        if needs_space {
-                            current_line.push(' ');
-                            current_length += 1;
-                        }
-                        current_line.push_str(&word_str);
-                        current_length += word_len;
+                        (!options.atomic_spans || element_len > options.line_length)
+                            && !content.contains(['`', '*', '_', '~'])
                     }
                 }
-            }
-        } else {
-            // For non-text elements (code, links, references), treat as atomic units
-            // These should never be broken across lines
+                None => false,
+            };
 
-            if is_adjacent_to_prev {
-                // Adjacent to preceding text — attach directly without space
-                if current_length + element_len > options.line_length
-                    && let Some(carried) = break_before_attached(
+            if is_eligible {
+                let (content, marker, is_code) = span_info.unwrap();
+                let words: Vec<&str> = split_breakable_words(content).collect();
+                let n = words.len();
+                if n == 0 {
+                    // Empty span — treat as atomic
+                    let full = format!("{marker}{marker}");
+                    let full_len = display_len(&full, length_mode);
+                    if !is_adjacent_to_prev && current_length > 0 {
+                        current_line.push(' ');
+                        current_length += 1;
+                    }
+                    current_line.push_str(&full);
+                    current_length += full_len;
+                } else {
+                    for (i, word) in words.iter().enumerate() {
+                        let is_first = i == 0;
+                        let is_last = i == n - 1;
+
+                        let space_start = if is_first && is_code && word.starts_with('`') {
+                            " "
+                        } else {
+                            ""
+                        };
+                        let space_end = if is_last && is_code && word.ends_with('`') {
+                            " "
+                        } else {
+                            ""
+                        };
+
+                        let word_str: String = match (is_first, is_last) {
+                            (true, true) => format!("{marker}{space_start}{word}{space_end}{marker}"),
+                            (true, false) => format!("{marker}{space_start}{word}"),
+                            (false, true) => format!("{word}{space_end}{marker}"),
+                            (false, false) => word.to_string(),
+                        };
+                        let word_len = display_len(&word_str, length_mode);
+
+                        let needs_space = if is_first {
+                            !is_adjacent_to_prev && current_length > 0
+                        } else {
+                            current_length > 0
+                        };
+
+                        if needs_space
+                            && current_length + 1 + word_len > options.line_length
+                            && !starts_block_construct(&word_str)
+                        {
+                            lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
+                            current_line = word_str;
+                            current_length = word_len;
+                            current_line_element_spans.clear();
+                        } else {
+                            if needs_space {
+                                current_line.push(' ');
+                                current_length += 1;
+                            }
+                            current_line.push_str(&word_str);
+                            current_length += word_len;
+                        }
+                    }
+                }
+            } else {
+                // For non-text elements (code, links, references), treat as atomic units
+                // These should never be broken across lines
+                let element_str = format!("{element}");
+
+                if is_adjacent_to_prev {
+                    // Adjacent to preceding text — attach directly without space
+                    if current_length + element_len > options.line_length
+                        && let Some(carried) = break_before_attached(
+                            &mut lines,
+                            &mut current_line,
+                            &mut current_length,
+                            &mut current_line_element_spans,
+                            &element_str,
+                            "",
+                            length_mode,
+                        )
+                    {
+                        // Would exceed limit — broke before the adjacent word group
+                        // at the last safe space (element-aware, so links/code stay
+                        // intact). Record the element span in the new current_line.
+                        current_line_element_spans.push((carried, carried + element_str.len()));
+                    } else {
+                        let start = current_line.len();
+                        current_line.push_str(&element_str);
+                        current_length += element_len;
+                        current_line_element_spans.push((start, current_line.len()));
+                    }
+                } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
+                    if !starts_block_construct(&element_str) {
+                        // Not adjacent, would exceed — start new line
+                        lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
+                        current_line.clone_from(&element_str);
+                        current_length = element_len;
+                        current_line_element_spans.clear();
+                        current_line_element_spans.push((0, element_str.len()));
+                    } else if let Some(carried) = break_before_attached(
                         &mut lines,
                         &mut current_line,
                         &mut current_length,
                         &mut current_line_element_spans,
                         &element_str,
-                        "",
+                        " ",
                         length_mode,
-                    )
-                {
-                    // Would exceed limit — broke before the adjacent word group
-                    // at the last safe space (element-aware, so links/code stay
-                    // intact). Record the element span in the new current_line.
-                    current_line_element_spans.push((carried, carried + element_str.len()));
+                    ) {
+                        // The overflowing element would open a block construct at
+                        // line start (e.g. an HtmlTag like `<div>`). Broke one word
+                        // earlier instead so the element stays mid-line.
+                        let start = carried + 1;
+                        current_line_element_spans.push((start, start + element_str.len()));
+                    } else {
+                        // No safe earlier break point — keep the element attached
+                        // and accept the long line rather than corrupt the structure.
+                        let ends_with_opener =
+                            current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
+                        if !ends_with_opener {
+                            current_line.push(' ');
+                            current_length += 1;
+                        }
+                        let start = current_line.len();
+                        current_line.push_str(&element_str);
+                        current_length += element_len;
+                        current_line_element_spans.push((start, current_line.len()));
+                    }
                 } else {
-                    // Fits, or no safe space to break at — accept the line
-                    let start = current_line.len();
-                    current_line.push_str(&element_str);
-                    current_length += element_len;
-                    current_line_element_spans.push((start, current_line.len()));
-                }
-            } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
-                if !starts_block_construct(&element_str) {
-                    // Not adjacent, would exceed — start new line
-                    lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
-                    current_line.clone_from(&element_str);
-                    current_length = element_len;
-                    current_line_element_spans.clear();
-                    current_line_element_spans.push((0, element_str.len()));
-                } else if let Some(carried) = break_before_attached(
-                    &mut lines,
-                    &mut current_line,
-                    &mut current_length,
-                    &mut current_line_element_spans,
-                    &element_str,
-                    " ",
-                    length_mode,
-                ) {
-                    // The overflowing element would open a block construct at
-                    // line start (e.g. an HtmlTag like `<div>`). Broke one word
-                    // earlier instead so the element stays mid-line.
-                    let start = carried + 1;
-                    current_line_element_spans.push((start, start + element_str.len()));
-                } else {
-                    // No safe earlier break point — keep the element attached
-                    // and accept the long line rather than corrupt the structure.
+                    // Not adjacent, fits — add with space
                     let ends_with_opener =
                         current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
-                    if !ends_with_opener {
+                    if current_length > 0 && !ends_with_opener {
                         current_line.push(' ');
                         current_length += 1;
                     }
@@ -2809,18 +2887,6 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     current_length += element_len;
                     current_line_element_spans.push((start, current_line.len()));
                 }
-            } else {
-                // Not adjacent, fits — add with space
-                let ends_with_opener =
-                    current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
-                if current_length > 0 && !ends_with_opener {
-                    current_line.push(' ');
-                    current_length += 1;
-                }
-                let start = current_line.len();
-                current_line.push_str(&element_str);
-                current_length += element_len;
-                current_line_element_spans.push((start, current_line.len()));
             }
         }
     }
@@ -3781,6 +3847,23 @@ pub fn reflow_paragraph_at_line_with_options(
         reflowed_text,
     })
 }
+/// Decomposes a raw inline code span string into its inner content and backtick marker.
+///
+/// For example, `decompose_code_span("`code`")` returns `Some(("code", "`"))`.
+/// If the input is not a valid code span (e.g., it doesn't start and end with the
+/// same number of backticks), returns `None`.
+fn decompose_code_span(raw: &str) -> Option<(&str, &str)> {
+    let marker_len = raw.bytes().take_while(|&b| b == b'`').count();
+    if marker_len == 0 {
+        return None;
+    }
+    let marker = &raw[..marker_len];
+    if raw.len() < marker_len * 2 {
+        return None;
+    }
+    let content = &raw[marker_len..raw.len() - marker_len];
+    Some((content, marker))
+}
 
 #[cfg(test)]
 mod tests {
@@ -4255,22 +4338,24 @@ mod tests {
         // 1. Single backtick
         let elements = parse_markdown_elements_inner("`code`", false, false, None);
         assert_eq!(elements.len(), 1);
-        assert!(matches!(&elements[0], Element::Code(s) if s == "`code`"));
+        assert!(matches!(&elements[0], Element::Code { content, marker } if content == "code" && marker == "`"));
 
         // 2. Double backtick
         let elements = parse_markdown_elements_inner("``code``", false, false, None);
         assert_eq!(elements.len(), 1);
-        assert!(matches!(&elements[0], Element::Code(s) if s == "``code``"));
+        assert!(matches!(&elements[0], Element::Code { content, marker } if content == "code" && marker == "``"));
 
         // 3. Double backtick with single backtick inside
         let elements = parse_markdown_elements_inner("``code`inside``", false, false, None);
         assert_eq!(elements.len(), 1);
-        assert!(matches!(&elements[0], Element::Code(s) if s == "``code`inside``"));
+        assert!(
+            matches!(&elements[0], Element::Code { content, marker } if content == "code`inside" && marker == "``")
+        );
 
         // 4. Spaces inside
         let elements = parse_markdown_elements_inner("`` code ``", false, false, None);
         assert_eq!(elements.len(), 1);
-        assert!(matches!(&elements[0], Element::Code(s) if s == "`` code ``"));
+        assert!(matches!(&elements[0], Element::Code { content, marker } if content == " code " && marker == "``"));
 
         // 5. Unclosed backtick (should be parsed as Text)
         let elements = parse_markdown_elements_inner("`unclosed", false, false, None);
@@ -4391,35 +4476,82 @@ mod tests {
     }
 
     #[test]
-    fn test_emphasis_spans() {
-        let text = "hello **word1 word2**";
+    fn test_atomic_spans() {
+        // --- Emphasis Spans ---
+        let text_emphasis = "hello **word1 word2**";
 
-        // With emphasis_spans = false (default), the short emphasis span is kept atomic
-        // because its total length (15) <= line_length (18), even though it doesn't fit on line 1.
         let options_disabled = ReflowOptions {
             line_length: 18,
-            emphasis_spans: false,
+            atomic_spans: true,
             ..Default::default()
         };
-        let lines_disabled = reflow_line(text, &options_disabled);
+        let lines_disabled = reflow_line(text_emphasis, &options_disabled);
         assert_eq!(lines_disabled, vec!["hello", "**word1 word2**"]);
 
-        // With emphasis_spans = true, the emphasis span is split across lines.
         let options_enabled = ReflowOptions {
             line_length: 18,
-            emphasis_spans: true,
+            atomic_spans: false,
             ..Default::default()
         };
-        let lines_enabled = reflow_line(text, &options_enabled);
+        let lines_enabled = reflow_line(text_emphasis, &options_enabled);
         assert_eq!(lines_enabled, vec!["hello **word1", "word2**"]);
 
-        // Verify other markers work too (italic and strikethrough)
-        let text_italic = "hello *word1 word2*";
-        let lines_italic = reflow_line(text_italic, &options_enabled);
-        assert_eq!(lines_italic, vec!["hello *word1", "word2*"]);
+        // --- Code Spans ---
+        let text_code = "hello `word1 word2`";
 
-        let text_strike = "hello ~~word1 word2~~";
-        let lines_strike = reflow_line(text_strike, &options_enabled);
-        assert_eq!(lines_strike, vec!["hello ~~word1", "word2~~"]);
+        let lines_code_disabled = reflow_line(text_code, &options_disabled);
+        assert_eq!(lines_code_disabled, vec!["hello", "`word1 word2`"]);
+
+        let lines_code_enabled = reflow_line(text_code, &options_enabled);
+        assert_eq!(lines_code_enabled, vec!["hello `word1", "word2`"]);
+
+        // Test multiple backticks with space padding
+        let text_code_padding = "hello `` `word1` `word2` ``";
+        let lines_padding_enabled = reflow_line(text_code_padding, &options_enabled);
+        assert_eq!(lines_padding_enabled, vec![r#"hello `` `word1`"#, r#"`word2` ``"#]);
+    }
+
+    #[test]
+    fn test_emphasis_containing_markers_is_not_split() {
+        let options = ReflowOptions {
+            line_length: 5,
+            atomic_spans: false,
+            ..Default::default()
+        };
+        // Emphasis containing internal markers (e.g. escaped asterisks) should not be split to avoid formatting corruption
+        let lines = reflow_line(r#"*foo \*bar*"#, &options);
+        assert_eq!(lines, vec![r#"*foo \*bar*"#.to_string()]);
+    }
+
+    #[test]
+    fn test_definition_list_marker_does_not_start_line() {
+        let options = ReflowOptions {
+            line_length: 20,
+            ..Default::default()
+        };
+        // Wrap should not start a line with ": "
+        let lines = reflow_line("This is a term and : definition here.", &options);
+        for line in &lines {
+            assert!(
+                !line.trim_start().starts_with(": "),
+                "Wrapped line should not start with definition marker: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_div_marker_does_not_start_line() {
+        let options = ReflowOptions {
+            line_length: 20,
+            ..Default::default()
+        };
+        // Wrap should not start a line with ":::"
+        let lines = reflow_line("This is some text with ::: class marker.", &options);
+        for line in &lines {
+            assert!(
+                !line.trim_start().starts_with(":::"),
+                "Wrapped line should not start with div marker: {line}"
+            );
+        }
     }
 }

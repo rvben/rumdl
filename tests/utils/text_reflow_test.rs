@@ -20,7 +20,7 @@ fn test_list_item_trailing_whitespace_removal() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
 
     let result = reflow_markdown(input, &options);
@@ -408,7 +408,7 @@ fn test_sentence_per_line_reflow() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -742,7 +742,7 @@ fn test_ie_abbreviation_split_debug() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
 
     let result = reflow_line(input, &options);
@@ -769,7 +769,7 @@ fn test_ie_abbreviation_paragraph() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
 
     let result = reflow_markdown(input, &options);
@@ -851,7 +851,7 @@ fn test_definition_list_with_paragraphs() {
         require_sentence_capital: true,
         max_list_continuation_indent: None,
         defined_references: None,
-        emphasis_spans: false,
+        atomic_spans: true,
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
@@ -6726,7 +6726,6 @@ proptest::proptest! {
         }
     }
 }
-
 // ---------------------------------------------------------------------------
 // Issue #740: reflow must not delete the space before French double
 // punctuation (: ; ! ?) and must preserve non-breaking spaces byte-for-byte.
@@ -6868,7 +6867,7 @@ fn test_nbsp_after_code_span_not_replaced() {
 fn test_nbsp_survives_in_emphasis_span_wrap() {
     let options = ReflowOptions {
         line_length: 40,
-        emphasis_spans: true,
+        atomic_spans: false,
         ..Default::default()
     };
     let input = "Il y a **dix\u{00A0}mille raisons de vérifier que les espaces insécables survivent** au reflow.";
@@ -6976,4 +6975,37 @@ fn test_sentence_per_line_trailing_nbsp_preserved() {
         joined.ends_with('\u{00A0}'),
         "a trailing NBSP must survive the sentence-mode final push. got: {joined:?}"
     );
+}
+
+#[test]
+fn test_nested_code_span_in_emphasis_wrapping_safety() {
+    let options = ReflowOptions {
+        line_length: 12,
+        atomic_spans: false,
+        ..Default::default()
+    };
+    // Padded double-backtick code span inside emphasis
+    let input = "hello *a `` `b` `` c*";
+    let result = reflow_line(input, &options);
+
+    // Check that we don't split the double-backticks from the code content
+    // If it wraps, it should keep the code span intact.
+    assert!(
+        result.iter().any(|line| line.contains("`` `b` ``")),
+        "Double-backtick code span was split: {result:?}"
+    );
+}
+
+#[test]
+fn test_block_construct_trigger_in_wrapped_emphasis() {
+    let options = ReflowOptions {
+        line_length: 12,
+        atomic_spans: false,
+        ..Default::default()
+    };
+    let input = "hello *word1 - word2*";
+    let result = reflow_line(input, &options);
+
+    // Line 2 should not start with a bullet marker "- "
+    assert_eq!(result, vec!["hello *word1 -", "word2*"]);
 }

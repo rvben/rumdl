@@ -23,7 +23,7 @@ fn create_sentence_per_line_rule() -> MD013LineLength {
         abbreviations: vec![],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     })
 }
 
@@ -311,7 +311,7 @@ fn test_single_sentence_with_no_line_length_constraint() {
         abbreviations: vec![],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
     let content = "This document provides advice for porting Rust code using PyO3 to run under\n\
                    free-threaded Python.";
@@ -379,7 +379,7 @@ fn test_custom_abbreviations_recognized() {
         abbreviations: vec!["Assn".to_string()],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     // With custom "Assn" abbreviation, this should be ONE sentence
@@ -415,7 +415,7 @@ fn test_custom_abbreviations_merged_with_builtin() {
         abbreviations: vec!["Assn".to_string()],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     // Both "Dr." (built-in) and "Assn." (custom) should be recognized
@@ -451,7 +451,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         abbreviations: vec!["Univ".to_string()],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     let rule_with_period = MD013LineLength::from_config_struct(MD013Config {
@@ -472,7 +472,7 @@ fn test_custom_abbreviation_with_period_in_config() {
         abbreviations: vec!["Univ.".to_string()],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     let content = "Visit Univ. Campus for the tour.";
@@ -515,7 +515,7 @@ fn test_issue_335_abbreviations_config_empty_vec_uses_defaults() {
         abbreviations: vec![], // Empty = use built-in defaults
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     // "Dr." is a built-in abbreviation - should NOT split after it
@@ -572,7 +572,7 @@ fn test_issue_335_custom_abbreviations_extend_defaults() {
         abbreviations: vec!["Corp".to_string(), "Inc".to_string()],
         require_sentence_capital: true,
         ignore_link_urls: true,
-        emphasis_spans: false,
+        atomic_spans: true,
     });
 
     // Single sentence with multiple abbreviations - no warning expected
