@@ -76,6 +76,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.37](https://github.com/rvben/rumdl/compare/v0.2.36...v0.2.37) - 2026-07-19
+
+### Added
+
+- **reflow**: add atomic_spans configuration and refactor inline wrapping (#742) ([aeabec1](https://github.com/rvben/rumdl/commit/aeabec1070d6f87baa7d2e817c75c86047d7ad2a))
+
+### Changed
+
+- **BREAKING**: the MD013 `emphasis-spans` option is renamed to `atomic-spans` (default `true`), with inverted meaning (`emphasis-spans = true` is now `atomic-spans = false`). Configs setting the old key should migrate; it is no longer recognized
+
+### Fixed
+
+- **reflow**: keep code spans atomic when wrapping would collapse whitespace ([d43618b](https://github.com/rvben/rumdl/commit/d43618ba07a231eab8cf0babe9d170a38fc38986))
+
 ## [0.2.36](https://github.com/rvben/rumdl/compare/v0.2.35...v0.2.36) - 2026-07-18
 
 ### Added
