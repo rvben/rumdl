@@ -60,6 +60,26 @@ fn split_breakable_words(text: &str) -> impl Iterator<Item = &str> {
     text.split(is_breakable_whitespace).filter(|word| !word.is_empty())
 }
 
+/// Whether an inline code span's content can be word-wrapped without altering it.
+///
+/// Interior whitespace in code spans is literal. Word-splitting collapses a run
+/// of whitespace to a single space and cannot represent tabs, so wrapping would
+/// corrupt content like `a    b` (four spaces) into `a b`. Only wrap when every
+/// breakable-whitespace separator is already a single plain space; a lone
+/// leading/trailing space still round-trips (CommonMark normalizes it and the
+/// marker-padding path re-adds it for backtick-adjacent content).
+fn code_span_wraps_losslessly(content: &str) -> bool {
+    let mut prev_ws = false;
+    for c in content.chars() {
+        let ws = is_breakable_whitespace(c);
+        if ws && (prev_ws || c != ' ') {
+            return false;
+        }
+        prev_ws = ws;
+    }
+    true
+}
+
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -2739,7 +2759,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             let is_eligible = match span_info {
                 Some((content, _, is_code)) => {
                     if is_code {
-                        !options.atomic_spans
+                        !options.atomic_spans && code_span_wraps_losslessly(content)
                     } else {
                         (!options.atomic_spans || element_len > options.line_length)
                             && !content.contains(['`', '*', '_', '~'])

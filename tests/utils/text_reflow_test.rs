@@ -7009,3 +7009,21 @@ fn test_block_construct_trigger_in_wrapped_emphasis() {
     // Line 2 should not start with a bullet marker "- "
     assert_eq!(result, vec!["hello *word1 -", "word2*"]);
 }
+
+#[test]
+fn test_codespan_internal_whitespace_preserved_when_wrapping() {
+    let options = ReflowOptions {
+        line_length: 80,
+        atomic_spans: false,
+        ..Default::default()
+    };
+    // Interior whitespace in inline code is significant (CommonMark keeps it).
+    // The paragraph is long enough that reflow actually runs.
+    let input = "This paragraph is intentionally quite long so that the reflow pass runs, and it has a code span like `a    b` with four internal spaces in it.";
+    let result = reflow_line(input, &options);
+    let joined = result.join("\n");
+    assert!(
+        joined.contains("`a    b`"),
+        "code span internal whitespace was collapsed: {joined:?}"
+    );
+}
