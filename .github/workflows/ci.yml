@@ -184,7 +184,7 @@ jobs:
           python3 -m venv "$HOME/cbt-venv"
           # Pin code-block-tool versions so CI stays reproducible and an upstream
           # release cannot break the job; bump these deliberately.
-          "$HOME/cbt-venv/bin/pip" install --quiet ruff==0.15.22 black==26.5.1 sqlfluff==4.2.2 djlint==1.40.8 beautysh==6.4.3
+          "$HOME/cbt-venv/bin/pip" install --quiet ruff==0.15.22 black==26.5.1 sqlfluff==4.2.2 djlint==1.40.10 beautysh==6.4.3
           echo "$HOME/cbt-venv/bin" >> "$GITHUB_PATH"
           npm install -g prettier elm-format
           go install mvdan.cc/sh/v3/cmd/shfmt@latest
