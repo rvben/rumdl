@@ -284,6 +284,9 @@ jobs:
       - name: Build browser wasm package
         run: make build-wasm
 
+      - name: Test wasm bindings (host)
+        run: make test-wasm
+
   # Verify the crate still builds on its declared MSRV (Cargo.toml
   # `rust-version`). CI otherwise builds on a newer pinned toolchain, so a
   # feature stabilized after the MSRV floor would pass every other job while

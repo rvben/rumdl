@@ -75,6 +75,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.36](https://github.com/rvben/rumdl/compare/v0.2.35...v0.2.36) - 2026-07-18
+
+### Added
+
+- **code-block-tools**: add shuck:format as a built-in shell formatter ([5b23261](https://github.com/rvben/rumdl/commit/5b232610a871755fd3900fe1b67f263b1fcd1474))
+
+### Fixed
+
+- **wasm**: stop double-converting already-character-based columns ([4178cdf](https://github.com/rvben/rumdl/commit/4178cdf8c0d64cba53340c17ce1dfa9a0ed9ff39))
+- **tests**: resolve String addition compilation errors under Rust 1.96 (#737) ([38f36cf](https://github.com/rvben/rumdl/commit/38f36cf3dfb523f4ced6daf0b7e3f505018be713))
+
 ## [0.2.35](https://github.com/rvben/rumdl/compare/v0.2.34...v0.2.35) - 2026-07-17
 
 ### Added
