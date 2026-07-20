@@ -12,6 +12,7 @@ rules:
       - docs.yml
       - fuzz.yml
       - idempotency.yml
+      - parity.yml
       - performance.yml
       - release.yml
       - sync-schemastore.yml

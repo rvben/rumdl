@@ -1,0 +1,62 @@
+name: Parity
+
+# Measures how closely rumdl agrees with markdownlint over markdownlint's own
+# test corpus. Reports agreed / rumdl-only / markdownlint-only finding counts so
+# a parity regression (a change that makes rumdl diverge on a rule both tools
+# implement) is visible on a cadence rather than only when someone runs
+# `make parity` locally. Informational by default; set a MIN_AGREEMENT floor to
+# turn it into a gate once the number is trusted.
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      min_agreement:
+        description: Fail if agreement drops below this (blank = report only)
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: rumdl vs markdownlint parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: jdx/mise-action@v4
+        with:
+          experimental: true
+          install: false
+
+      - name: Install mise tools
+        run: ./scripts/mise-install.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install markdownlint-cli2
+        run: npm install --no-save markdownlint-cli2
+
+      - name: Compare against markdownlint corpus
+        env:
+          # Bound to an env var rather than expanded into the shell directly, so
+          # a workflow_dispatch input cannot inject shell.
+          MIN_AGREEMENT: ${{ github.event.inputs.min_agreement }}
+        run: |
+          make parity \
+            MIN_AGREEMENT="$MIN_AGREEMENT" \
+            ARGS='--markdownlint ./node_modules/.bin/markdownlint-cli2'

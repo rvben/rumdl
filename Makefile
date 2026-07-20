@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc fuzz-all audit msrv-check smoke-wasi
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc fuzz-all audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -333,6 +333,19 @@ fuzz-all:
 		echo "=== fuzzing $$t ==="; \
 		cargo +nightly fuzz run --target $(FUZZ_TARGET) $$t -- -max_total_time=$(FUZZ_TIME) || exit 1; \
 	done
+
+# Measure how closely rumdl and markdownlint agree over markdownlint's own test
+# corpus (cloned and pinned by the script). Reports agreed / rumdl-only /
+# markdownlint-only finding counts for the rules both tools implement, so parity
+# is a tracked number rather than something noticed by hand. Needs a release
+# rumdl binary and markdownlint-cli2 (via npx). Pass MIN_AGREEMENT=N to fail
+# below a floor, or ARGS='--json' for machine-readable output.
+MIN_AGREEMENT ?=
+parity: build
+	@python3 scripts/parity.py \
+		--rumdl target/release/rumdl \
+		$(if $(MIN_AGREEMENT),--min-agreement $(MIN_AGREEMENT),) \
+		$(ARGS)
 
 # Audit dependencies for known vulnerabilities (RUSTSEC advisories). Reads
 # Cargo.lock only; installs cargo-audit if missing.
