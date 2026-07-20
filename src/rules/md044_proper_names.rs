@@ -298,6 +298,11 @@ impl MD044ProperNames {
             if fm_value_offset == usize::MAX {
                 continue;
             }
+            let fm_value_span = if line_info.in_front_matter {
+                Self::frontmatter_value_span(line)
+            } else {
+                None
+            };
 
             // Skip inline config comments (rumdl, markdownlint, Vale, remark-lint directives)
             if is_inline_config_comment(trimmed) {
@@ -386,6 +391,18 @@ impl MD044ProperNames {
                 // case-insensitively but paths are case-sensitive, so a
                 // proper-name "fix" inside one can break the link.
                 if Self::is_in_bare_url(ctx, byte_pos) {
+                    continue;
+                }
+
+                // Skip if inside a file path within a frontmatter value. Domains
+                // match case-insensitively but paths are case-sensitive, so
+                // rewriting a name inside one breaks the reference it points at.
+                // Body prose is deliberately never consulted here; see
+                // `is_in_path_like_token` for why the exemption stops at the
+                // frontmatter boundary.
+                if let Some(fm_value) = fm_value_span
+                    && Self::is_in_path_like_token(line, start_pos, fm_value)
+                {
                     continue;
                 }
 
@@ -798,6 +815,208 @@ impl MD044ProperNames {
                 Some(c) => Self::is_word_boundary_char(c),
             }
         }
+    }
+
+    /// Whether the frontmatter value starting at `value_start` is a quoted
+    /// scalar: the character immediately preceding `value_start` is a quote.
+    /// Call this with the span start returned by `frontmatter_value_span`,
+    /// which always lands just past the opening quote for quoted values.
+    /// The raw `frontmatter_value_offset` does not carry that guarantee: its
+    /// helper `kv_value_offset` only skips the opening quote when the whole
+    /// trimmed remainder of the line starts and ends with the same quote
+    /// character, so a trailing comment or an unterminated quote leaves the
+    /// offset pointing AT the quote instead of past it.
+    fn value_is_quoted(line: &str, value_start: usize) -> bool {
+        matches!(line[..value_start].chars().next_back(), Some('\'') | Some('"'))
+    }
+
+    /// Byte span of the semantic value on a frontmatter line: the checkable
+    /// content with a trailing comment excluded. For a quoted scalar the span
+    /// ends at the closing quote (or the trimmed end of line if the quote is
+    /// unterminated), so `#` and spaces inside it are literal, and the quote
+    /// characters themselves are never part of the span. `None` when the line
+    /// carries no checkable value, including an empty quoted value (`''`).
+    fn frontmatter_value_span(line: &str) -> Option<(usize, usize)> {
+        let start = Self::frontmatter_value_offset(line);
+        if start == usize::MAX || start >= line.len() {
+            return None;
+        }
+
+        // `frontmatter_value_offset` sometimes points past the opening quote
+        // already, and sometimes points AT it (see `value_is_quoted` docs).
+        // Detect the quote from either position so both cases converge on a
+        // `content_start` that is always just past the opening quote.
+        let before = line[..start].chars().next_back();
+        let at = line[start..].chars().next();
+        let (content_start, quote) = match (before, at) {
+            (Some(q @ ('\'' | '"')), _) => (start, Some(q)),
+            (_, Some(q @ ('\'' | '"'))) => (start + q.len_utf8(), Some(q)),
+            _ => (start, None),
+        };
+
+        let end = if let Some(quote) = quote {
+            let rest = &line[content_start..];
+            match rest.find(quote) {
+                Some(i) => content_start + i,
+                None => content_start + rest.trim_end().len(),
+            }
+        } else {
+            let rest = &line[content_start..];
+            let raw_end = match rest.find(" #") {
+                Some(i) => content_start + i,
+                None => line.len(),
+            };
+            line[..raw_end].trim_end().len()
+        };
+
+        if end <= content_start {
+            None
+        } else {
+            Some((content_start, end))
+        }
+    }
+
+    /// Delimiters that wrap a token from the outside (quotes, brackets,
+    /// parens, angle brackets) rather than appearing inside a path. Used only
+    /// by the edge-trimming pass: these characters legitimately occur inside
+    /// real paths (Next.js route groups `(marketing)/`, dynamic segments
+    /// `[slug]`, disambiguated filenames `myapp(1).md`), so they must not act
+    /// as mid-token boundaries, only as leading/trailing punctuation to peel
+    /// off prose wrapping such as `See (docs/a.md) here.`.
+    const PATH_TOKEN_WRAPPERS: &'static [char] = &['\'', '"', '`', '(', ')', '[', ']', '<', '>'];
+
+    /// Bounds of the whitespace-delimited token containing `pos`, clamped to
+    /// `[value_start, value_end)`. The clamp is what keeps this search inside
+    /// a single frontmatter value: it can never walk past the value's own
+    /// boundaries, so it can never wander into Markdown link syntax on the
+    /// same line (frontmatter has none) or onto a neighboring line.
+    fn value_token_bounds(line: &str, pos: usize, value_start: usize, value_end: usize) -> (usize, usize) {
+        let before = &line[value_start..pos];
+        let start = before.rfind(char::is_whitespace).map_or(value_start, |i| {
+            value_start + i + before[i..].chars().next().unwrap().len_utf8()
+        });
+
+        let after = &line[pos..value_end];
+        let end = after.find(char::is_whitespace).map_or(value_end, |i| pos + i);
+
+        (start, end)
+    }
+
+    /// Strip wrapping delimiters, then trailing sentence punctuation, repeating
+    /// both passes until a full pass leaves the bounds unchanged. Punctuation
+    /// removal can expose a wrapper underneath it (`"docs/myapp.md",` sheds the
+    /// comma to reveal a trailing quote), so a single sequential pass is not
+    /// enough to reach a stable result.
+    fn trim_token_bounds(line: &str, mut start: usize, mut end: usize) -> (usize, usize) {
+        const WRAPPERS: &[char] = MD044ProperNames::PATH_TOKEN_WRAPPERS;
+        const TRAILING: &[char] = &['.', ',', ';', ':', '!', '?'];
+        while start < end && line[start..end].starts_with(WRAPPERS) {
+            start += line[start..].chars().next().unwrap().len_utf8();
+        }
+        loop {
+            let before = (start, end);
+            while end > start && line[start..end].ends_with(WRAPPERS) {
+                end -= line[..end].chars().next_back().unwrap().len_utf8();
+            }
+            while end > start && line[start..end].ends_with(TRAILING) {
+                end -= line[..end].chars().next_back().unwrap().len_utf8();
+            }
+            if (start, end) == before {
+                break;
+            }
+        }
+        (start, end)
+    }
+
+    /// Whether the match at `match_start` sits inside a file path, which must
+    /// not be rewritten. `fm_value` is the semantic value span of the
+    /// frontmatter line the match was found on.
+    ///
+    /// This exemption is deliberately scoped to frontmatter values only and
+    /// is never applied to body prose. In frontmatter the value span is known
+    /// exactly (`frontmatter_value_span`), so token bounds can be clamped to
+    /// it with no risk of crossing into unrelated syntax. Body prose has no
+    /// such known span: a token there must be delimited by scanning the raw
+    /// line for whitespace and Markdown punctuation, and that scan
+    /// unavoidably collides with Markdown link/image/wikilink syntax (see the
+    /// module-level history of defects from trying this). Reusing this
+    /// function for body text is a structural mismatch, not a missing edge
+    /// case, so `fm_value` is required rather than optional: a caller cannot
+    /// accidentally invoke this for a line that has no known value span.
+    ///
+    /// A slash is mandatory: without it a bare extension rule would swallow
+    /// dotted proper names such as `Node.js`.
+    ///
+    /// The 3+ segment sole-value signal only fires for a genuinely
+    /// single-token value. A quoted value that collapsed from several
+    /// whitespace-separated words (`"myapp/gitlab github/bitbucket"`) must
+    /// instead satisfy the path-prefix or file-extension signal; otherwise
+    /// two unrelated slash-pairs joined by a space would vacuously look like
+    /// a 3-segment path. This means an extensionless path containing a
+    /// literal space (`docs/My App/myapp`) is no longer exempt, a deliberate
+    /// narrowing rather than an oversight.
+    fn is_in_path_like_token(line: &str, match_start: usize, fm_value: (usize, usize)) -> bool {
+        let (value_start, value_end) = fm_value;
+        if match_start < value_start || match_start >= value_end {
+            return false;
+        }
+
+        // A quoted scalar is one token even with spaces in it, but only when
+        // every whitespace-separated word in it carries a slash (e.g. a path
+        // containing a space, `docs/My App/myapp`). A quoted sentence with
+        // ordinary prose words (`"We support github/gitlab/bitbucket now"`)
+        // falls back to per-word tokenization instead, otherwise quoting
+        // alone would make the token span the whole value and vacuously
+        // satisfy the sole-value check below.
+        let quoted_words: Vec<&str> = if Self::value_is_quoted(line, value_start) {
+            line[value_start..value_end].split_whitespace().collect()
+        } else {
+            Vec::new()
+        };
+        let is_single_quoted_path = !quoted_words.is_empty() && quoted_words.iter().all(|word| word.contains('/'));
+        // Collapsing several whitespace-separated words into one token is
+        // only safe evidence for signals (a) and (b): a shared slash prefix
+        // or a real extension on the last segment. It is not evidence for
+        // the segment-count signal below, which assumes a single word split
+        // into path segments by '/'; two unrelated slash-pairs joined by a
+        // space (`"myapp/gitlab github/bitbucket"`) would otherwise satisfy
+        // that count vacuously.
+        let is_multi_word_collapse = is_single_quoted_path && quoted_words.len() > 1;
+
+        let (raw_start, raw_end) = if is_single_quoted_path {
+            (value_start, value_end)
+        } else {
+            Self::value_token_bounds(line, match_start, value_start, value_end)
+        };
+
+        let (start, end) = Self::trim_token_bounds(line, raw_start, raw_end);
+        if match_start < start || match_start >= end {
+            return false;
+        }
+
+        let token = &line[start..end];
+        if !token.contains('/') {
+            return false;
+        }
+        if token.starts_with('/') || token.starts_with("./") || token.starts_with("../") || token.starts_with("~/") {
+            return true;
+        }
+        if token.rsplit('/').next().is_some_and(|seg| seg.contains('.')) {
+            return true;
+        }
+
+        if is_multi_word_collapse {
+            return false;
+        }
+
+        // Three or more segments is only a path signal when the token is the
+        // entire frontmatter value. In prose, `github/gitlab/bitbucket` is
+        // shorthand, not a path.
+        let sole_value = {
+            let (ts, te) = Self::trim_token_bounds(line, value_start, value_end);
+            ts == start && te == end
+        };
+        sole_value && token.split('/').filter(|s| !s.is_empty()).count() >= 3
     }
 
     /// For a frontmatter line, return the byte offset where the checkable
@@ -3323,5 +3542,462 @@ Some javascript text.
             result.is_empty(),
             "Should not flag bare-domain text when destination URL has an uppercase scheme: {result:?}"
         );
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_strips_trailing_comment() {
+        let line = "link: docs/guide/myapp # canonical path";
+        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert_eq!(&line[s..e], "docs/guide/myapp");
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_quoted_keeps_hash_and_spaces() {
+        let line = "link: 'docs/My App/a#b'";
+        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert_eq!(&line[s..e], "docs/My App/a#b");
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_plain_value() {
+        let line = "title: Heading for myapp";
+        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert_eq!(&line[s..e], "Heading for myapp");
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_none_for_key_only() {
+        assert!(MD044ProperNames::frontmatter_value_span("seo:").is_none());
+        assert!(MD044ProperNames::frontmatter_value_span("---").is_none());
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_quoted_strips_trailing_comment() {
+        let line = "link: 'docs/guide' # canonical path";
+        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert_eq!(&line[s..e], "docs/guide");
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_empty_quoted_value_is_none() {
+        assert!(MD044ProperNames::frontmatter_value_span("key: ''").is_none());
+    }
+
+    #[test]
+    fn test_frontmatter_value_span_unterminated_quote_strips_leading_quote() {
+        let line = "link: 'docs/a";
+        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert_eq!(&line[s..e], "docs/a");
+    }
+
+    /// Byte offset of `needle` in `line`, for locating the match under test.
+    fn at(line: &str, needle: &str) -> usize {
+        line.find(needle).expect("needle present")
+    }
+
+    #[test]
+    fn test_path_like_exempts_single_token_frontmatter_paths() {
+        for line in [
+            "link: this/is/a/link/to/myapp.md",
+            "link: docs/myapp.md",
+            "link: /abs/path/myapp.md",
+            "link: ./myapp.md",
+            "link: ../shared/myapp.md",
+        ] {
+            let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+            let pos = at(line, "myapp");
+            assert!(
+                MD044ProperNames::is_in_path_like_token(line, pos, span),
+                "should treat as a path: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_path_like_does_not_exempt_slash_conjunction_prose() {
+        // Extra words around the slash-separated token mean it is not the
+        // sole frontmatter value, so the 3+ segment path signal must not fire.
+        let line = "description: We support github/gitlab/bitbucket imports.";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(
+            !MD044ProperNames::is_in_path_like_token(line, at(line, "github"), span),
+            "slash-separated prose is not a path"
+        );
+
+        let line = "description: The javascript/typescript ecosystem is large.";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(!MD044ProperNames::is_in_path_like_token(
+            line,
+            at(line, "javascript"),
+            span
+        ));
+    }
+
+    #[test]
+    fn test_path_like_requires_a_slash_so_dotted_names_survive() {
+        let line = "title: Use nodejs and myapp.md today.";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_path_like_no_slash_frontmatter_value_still_flagged() {
+        // A frontmatter value with no slash at all is never a path signal,
+        // regardless of it being the sole value; the mandatory slash is what
+        // protects dotted proper names like `Node.js` without over-exempting
+        // plain slugs.
+        let line = "slug: myapp-guide";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_path_like_returns_false_outside_value_span() {
+        // A match outside the frontmatter value span (e.g. in the key) is
+        // rejected immediately, before any token-bound scanning happens.
+        let line = "myapp: docs/guide/myapp";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let key_pos = 0;
+        assert!(!MD044ProperNames::is_in_path_like_token(line, key_pos, span));
+    }
+
+    #[test]
+    fn test_path_like_three_segments_only_as_sole_frontmatter_value() {
+        let line = "link: docs/guide/myapp";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+
+        let line = "description: We support github/gitlab/bitbucket now";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(
+            !MD044ProperNames::is_in_path_like_token(line, at(line, "github"), span),
+            "multi-token value gets body treatment"
+        );
+    }
+
+    #[test]
+    fn test_path_like_quoted_value_with_spaces() {
+        // The collapsed token has a real extension on its last segment, so
+        // signal (b) exempts it regardless of the multi-word collapse.
+        let line = "link: 'docs/My App/myapp.md'";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_path_like_quoted_value_with_spaces_no_extension_not_exempt() {
+        // Same shape as above but without an extension: the collapsed token
+        // only has the 3+ segment signal available, which is deliberately
+        // restricted to single-token values (see `is_multi_word_collapse` in
+        // `is_in_path_like_token`). An extensionless path containing a
+        // literal space is rare enough that this is an accepted narrowing,
+        // not an oversight.
+        let line = "link: 'docs/My App/myapp'";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_path_like_trailing_comment_is_still_sole_value() {
+        let line = "link: docs/guide/myapp # canonical path";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_path_like_trailing_punctuation_trimmed() {
+        let line = "link: docs/myapp.md, then leave.";
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
+    }
+
+    #[test]
+    fn test_trim_token_bounds_reaches_fixpoint_after_punctuation_exposes_wrapper() {
+        let line = r#"See "docs/myapp.md", then leave."#;
+        let raw_start = at(line, "\"docs");
+        let raw_end = raw_start + r#""docs/myapp.md","#.len();
+        assert_eq!(&line[raw_start..raw_end], r#""docs/myapp.md","#);
+        let (start, end) = MD044ProperNames::trim_token_bounds(line, raw_start, raw_end);
+        assert_eq!(&line[start..end], "docs/myapp.md");
+    }
+
+    #[test]
+    fn test_trim_token_bounds_reaches_fixpoint_with_multiple_trailing_wrappers() {
+        let line = r#"("docs/myapp.md")."#;
+        let (start, end) = MD044ProperNames::trim_token_bounds(line, 0, line.len());
+        assert_eq!(&line[start..end], "docs/myapp.md");
+    }
+
+    #[test]
+    fn test_frontmatter_link_path_not_flagged() {
+        let content = "---\ntitle: Heading for MyApp\nlink: 'this/is/a/link/to/myapp.md'\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "path in a frontmatter value must not be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_fix_does_not_corrupt_frontmatter_link_path() {
+        let content = "---\nlink: 'this/is/a/link/to/myapp.md'\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        assert_eq!(rule.fix(&ctx).unwrap(), content, "fix must not rewrite a path");
+    }
+
+    // The next few tests document the deliberate frontmatter-only scope: a
+    // body occurrence that sits inside text shaped like a file path (a
+    // parenthesised disambiguator, a bracketed dynamic segment, a Next.js
+    // catch-all route) is corrected exactly like any other prose occurrence,
+    // and only that single word changes. Earlier attempts at exempting
+    // body-prose paths corrupted these exact shapes (splitting mid-token on
+    // wrapper characters, or on `[[`/`]]`/`](` sequences); asserting the
+    // plain single-word correction here guards against that class of bug
+    // reappearing without silently reintroducing the abandoned exemption.
+
+    #[test]
+    fn test_body_prose_parenthesized_disambiguator_is_case_corrected() {
+        let content = "See docs/myapp(1).md here.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "body occurrence is flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), "See docs/MyApp(1).md here.\n");
+    }
+
+    #[test]
+    fn test_body_prose_bracketed_dynamic_segment_is_case_corrected() {
+        let content = "See docs/[myapp].md here.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "body occurrence is flagged: {result:?}");
+        assert_eq!(rule.fix(&ctx).unwrap(), "See docs/[MyApp].md here.\n");
+    }
+
+    #[test]
+    fn test_body_prose_nextjs_catch_all_segment_is_case_corrected() {
+        // `[[...myapp]]` is a Next.js optional catch-all route segment, not
+        // WikiLink syntax; nothing in the parser treats it specially here.
+        let content = "pages/[[...myapp]].tsx are catch-all routes.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "body occurrence is flagged: {result:?}");
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "pages/[[...MyApp]].tsx are catch-all routes.\n"
+        );
+    }
+
+    #[test]
+    fn test_two_adjacent_whitespace_free_links_both_flagged() {
+        // Two links with no whitespace between them, `[myapp](url)[github](url)`.
+        // A body-prose tokenizer that split on markdown syntax previously let
+        // the first link's boundary swallow the second, losing its flag.
+        let content = "[myapp](https://a.com)[github](https://b.com)\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string(), "GitHub".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 2, "both link texts must be flagged: {result:?}");
+        assert!(result.iter().any(|w| w.message.contains("'myapp'")));
+        assert!(result.iter().any(|w| w.message.contains("'github'")));
+    }
+
+    #[test]
+    fn test_fix_does_not_corrupt_frontmatter_path_with_route_group_named_after_proper_name() {
+        // Next.js-style route group: the parenthesised directory segment
+        // itself is the proper name, e.g. `src/(myapp)/page.tsx`.
+        let content = "---\nlink: src/(myapp)/page.tsx\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            content,
+            "fix must not rewrite a frontmatter path whose route-group directory name is the proper name"
+        );
+    }
+
+    #[test]
+    fn test_quoted_frontmatter_value_slash_conjunction_prose_still_flagged() {
+        // A quoted value is not automatically a single path token just
+        // because it is quoted: "We" carries no slash, so per-word
+        // tokenization applies and the slash-separated list is judged as
+        // prose, not the sole value.
+        let content = "---\ndescription: \"We support github/gitlab/bitbucket now\"\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "quoted prose value must still flag 'github': {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_quoted_frontmatter_value_single_slash_word_with_unrelated_dot_still_flagged() {
+        // One slash-bearing word plus an unrelated later dot (in "1.0" or
+        // "e.g.") must not make the whole quoted sentence exempt as a path.
+        let content = "---\ndescription: \"We use myapp/gitlab and version 1.0 e.g. weekly\"\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "quoted prose value must still flag 'myapp': {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_quoted_toml_frontmatter_value_slash_conjunction_prose_still_flagged() {
+        // TOML string values are essentially always quoted, so this class of
+        // bug affects TOML frontmatter systematically.
+        let content = "+++\ndescription = \"We support github/gitlab/bitbucket now\"\n+++\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "TOML quoted prose value must still flag 'github': {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_path_like_collapsed_multiword_no_extension_not_exempt() {
+        // Every word in these quoted values carries a slash, so they collapse
+        // to one token per `is_single_quoted_path`. None of the collapsed
+        // tokens starts with a path prefix or ends in an extension, so the
+        // 3+ segment sole-value signal must not exempt them either: it is
+        // restricted to genuinely single-token values, not tokens formed by
+        // collapsing several whitespace-separated words together.
+        for line in [
+            r#"description: "myapp/gitlab github/bitbucket""#,
+            r#"description: "and/or this/that myapp/gitlab""#,
+            r#"description: "he/him she/her myapp/gitlab""#,
+        ] {
+            let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+            for needle in ["myapp", "gitlab"] {
+                if let Some(byte_pos) = line.find(needle) {
+                    assert!(
+                        !MD044ProperNames::is_in_path_like_token(line, byte_pos, span),
+                        "collapsed multi-word value must not exempt '{needle}': {line}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_path_like_collapsed_multiword_no_extension_not_exempt_toml() {
+        let line = r#"description = "myapp/gitlab github/bitbucket""#;
+        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        for needle in ["myapp", "gitlab", "github", "bitbucket"] {
+            let byte_pos = at(line, needle);
+            assert!(
+                !MD044ProperNames::is_in_path_like_token(line, byte_pos, span),
+                "collapsed multi-word TOML value must not exempt '{needle}'"
+            );
+        }
+    }
+
+    #[test]
+    fn test_frontmatter_collapsed_multiword_names_all_flagged_yaml() {
+        let content = "---\ndescription: \"myapp/gitlab github/bitbucket\"\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(
+            vec![
+                "MyApp".to_string(),
+                "GitLab".to_string(),
+                "GitHub".to_string(),
+                "Bitbucket".to_string(),
+            ],
+            false,
+        );
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            4,
+            "all four names in the collapsed multi-word value must be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_collapsed_multiword_names_all_flagged_toml() {
+        let content = "+++\ndescription = \"myapp/gitlab github/bitbucket\"\n+++\n\nBody.\n";
+        let rule = MD044ProperNames::new(
+            vec![
+                "MyApp".to_string(),
+                "GitLab".to_string(),
+                "GitHub".to_string(),
+                "Bitbucket".to_string(),
+            ],
+            false,
+        );
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            4,
+            "all four names in the collapsed multi-word TOML value must be flagged: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_collapsed_multiword_conjunction_pairs_flagged() {
+        let content = "---\ndescription: \"and/or this/that myapp/gitlab\"\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string(), "GitLab".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "myapp and gitlab must both be flagged despite the surrounding slash pairs: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_collapsed_multiword_pronoun_pairs_flagged() {
+        let content = "---\ndescription: \"he/him she/her myapp/gitlab\"\n---\n\nBody.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string(), "GitLab".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "myapp and gitlab must both be flagged despite the surrounding slash pairs: {result:?}"
+        );
+    }
+
+    /// The path exemption is scoped to frontmatter only, by design: a body
+    /// occurrence sitting inside what looks like a file path is still
+    /// flagged and fixed like any other prose occurrence. This is a
+    /// deliberate limit (see `is_in_path_like_token`), not an oversight, so a
+    /// future reader does not "fix" it back into hand-rolled body tokenizing.
+    #[test]
+    fn test_body_prose_path_is_flagged_frontmatter_only_scope() {
+        let content = "See docs/myapp.md for details about myapp.\n";
+        let rule = MD044ProperNames::new(vec!["MyApp".to_string()], false);
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "both the path occurrence and the prose occurrence are flagged in body text: {result:?}"
+        );
+        assert_eq!(rule.fix(&ctx).unwrap(), "See docs/MyApp.md for details about MyApp.\n");
+    }
+
+    #[test]
+    fn test_slash_conjunction_prose_still_flagged() {
+        let content = "We support github/gitlab imports.\n";
+        let rule = MD044ProperNames::new(vec!["GitHub".to_string()], false);
+        let ctx = create_context(content);
+        assert_eq!(rule.check(&ctx).unwrap().len(), 1);
     }
 }
