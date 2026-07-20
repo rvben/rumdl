@@ -573,29 +573,34 @@ impl Rule for MD022BlanksAroundHeadings {
             let (start_line, start_col, end_line, end_col) =
                 calculate_heading_range(heading_display_line, line_info.content(ctx.content));
 
-            let required_above_count = self
-                .config
-                .lines_above
-                .get_for_level(heading_level)
-                .required_count()
-                .expect("Violations only generated for limited 'above' requirements");
-            let required_below_count = self
-                .config
-                .lines_below
-                .get_for_level(heading_level)
-                .required_count()
-                .expect("Violations only generated for limited 'below' requirements");
-
+            // Each requirement is resolved inside the arm that uses it. A
+            // requirement can be unlimited (a negative config value such as
+            // `lines_above: -1`), in which case it has no required count and
+            // never produces a violation for its own position. Resolving both
+            // up front panicked whenever one position was unlimited and the
+            // other reported.
             let (message, insertion_point) = match position {
-                "above" => (
-                    format!(
-                        "Expected {} blank {} above heading",
-                        required_above_count,
-                        if required_above_count == 1 { "line" } else { "lines" }
-                    ),
-                    heading_line, // Insert before the heading line
-                ),
+                "above" => {
+                    let Some(required_above_count) =
+                        self.config.lines_above.get_for_level(heading_level).required_count()
+                    else {
+                        continue;
+                    };
+                    (
+                        format!(
+                            "Expected {} blank {} above heading",
+                            required_above_count,
+                            if required_above_count == 1 { "line" } else { "lines" }
+                        ),
+                        heading_line, // Insert before the heading line
+                    )
+                }
                 "below" => {
+                    let Some(required_below_count) =
+                        self.config.lines_below.get_for_level(heading_level).required_count()
+                    else {
+                        continue;
+                    };
                     // For Setext headings, insert after the underline
                     let insert_after = if line_info.heading.as_ref().is_some_and(|h| {
                         matches!(
@@ -1004,6 +1009,65 @@ Final content.";
         let warnings = rule.check(&ctx).unwrap();
         assert_eq!(warnings.len(), 1, "H2 without blank above should trigger warning");
         assert!(warnings[0].message.contains("above"));
+    }
+
+    #[test]
+    fn test_unlimited_above_with_limited_below_does_not_panic() {
+        use md022_config::{HeadingBlankRequirement, HeadingLevelConfig};
+
+        // `lines_above: -1` means "any number of blank lines above", so that
+        // side has no required count. A violation on the *other* side used to
+        // resolve both counts up front and panic on the unlimited one.
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::scalar_requirement(HeadingBlankRequirement::Unlimited),
+            lines_below: HeadingLevelConfig::scalar(1),
+            allowed_at_start: false,
+        });
+
+        // "## Banana" has no blank line below it, so a "below" violation fires.
+        let content = "# Title\n\nText\n## Banana\nText\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).expect("check must not fail");
+
+        assert!(
+            warnings.iter().any(|w| w.message.contains("below")),
+            "expected a 'below' violation, got: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+        assert!(
+            !warnings.iter().any(|w| w.message.contains("above")),
+            "an unlimited 'above' requirement must never report: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_unlimited_below_with_limited_above_does_not_panic() {
+        use md022_config::{HeadingBlankRequirement, HeadingLevelConfig};
+
+        let rule = MD022BlanksAroundHeadings::from_config_struct(MD022Config {
+            lines_above: HeadingLevelConfig::scalar(1),
+            lines_below: HeadingLevelConfig::scalar_requirement(HeadingBlankRequirement::Unlimited),
+            allowed_at_start: false,
+        });
+
+        // "## Banana" has no blank line above it, so an "above" violation fires.
+        let content = "# Title\n\nText\n## Banana\n\nText\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let warnings = rule.check(&ctx).expect("check must not fail");
+
+        assert!(
+            warnings.iter().any(|w| w.message.contains("above")),
+            "expected an 'above' violation, got: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+        assert!(
+            !warnings.iter().any(|w| w.message.contains("below")),
+            "an unlimited 'below' requirement must never report: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
