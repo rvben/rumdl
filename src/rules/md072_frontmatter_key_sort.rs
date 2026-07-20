@@ -87,7 +87,7 @@ impl MD072FrontmatterKeySort {
             // contain one, e.g. "og:title").
             if !line.starts_with(' ')
                 && !line.starts_with('\t')
-                && let Some(colon_pos) = Self::separator_pos_outside_quoted_key(line, ':')
+                && let Some(colon_pos) = FrontMatterUtils::separator_pos_outside_quoted_key(line, ':')
             {
                 let raw = line[..colon_pos].trim();
                 if !raw.is_empty() && !raw.starts_with('#') {
@@ -127,7 +127,7 @@ impl MD072FrontmatterKeySort {
             // contain one, e.g. "a=b").
             if !line.starts_with(' ')
                 && !line.starts_with('\t')
-                && let Some(eq_pos) = Self::separator_pos_outside_quoted_key(line, '=')
+                && let Some(eq_pos) = FrontMatterUtils::separator_pos_outside_quoted_key(line, '=')
             {
                 let raw = line[..eq_pos].trim();
                 if !raw.is_empty() {
@@ -261,39 +261,6 @@ impl MD072FrontmatterKeySort {
         });
     }
 
-    /// Byte position of `separator` outside a leading quoted key: a quoted
-    /// key (`"og:title":`, `"a=b" =`) may contain the separator character,
-    /// so the search starts after the closing quote.
-    fn separator_pos_outside_quoted_key(line: &str, separator: char) -> Option<usize> {
-        let after_quote = if let Some(rest) = line.strip_prefix('"') {
-            rest.find('"').map(|i| i + 2)
-        } else if let Some(rest) = line.strip_prefix('\'') {
-            rest.find('\'').map(|i| i + 2)
-        } else {
-            None
-        };
-        match after_quote {
-            Some(start) => line[start..].find(separator).map(|i| start + i),
-            None => line.find(separator),
-        }
-    }
-
-    /// The top-level key a raw TOML key expression defines. A quoted key is
-    /// atomic (`"a.b"` defines `a.b`); otherwise the root of a dotted path
-    /// (`params.seo` defines `params`).
-    fn toml_root_key(raw: &str) -> &str {
-        if let Some(rest) = raw.strip_prefix('"') {
-            if let Some(end) = rest.find('"') {
-                return &rest[..end];
-            }
-        } else if let Some(rest) = raw.strip_prefix('\'')
-            && let Some(end) = rest.find('\'')
-        {
-            return &rest[..end];
-        }
-        raw.split('.').next().unwrap_or(raw).trim()
-    }
-
     /// Every top-level key the TOML frontmatter defines, for the presence
     /// check. Broader than `extract_toml_keys` (which is scoped to what the
     /// sort check orders): dotted assignments count by their root
@@ -323,7 +290,7 @@ impl MD072FrontmatterKeySort {
                             .and_then(|s| s.split_once(']').map(|(inner, _)| inner))
                     });
                 if let Some(inner) = inner {
-                    let key = Self::toml_root_key(inner.trim());
+                    let key = FrontMatterUtils::toml_root_key(inner.trim());
                     if !key.is_empty() {
                         keys.push(key.to_string());
                     }
@@ -333,9 +300,9 @@ impl MD072FrontmatterKeySort {
             if !in_tables
                 && !line.starts_with(' ')
                 && !line.starts_with('\t')
-                && let Some(eq_pos) = Self::separator_pos_outside_quoted_key(line, '=')
+                && let Some(eq_pos) = FrontMatterUtils::separator_pos_outside_quoted_key(line, '=')
             {
-                let key = Self::toml_root_key(line[..eq_pos].trim());
+                let key = FrontMatterUtils::toml_root_key(line[..eq_pos].trim());
                 if !key.is_empty() {
                     keys.push(key.to_string());
                 }
@@ -464,7 +431,7 @@ impl Rule for MD072FrontmatterKeySort {
                 let end_column = frontmatter_lines
                     .get(key_idx)
                     .and_then(|line| {
-                        Self::separator_pos_outside_quoted_key(line, ':')
+                        FrontMatterUtils::separator_pos_outside_quoted_key(line, ':')
                             .map(|pos| line[..pos].trim().chars().count() + 1)
                     })
                     .unwrap_or(out_of_place.chars().count() + 1);
@@ -531,7 +498,7 @@ impl Rule for MD072FrontmatterKeySort {
                 let end_column = frontmatter_lines
                     .get(key_idx)
                     .and_then(|line| {
-                        Self::separator_pos_outside_quoted_key(line, '=')
+                        FrontMatterUtils::separator_pos_outside_quoted_key(line, '=')
                             .map(|pos| line[..pos].trim().chars().count() + 1)
                     })
                     .unwrap_or(out_of_place.chars().count() + 1);

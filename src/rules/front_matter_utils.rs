@@ -366,6 +366,39 @@ impl FrontMatterUtils {
 
         0
     }
+
+    /// Byte position of `separator` outside a leading quoted key: a quoted
+    /// key (`"og:title":`, `"a=b" =`) may contain the separator character,
+    /// so the search starts after the closing quote.
+    pub fn separator_pos_outside_quoted_key(line: &str, separator: char) -> Option<usize> {
+        let after_quote = if let Some(rest) = line.strip_prefix('"') {
+            rest.find('"').map(|i| i + 2)
+        } else if let Some(rest) = line.strip_prefix('\'') {
+            rest.find('\'').map(|i| i + 2)
+        } else {
+            None
+        };
+        match after_quote {
+            Some(start) => line[start..].find(separator).map(|i| start + i),
+            None => line.find(separator),
+        }
+    }
+
+    /// The top-level key a raw TOML key expression defines. A quoted key is
+    /// atomic (`"a.b"` defines `a.b`); otherwise the root of a dotted path
+    /// (`params.seo` defines `params`).
+    pub fn toml_root_key(raw: &str) -> &str {
+        if let Some(rest) = raw.strip_prefix('"') {
+            if let Some(end) = rest.find('"') {
+                return &rest[..end];
+            }
+        } else if let Some(rest) = raw.strip_prefix('\'')
+            && let Some(end) = rest.find('\'')
+        {
+            return &rest[..end];
+        }
+        raw.split('.').next().unwrap_or(raw).trim()
+    }
 }
 
 #[cfg(test)]
