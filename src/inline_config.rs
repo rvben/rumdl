@@ -225,7 +225,23 @@ impl InlineConfig {
                             && let Some(obj) = json_config.as_object()
                         {
                             for (rule_name, rule_config) in obj {
-                                config.file_rule_config.insert(rule_name.clone(), rule_config.clone());
+                                // markdownlint allows a boolean to turn a rule off or
+                                // back on, e.g. `{ "no-trailing-spaces": false }`, so
+                                // route those to the disable set instead of storing
+                                // them as rule options.
+                                let normalized = normalize_rule_name(rule_name);
+                                if let Some(enabled) = rule_config.as_bool() {
+                                    if enabled {
+                                        config.file_disabled_rules.remove(&normalized);
+                                    } else {
+                                        config.file_disabled_rules.insert(normalized);
+                                    }
+                                    continue;
+                                }
+                                // Store under the canonical rule id so lookups by
+                                // `MDxxx` also find configs written with an alias,
+                                // e.g. `{ "line-length": { "line_length": 70 } }`.
+                                config.file_rule_config.insert(normalized, rule_config.clone());
                             }
                         }
                     }
@@ -1131,6 +1147,52 @@ This is a test line."#;
         let obj = json.as_object().unwrap();
         assert!(obj.contains_key("tables"), "Should have tables key");
         assert!(!obj.get("tables").unwrap().as_bool().unwrap());
+    }
+
+    #[test]
+    fn test_configure_file_bool_false_disables_rule() {
+        // markdownlint documents a boolean as a way to turn a rule off for the
+        // whole file, e.g. `{ "no-trailing-spaces": false }`.
+        let content = r#"<!-- markdownlint-configure-file {"MD012": false} -->"#;
+
+        let inline_config = InlineConfig::from_content(content);
+
+        assert!(inline_config.is_rule_disabled("MD012", 1));
+        assert!(
+            inline_config.get_rule_config("MD012").is_none(),
+            "a boolean should not be stored as rule options"
+        );
+    }
+
+    #[test]
+    fn test_configure_file_bool_false_disables_rule_by_alias() {
+        let content = r#"<!-- markdownlint-configure-file {"no-multiple-blanks": false} -->"#;
+
+        let inline_config = InlineConfig::from_content(content);
+
+        assert!(inline_config.is_rule_disabled("MD012", 1));
+    }
+
+    #[test]
+    fn test_configure_file_bool_true_leaves_rule_enabled() {
+        let content = r#"<!-- markdownlint-configure-file {"MD012": true} -->"#;
+
+        let inline_config = InlineConfig::from_content(content);
+
+        assert!(!inline_config.is_rule_disabled("MD012", 1));
+    }
+
+    #[test]
+    fn test_get_rule_config_from_configure_file_alias_key() {
+        // A config written with the rule's alias must be reachable by its id.
+        let content = r#"<!-- markdownlint-configure-file {"line-length": {"line_length": 50}} -->"#;
+
+        let inline_config = InlineConfig::from_content(content);
+        let config_override = inline_config.get_rule_config("MD013");
+
+        assert!(config_override.is_some(), "alias-keyed config should resolve to MD013");
+        let obj = config_override.unwrap().as_object().unwrap();
+        assert_eq!(obj.get("line_length").unwrap().as_u64().unwrap(), 50);
     }
 
     // ── parse_disable_comment / parse_enable_comment edge cases ──────────
