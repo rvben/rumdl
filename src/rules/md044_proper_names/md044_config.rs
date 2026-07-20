@@ -14,6 +14,12 @@ pub struct MD044Config {
 
     #[serde(default = "default_html_comments", rename = "html-comments", alias = "html_comments")]
     pub html_comments: bool,
+
+    /// Top-level frontmatter keys whose values are not checked. Matched
+    /// case-insensitively. `None` checks every field. A parent key excludes
+    /// its whole subtree.
+    #[serde(default, rename = "ignore-frontmatter-fields", alias = "ignore_frontmatter_fields")]
+    pub ignore_frontmatter_fields: Option<Vec<String>>,
 }
 
 impl Default for MD044Config {
@@ -23,6 +29,7 @@ impl Default for MD044Config {
             code_blocks: default_code_blocks(),
             html_elements: default_html_elements(),
             html_comments: default_html_comments(),
+            ignore_frontmatter_fields: None,
         }
     }
 }
@@ -94,5 +101,25 @@ mod tests {
         assert!(!config.code_blocks);
         assert!(config.html_elements);
         assert!(config.html_comments);
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_fields_kebab_and_snake() {
+        let kebab: MD044Config = toml::from_str(r#"ignore-frontmatter-fields = ["link"]"#).unwrap();
+        assert_eq!(
+            kebab.ignore_frontmatter_fields.as_deref(),
+            Some(&["link".to_string()][..])
+        );
+
+        let snake: MD044Config = toml::from_str(r#"ignore_frontmatter_fields = ["link"]"#).unwrap();
+        assert_eq!(
+            snake.ignore_frontmatter_fields.as_deref(),
+            Some(&["link".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_fields_defaults_to_none() {
+        assert!(MD044Config::default().ignore_frontmatter_fields.is_none());
     }
 }

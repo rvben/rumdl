@@ -2,6 +2,7 @@ use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
+use crate::rules::front_matter_utils::FrontMatterUtils;
 use crate::utils::range_utils::byte_to_char_count;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -86,6 +87,8 @@ pub struct MD044ProperNames {
     combined_pattern: Option<String>,
     // Precomputed lowercase name variants for fast pre-checks
     name_variants: Vec<String>,
+    /// Lowercased `ignore_frontmatter_fields`, for case-insensitive lookup.
+    ignore_fields: HashSet<String>,
     // Memoizes name violations keyed by content hash. Deliberately behind an
     // `Arc<Mutex<..>>` so it is SHARED across clones: rule instances are cloned
     // per config group and recreated for inline-config overrides, and the same
@@ -102,15 +105,21 @@ impl MD044ProperNames {
         let config = MD044Config {
             names,
             code_blocks,
-            html_elements: true, // Default to checking HTML elements
-            html_comments: true, // Default to checking HTML comments
+            ..Default::default()
         };
         let combined_pattern = Self::create_combined_pattern(&config);
         let name_variants = Self::build_name_variants(&config);
+        let ignore_fields = config
+            .ignore_frontmatter_fields
+            .iter()
+            .flatten()
+            .map(|f| f.to_lowercase())
+            .collect();
         Self {
             config,
             combined_pattern,
             name_variants,
+            ignore_fields,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -129,10 +138,17 @@ impl MD044ProperNames {
     pub fn from_config_struct(config: MD044Config) -> Self {
         let combined_pattern = Self::create_combined_pattern(&config);
         let name_variants = Self::build_name_variants(&config);
+        let ignore_fields = config
+            .ignore_frontmatter_fields
+            .iter()
+            .flatten()
+            .map(|f| f.to_lowercase())
+            .collect();
         Self {
             config,
             combined_pattern,
             name_variants,
+            ignore_fields,
             content_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -252,6 +268,13 @@ impl MD044ProperNames {
             None => return Vec::new(),
         };
 
+        // Attribution is only needed when fields are actually excluded.
+        let field_map = if self.ignore_fields.is_empty() {
+            Vec::new()
+        } else {
+            Self::frontmatter_field_map(ctx)
+        };
+
         // Use ctx.lines for better performance
         for (line_idx, line_info) in ctx.lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -296,6 +319,12 @@ impl MD044ProperNames {
                 0
             };
             if fm_value_offset == usize::MAX {
+                continue;
+            }
+            if line_info.in_front_matter
+                && let Some(Some(field)) = field_map.get(line_idx)
+                && self.ignore_fields.contains(field)
+            {
                 continue;
             }
             let fm_value_span = if line_info.in_front_matter {
@@ -1113,6 +1142,218 @@ impl MD044ProperNames {
         Some(usize::MAX)
     }
 
+    /// Byte offset of the first occurrence of `target` in `s` that is
+    /// outside a single- or double-quoted span, skipping escaped
+    /// characters inside double quotes. `None` if `target` never occurs
+    /// unquoted.
+    fn find_unquoted(s: &str, target: char) -> Option<usize> {
+        let mut in_double = false;
+        let mut in_single = false;
+        let mut chars = s.char_indices();
+        while let Some((i, c)) = chars.next() {
+            if in_double {
+                if c == '\\' {
+                    chars.next();
+                } else if c == '"' {
+                    in_double = false;
+                }
+            } else if in_single {
+                if c == '\'' {
+                    in_single = false;
+                }
+            } else if c == target {
+                return Some(i);
+            } else if c == '"' {
+                in_double = true;
+            } else if c == '\'' {
+                in_single = true;
+            }
+        }
+        None
+    }
+
+    /// Inner key path of a real TOML table header, `[seo]` or
+    /// `[[authors]]`.
+    ///
+    /// A header, after stripping an optional trailing `#comment` that is
+    /// outside quotes and trimming, must START with `[` and END with the
+    /// matching `]` or `]]` and nothing else, and its inner key path must
+    /// contain no unquoted comma: a comma never appears in a real header
+    /// key (a bare or dotted path like `params.seo`), only in an array
+    /// literal like `1, 2`. This rejects a column-0 array element such as
+    /// `[1, 2],`: TOML does not require array elements to be indented, so
+    /// without this check the line is misread as a header named `1, 2`.
+    ///
+    /// A quoted key that itself contains a comma (`["a,b"]`) is valid TOML
+    /// and is still recognized here, since the comma is inside the quotes
+    /// and `find_unquoted` skips it.
+    fn toml_table_header(trimmed: &str) -> Option<&str> {
+        let head = match Self::find_unquoted(trimmed, '#') {
+            Some(i) => trimmed[..i].trim_end(),
+            None => trimmed,
+        };
+
+        let inner = if let Some(rest) = head.strip_prefix("[[") {
+            rest.strip_suffix("]]")?
+        } else {
+            head.strip_prefix('[')?.strip_suffix(']')?
+        };
+
+        if Self::find_unquoted(inner, ',').is_some() {
+            return None;
+        }
+
+        let inner = inner.trim();
+        if inner.is_empty() { None } else { Some(inner) }
+    }
+
+    /// Signed count of `[` minus `]` on a TOML line, ignoring bracket
+    /// characters inside quoted strings. Used to track how deep the parser
+    /// is inside an unclosed `key = [ ... ]` array so a nested element like
+    /// `[1, 2],` is never misread as a table header.
+    fn toml_bracket_delta(trimmed: &str) -> i32 {
+        let mut delta = 0i32;
+        let mut chars = trimmed.chars();
+        let mut in_double = false;
+        let mut in_single = false;
+        while let Some(c) = chars.next() {
+            if in_double {
+                if c == '\\' {
+                    chars.next();
+                } else if c == '"' {
+                    in_double = false;
+                }
+            } else if in_single {
+                if c == '\'' {
+                    in_single = false;
+                }
+            } else {
+                match c {
+                    '"' => in_double = true,
+                    '\'' => in_single = true,
+                    '[' => delta += 1,
+                    ']' => delta -= 1,
+                    _ => {}
+                }
+            }
+        }
+        delta
+    }
+
+    fn strip_key_quotes(raw: &str) -> &str {
+        raw.strip_prefix('"')
+            .and_then(|k| k.strip_suffix('"'))
+            .or_else(|| raw.strip_prefix('\'').and_then(|k| k.strip_suffix('\'')))
+            .unwrap_or(raw)
+    }
+
+    /// The lowercased top-level frontmatter key owning each line, indexed by
+    /// line number. `None` where no owner is determinable, which leaves the
+    /// line checked.
+    ///
+    /// Attribution is a heuristic. It is deliberately biased so an uncertain
+    /// line falls back to being checked: an indent-0 YAML key line always
+    /// starts a new key, so a bracket inside a block scalar can never cause a
+    /// later real key to be suppressed. The cost is that an indent-0 flow
+    /// continuation is attributed to its own text rather than to its parent.
+    fn frontmatter_field_map(ctx: &crate::lint_context::LintContext) -> Vec<Option<String>> {
+        let mut map = vec![None; ctx.lines.len()];
+        let mut current: Option<String> = None;
+        let mut toml = false;
+        let mut in_toml_table = false;
+        // Depth of unclosed `[` inside the current TOML `key = [ ... ]`
+        // array, across lines. TOML only: see the comment in the YAML
+        // branch below for why this tracking does not extend there.
+        let mut toml_array_depth: i32 = 0;
+
+        for (idx, info) in ctx.lines.iter().enumerate() {
+            if !info.in_front_matter {
+                continue;
+            }
+            let line = info.content(ctx.content);
+            let trimmed = line.trim();
+
+            if trimmed == "---" || trimmed == "+++" {
+                toml = trimmed == "+++";
+                current = None;
+                in_toml_table = false;
+                toml_array_depth = 0;
+                continue;
+            }
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                map[idx].clone_from(&current);
+                continue;
+            }
+
+            if toml {
+                // A table header can only ever be found while
+                // `toml_array_depth` is zero: valid TOML never lets a
+                // `[table]`/`[[array-of-tables]]` header appear inside an
+                // unclosed array value, so a bracket-only line seen while
+                // depth is above zero, such as a column-0 array element
+                // `[1, 2]` or `[2]`, is always a continuation, never a
+                // header, regardless of whether it happens to satisfy
+                // `toml_table_header`'s shape check on its own.
+                //
+                // An indent-0 assignment, by contrast, always resyncs
+                // `current` and clears the stuck depth, even while
+                // `toml_array_depth` is stuck above zero from an unclosed
+                // array (a forgotten closing bracket). Without this, a
+                // malformed array would misattribute every following key
+                // to the array's key for the rest of the frontmatter.
+                let indent = line.len() - line.trim_start().len();
+                let header = if indent == 0 && toml_array_depth == 0 {
+                    Self::toml_table_header(trimmed)
+                } else {
+                    None
+                };
+                let assignment_eq = if indent == 0 {
+                    FrontMatterUtils::separator_pos_outside_quoted_key(trimmed, '=')
+                } else {
+                    None
+                };
+                let resync = header.is_some() || assignment_eq.is_some();
+
+                if resync {
+                    if let Some(name) = header {
+                        current = Some(FrontMatterUtils::toml_root_key(name).to_lowercase());
+                        in_toml_table = true;
+                    } else if !in_toml_table && let Some(eq) = assignment_eq {
+                        let root = FrontMatterUtils::toml_root_key(trimmed[..eq].trim());
+                        current = Some(root.to_lowercase());
+                    }
+                    // Inside a table, assignments belong to the table. Array
+                    // continuations match neither branch and inherit.
+                    toml_array_depth = 0;
+                }
+                toml_array_depth = (toml_array_depth + Self::toml_bracket_delta(trimmed)).max(0);
+            } else {
+                // YAML deliberately does not track bracket/flow depth the
+                // way the TOML branch does. YAML has block scalars
+                // (`description: |`) whose content is arbitrary text that
+                // could contain an unmatched `[`, and a running depth
+                // counter would misread that as an open array and wrongly
+                // swallow a later, real top-level key. TOML has no block
+                // scalars, so depth tracking is safe there. YAML instead
+                // stays with the simpler, safer rule: every indent-0 key
+                // line always starts a new key.
+                let indent = line.len() - line.trim_start().len();
+                if indent == 0 {
+                    if trimmed.starts_with("- ") || trimmed == "-" {
+                        current = None;
+                    } else if let Some(colon) = FrontMatterUtils::separator_pos_outside_quoted_key(trimmed, ':') {
+                        let raw = trimmed[..colon].trim();
+                        current = Some(Self::strip_key_quotes(raw).to_lowercase());
+                    }
+                }
+                // Indented lines inherit, which covers nested maps, sequence
+                // items and block-scalar continuations.
+            }
+            map[idx].clone_from(&current);
+        }
+        map
+    }
+
     // Get the proper name that should be used for a found name
     fn get_proper_name_for(&self, found_name: &str) -> Option<String> {
         let found_lower = found_name.to_lowercase();
@@ -1239,7 +1480,7 @@ impl Rule for MD044ProperNames {
         self
     }
 
-    crate::impl_rule_config_methods!(MD044Config);
+    crate::impl_rule_config_methods!(MD044Config, nullable);
 }
 
 #[cfg(test)]
@@ -1249,6 +1490,168 @@ mod tests {
 
     fn create_context(content: &str) -> LintContext<'_> {
         LintContext::new(content, crate::config::MarkdownFlavor::Standard, None)
+    }
+
+    fn field_map_for(content: &str) -> Vec<Option<String>> {
+        let ctx = create_context(content);
+        MD044ProperNames::frontmatter_field_map(&ctx)
+    }
+
+    #[test]
+    fn test_field_map_nested_lines_inherit_top_level_key() {
+        let map = field_map_for("---\nseo:\n  canonical: docs/a.md\n  keywords:\n    - myapp\ntitle: x\n---\n");
+        assert_eq!(map[2].as_deref(), Some("seo"));
+        assert_eq!(map[4].as_deref(), Some("seo"));
+        assert_eq!(map[5].as_deref(), Some("title"));
+    }
+
+    #[test]
+    fn test_field_map_block_scalar_bracket_does_not_swallow_next_key() {
+        let map = field_map_for("---\ndescription: |\n  [myapp\ntitle: myapp\n---\n");
+        assert_eq!(map[2].as_deref(), Some("description"));
+        assert_eq!(
+            map[3].as_deref(),
+            Some("title"),
+            "an indent-0 key always starts a new key"
+        );
+    }
+
+    #[test]
+    fn test_field_map_quoted_key_with_colon() {
+        let map = field_map_for("---\n\"og:title\": myapp\n---\n");
+        assert_eq!(map[1].as_deref(), Some("og:title"));
+    }
+
+    #[test]
+    fn test_field_map_top_level_sequence_clears_attribution() {
+        let map = field_map_for("---\n- myapp\n---\n");
+        assert_eq!(map[1], None);
+    }
+
+    #[test]
+    fn test_field_map_toml_table_body_belongs_to_table_root() {
+        let map = field_map_for("+++\n[seo]\ncanonical = \"docs/a.md\"\n\n[[authors]]\nname = \"myapp\"\n+++\n");
+        assert_eq!(map[2].as_deref(), Some("seo"));
+        assert_eq!(map[5].as_deref(), Some("authors"));
+    }
+
+    #[test]
+    fn test_field_map_toml_dotted_assignment_uses_root() {
+        let map = field_map_for("+++\nseo.canonical = \"docs/a.md\"\n+++\n");
+        assert_eq!(map[1].as_deref(), Some("seo"));
+    }
+
+    #[test]
+    fn test_field_map_toml_array_continuation_inherits() {
+        let map = field_map_for("+++\nseo = [\n\"docs/guide/myapp\"\n]\n+++\n");
+        assert_eq!(map[2].as_deref(), Some("seo"));
+    }
+
+    #[test]
+    fn test_field_map_indent_zero_flow_continuation_is_not_attributed_to_parent() {
+        // Documented limitation: this is the safe direction. The value keeps
+        // being checked, exactly as it is today.
+        let map = field_map_for("---\nseo: [\n{name: myapp}\n]\n---\n");
+        assert_eq!(map[2].as_deref(), Some("{name"));
+    }
+
+    #[test]
+    fn test_field_map_toml_nested_array_inherits_and_title_not_corrupted() {
+        let map = field_map_for("+++\nmatrix = [\n  [1, 2],\n  [3, 4],\n]\ntitle = \"x\"\n+++\n");
+        assert_eq!(map[2].as_deref(), Some("matrix"), "nested array line inherits matrix");
+        assert_eq!(map[3].as_deref(), Some("matrix"), "nested array line inherits matrix");
+        assert_eq!(
+            map[5].as_deref(),
+            Some("title"),
+            "title must not inherit stale attribution from a closed nested array"
+        );
+    }
+
+    #[test]
+    fn test_field_map_toml_nested_array_last_element_without_trailing_comma() {
+        let map = field_map_for("+++\nmatrix = [\n  [1, 2],\n  [2]\n]\ntitle = \"x\"\n+++\n");
+        assert_eq!(
+            map[3].as_deref(),
+            Some("matrix"),
+            "last element without a trailing comma still inherits matrix"
+        );
+        assert_eq!(
+            map[5].as_deref(),
+            Some("title"),
+            "title must not inherit stale attribution from a closed nested array"
+        );
+    }
+
+    #[test]
+    fn test_field_map_toml_nested_array_then_real_table_header_non_regression_guard() {
+        // Not a bug reproduction: `toml_table_header` runs unconditionally
+        // on every non-continuation line, so a real `[table]` header always
+        // resyncs `current`/`in_toml_table` regardless of what came before.
+        // This passed before the array-depth fix and always will; it guards
+        // against a future change accidentally gating the header check
+        // itself behind array-depth state.
+        let map = field_map_for("+++\nmatrix = [\n  [1, 2],\n  [3, 4],\n]\n\n[seo]\ncanonical = \"docs/a.md\"\n+++\n");
+        assert_eq!(map[6].as_deref(), Some("seo"), "real table header after a closed array");
+        assert_eq!(
+            map[7].as_deref(),
+            Some("seo"),
+            "table body still attributes to the table"
+        );
+    }
+
+    #[test]
+    fn test_field_map_toml_unclosed_array_resyncs_on_next_assignment() {
+        // A forgotten closing bracket is a plausible authoring typo. Without
+        // recovery, the stuck array depth would attribute `title` to
+        // `matrix` forever, and excluding `matrix` would silently suppress
+        // a real violation on `title`. The indent-0 assignment must resync
+        // regardless of the unclosed depth.
+        let map = field_map_for("+++\nmatrix = [\n  [1, 2],\ntitle = \"x\"\n+++\n");
+        assert_eq!(
+            map[3].as_deref(),
+            Some("title"),
+            "title must resync even though the array was never closed"
+        );
+    }
+
+    #[test]
+    fn test_field_map_toml_column_zero_array_elements_inherit_and_title_not_corrupted() {
+        // TOML does not require indentation inside a multi-line array, so
+        // `[1, 2],` at column 0 is a valid array element, not a table
+        // header. `toml_table_header` must reject it: it starts with `[`
+        // and contains a later `]`, but does not END with `]` (there is a
+        // trailing `,`) and its inner content has an unquoted comma.
+        let map = field_map_for("+++\nmatrix = [\n[1, 2],\n[3, 4],\n]\ntitle = \"x\"\n+++\n");
+        assert_eq!(
+            map[2].as_deref(),
+            Some("matrix"),
+            "column-0 array element inherits matrix"
+        );
+        assert_eq!(
+            map[3].as_deref(),
+            Some("matrix"),
+            "column-0 array element inherits matrix"
+        );
+        assert_eq!(
+            map[5].as_deref(),
+            Some("title"),
+            "title must not inherit stale attribution from a misread array element"
+        );
+    }
+
+    #[test]
+    fn test_field_map_toml_column_zero_array_last_element_without_trailing_comma() {
+        let map = field_map_for("+++\nmatrix = [\n[1, 2],\n[2]\n]\ntitle = \"x\"\n+++\n");
+        assert_eq!(
+            map[3].as_deref(),
+            Some("matrix"),
+            "column-0 last element without a trailing comma still inherits matrix"
+        );
+        assert_eq!(
+            map[5].as_deref(),
+            Some("title"),
+            "title must not inherit stale attribution from a misread array element"
+        );
     }
 
     #[test]
@@ -1392,8 +1795,7 @@ javascript in code block
         let config = MD044Config {
             names: vec!["GitHub".to_string(), "GitLab".to_string(), "DevOps".to_string()],
             code_blocks: true,
-            html_elements: true,
-            html_comments: true,
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1609,8 +2011,8 @@ Third line with RUST and PYTHON."#;
         let config = MD044Config {
             names: vec!["Test".to_string()],
             code_blocks: true,
-            html_elements: true,
             html_comments: false,
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1749,8 +2151,8 @@ Third line with RUST and PYTHON."#;
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
-            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1770,9 +2172,8 @@ More javascript outside."#;
     fn test_html_comments_checked_when_enabled() {
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
-            code_blocks: true,   // Check code blocks
-            html_elements: true, // Check HTML elements
-            html_comments: true, // Check HTML comments
+            code_blocks: true, // Check code blocks
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1795,8 +2196,8 @@ More javascript outside."#;
         let config = MD044Config {
             names: vec!["Python".to_string(), "JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
-            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -1821,8 +2222,8 @@ More javascript outside."#;
         let config = MD044Config {
             names: vec!["JavaScript".to_string()],
             code_blocks: true,    // Check code blocks
-            html_elements: true,  // Check HTML elements
             html_comments: false, // Don't check HTML comments
+            ..Default::default()
         };
         let rule = MD044ProperNames::from_config_struct(config);
 
@@ -2733,6 +3134,53 @@ Visit [github documentation](https://github.com/docs) for details.
             fixed, content,
             "Fix should not modify names inside backticks in frontmatter"
         );
+    }
+
+    fn rule_ignoring(names: &[&str], ignore: &[&str]) -> MD044ProperNames {
+        MD044ProperNames::from_config_struct(MD044Config {
+            names: names.iter().map(ToString::to_string).collect(),
+            ignore_frontmatter_fields: Some(ignore.iter().map(ToString::to_string).collect()),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_field_suppresses_only_that_field() {
+        let content = "---\ntitle: Heading for myapp\nslug: myapp-guide\n---\n";
+        let rule = rule_ignoring(&["MyApp"], &["slug"]);
+        let result = rule.check(&create_context(content)).unwrap();
+        assert_eq!(result.len(), 1, "only title is flagged: {result:?}");
+        assert_eq!(result[0].line, 2);
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_field_is_case_insensitive() {
+        let content = "---\nSlug: myapp-guide\n---\n";
+        let rule = rule_ignoring(&["MyApp"], &["SLUG"]);
+        assert!(rule.check(&create_context(content)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_field_covers_nested_subtree() {
+        let content = "---\nseo:\n  canonical: myapp\n  keywords:\n    - myapp\n---\n";
+        let rule = rule_ignoring(&["MyApp"], &["seo"]);
+        assert!(rule.check(&create_context(content)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_field_does_not_affect_body() {
+        let content = "---\nslug: myapp\n---\n\nBody mentions myapp.\n";
+        let rule = rule_ignoring(&["MyApp"], &["slug"]);
+        let result = rule.check(&create_context(content)).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].line, 5);
+    }
+
+    #[test]
+    fn test_ignore_frontmatter_field_toml_table() {
+        let content = "+++\n[seo]\ncanonical = \"myapp\"\n+++\n";
+        let rule = rule_ignoring(&["MyApp"], &["seo"]);
+        assert!(rule.check(&create_context(content)).unwrap().is_empty());
     }
 
     // --- Angle-bracket URL tests (issue #457) ---
