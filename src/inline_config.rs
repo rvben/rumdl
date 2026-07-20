@@ -673,22 +673,37 @@ pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
     scan_configure_file_comments(line).into_iter().next().map(|(_, v)| v)
 }
 
-/// Warning about unknown rules in inline config comments
+/// Warning about unknown rules or options in inline config comments
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlineConfigWarning {
     /// The line number where the warning occurred (1-indexed)
     pub line_number: usize,
-    /// The rule name that was not recognized
+    /// The rule the warning concerns
     pub rule_name: String,
     /// The type of inline config comment
     pub comment_type: String,
-    /// Optional suggestion for similar rule names
+    /// Optional suggestion for a similar rule name, or option key when
+    /// `option_key` is set
     pub suggestion: Option<String>,
+    /// The unrecognized option key, when the warning is about an option inside
+    /// a configure-file rule config rather than the rule name itself
+    pub option_key: Option<String>,
 }
 
 impl InlineConfigWarning {
     /// Format the warning message
     pub fn format_message(&self) -> String {
+        // Wording matches the config-file validator so the same mistake reads
+        // the same way wherever it is written.
+        if let Some(ref key) = self.option_key {
+            return match self.suggestion {
+                Some(ref suggestion) => format!(
+                    "Unknown option for rule {}: {} (did you mean: {}?)",
+                    self.rule_name, key, suggestion
+                ),
+                None => format!("Unknown option for rule {}: {}", self.rule_name, key),
+            };
+        }
         if let Some(ref suggestion) = self.suggestion {
             format!(
                 "Unknown rule in inline {} comment: {} (did you mean: {}?)",
@@ -729,20 +744,46 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
     };
 
     // configure-file carries its rule names as JSON keys and may span lines, so
-    // it is scanned over the whole document. The warning is reported against
-    // the line the comment opens on.
+    // it is scanned over the whole document. Warnings are reported against the
+    // line the comment opens on.
+    let registry = crate::config::default_registry();
     for (offset, json_config) in scan_configure_file_comments(content) {
         let Some(obj) = json_config.as_object() else {
             continue;
         };
-        for rule_name in obj.keys() {
+        let line_number = line_of_offset(content, offset);
+        for (rule_name, rule_config) in obj {
             if !is_valid_rule_name(rule_name) {
                 warnings.push(InlineConfigWarning {
-                    line_number: line_of_offset(content, offset),
+                    line_number,
                     rule_name: rule_name.clone(),
                     comment_type: "configure-file".to_string(),
                     suggestion: suggest(rule_name),
+                    option_key: None,
                 });
+                // The rule itself is unknown, so its options cannot be checked
+                // against anything and would only add noise.
+                continue;
+            }
+            // A boolean turns the rule on or off and carries no options.
+            let Some(options) = rule_config.as_object() else {
+                continue;
+            };
+            let canonical = normalize_rule_name(rule_name);
+            let Some(valid_keys) = registry.config_keys_for(&canonical) else {
+                continue;
+            };
+            let valid_keys_vec: Vec<String> = valid_keys.iter().cloned().collect();
+            for key in options.keys() {
+                if !valid_keys.contains(key) {
+                    warnings.push(InlineConfigWarning {
+                        line_number,
+                        rule_name: canonical.clone(),
+                        comment_type: "configure-file".to_string(),
+                        suggestion: suggest_similar_key(key, &valid_keys_vec),
+                        option_key: Some(key.clone()),
+                    });
+                }
             }
         }
     }
@@ -778,6 +819,7 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
                     rule_name: rule_name.to_string(),
                     comment_type: comment_type.to_string(),
                     suggestion: suggest(rule_name),
+                    option_key: None,
                 });
             }
         }
@@ -1209,6 +1251,80 @@ This is a test line."#;
     // markdownlint scans configure-file over the whole document rather than
     // per line, so the comment may span lines. Every other directive stays
     // line-scoped in both tools.
+
+    // ── unknown option keys inside configure-file ────────────────────────
+    //
+    // A typo'd option key used to be dropped in silence, while the same typo
+    // in a config file was reported with a suggestion.
+
+    #[test]
+    fn test_unknown_option_key_in_configure_file_warns() {
+        let content = r#"<!-- markdownlint-configure-file {"MD013": {"line_lenght": 20}} -->"#;
+
+        let warnings = validate_inline_config_rules(content);
+
+        assert_eq!(warnings.len(), 1, "expected one option warning: {warnings:?}");
+        assert_eq!(warnings[0].rule_name, "MD013");
+        assert_eq!(warnings[0].option_key.as_deref(), Some("line_lenght"));
+        assert!(
+            warnings[0].suggestion.is_some(),
+            "a near-miss key should suggest the real one"
+        );
+        assert!(
+            warnings[0].format_message().contains("Unknown option for rule MD013"),
+            "message was: {}",
+            warnings[0].format_message()
+        );
+    }
+
+    #[test]
+    fn test_valid_option_keys_do_not_warn_in_either_case_style() {
+        // The false-positive guard that matters: both spellings are legal, and
+        // warning on them would be worse than the silence this replaces.
+        for content in [
+            r#"<!-- markdownlint-configure-file {"MD013": {"line_length": 20}} -->"#,
+            r#"<!-- markdownlint-configure-file {"MD013": {"line-length": 20}} -->"#,
+        ] {
+            let warnings = validate_inline_config_rules(content);
+            assert!(warnings.is_empty(), "valid key warned: {content} -> {warnings:?}");
+        }
+    }
+
+    #[test]
+    fn test_unknown_rule_does_not_also_warn_about_its_options() {
+        // The rule name is already reported; validating options of a rule that
+        // does not exist would just be noise.
+        let content = r#"<!-- markdownlint-configure-file {"nonexistent": {"whatever": 1}} -->"#;
+
+        let warnings = validate_inline_config_rules(content);
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected only the unknown-rule warning: {warnings:?}"
+        );
+        assert_eq!(warnings[0].rule_name, "nonexistent");
+        assert!(warnings[0].option_key.is_none());
+    }
+
+    #[test]
+    fn test_boolean_rule_value_has_no_option_warnings() {
+        let content = r#"<!-- markdownlint-configure-file {"MD013": false} -->"#;
+
+        let warnings = validate_inline_config_rules(content);
+
+        assert!(warnings.is_empty(), "a boolean has no option keys: {warnings:?}");
+    }
+
+    #[test]
+    fn test_unknown_option_key_in_multiline_comment_reports_start_line() {
+        let content = "# Head\n\n<!-- markdownlint-configure-file\n{\n  \"MD013\": { \"line_lenght\": 20 }\n}\n-->\n";
+
+        let warnings = validate_inline_config_rules(content);
+
+        assert_eq!(warnings.len(), 1, "expected one option warning: {warnings:?}");
+        assert_eq!(warnings[0].line_number, 3, "must point at the comment's opening line");
+    }
 
     #[test]
     fn test_configure_file_spanning_multiple_lines_applies() {
