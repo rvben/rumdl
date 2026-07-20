@@ -747,7 +747,15 @@ pub fn process_file_with_index(
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
     let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
-        let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        // Also flag inline enables that cannot take effect because config
+        // disabled the rule. The active set is the rules that survived config
+        // filtering, which is exactly `rules` here.
+        let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
+        inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
+            &content,
+            &active_rules,
+        ));
         let had_any = !inline_warnings.is_empty();
         if !silent {
             for warn in inline_warnings {

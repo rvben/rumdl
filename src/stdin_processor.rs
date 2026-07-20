@@ -61,7 +61,12 @@ pub fn process_stdin(
     // --silent (which only suppresses the printed notices) so the flag can still
     // fail the run.
     let inline_config_warning = {
-        let inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
+        let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
+        inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
+            &content,
+            &active_rules,
+        ));
         let had_any = !inline_warnings.is_empty();
         if !silent {
             let display_name = args.stdin_filename.as_deref().unwrap_or("<stdin>");

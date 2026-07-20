@@ -284,6 +284,20 @@ Regular content continues here.
 2. Verify the comment appears before the content it should affect
 3. Ensure you're using the correct rule ID (check with `rumdl rule MD###`)
 
+### Inline Enable Has No Effect
+
+A rule disabled in configuration cannot be re-enabled with an inline comment.
+Configuration-level rule selection is final: a disabled rule never runs, so an
+`enable`, `enable-file`, or `configure-file` with `true` targeting it does
+nothing. rumdl warns when this happens:
+
+```text
+[inline config warning] file.md:1: Rule MD012 is not enabled in configuration, so the inline enable comment enabling it has no effect
+```
+
+To use the rule, enable it in your configuration instead. Inline comments can
+only tighten configuration (disable rules), not loosen it.
+
 ## See Also
 
 - [Global Settings Reference](global-settings.md) - Configure rules globally
