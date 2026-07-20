@@ -77,6 +77,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.38](https://github.com/rvben/rumdl/compare/v0.2.37...v0.2.38) - 2026-07-21
+
+### Added
+
+- **md044**: add ignore-frontmatter-fields option ([b664e5a](https://github.com/rvben/rumdl/commit/b664e5ac776963b18a52fc9fb7cead8287530e10))
+- **config**: warn when an inline enable cannot re-enable a config-disabled rule ([a74a923](https://github.com/rvben/rumdl/commit/a74a92322d556967f61a1dde86c0f9649fed89e0))
+
+### Fixed
+
+- **md044**: stop flagging proper names inside frontmatter file paths ([35649d9](https://github.com/rvben/rumdl/commit/35649d9baf4d9452fbf0c669137e6c98280af9f3))
+- **md022**: stop panicking when one blank-line requirement is unlimited ([8a25eb2](https://github.com/rvben/rumdl/commit/8a25eb2c9d76df171475b69a1f11f455a9bfdc60))
+- **config**: report unknown option keys in inline configure-file comments ([8f4c0ea](https://github.com/rvben/rumdl/commit/8f4c0ea63e732abc52da7786abbabc53984fdf5c))
+- **config**: apply markdownlint-configure-file when the comment spans lines ([7a023a5](https://github.com/rvben/rumdl/commit/7a023a58079876674ca99f67b7f4e68c29472c8f))
+- **config**: honor booleans and alias keys in markdownlint-configure-file (#745) ([acefc19](https://github.com/rvben/rumdl/commit/acefc195b64003b3c1deef1dc9ac4c81b43f8bfa))
+
 ## [0.2.37](https://github.com/rvben/rumdl/compare/v0.2.36...v0.2.37) - 2026-07-19
 
 ### Added
