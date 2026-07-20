@@ -115,6 +115,29 @@ Configure specific rule settings for the entire file:
 This file uses a line length of 120 instead of the default.
 ```
 
+Unlike the other comments, this one may span multiple lines, which keeps larger
+configurations readable:
+
+```markdown
+<!-- rumdl-configure-file
+{
+  "MD013": { "line_length": 120 },
+  "MD007": { "indent": 4 }
+}
+-->
+```
+
+A rule can also be given `true` or `false` instead of an options object, to turn
+it on or off for the whole file:
+
+```markdown
+<!-- rumdl-configure-file { "MD012": false } -->
+```
+
+Rule names may be written as either an ID (`MD013`) or an alias
+(`line-length`). Several `configure-file` comments may appear in one document;
+each is applied, and a later one wins for any rule it repeats.
+
 ## Advanced Features
 
 ### Capture and Restore
