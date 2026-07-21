@@ -199,11 +199,59 @@ pub fn markdown_walk_builder(root: &Path, options: &MarkdownWalkOptions) -> igno
     builder
 }
 
+/// Drop Windows' verbatim `\\?\` prefix from a canonicalized path string.
+///
+/// `std::fs::canonicalize` returns the verbatim form (`\\?\C:\Users\dev`) on
+/// Windows. That form is useless for pattern matching: it does not compare
+/// equal to the ordinary paths rumdl works with, and normalizing its
+/// separators for globbing mangles it into `//?/C:/Users/dev`, which matches
+/// nothing. Only a drive path (`\\?\C:\...`) and a UNC share
+/// (`\\?\UNC\server\share` -> `\\server\share`) are unwrapped; any other
+/// verbatim path names a device namespace that has no ordinary equivalent, so
+/// it is left alone.
+///
+/// Pure string logic, compiled on every platform so it stays under test where
+/// Windows is not available. Only the call sites are Windows-specific, and on
+/// other platforms no path ever carries this prefix.
+fn strip_verbatim_prefix(path: &str) -> Cow<'_, str> {
+    // `\\?\UNC\server\share` -> `\\server\share`. The remainder already starts
+    // with one separator, so restoring the UNC form needs one more prepended.
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC")
+        && rest.starts_with('\\')
+    {
+        return Cow::Owned(format!(r"\{rest}"));
+    }
+    let Some(rest) = path.strip_prefix(r"\\?\") else {
+        return Cow::Borrowed(path);
+    };
+    let is_drive_path = rest.as_bytes().get(1) == Some(&b':');
+    if is_drive_path {
+        Cow::Borrowed(rest)
+    } else {
+        Cow::Borrowed(path)
+    }
+}
+
+/// Canonicalize `path` for pattern matching, or `None` when it cannot be
+/// resolved (a missing or unreadable file).
+///
+/// Canonical form is what patterns are matched against, so a symlinked
+/// location (`/home/dev` -> `/mnt/dev`, or a macOS `/var` -> `/private/var`)
+/// still matches. Windows' verbatim prefix is removed (see
+/// [`strip_verbatim_prefix`]).
+pub fn canonicalize_for_matching(path: &Path) -> Option<PathBuf> {
+    let canonical = path.canonicalize().ok()?;
+    if !cfg!(windows) {
+        return Some(canonical);
+    }
+    let as_str = canonical.to_string_lossy();
+    Some(PathBuf::from(strip_verbatim_prefix(&as_str).as_ref()))
+}
+
 /// The user's home directory, or `None` when it cannot be resolved.
 ///
-/// Canonicalized when possible: the paths an expanded pattern is matched
-/// against are canonical, so a symlinked home (`/home/dev` -> `/mnt/dev`, or a
-/// macOS `/var` -> `/private/var`) would otherwise never match.
+/// Canonicalized for matching (see [`canonicalize_for_matching`]), falling
+/// back to the path as reported when it cannot be canonicalized.
 ///
 /// Wasm and WASI builds have no home directory to resolve, so patterns keep
 /// their `~` there (see [`expand_home_prefix`]).
@@ -211,11 +259,9 @@ fn home_dir() -> Option<PathBuf> {
     #[cfg(feature = "native")]
     {
         use etcetera::{BaseStrategy, choose_base_strategy};
-        choose_base_strategy().ok().map(|s| {
-            s.home_dir()
-                .canonicalize()
-                .unwrap_or_else(|_| s.home_dir().to_path_buf())
-        })
+        choose_base_strategy()
+            .ok()
+            .map(|s| canonicalize_for_matching(s.home_dir()).unwrap_or_else(|| s.home_dir().to_path_buf()))
     }
     #[cfg(not(feature = "native"))]
     {
@@ -306,7 +352,7 @@ pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String 
     // non-canonical base (macOS `/var`, a Windows 8.3 short name) still strips.
     let path = Path::new(expanded.as_ref());
     let relative = path.strip_prefix(base).ok().or_else(|| {
-        let canonical = base.canonicalize().ok()?;
+        let canonical = canonicalize_for_matching(base)?;
         path.strip_prefix(canonical).ok()
     });
     match relative {
@@ -422,7 +468,7 @@ impl ExcludeMatchers {
         if !self.has_absolute {
             return None;
         }
-        let canonical = absolute.canonicalize();
+        let canonical = canonicalize_for_matching(absolute);
         let absolute = canonical.as_deref().unwrap_or(absolute);
         self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
     }
@@ -710,7 +756,9 @@ mod tests {
     #[test]
     fn normalize_pattern_for_base_rewrites_absolute_patterns_under_the_base() {
         let temp = tempdir().unwrap();
-        let base = temp.path().canonicalize().unwrap();
+        // Canonicalize the way production does, so the pattern has the shape an
+        // expanded `~` produces (on Windows that means no verbatim prefix).
+        let base = canonicalize_for_matching(temp.path()).unwrap();
         let pattern = format!("{}/docs/**", base.to_string_lossy().replace('\\', "/"));
         assert_eq!(normalize_pattern_for_base(&pattern, Some(&base)), "docs/**");
     }
@@ -720,7 +768,7 @@ mod tests {
         // The base as handed to us (a symlinked `/var` on macOS, a Windows 8.3
         // short name) must still strip.
         let temp = tempdir().unwrap();
-        let canonical = temp.path().canonicalize().unwrap();
+        let canonical = canonicalize_for_matching(temp.path()).unwrap();
         let pattern = format!("{}/docs/**", canonical.to_string_lossy().replace('\\', "/"));
         assert_eq!(normalize_pattern_for_base(&pattern, Some(temp.path())), "docs/**");
     }
@@ -728,7 +776,7 @@ mod tests {
     #[test]
     fn normalize_pattern_for_base_leaves_other_patterns_alone() {
         let temp = tempdir().unwrap();
-        let base = temp.path().canonicalize().unwrap();
+        let base = canonicalize_for_matching(temp.path()).unwrap();
         // Relative patterns are already base-relative.
         assert_eq!(normalize_pattern_for_base("docs/**", Some(&base)), "docs/**");
         // An absolute pattern outside the base stays absolute: nothing under
@@ -739,6 +787,37 @@ mod tests {
         );
         // With no base there is nothing to rewrite against.
         assert_eq!(normalize_pattern_for_base("/abs/docs/**", None), "/abs/docs/**");
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_unwraps_windows_canonical_paths() {
+        // The exact shape `canonicalize` returns on Windows. Left unstripped it
+        // normalizes to `//?/C:/...`, which matches nothing.
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\C:\Users\dev\AppData\Local\Temp\x"),
+            r"C:\Users\dev\AppData\Local\Temp\x"
+        );
+        assert_eq!(strip_verbatim_prefix(r"\\?\C:\"), r"C:\");
+        // UNC shares unwrap to their ordinary `\\server\share` form.
+        assert_eq!(
+            strip_verbatim_prefix(r"\\?\UNC\server\share\docs"),
+            r"\\server\share\docs"
+        );
+    }
+
+    #[test]
+    fn strip_verbatim_prefix_leaves_other_paths_alone() {
+        for path in [
+            "/home/dev/docs",
+            r"C:\Users\dev",
+            r"\\server\share",
+            // A device namespace has no ordinary equivalent to unwrap to.
+            r"\\?\Volume{b75e2c83-0000-0000-0000-602f00000000}\docs",
+            r"\\?\",
+            "",
+        ] {
+            assert_eq!(strip_verbatim_prefix(path), path, "{path:?} must be left as written");
+        }
     }
 
     #[test]

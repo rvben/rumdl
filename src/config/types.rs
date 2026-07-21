@@ -158,7 +158,7 @@ fn absolute_match_path(file_path: &Path, has_absolute: bool) -> Option<PathBuf> 
     if !has_absolute {
         return None;
     }
-    file_path.canonicalize().ok()
+    crate::discovery::canonicalize_for_matching(file_path)
 }
 
 impl Config {

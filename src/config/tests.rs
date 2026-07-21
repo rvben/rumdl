@@ -1050,7 +1050,11 @@ fn test_per_file_globs_match_absolute_patterns() {
     // An absolute pattern - what a `~/...` pattern expands to - must match the
     // file's absolute path, not just its project-relative form.
     let temp_dir = tempdir().unwrap();
-    let notes_dir = temp_dir.path().canonicalize().unwrap().join("notes");
+    // Canonicalize the way production does: on Windows a raw `canonicalize`
+    // yields the verbatim `\\?\` form, which is not what patterns are matched
+    // against.
+    let canonical_temp = crate::discovery::canonicalize_for_matching(temp_dir.path()).unwrap();
+    let notes_dir = canonical_temp.join("notes");
     fs::create_dir_all(&notes_dir).unwrap();
     let note = notes_dir.join("scratch.md");
     fs::write(&note, "# Note\n").unwrap();
@@ -1072,7 +1076,7 @@ fn test_per_file_globs_match_absolute_patterns() {
     assert!(config.get_ignored_rules_for_file(&note).contains("MD013"));
 
     // A sibling outside the pattern is unaffected.
-    let other = temp_dir.path().canonicalize().unwrap().join("other.md");
+    let other = canonical_temp.join("other.md");
     fs::write(&other, "# Other\n").unwrap();
     assert_eq!(config.get_flavor_for_file(&other), MarkdownFlavor::Standard);
     assert!(config.get_ignored_rules_for_file(&other).is_empty());
