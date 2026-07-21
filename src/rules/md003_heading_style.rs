@@ -132,8 +132,14 @@ impl Rule for MD003HeadingStyle {
                 let expected_style = match target_style {
                     HeadingStyle::Setext1 | HeadingStyle::Setext2 => {
                         if level > 2 {
-                            // Setext only supports levels 1-2, so levels 3+ must be ATX
-                            HeadingStyle::Atx
+                            // Setext only supports levels 1-2. The heading cannot
+                            // comply at all, so keep the ATX flavor it already has
+                            // instead of restyling it to one the config never asked
+                            // for. That also keeps the fix idempotent under
+                            // `consistent`: rewriting only ever moves headings into
+                            // the target style, so it can never flip the prevalence
+                            // count that chose the target.
+                            current_style
                         } else if level == 1 {
                             HeadingStyle::Setext1
                         } else {
@@ -183,10 +189,24 @@ impl Rule for MD003HeadingStyle {
                         let original_indent = &line[..line_info.indent];
                         let final_heading = format!("{original_indent}{converted_heading}");
 
-                        // Calculate the correct range for the heading
-                        let range = ctx.line_index.line_content_range(line_num + 1);
+                        // A setext heading spans two lines. When converting away
+                        // from it the underline has to be replaced too, otherwise
+                        // it survives as a thematic break.
+                        let converting_from_setext =
+                            matches!(
+                                heading.style,
+                                crate::lint_context::HeadingStyle::Setext1 | crate::lint_context::HeadingStyle::Setext2
+                            ) && !matches!(expected_style, HeadingStyle::Setext1 | HeadingStyle::Setext2);
+                        let last_line = if converting_from_setext {
+                            line_num + 2
+                        } else {
+                            line_num + 1
+                        };
 
-                        Some(crate::rule::Fix::new(range, final_heading))
+                        let start = ctx.line_index.line_content_range(line_num + 1).start;
+                        let end = ctx.line_index.line_content_range(last_line).end;
+
+                        Some(crate::rule::Fix::new(start..end, final_heading))
                     };
 
                     // Calculate precise character range for the heading marker

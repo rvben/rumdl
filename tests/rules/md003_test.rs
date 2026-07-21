@@ -141,6 +141,50 @@ fn test_fix_mixed_setext_atx() {
 }
 
 #[test]
+fn test_fix_setext_to_atx_removes_the_underline() {
+    // Converting a setext heading to ATX has to consume the underline as well.
+    // Leaving it behind turns it into a thematic break, adding a horizontal
+    // rule the document never had.
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "Heading 1\n=========\n\nHeading 2\n---------\n\nBody text.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(result, "# Heading 1\n\n## Heading 2\n\nBody text.\n");
+}
+
+#[test]
+fn test_fix_setext_to_atx_closed_removes_the_underline() {
+    let rule = MD003HeadingStyle::new(HeadingStyle::AtxClosed);
+    let content = "Heading 1\n=========\n\nBody text.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(result, "# Heading 1 #\n\nBody text.\n");
+}
+
+#[test]
+fn test_fix_setext_to_atx_preserves_indentation() {
+    let rule = MD003HeadingStyle::new(HeadingStyle::Atx);
+    let content = "  Heading 1\n  =========\n\nBody text.\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.fix(&ctx).unwrap();
+    assert_eq!(result, "  # Heading 1\n\nBody text.\n");
+}
+
+#[test]
+fn test_fix_is_idempotent_when_style_counts_tie() {
+    // `style = consistent` picks the most prevalent style, so rewriting one
+    // heading can flip the tiebreaker and make the next pass rewrite a
+    // different heading. Fixing must reach a fixpoint in one pass.
+    let rule = MD003HeadingStyle::default();
+    let content = "``\n---\n### #";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let once = rule.fix(&ctx).unwrap();
+    let ctx2 = LintContext::new(&once, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let twice = rule.fix(&ctx2).unwrap();
+    assert_eq!(once, twice, "MD003 fix is not idempotent");
+}
+
+#[test]
 fn test_setext_with_indentation() {
     let rule = MD003HeadingStyle::new(HeadingStyle::Setext1);
     let content = "  Heading 1\n  =========\n\n  Heading 2\n  ---------";

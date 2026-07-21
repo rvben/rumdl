@@ -700,8 +700,8 @@ fn test_heading_rules_fix_generation() {
     let md003 = MD003HeadingStyle::new(HeadingStyle::Atx);
     let fixed = md003.fix(&ctx).unwrap();
     assert_eq!(
-        fixed, "# ATX\n\n## Setext\n------",
-        "MD003 converts heading to ATX but preserves underline (bug?)"
+        fixed, "# ATX\n\n## Setext",
+        "MD003 must consume the setext underline when converting to ATX, or it is left behind as a thematic break"
     );
 
     // MD022 - Test fix for blanks around headings
