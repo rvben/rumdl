@@ -599,6 +599,15 @@ impl Rule for MD077ListContinuationIndent {
                 if let Some(info) = ctx.line_info(item_line)
                     && let Some(ref li) = info.list_item
                 {
+                    // Lists inside blockquotes are out of scope for MD077. Their
+                    // content column is measured on the raw line, so it is
+                    // meaningless for a lazy continuation sitting outside the
+                    // quote: scoping them lets two items with different content
+                    // columns each claim such a line and reindent it the other
+                    // way on alternating passes.
+                    if info.blockquote.is_some() {
+                        continue;
+                    }
                     let line = info.content(ctx.content);
                     let task_col = Self::is_task_list_item(line, li.content_column)
                         .then_some(li.content_column + Self::TASK_CHECKBOX_PREFIX_LEN);
@@ -935,6 +944,17 @@ mod tests {
         let once = fix_aligned_quarto(input);
         let twice = fix_aligned_quarto(&once);
         assert_eq!(once, twice, "MD077 aligned fix must be idempotent (Quarto)");
+    }
+
+    #[test]
+    fn aligned_idempotent_with_lazy_continuation_out_of_a_blockquote() {
+        // Regression: a lazy continuation that follows a blockquote-nested list
+        // item gained one space of indent on every pass, so the formatter never
+        // converged.
+        let input = "- \n> *\n> a\n``";
+        let once = fix_aligned(input);
+        let twice = fix_aligned(&once);
+        assert_eq!(once, twice, "MD077 aligned fix must be idempotent");
     }
 
     // ── Tight continuation (no blank line) ─────────────────────────────
