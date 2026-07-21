@@ -6,6 +6,7 @@ mod config_style_normalization_test;
 mod config_tests;
 mod config_upward_traversal_test;
 mod configuration_inheritance_tests;
+mod documented_alias_reachability_test;
 mod extends_tests;
 mod fixable_unfixable_config_test;
 mod inline_config_blocks_test;

@@ -1194,6 +1194,10 @@ impl Rule for MD033NoInlineHtml {
         // Shorthand aliases for allowed-elements/disallowed-elements
         aliases.insert("allowed".to_string(), "allowed-elements".to_string());
         aliases.insert("disallowed".to_string(), "disallowed-elements".to_string());
+        // Documented in docs/md033.md; kept in step with the `alias` attributes on
+        // `MD033Config::table_allowed_elements`.
+        aliases.insert("table-allowed".to_string(), "table-allowed-elements".to_string());
+        aliases.insert("table_allowed".to_string(), "table-allowed-elements".to_string());
         Some(aliases)
     }
 }

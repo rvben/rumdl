@@ -17,10 +17,12 @@ pub struct MD052Config {
     /// When true, shortcut syntax is also checked, which may produce false positives
     /// for bracketed text that is not intended to be a reference link.
     #[serde(
+        // No camelCase alias: config keys reach serde already lowercased, so
+        // `shortcutSyntax` could never match. markdownlint spells this option
+        // `shortcut_syntax` too, so there is nothing to migrate from.
         default,
         rename = "shortcut-syntax",
-        alias = "shortcut_syntax",
-        alias = "shortcutSyntax"
+        alias = "shortcut_syntax"
     )]
     pub shortcut_syntax: bool,
 

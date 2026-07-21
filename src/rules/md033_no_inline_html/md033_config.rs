@@ -129,10 +129,14 @@ pub struct MD033Config {
     ///   cells; `allowed` is ignored for in-table contexts.
     ///
     /// Tags outside GFM tables are never affected by this option.
+    // Config keys reach serde already normalized to lowercase kebab-case, so the
+    // kebab spelling of every accepted key has to be declared; a snake_case-only
+    // alias never matches and silently drops the value.
     #[serde(
         default,
         rename = "table-allowed-elements",
         alias = "table_allowed_elements",
+        alias = "table-allowed",
         alias = "table_allowed"
     )]
     pub table_allowed_elements: Option<Vec<String>>,
