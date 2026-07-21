@@ -337,13 +337,24 @@ fuzz-all:
 # Measure how closely rumdl and markdownlint agree over markdownlint's own test
 # corpus (cloned and pinned by the script). Reports agreed / rumdl-only /
 # markdownlint-only finding counts for the rules both tools implement, so parity
-# is a tracked number rather than something noticed by hand. Needs a release
-# rumdl binary and markdownlint-cli2 (via npx). Pass MIN_AGREEMENT=N to fail
-# below a floor, or ARGS='--json' for machine-readable output.
+# is a tracked number rather than something noticed by hand. Pass MIN_AGREEMENT=N
+# to fail below a floor, or ARGS='--json' for machine-readable output.
+#
+# markdownlint-cli2 is installed under target/parity rather than the repo root:
+# the repo has no package.json, so a bare `npm install` walks up and installs
+# into the parent directory (or $HOME). --prefix keeps it repo-local and
+# throwaway. The rule list is read from the markdownlint that cli2 itself
+# depends on, so the two always agree on which rules exist.
 MIN_AGREEMENT ?=
+PARITY_DIR := target/parity
+PARITY_MARKDOWNLINT := $(PARITY_DIR)/node_modules/.bin/markdownlint-cli2
 parity: build
+	@mkdir -p $(PARITY_DIR)
+	@test -x $(PARITY_MARKDOWNLINT) \
+		|| npm install --no-save --no-audit --no-fund --prefix $(PARITY_DIR) markdownlint-cli2
 	@python3 scripts/parity.py \
 		--rumdl target/release/rumdl \
+		--markdownlint $(PARITY_MARKDOWNLINT) \
 		$(if $(MIN_AGREEMENT),--min-agreement $(MIN_AGREEMENT),) \
 		$(ARGS)
 

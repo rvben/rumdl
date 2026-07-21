@@ -130,7 +130,11 @@ def collect_rumdl(rumdl: str, files: list[Path], root: Path) -> ToolRun:
                 rumdl, "check",
                 "--no-config", "--no-cache",
                 "--output-format", "json",
-                str(path),
+                # Both tools run with cwd=root, so the fixture is addressed by
+                # bare name. A path relative to the caller's directory would
+                # resolve against the corpus and find nothing; an absolute one
+                # is rejected by markdownlint-cli2, which globs from cwd.
+                path.name,
             ],
             cwd=root,
         )
@@ -154,7 +158,7 @@ def collect_markdownlint(cmd: list[str], files: list[Path], root: Path, empty_co
     findings: set[Finding] = set()
     failures: list[str] = []
     for path in files:
-        result = run(cmd + ["--config", str(empty_config), str(path)], cwd=root)
+        result = run(cmd + ["--config", str(empty_config), path.name], cwd=root)
         stream = result.stdout + result.stderr
         matched_any = False
         for line in stream.splitlines():
@@ -178,7 +182,7 @@ def main() -> int:
     parser.add_argument("--rumdl", default="target/release/rumdl", help="Path to the rumdl binary")
     parser.add_argument("--markdownlint", default="npx --yes markdownlint-cli2", help="markdownlint-cli2 command")
     parser.add_argument("--limit", type=int, default=0, help="Only compare the first N fixtures (0 = all)")
-    parser.add_argument("--min-agreement", type=int, default=None, help="Fail if agreement drops below this")
+    parser.add_argument("--min-agreement", type=float, default=None, help="Fail if the agreement percentage drops below this")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable results")
     args = parser.parse_args()
 
@@ -206,7 +210,10 @@ def main() -> int:
     if not files:
         sys.exit(f"no .md fixtures found in {corpus}")
 
-    empty_config = args.cache / "empty-markdownlint.json"
+    # markdownlint-cli2 only accepts a config file whose name is one of its
+    # supported names, or a prefix plus a supported name. An arbitrary name is
+    # a hard error on every invocation, so this has to stay `*.markdownlint-cli2.jsonc`.
+    empty_config = args.cache / "empty.markdownlint-cli2.jsonc"
     empty_config.parent.mkdir(parents=True, exist_ok=True)
     empty_config.write_text("{}\n")
 
@@ -233,6 +240,16 @@ def main() -> int:
 
     excluded = {f[2] for f in rumdl_run.findings if f[2] not in shared}
 
+    # Rank by count, then by rule id. `Counter.most_common` leaves equal counts
+    # in insertion order, which varies between runs and makes two identical
+    # results diff as if the number had moved.
+    def by_rule(bucket: set[Finding]) -> list[tuple[str, int]]:
+        counts = Counter(f[2] for f in bucket)
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+    total = len(agreed) + len(only_ours) + len(only_theirs)
+    pct = (100.0 * len(agreed) / total) if total else 100.0
+
     if args.json:
         print(json.dumps({
             "fixtures": len(files),
@@ -240,21 +257,20 @@ def main() -> int:
             "agreed": len(agreed),
             "rumdl_only": len(only_ours),
             "markdownlint_only": len(only_theirs),
-            "rumdl_only_by_rule": Counter(f[2] for f in only_ours).most_common(),
-            "markdownlint_only_by_rule": Counter(f[2] for f in only_theirs).most_common(),
+            "agreement_pct": round(pct, 1),
+            "rumdl_only_by_rule": by_rule(only_ours),
+            "markdownlint_only_by_rule": by_rule(only_theirs),
             "rules_not_compared": sorted(excluded),
             "failures": rumdl_run.failures + ml_run.failures,
         }, indent=2))
     else:
-        total = len(agreed) + len(only_ours) + len(only_theirs)
-        pct = (100.0 * len(agreed) / total) if total else 100.0
         print(f"\n  agreed             {len(agreed)}")
         print(f"  rumdl only         {len(only_ours)}")
         print(f"  markdownlint only  {len(only_theirs)}")
         print(f"  agreement          {pct:.1f}% over {len(shared)} shared rules\n")
 
         for label, bucket in (("rumdl only", only_ours), ("markdownlint only", only_theirs)):
-            counts = Counter(f[2] for f in bucket).most_common(10)
+            counts = by_rule(bucket)[:10]
             if counts:
                 print(f"  top {label} rules: " + ", ".join(f"{r}={n}" for r, n in counts))
 
@@ -269,9 +285,11 @@ def main() -> int:
             print(f"    {failure}", file=sys.stderr)
         return 2
 
-    if args.min_agreement is not None and len(agreed) < args.min_agreement:
+    # The floor is a percentage, matching the number this prints. Comparing the
+    # raw agreed count instead would pass for any realistic floor.
+    if args.min_agreement is not None and pct < args.min_agreement:
         print(
-            f"\nagreement {len(agreed)} is below the required {args.min_agreement}",
+            f"\nagreement {pct:.1f}% is below the required {args.min_agreement}%",
             file=sys.stderr,
         )
         return 1

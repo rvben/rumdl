@@ -48,15 +48,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install markdownlint-cli2
-        run: npm install --no-save markdownlint-cli2
-
       - name: Compare against markdownlint corpus
         env:
           # Bound to an env var rather than expanded into the shell directly, so
           # a workflow_dispatch input cannot inject shell.
           MIN_AGREEMENT: ${{ github.event.inputs.min_agreement }}
-        run: |
-          make parity \
-            MIN_AGREEMENT="$MIN_AGREEMENT" \
-            ARGS='--markdownlint ./node_modules/.bin/markdownlint-cli2'
+        run: make parity MIN_AGREEMENT="$MIN_AGREEMENT"
