@@ -78,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.39](https://github.com/rvben/rumdl/compare/v0.2.38...v0.2.39) - 2026-07-21
+
+### Added
+
+- **config**: expand ~ to the home directory in path settings ([70f91aa](https://github.com/rvben/rumdl/commit/70f91aaaf4e02a5374bef57ff1295ce802802450))
+
+### Fixed
+
+- **md013**: wrap over-long emphasis spans that contain nested markup ([ddc73f4](https://github.com/rvben/rumdl/commit/ddc73f49d494c21f28cec18f5cc196bfd4ba2f81))
+- **discovery**: strip Windows verbatim prefix from canonicalized paths ([a85ab87](https://github.com/rvben/rumdl/commit/a85ab87f92d697cb82f5764c4ef8ed764c6a4c39))
+- **discovery**: apply absolute exclude patterns during directory discovery ([0d20fc8](https://github.com/rvben/rumdl/commit/0d20fc8f11abe36e8838ab847c3d6fd2ea3046bd))
+
 ## [0.2.38](https://github.com/rvben/rumdl/compare/v0.2.37...v0.2.38) - 2026-07-21
 
 ### Added
