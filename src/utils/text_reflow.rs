@@ -102,6 +102,22 @@ fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
         }
     }
 
+    // Constructs pulldown does not model, but that `parse_elements` holds
+    // atomic at the top level. Only those that can contain whitespace matter
+    // here: an emoji shortcode or HTML entity has no break point inside it.
+    for found in WIKI_LINK_REGEX
+        .find_iter(content)
+        .chain(HUGO_SHORTCODE_REGEX.find_iter(content))
+        .chain(DISPLAY_MATH_REGEX.find_iter(content))
+    {
+        ranges.push((found.start(), found.end()));
+    }
+    let mut from = 0;
+    while let Ok(Some(found)) = INLINE_MATH_REGEX.find_from_pos(content, from) {
+        ranges.push((found.start(), found.end()));
+        from = found.end();
+    }
+
     // A nested construct is reported alongside its parent, so any range
     // starting at or before the current end is already covered by it.
     ranges.sort_unstable();
@@ -132,7 +148,7 @@ fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
 fn breakable_units(content: &str) -> Option<Vec<&str>> {
     // Plain prose cannot hold a nested construct, so every whitespace run is a
     // break point and the parse below can be skipped.
-    if !content.contains(['`', '*', '_', '~', '[', '<']) {
+    if !content.contains(['`', '*', '_', '~', '[', '<', '$', '{']) {
         return Some(split_breakable_words(content).collect());
     }
 
@@ -4709,6 +4725,42 @@ mod tests {
                         expected,
                         "reflow changed the parse of {text:?} at line_length={line_length} \
                          atomic_spans={atomic_spans}\n  wrapped: {wrapped:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrapping_a_span_keeps_whole_the_constructs_pulldown_cannot_see() {
+        // Wiki links, Hugo shortcodes and math are atomic elements at the top
+        // level but are invisible to the CommonMark parser, so `semantic_shape`
+        // cannot catch a break inside one. Assert directly that they survive.
+        let cases = [
+            (
+                "_alpha beta gamma [[a wiki link]] delta epsilon zeta eta_",
+                "[[a wiki link]]",
+            ),
+            (
+                "_alpha beta gamma {{< foo bar >}} delta epsilon zeta eta_",
+                "{{< foo bar >}}",
+            ),
+            ("_alpha beta gamma $a + b$ delta epsilon zeta eta theta_", "$a + b$"),
+            ("_alpha beta gamma $$a + b$$ delta epsilon zeta eta theta_", "$$a + b$$"),
+        ];
+        for (text, construct) in cases {
+            for line_length in [12, 20, 30] {
+                for atomic_spans in [true, false] {
+                    let options = ReflowOptions {
+                        line_length,
+                        atomic_spans,
+                        ..Default::default()
+                    };
+                    let wrapped = reflow_line(text, &options).join("\n");
+                    assert!(
+                        wrapped.contains(construct),
+                        "{construct} was broken at line_length={line_length} \
+                         atomic_spans={atomic_spans}: {wrapped:?}"
                     );
                 }
             }
