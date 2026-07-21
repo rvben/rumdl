@@ -693,6 +693,17 @@ impl Rule for MD013LineLength {
         aliases.insert("enable_reflow".to_string(), "reflow".to_string());
         aliases.insert("strict_sentences".to_string(), "require-sentence-capital".to_string());
         aliases.insert("strict-sentences".to_string(), "require-sentence-capital".to_string());
+        // Kept in step with the `alias` attributes on `MD013Config::ignore_link_urls`.
+        // Serde accepts these spellings, so a config using one is honored; without
+        // them here the key validator reports a documented, working key as unknown.
+        aliases.insert(
+            "semantic-link-understanding".to_string(),
+            "ignore-link-urls".to_string(),
+        );
+        aliases.insert(
+            "semantic_link_understanding".to_string(),
+            "ignore-link-urls".to_string(),
+        );
         Some(aliases)
     }
 
@@ -704,6 +715,28 @@ impl Rule for MD013LineLength {
         // Use global line_length if rule-specific config still has default value
         if rule_config.line_length.get() == 80 {
             rule_config.line_length = config.global.line_length;
+        }
+
+        // `ignore-link-urls` forgives a line-length *violation*; it does not change
+        // how reflow measures a line. Reflow therefore still rewrites a paragraph
+        // whose only over-length cause is a link URL, which reads as the setting
+        // being ignored. Warn only when the user set it explicitly: it defaults to
+        // true, so warning on the default would fire for everyone using reflow.
+        if rule_config.reflow
+            && let Some(rule_cfg) = config.rules.get("MD013")
+        {
+            let set_explicitly = ["ignore-link-urls", "ignore_link_urls"]
+                .iter()
+                .chain(["semantic-link-understanding", "semantic_link_understanding"].iter())
+                .any(|key| rule_cfg.values.contains_key(*key));
+            if set_explicitly {
+                eprintln!(
+                    "\x1b[33m[config warning]\x1b[0m MD013: 'ignore-link-urls' does not affect 'reflow'. \
+                     It only forgives a line-length violation; reflow always measures the markdown as \
+                     written, so a paragraph whose only over-length cause is a link URL is still \
+                     rewritten. Set 'reflow = false' to keep such lines as authored."
+                );
+            }
         }
         let mut rule = Self::from_config_struct(rule_config);
         // Pull list-marker spacing from MD030 (via the shared serde config loader)
