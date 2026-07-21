@@ -1144,6 +1144,88 @@ fn test_reflow_with_nested_markdown_elements() {
     assert!(fixed.contains("**bold with `code` inside**"));
 }
 
+/// Config from issue #748: normalize-mode reflow with `atomic-spans` enabled.
+fn issue_748_config() -> MD013Config {
+    MD013Config {
+        line_length: crate::types::LineLength::from_const(80),
+        atomic_spans: true,
+        code_blocks: false,
+        headings: false,
+        reflow: true,
+        reflow_mode: ReflowMode::Normalize,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_overlong_emphasis_with_nested_code_span_is_fixable() {
+    // An emphasis span containing a nested code span is longer than the line
+    // budget. It must be reported as a fixable normalize warning, not as a
+    // bare "line too long" the fixer refuses to touch.
+    let rule = MD013LineLength::from_config_struct(issue_748_config());
+
+    let content = "_This is a very, very, very, very, very, very, very long line that exceeds 80 characters with some `code` inside._\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    let warnings = rule.check(&ctx).unwrap();
+    assert_eq!(warnings.len(), 1, "expected one warning, got {warnings:?}");
+    assert!(
+        warnings[0].fix.is_some(),
+        "warning must carry a fix, got {:?}",
+        warnings[0].message
+    );
+
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "_This is a very, very, very, very, very, very, very long line that exceeds 80\ncharacters with some `code` inside._\n"
+    );
+}
+
+#[test]
+fn test_wrapped_emphasis_with_nested_code_span_stays_wrapped() {
+    // The already-compliant hand-wrapped form must survive `fix` untouched and
+    // check clean. Re-joining it would make `rumdl fmt` emit output that
+    // `rumdl check` then rejects.
+    let rule = MD013LineLength::from_config_struct(issue_748_config());
+
+    let content = "_This is a very, very, very, very, very, very, very long line that exceeds 80\ncharacters with some `code` inside._\n";
+    let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+    assert!(
+        rule.check(&ctx).unwrap().is_empty(),
+        "compliant wrapped input must be clean: {:?}",
+        rule.check(&ctx).unwrap()
+    );
+}
+
+#[test]
+fn test_overlong_emphasis_with_nested_markup_is_fixable_for_every_marker() {
+    // Not specific to code spans: any nested inline span inside an over-long
+    // emphasis span must still allow wrapping.
+    let rule = MD013LineLength::from_config_struct(issue_748_config());
+
+    for nested in ["`code`", "**bold**", "_under_", "~~strike~~"] {
+        let content = format!(
+            "_This is a very, very, very, very, very, very, very long line that exceeds 80 characters with some {nested} inside._\n"
+        );
+        let ctx = LintContext::new(&content, crate::config::MarkdownFlavor::Standard, None);
+
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            fixed.contains(nested),
+            "nested {nested} must be preserved, got {fixed:?}"
+        );
+        for line in fixed.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "line over budget after fix with nested {nested}: {line:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_reflow_with_unbalanced_markdown() {
     // Test edge case with unbalanced markdown

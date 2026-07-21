@@ -80,6 +80,96 @@ fn code_span_wraps_losslessly(content: &str) -> bool {
     true
 }
 
+/// Byte ranges of the inline constructs nested inside a span's content, merged
+/// into outermost, non-overlapping ranges. A line break may never land inside
+/// one: the whitespace in a code span is literal, and the whitespace in a link
+/// destination or an HTML tag is structural, so replacing it with a newline
+/// rewrites the document.
+fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for (event, range) in Parser::new_ext(content, options).into_offset_iter() {
+        let protect = matches!(
+            event,
+            Event::Code(_)
+                | Event::InlineHtml(_)
+                | Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. })
+        );
+        if protect {
+            ranges.push((range.start, range.end));
+        }
+    }
+
+    // A nested construct is reported alongside its parent, so any range
+    // starting at or before the current end is already covered by it.
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    merged
+}
+
+/// Split an emphasis, strong or strikethrough span's content into the units
+/// that may be placed on separate lines, or `None` when the span has to stay
+/// atomic.
+///
+/// Breaking such a span at whitespace is safe: emphasis carries across a soft
+/// line break, and a newline is whitespace just like the space it replaces, so
+/// every delimiter keeps its flanking classification. Two things are not safe,
+/// and this rules them out:
+///
+/// - A break inside a nested construct. Each is one unbreakable unit, matching
+///   how links, images and code spans are already held atomic at the top level.
+/// - A marker character that belongs to no well-formed nested span: a stray or
+///   backslash-escaped `` ` ``, `*`, `_` or `~`. The content's structure is then
+///   not fully modelled, so the span is kept whole rather than broken on a guess.
+fn breakable_units(content: &str) -> Option<Vec<&str>> {
+    // Plain prose cannot hold a nested construct, so every whitespace run is a
+    // break point and the parse below can be skipped.
+    if !content.contains(['`', '*', '_', '~', '[', '<']) {
+        return Some(split_breakable_words(content).collect());
+    }
+
+    let protected = nested_construct_ranges(content);
+
+    let mut units = Vec::new();
+    let mut unit_start = None;
+    let mut next_range = 0;
+    for (offset, ch) in content.char_indices() {
+        while protected.get(next_range).is_some_and(|&(_, end)| end <= offset) {
+            next_range += 1;
+        }
+        if protected.get(next_range).is_some_and(|&(start, _)| offset >= start) {
+            // Inside a nested construct: never a break point, and its markers
+            // are accounted for.
+            if unit_start.is_none() {
+                unit_start = Some(offset);
+            }
+            continue;
+        }
+        if matches!(ch, '`' | '*' | '_' | '~') {
+            return None;
+        }
+        if is_breakable_whitespace(ch) {
+            if let Some(start) = unit_start.take() {
+                units.push(&content[start..offset]);
+            }
+        } else if unit_start.is_none() {
+            unit_start = Some(offset);
+        }
+    }
+    if let Some(start) = unit_start {
+        units.push(&content[start..]);
+    }
+    Some(units)
+}
+
 /// Options for reflowing text
 #[derive(Clone)]
 pub struct ReflowOptions {
@@ -2756,21 +2846,25 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 _ => None,
             };
 
-            let is_eligible = match span_info {
+            // A span that alone exceeds the line budget is broken even when
+            // spans are atomic, since keeping it whole would leave a line that can
+            // never fit. `breakable_units` decides where that is safe.
+            let breakable: Option<Vec<&str>> = match span_info {
                 Some((content, _, is_code)) => {
                     if is_code {
-                        !options.atomic_spans && code_span_wraps_losslessly(content)
+                        (!options.atomic_spans && code_span_wraps_losslessly(content))
+                            .then(|| split_breakable_words(content).collect())
                     } else {
                         (!options.atomic_spans || element_len > options.line_length)
-                            && !content.contains(['`', '*', '_', '~'])
+                            .then(|| breakable_units(content))
+                            .flatten()
                     }
                 }
-                None => false,
+                None => None,
             };
 
-            if is_eligible {
-                let (content, marker, is_code) = span_info.unwrap();
-                let words: Vec<&str> = split_breakable_words(content).collect();
+            if let Some(words) = breakable {
+                let (_, marker, is_code) = span_info.expect("breakable implies a span");
                 let n = words.len();
                 if n == 0 {
                     // Empty span — treat as atomic
@@ -4541,6 +4635,150 @@ mod tests {
         // Emphasis containing internal markers (e.g. escaped asterisks) should not be split to avoid formatting corruption
         let lines = reflow_line(r#"*foo \*bar*"#, &options);
         assert_eq!(lines, vec![r#"*foo \*bar*"#.to_string()]);
+    }
+
+    /// The parsed shape of a markdown fragment, normalized the way wrapping is
+    /// allowed to change it and no further: block/inline structure and
+    /// code-span contents are compared exactly, while prose whitespace is
+    /// collapsed, because a wrap only ever swaps a space for a newline.
+    fn semantic_shape(markdown: &str) -> String {
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        let mut out = String::new();
+        let push_prose = |out: &mut String, text: &str| {
+            for c in text.chars() {
+                if c.is_whitespace() {
+                    if !out.ends_with(char::is_whitespace) {
+                        out.push(' ');
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+        };
+        for event in Parser::new_ext(markdown, options) {
+            match event {
+                Event::Text(text) => push_prose(&mut out, &text),
+                Event::SoftBreak | Event::HardBreak => push_prose(&mut out, " "),
+                // Interior whitespace in a code span is literal: compare verbatim.
+                Event::Code(code) => out.push_str(&format!("<code>{code}</code>")),
+                Event::Start(tag) => out.push_str(&format!("<{tag:?}>")),
+                Event::End(tag) => out.push_str(&format!("</{tag:?}>")),
+                other => out.push_str(&format!("{other:?}")),
+            }
+        }
+        out.trim().to_string()
+    }
+
+    #[test]
+    fn test_wrapping_a_span_never_changes_what_it_parses_to() {
+        // Breaking a span is only safe if the document still parses the same.
+        // Cover both settings and several budgets so the break lands in a
+        // different place in each run.
+        let corpus = [
+            "_This is a very, very, very, very, very long line with some `code` inside._",
+            "_alpha beta gamma delta epsilon `a  b` zeta eta theta iota kappa lambda_",
+            "**strong text with `code` and more words than fit on one single line**",
+            "~~struck text with `code` and more words than fit on one single line~~",
+            "_emphasis with **nested strong that is quite long** and trailing words_",
+            "_foo `a` bar `b` baz qux quux corge grault garply waldo fred plugh xyzzy_",
+            "text before _a long emphasis with `code` inside of it here_ and after",
+            "(_a parenthesized long emphasis with `code` inside of it right here_)",
+            r#"*foo \*bar baz qux quux corge grault garply waldo fred plugh xyzzy*"#,
+            "_tab\tseparated `a\tb` words spread out over quite a long emphasis span_",
+            // A link nested in the span: its destination and title are not prose
+            // and cannot absorb a line break.
+            "_This has [text](<a b c d e f g h i j k>) and trailing words to wrap._",
+            "_This has [`code`](<a b c d e f g h i j k>) and trailing words to wrap._",
+            r#"_See [x](https://example.com "a long link title here") and `code` too._"#,
+            "_A [link with a long label](https://example.com/path) and `code` here._",
+            "_An image ![alt text here](<a b c d e f g h>) plus `code` and more text_",
+        ];
+        for text in corpus {
+            let expected = semantic_shape(text);
+            for line_length in [20, 30, 40, 80] {
+                for atomic_spans in [true, false] {
+                    let options = ReflowOptions {
+                        line_length,
+                        atomic_spans,
+                        ..Default::default()
+                    };
+                    let wrapped = reflow_line(text, &options).join("\n");
+                    assert_eq!(
+                        semantic_shape(&wrapped),
+                        expected,
+                        "reflow changed the parse of {text:?} at line_length={line_length} \
+                         atomic_spans={atomic_spans}\n  wrapped: {wrapped:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_overlong_emphasis_with_nested_code_span_wraps() {
+        // An emphasis span longer than the whole line budget must still wrap,
+        // even when it contains a nested code span: keeping it atomic would
+        // leave a line that can never fit.
+        let options = ReflowOptions {
+            line_length: 80,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        let text = "_This is a very, very, very, very, very, very, very long line that exceeds 80 characters with some `code` inside._";
+        let lines = reflow_line(text, &options);
+        assert_eq!(
+            lines,
+            vec![
+                "_This is a very, very, very, very, very, very, very long line that exceeds 80",
+                "characters with some `code` inside._",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_overlong_emphasis_with_nested_strong_wraps() {
+        // Same for a nested strong span. The nested span itself stays whole.
+        let options = ReflowOptions {
+            line_length: 80,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        let text = "_This is a very, very, very, very, very, very, very long line that exceeds 80 characters with some **bold** inside._";
+        let lines = reflow_line(text, &options);
+        assert_eq!(
+            lines,
+            vec![
+                "_This is a very, very, very, very, very, very, very long line that exceeds 80",
+                "characters with some **bold** inside._",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_overlong_emphasis_never_breaks_inside_nested_code_span() {
+        // Interior whitespace in a code span is literal, so a break inside one
+        // would rewrite the code. The nested span is a single unbreakable unit
+        // and its interior survives byte-for-byte.
+        let options = ReflowOptions {
+            line_length: 30,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        let text = "_alpha beta gamma delta epsilon `a  b` zeta eta theta iota kappa_";
+        let lines = reflow_line(text, &options);
+        assert!(lines.len() > 1, "over-long emphasis should wrap: {lines:?}");
+        assert!(
+            lines.iter().any(|line| line.contains("`a  b`")),
+            "nested code span must stay whole with its interior spaces: {lines:?}"
+        );
+        for line in &lines {
+            assert_eq!(
+                line.matches('`').count() % 2,
+                0,
+                "no line may contain half a code span: {line:?}"
+            );
+        }
     }
 
     #[test]
