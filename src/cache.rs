@@ -113,6 +113,32 @@ struct CacheEntry {
     timestamp: i64,
 }
 
+/// The cache directory used when nothing configures one.
+pub const DEFAULT_CACHE_DIR: &str = ".rumdl_cache";
+
+/// Resolve the cache directory from its layered sources, in precedence order:
+/// an explicit CLI flag, `RUMDL_CACHE_DIR`, the config `cache-dir`, then
+/// [`DEFAULT_CACHE_DIR`].
+///
+/// A leading `~/` expands to the home directory, and a path that is still
+/// relative resolves against the project root. Both `check` and `clean` resolve
+/// through here: a divergence between them would leave `rumdl clean` wiping a
+/// different directory than the one `check` filled.
+pub fn resolve_cache_dir(cli: Option<&str>, config: Option<&str>, project_root: Option<&Path>) -> PathBuf {
+    let configured = cli
+        .map(str::to_string)
+        .or_else(|| std::env::var("RUMDL_CACHE_DIR").ok())
+        .or_else(|| config.map(str::to_string))
+        .unwrap_or_else(|| DEFAULT_CACHE_DIR.to_string());
+
+    let cache_dir = PathBuf::from(rumdl_lib::discovery::expand_home_prefix(&configured).as_ref());
+
+    match project_root {
+        Some(root) if cache_dir.is_relative() => root.join(cache_dir),
+        _ => cache_dir,
+    }
+}
+
 /// File-level cache for lint results
 pub struct LintCache {
     /// Base cache directory (e.g., .rumdl_cache/)

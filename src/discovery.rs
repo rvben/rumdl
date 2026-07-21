@@ -17,7 +17,7 @@
 use globset::{Glob, GlobMatcher};
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Glob metacharacters recognized when deciding whether an include pattern
 /// names files explicitly.
@@ -199,6 +199,78 @@ pub fn markdown_walk_builder(root: &Path, options: &MarkdownWalkOptions) -> igno
     builder
 }
 
+/// The user's home directory, or `None` when it cannot be resolved.
+///
+/// Canonicalized when possible: the paths an expanded pattern is matched
+/// against are canonical, so a symlinked home (`/home/dev` -> `/mnt/dev`, or a
+/// macOS `/var` -> `/private/var`) would otherwise never match.
+///
+/// Wasm and WASI builds have no home directory to resolve, so patterns keep
+/// their `~` there (see [`expand_home_prefix`]).
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(feature = "native")]
+    {
+        use etcetera::{BaseStrategy, choose_base_strategy};
+        choose_base_strategy().ok().map(|s| {
+            s.home_dir()
+                .canonicalize()
+                .unwrap_or_else(|_| s.home_dir().to_path_buf())
+        })
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        None
+    }
+}
+
+/// Expand a leading `~` in a path pattern to the user's home directory, so a
+/// user-level config (`~/.config/rumdl/rumdl.toml`) can name a home path
+/// without hardcoding a username.
+///
+/// Only a bare `~` and a `~/` prefix expand. `~` is a legal filename character
+/// everywhere else (editor backups like `notes.md~`, a literal `docs/~drafts`),
+/// so it is left alone there. `~user` is not expanded either: resolving another
+/// user's home needs the password database, and treating it as the current
+/// user's home would silently match the wrong directory.
+///
+/// The expansion is a glob pattern, so separators are normalized to `/` on
+/// Windows: `\` is globset's escape character, and matched paths are normalized
+/// the same way (see [`path_relative_to`]).
+pub fn expand_home_prefix(pattern: &str) -> Cow<'_, str> {
+    // Resolve the home directory only for a pattern that references it: every
+    // other pattern would otherwise pay for the lookup and its canonicalization.
+    if !has_home_prefix(pattern) {
+        return Cow::Borrowed(pattern);
+    }
+    expand_home_prefix_impl(pattern, home_dir().as_deref())
+}
+
+/// Whether `pattern` starts with a home reference (`~` or `~/`).
+fn has_home_prefix(pattern: &str) -> bool {
+    pattern == "~" || pattern.starts_with("~/")
+}
+
+fn expand_home_prefix_impl<'a>(pattern: &'a str, home: Option<&Path>) -> Cow<'a, str> {
+    let Some(suffix) = (if pattern == "~" {
+        Some("")
+    } else {
+        pattern.strip_prefix("~/")
+    }) else {
+        return Cow::Borrowed(pattern);
+    };
+    let Some(home) = home else {
+        return Cow::Borrowed(pattern);
+    };
+
+    let home = normalize_pattern_separators(home.to_string_lossy());
+    let home = home.trim_end_matches('/');
+    if suffix.is_empty() {
+        Cow::Owned(home.to_string())
+    } else {
+        Cow::Owned(format!("{home}/{suffix}"))
+    }
+}
+
 /// Normalize path separators to `/` for glob matching. On Windows `\` is
 /// globset's escape character, so a native path must be rewritten before it can
 /// be used as - or matched against - a pattern. No-op on Unix, where `\` is a
@@ -211,9 +283,42 @@ fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
     }
 }
 
+/// Normalize a config path pattern for matching against paths discovered under
+/// `base`: expand a leading `~`, then rewrite an absolute pattern as one
+/// relative to `base` when `base` contains it.
+///
+/// The rewrite is what makes an absolute pattern usable as a walker override:
+/// the `ignore` crate reads a leading `/` as "anchored to the walk base", so
+/// `/home/dev/docs/**` would otherwise be understood as
+/// `<base>/home/dev/docs/**` and match nothing. A pattern pointing outside
+/// `base` is left absolute - nothing under this walk can match it, which is the
+/// correct outcome.
+pub fn normalize_pattern_for_base(pattern: &str, base: Option<&Path>) -> String {
+    let expanded = expand_home_prefix(pattern);
+    let Some(base) = base else {
+        return expanded.into_owned();
+    };
+    if !is_absolute_pattern(&expanded) {
+        return expanded.into_owned();
+    }
+
+    // Try the base as given and canonicalized, so a symlinked or
+    // non-canonical base (macOS `/var`, a Windows 8.3 short name) still strips.
+    let path = Path::new(expanded.as_ref());
+    let relative = path.strip_prefix(base).ok().or_else(|| {
+        let canonical = base.canonicalize().ok()?;
+        path.strip_prefix(canonical).ok()
+    });
+    match relative {
+        Some(relative) => normalize_pattern_separators(relative.to_string_lossy()).into_owned(),
+        None => expanded.into_owned(),
+    }
+}
+
 /// Expands directory-style patterns to also match files within them.
 /// Pattern "dir/path" becomes ["dir/path", "dir/path/**"] to match both
-/// the directory itself and all contents recursively.
+/// the directory itself and all contents recursively. A leading `~` is
+/// expanded first (see [`expand_home_prefix`]).
 ///
 /// The expansion is driven by the pattern's *final* component: it names a
 /// directory only when it holds no wildcard. `docs/*` therefore stays as
@@ -221,6 +326,7 @@ fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
 /// nested contents), while `**/.cursor/plans` gains its contents-expansion
 /// despite the wildcard earlier in the pattern.
 pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
+    let pattern = expand_home_prefix(pattern);
     let base = pattern.trim_end_matches('/');
     let final_component = base.rsplit('/').next().unwrap_or(base);
 
@@ -254,7 +360,7 @@ pub struct ExcludeMatchers {
 /// Whether `pattern` names an absolute location. A leading `/` counts on every
 /// platform: patterns use `/` separators, so a Unix-style path stays absolute
 /// when the same config is read on Windows.
-fn is_absolute_pattern(pattern: &str) -> bool {
+pub fn is_absolute_pattern(pattern: &str) -> bool {
     pattern.starts_with('/') || Path::new(pattern).is_absolute()
 }
 
@@ -570,6 +676,69 @@ mod tests {
         assert!(!matchers.is_match("docs/guide.md"));
         assert_eq!(matchers.matched_pattern("drafts/inner.md"), Some("drafts/**"));
         assert!(matchers.invalid.is_empty());
+    }
+
+    #[test]
+    fn expand_home_prefix_expands_only_a_leading_tilde() {
+        let home = Path::new("/home/dev");
+        assert_eq!(
+            expand_home_prefix_impl("~/.cursor/plans", Some(home)),
+            "/home/dev/.cursor/plans"
+        );
+        assert_eq!(expand_home_prefix_impl("~", Some(home)), "/home/dev");
+        assert_eq!(expand_home_prefix_impl("~/", Some(home)), "/home/dev");
+    }
+
+    #[test]
+    fn expand_home_prefix_leaves_interior_tildes_alone() {
+        let home = Path::new("/home/dev");
+        // `~` is a legal filename character; only a leading `~/` is a home reference.
+        for pattern in ["backup.md~", "docs/~drafts/**", "~user/docs", "**/*~", "!~/secret"] {
+            assert_eq!(
+                expand_home_prefix_impl(pattern, Some(home)),
+                pattern,
+                "{pattern:?} must be left as written"
+            );
+        }
+    }
+
+    #[test]
+    fn expand_home_prefix_without_a_home_leaves_the_pattern_as_written() {
+        assert_eq!(expand_home_prefix_impl("~/.cursor/plans", None), "~/.cursor/plans");
+    }
+
+    #[test]
+    fn normalize_pattern_for_base_rewrites_absolute_patterns_under_the_base() {
+        let temp = tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        let pattern = format!("{}/docs/**", base.to_string_lossy().replace('\\', "/"));
+        assert_eq!(normalize_pattern_for_base(&pattern, Some(&base)), "docs/**");
+    }
+
+    #[test]
+    fn normalize_pattern_for_base_strips_through_a_non_canonical_base() {
+        // The base as handed to us (a symlinked `/var` on macOS, a Windows 8.3
+        // short name) must still strip.
+        let temp = tempdir().unwrap();
+        let canonical = temp.path().canonicalize().unwrap();
+        let pattern = format!("{}/docs/**", canonical.to_string_lossy().replace('\\', "/"));
+        assert_eq!(normalize_pattern_for_base(&pattern, Some(temp.path())), "docs/**");
+    }
+
+    #[test]
+    fn normalize_pattern_for_base_leaves_other_patterns_alone() {
+        let temp = tempdir().unwrap();
+        let base = temp.path().canonicalize().unwrap();
+        // Relative patterns are already base-relative.
+        assert_eq!(normalize_pattern_for_base("docs/**", Some(&base)), "docs/**");
+        // An absolute pattern outside the base stays absolute: nothing under
+        // this walk can match it, which is the correct outcome.
+        assert_eq!(
+            normalize_pattern_for_base("/somewhere/else/**", Some(&base)),
+            "/somewhere/else/**"
+        );
+        // With no base there is nothing to rewrite against.
+        assert_eq!(normalize_pattern_for_base("/abs/docs/**", None), "/abs/docs/**");
     }
 
     #[test]

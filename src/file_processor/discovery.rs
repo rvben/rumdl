@@ -7,7 +7,7 @@ use rumdl_config::resolve_rule_names;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
     ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, apply_markdown_walk_options,
-    expand_directory_pattern, has_markdown_extension, path_relative_to,
+    expand_directory_pattern, has_markdown_extension, normalize_pattern_for_base, path_relative_to,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -270,12 +270,26 @@ pub fn find_markdown_files(
     // Track whether config-based include patterns are active in discovery mode
     let has_config_include = is_discovery_mode && !config.global.include.is_empty();
 
+    // Include patterns are matched relative to the same base the walker's
+    // overrides use, so `~` is expanded and an absolute pattern under that base
+    // is rewritten relative to it (see `normalize_pattern_for_base`).
+    let include_base = project_root
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok());
+    let normalize_include = |pattern: &str| normalize_pattern_for_base(pattern, include_base.as_deref());
+    let config_include: Vec<String> = config
+        .global
+        .include
+        .iter()
+        .map(|pattern| normalize_include(pattern))
+        .collect();
+
     // Config include patterns that explicitly name files beyond the standard
     // markdown extensions (e.g. `**/*.md.jinja`). These widen both the
     // walker's type filter and the final lintable-file filter below, so that
     // config include reaches the same files the equivalent CLI --include does.
     let explicit_includes = if has_config_include {
-        ExplicitIncludeMatchers::new(&config.global.include)
+        ExplicitIncludeMatchers::new(&config_include)
     } else {
         ExplicitIncludeMatchers::new(&[])
     };
@@ -287,12 +301,13 @@ pub fn find_markdown_files(
         // 1. CLI --include always wins
         cli_include
             .split(',')
-            .map(|p| p.trim().to_string())
+            .map(|p| p.trim())
             .filter(|p| !p.is_empty())
+            .map(normalize_include)
             .collect()
     } else if is_discovery_mode && !config.global.include.is_empty() {
         // 2. Config include is used ONLY in discovery mode if specified
-        config.global.include.clone()
+        config_include.clone()
     } else if is_discovery_mode {
         // 3. Default: Don't add include patterns as overrides - the type filter already handles
         // selecting markdown files (lines 183-199). Using overrides here would bypass gitignore

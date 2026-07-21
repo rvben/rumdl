@@ -48,12 +48,16 @@ pub struct Config {
     #[serde(default)]
     pub global: GlobalConfig,
 
-    /// Per-file rule ignores: maps file patterns to lists of rules to ignore
+    /// Per-file rule ignores: maps file patterns to lists of rules to ignore.
+    /// Patterns are relative to the project root; a leading `~/` expands to the
+    /// home directory and absolute paths are matched as written.
     /// Example: { "README.md": ["MD033"], "docs/**/*.md": ["MD013"] }
     #[serde(default, rename = "per-file-ignores")]
     pub per_file_ignores: BTreeMap<String, Vec<String>>,
 
-    /// Per-file flavor overrides: maps file patterns to Markdown flavors
+    /// Per-file flavor overrides: maps file patterns to Markdown flavors.
+    /// Patterns are relative to the project root; a leading `~/` expands to the
+    /// home directory and absolute paths are matched as written.
     /// Example: { "docs/**/*.md": MkDocs, "**/*.mdx": MDX }
     /// Uses IndexMap to preserve config file order for "first match wins" semantics
     #[serde(default, rename = "per-file-flavor")]
@@ -135,11 +139,26 @@ impl PartialEq for Config {
 pub(super) struct PerFileIgnoreCache {
     globset: GlobSet,
     rules: Vec<Vec<String>>,
+    /// Whether any pattern is absolute, i.e. whether matching has to consider
+    /// the file's absolute path as well as its project-relative form.
+    has_absolute: bool,
 }
 
 #[derive(Debug)]
 pub(super) struct PerFileFlavorCache {
     matchers: Vec<(GlobMatcher, MarkdownFlavor)>,
+    /// See [`PerFileIgnoreCache::has_absolute`].
+    has_absolute: bool,
+}
+
+/// The file's absolute path, for matching against absolute patterns. `None`
+/// when the caller has no absolute pattern to match (the common case, which
+/// must not pay for the canonicalization) or when the file cannot be resolved.
+fn absolute_match_path(file_path: &Path, has_absolute: bool) -> Option<PathBuf> {
+    if !has_absolute {
+        return None;
+    }
+    file_path.canonicalize().ok()
 }
 
 impl Config {
@@ -237,8 +256,17 @@ impl Config {
             .per_file_ignores_cache
             .get_or_init(|| PerFileIgnoreCache::new(&self.per_file_ignores));
 
-        // Match the file path against all patterns
-        for match_idx in cache.globset.matches(path_for_matching.as_ref()) {
+        // Match the file path against all patterns, by its project-relative
+        // form and - for absolute patterns, including expanded `~` ones - by
+        // its absolute path.
+        let absolute = absolute_match_path(file_path, cache.has_absolute);
+        let matches = cache
+            .globset
+            .matches(path_for_matching.as_ref())
+            .into_iter()
+            .chain(absolute.iter().flat_map(|abs| cache.globset.matches(abs)));
+
+        for match_idx in matches {
             if let Some(rules) = cache.rules.get(match_idx) {
                 for rule in rules {
                     // Normalize rule names to uppercase (MD033, md033 -> MD033)
@@ -266,9 +294,14 @@ impl Config {
             .per_file_flavor_cache
             .get_or_init(|| PerFileFlavorCache::new(&self.per_file_flavor));
 
-        // Iterate in config order and return first match (IndexMap preserves order)
+        // Iterate in config order and return first match (IndexMap preserves order).
+        // Each pattern sees the file's project-relative form and - for absolute
+        // patterns, including expanded `~` ones - its absolute path.
+        let absolute = absolute_match_path(file_path, cache.has_absolute);
         for (matcher, flavor) in &cache.matchers {
-            if matcher.is_match(path_for_matching.as_ref()) {
+            if matcher.is_match(path_for_matching.as_ref())
+                || absolute.as_ref().is_some_and(|abs| matcher.is_match(abs))
+            {
                 return *flavor;
             }
         }
@@ -493,8 +526,11 @@ impl PerFileIgnoreCache {
         let mut builder = GlobSetBuilder::new();
         let mut rules = Vec::new();
 
+        let mut has_absolute = false;
         for (pattern, rules_list) in per_file_ignores {
-            if let Ok(glob) = Glob::new(pattern) {
+            let pattern = crate::discovery::expand_home_prefix(pattern);
+            has_absolute |= crate::discovery::is_absolute_pattern(&pattern);
+            if let Ok(glob) = Glob::new(&pattern) {
                 builder.add(glob);
                 // Canonicalize defensively: callers should have run
                 // Config::canonicalize_rule_lists already, but per-file-ignores
@@ -517,7 +553,11 @@ impl PerFileIgnoreCache {
             GlobSetBuilder::new().build().unwrap()
         });
 
-        Self { globset, rules }
+        Self {
+            globset,
+            rules,
+            has_absolute,
+        }
     }
 }
 
@@ -525,15 +565,18 @@ impl PerFileFlavorCache {
     fn new(per_file_flavor: &IndexMap<String, MarkdownFlavor>) -> Self {
         let mut matchers = Vec::new();
 
+        let mut has_absolute = false;
         for (pattern, flavor) in per_file_flavor {
-            if let Ok(glob) = GlobBuilder::new(pattern).literal_separator(true).build() {
+            let pattern = crate::discovery::expand_home_prefix(pattern);
+            has_absolute |= crate::discovery::is_absolute_pattern(&pattern);
+            if let Ok(glob) = GlobBuilder::new(&pattern).literal_separator(true).build() {
                 matchers.push((glob.compile_matcher(), *flavor));
             } else {
                 log::warn!("Invalid glob pattern in per-file-flavor: {pattern}");
             }
         }
 
-        Self { matchers }
+        Self { matchers, has_absolute }
     }
 }
 
@@ -549,11 +592,15 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub disable: Vec<String>,
 
-    /// Files to exclude
+    /// Files to exclude. Glob patterns, relative to the project root; a
+    /// leading `~/` expands to the home directory and absolute paths are
+    /// matched as written.
     #[serde(default)]
     pub exclude: Vec<String>,
 
-    /// Files to include
+    /// Files to include. Glob patterns, relative to the project root; a
+    /// leading `~/` expands to the home directory and absolute paths are
+    /// matched as written.
     #[serde(default)]
     pub include: Vec<String>,
 
@@ -592,7 +639,9 @@ pub struct GlobalConfig {
     #[deprecated(since = "0.0.156", note = "Exclude patterns are now always respected")]
     pub force_exclude: bool,
 
-    /// Directory to store cache files (default: .rumdl_cache)
+    /// Directory to store cache files (default: .rumdl_cache).
+    /// A leading `~/` expands to the home directory; a relative path resolves
+    /// against the project root.
     /// Can also be set via --cache-dir CLI flag or RUMDL_CACHE_DIR environment variable
     #[serde(default, alias = "cache_dir", skip_serializing_if = "Option::is_none")]
     pub cache_dir: Option<String>,

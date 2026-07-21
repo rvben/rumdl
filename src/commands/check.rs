@@ -145,11 +145,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     apply_cli_overrides(&mut sourced, args);
 
     // 4. Extract cache_dir and project_root before converting sourced
-    let cache_dir_from_config = sourced
-        .global
-        .cache_dir
-        .as_ref()
-        .map(|sv| std::path::PathBuf::from(&sv.value));
+    let cache_dir_from_config = sourced.global.cache_dir.as_ref().map(|sv| sv.value.clone());
 
     let project_root = sourced.project_root.clone();
 
@@ -172,21 +168,11 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     // CLI --no-cache flag takes precedence over config
     let cache_enabled = !args.no_cache && config.global.cache;
 
-    // Resolve cache directory with precedence: CLI -> env var -> config -> default
-    let mut cache_dir = args
-        .cache_dir
-        .as_ref()
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var("RUMDL_CACHE_DIR").ok().map(std::path::PathBuf::from))
-        .or(cache_dir_from_config)
-        .unwrap_or_else(|| std::path::PathBuf::from(".rumdl_cache"));
-
-    // If cache_dir is relative and we have a project root, resolve relative to project root
-    if cache_dir.is_relative()
-        && let Some(ref root) = project_root
-    {
-        cache_dir = root.join(&cache_dir);
-    }
+    let cache_dir = crate::cache::resolve_cache_dir(
+        args.cache_dir.as_deref(),
+        cache_dir_from_config.as_deref(),
+        project_root.as_deref(),
+    );
 
     let cache = if cache_enabled {
         let cache_instance = crate::cache::LintCache::new(cache_dir.clone(), cache_enabled);

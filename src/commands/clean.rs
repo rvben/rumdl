@@ -79,30 +79,12 @@ fn resolve_cache_directory(config_path: Option<&str>, no_config: bool, isolated:
         }
     };
 
-    // Get cache_dir from config
-    let cache_dir_from_config = sourced
-        .global
-        .cache_dir
-        .as_ref()
-        .map(|sv| std::path::PathBuf::from(&sv.value));
-
-    let project_root = sourced.project_root.clone();
-
-    // Resolve cache directory with precedence: env var -> config -> default
-    let mut cache_dir = std::env::var("RUMDL_CACHE_DIR")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or(cache_dir_from_config)
-        .unwrap_or_else(|| std::path::PathBuf::from(".rumdl_cache"));
-
-    // If cache_dir is relative and we have a project root, resolve relative to project root
-    if cache_dir.is_relative()
-        && let Some(root) = project_root
-    {
-        cache_dir = root.join(&cache_dir);
-    }
-
-    cache_dir
+    // `clean` has no --cache-dir flag, so the CLI source is always absent.
+    crate::cache::resolve_cache_dir(
+        None,
+        sourced.global.cache_dir.as_ref().map(|sv| sv.value.as_str()),
+        sourced.project_root.as_deref(),
+    )
 }
 
 /// Calculate total size and count of files in a directory recursively

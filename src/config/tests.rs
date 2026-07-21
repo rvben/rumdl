@@ -1046,6 +1046,39 @@ fn test_per_file_flavor_glob_matching() {
 }
 
 #[test]
+fn test_per_file_globs_match_absolute_patterns() {
+    // An absolute pattern - what a `~/...` pattern expands to - must match the
+    // file's absolute path, not just its project-relative form.
+    let temp_dir = tempdir().unwrap();
+    let notes_dir = temp_dir.path().canonicalize().unwrap().join("notes");
+    fs::create_dir_all(&notes_dir).unwrap();
+    let note = notes_dir.join("scratch.md");
+    fs::write(&note, "# Note\n").unwrap();
+
+    let config_path = temp_dir.path().join(".rumdl.toml");
+    let pattern = notes_dir.to_string_lossy().replace('\\', "/");
+    fs::write(
+        &config_path,
+        format!(
+            "[per-file-flavor]\n\"{pattern}/**\" = \"mkdocs\"\n\n[per-file-ignores]\n\"{pattern}/**\" = [\"MD013\"]\n"
+        ),
+    )
+    .unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery(Some(config_path.to_str().unwrap()), None, true).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(config.get_flavor_for_file(&note), MarkdownFlavor::MkDocs);
+    assert!(config.get_ignored_rules_for_file(&note).contains("MD013"));
+
+    // A sibling outside the pattern is unaffected.
+    let other = temp_dir.path().canonicalize().unwrap().join("other.md");
+    fs::write(&other, "# Other\n").unwrap();
+    assert_eq!(config.get_flavor_for_file(&other), MarkdownFlavor::Standard);
+    assert!(config.get_ignored_rules_for_file(&other).is_empty());
+}
+
+#[test]
 fn test_per_file_flavor_pyproject_toml() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join("pyproject.toml");

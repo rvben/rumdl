@@ -274,6 +274,38 @@ enable = ["ALL"]
 disable = ["MD013", "MD033"]
 ```
 
+## Paths and the Home Directory
+
+Every setting that takes a path or a file pattern - [`extends`](#extends),
+[`exclude`](#exclude), [`include`](#include),
+[`per-file-ignores`](#per-file-ignores), [`per-file-flavor`](#per-file-flavor)
+and [`cache-dir`](#cache-dir) - accepts three forms:
+
+| Form             | Meaning                                      |
+| ---------------- | -------------------------------------------- |
+| `docs/**`        | Relative to the project root                 |
+| `/absolute/path` | That one location on disk                    |
+| `~/path`         | That one location, under your home directory |
+
+A leading `~/` expands to your home directory, so a user-level config
+(`~/.config/rumdl/rumdl.toml`) can name a home path without hardcoding a
+username - useful when that config lives in a dotfiles repository:
+
+```toml
+[global]
+exclude = ["~/.cursor/plans"]
+cache-dir = "~/.cache/rumdl"
+```
+
+Only a leading `~/` (or a bare `~`) is a home reference. `~` is a legal
+filename character elsewhere, so `notes.md~` and `docs/~drafts` stay literal,
+and `~user` is not expanded to another user's home.
+
+Note the difference in reach: an absolute or `~/` pattern matches that one
+location, while a relative pattern matches the name wherever it appears.
+`~/notes` excludes only your home `notes` directory; `notes` excludes every
+project's `notes` directory.
+
 ## Detailed Settings Reference
 
 ### `extends`
@@ -543,6 +575,9 @@ Patterns use standard glob syntax:
 - `?` matches a single character
 - `{a,b}` matches either `a` or `b` (brace expansion)
 
+See [Paths and the Home Directory](#paths-and-the-home-directory) for `~/` and
+absolute patterns.
+
 To match multiple specific files, use **brace expansion**:
 
 ```toml
@@ -674,10 +709,15 @@ exclude = [
 - `**/*.ext` - Exclude all files with extension in any subdirectory
 - `*.pattern` - Exclude files matching pattern in current directory
 - `path/**/file` - Exclude specific files in any subdirectory of path
+- `~/path` - Exclude a path in your home directory
+- `/absolute/path` - Exclude an absolute location
+
+See [Paths and the Home Directory](#paths-and-the-home-directory) for `~/` and
+absolute patterns.
 
 **Usage Notes**:
 
-- Patterns are relative to the project root
+- Patterns are relative to the project root, unless they are absolute or start with `~/`
 - Exclude patterns are processed before include patterns
 - More specific patterns take precedence over general ones
 - Useful for excluding generated files, dependencies, and temporary files
@@ -707,6 +747,9 @@ include = [
     "**/*.md.jinja",         # Include templates with a non-standard extension
 ]
 ```
+
+See [Paths and the Home Directory](#paths-and-the-home-directory) for `~/` and
+absolute patterns.
 
 **Usage Notes**:
 
@@ -886,7 +929,8 @@ Specifies Markdown flavors for specific files or file patterns. This allows diff
 - `*` matches any characters except path separators
 - `**` matches any characters including path separators
 - `?` matches a single character
-- Patterns are relative to the project root
+- Patterns are relative to the project root, unless absolute or starting with
+  `~/` (see [Paths and the Home Directory](#paths-and-the-home-directory))
 
 **Usage Notes**:
 
@@ -1033,7 +1077,12 @@ Specifies the directory where rumdl stores cache files.
 cache-dir = ".rumdl_cache"      # Default location
 # or
 cache-dir = "/tmp/rumdl-cache"  # Custom location
+# or
+cache-dir = "~/.cache/rumdl"    # Shared across projects
 ```
+
+See [Paths and the Home Directory](#paths-and-the-home-directory). A relative
+path resolves against the project root.
 
 **Behavior**:
 
