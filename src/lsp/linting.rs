@@ -45,13 +45,14 @@ impl RumdlLanguageServer {
                 .cloned()
                 .or_else(|| std::env::current_dir().ok())
         };
-        let path_to_check = base
-            .and_then(|base| crate::discovery::path_relative_to(&file_path, &base))
-            .unwrap_or_else(|| file_path.to_string_lossy().to_string());
+        let path_to_check = base.and_then(|base| crate::discovery::path_relative_to(&file_path, &base));
 
         let matchers = crate::discovery::ExcludeMatchers::new(exclude_patterns);
-        if matchers.is_match(&path_to_check) {
-            log::debug!("Excluding file from LSP linting: {path_to_check}");
+        if let Some(pattern) = matchers.matched_pattern_for_file(path_to_check.as_deref(), &file_path) {
+            log::debug!(
+                "Excluding file from LSP linting: {} (pattern '{pattern}')",
+                file_path.display()
+            );
             return true;
         }
 

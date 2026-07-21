@@ -428,12 +428,13 @@ fn collect_markdown_files(
 }
 
 /// Whether `path` matches the config `exclude` patterns, matched against its
-/// root-relative form. Paths that cannot be relativized are not excluded.
+/// root-relative form and, for absolute patterns, its absolute path. A path
+/// that cannot be relativized is excluded only by an absolute pattern.
 fn excluded_relative_to_root(excludes: &ExcludeMatchers, path: &Path, root: &Path) -> bool {
     if excludes.is_empty() {
         return false;
     }
-    path_relative_to(path, root).is_some_and(|rel| excludes.is_match(&rel))
+    excludes.excludes_file(path_relative_to(path, root).as_deref(), path)
 }
 
 /// Whether `path` should be excluded from the workspace index based on the same
@@ -637,6 +638,32 @@ More text with [link](./other.md#section).
             &[root.to_path_buf()],
             &index_walk_options(&Config::default()),
             &excludes,
+        )
+        .iter()
+        .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+        assert_eq!(names, vec!["README.md".to_string()]);
+    }
+
+    #[test]
+    fn test_collect_markdown_files_honors_absolute_exclude_patterns() {
+        use std::fs;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+
+        fs::write(root.join("README.md"), "# Readme\n").unwrap();
+        fs::create_dir(root.join("drafts")).unwrap();
+        fs::write(root.join("drafts").join("wip.md"), "# WIP\n").unwrap();
+
+        // An absolute pattern - what a `~/...` pattern expands to - must
+        // exclude in the workspace scan just as it does in the CLI walk.
+        let pattern = format!("{}/drafts", root.to_string_lossy().replace('\\', "/"));
+        let names: Vec<String> = collect_markdown_files(
+            std::slice::from_ref(&root),
+            &index_walk_options(&Config::default()),
+            &ExcludeMatchers::new(&[pattern]),
         )
         .iter()
         .map(|p| p.file_name().unwrap().to_str().unwrap().to_string())

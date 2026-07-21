@@ -386,22 +386,13 @@ pub fn find_markdown_files(
             if !exclude_matchers.is_empty() {
                 // Compute path relative to project_root for pattern matching
                 // This ensures patterns like "subdir/file.md" work regardless of cwd
-                let path_for_matching = if let Some(canonical_root) = canonical_project_root.as_deref() {
-                    if let Ok(canonical_path) = path.canonicalize() {
-                        if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
-                            relative.to_string_lossy().to_string()
-                        } else {
-                            // Path is not under project_root, fall back to cleaned_path
-                            cleaned_path.clone()
-                        }
-                    } else {
-                        cleaned_path.clone()
-                    }
-                } else {
-                    cleaned_path.clone()
-                };
-
-                if let Some(pattern) = exclude_matchers.matched_pattern(&path_for_matching) {
+                let path_for_matching = canonical_project_root
+                    .as_deref()
+                    .and_then(|root| path_relative_to(path, root))
+                    .unwrap_or_else(|| cleaned_path.clone());
+                // Absolute patterns (written literally or produced by `~`
+                // expansion) match the absolute path instead.
+                if let Some(pattern) = exclude_matchers.matched_pattern_for_file(Some(&path_for_matching), path) {
                     // Excluding an explicitly provided file is a deliberate config choice, so
                     // this is an informational notice, not a warning, and it is surfaced only
                     // under --verbose. This keeps explicit-path mode as quiet as discovery
@@ -564,24 +555,19 @@ pub fn find_markdown_files(
     // --- Post-walk exclude pattern filtering ---
     // The ignore crate's overrides may not work correctly when the walker path prefix
     // differs from the config file location. Apply exclude patterns manually here.
-    if !exclude_matchers.is_empty()
-        && let Some(canonical_root) = canonical_project_root.as_deref()
-    {
+    // This also carries absolute patterns, which the walker's overrides cannot
+    // express: the ignore crate anchors a leading `/` to the walk root.
+    if !exclude_matchers.is_empty() {
         file_paths.retain(|file_path| {
             let path = Path::new(file_path);
-            // Compute path relative to project_root for pattern matching
-            let path_for_matching = if let Ok(canonical_path) = path.canonicalize() {
-                if let Ok(relative) = canonical_path.strip_prefix(canonical_root) {
-                    relative.to_string_lossy().to_string()
-                } else {
-                    file_path.clone()
-                }
-            } else {
-                file_path.clone()
-            };
+            // Compute path relative to project_root for pattern matching. Without
+            // a project root, or outside it, only the absolute form applies.
+            let path_for_matching = canonical_project_root
+                .as_deref()
+                .and_then(|root| path_relative_to(path, root));
 
             // Check if any exclude pattern matches
-            !exclude_matchers.is_match(&path_for_matching)
+            !exclude_matchers.excludes_file(path_for_matching.as_deref(), path)
         });
     }
 

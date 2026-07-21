@@ -15,6 +15,7 @@
 //! walks whatever gitignore semantics allow.
 
 use globset::{Glob, GlobMatcher};
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::Path;
 
@@ -198,17 +199,35 @@ pub fn markdown_walk_builder(root: &Path, options: &MarkdownWalkOptions) -> igno
     builder
 }
 
+/// Normalize path separators to `/` for glob matching. On Windows `\` is
+/// globset's escape character, so a native path must be rewritten before it can
+/// be used as - or matched against - a pattern. No-op on Unix, where `\` is a
+/// legal filename character.
+fn normalize_pattern_separators(path: Cow<'_, str>) -> Cow<'_, str> {
+    if cfg!(windows) && path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        path
+    }
+}
+
 /// Expands directory-style patterns to also match files within them.
 /// Pattern "dir/path" becomes ["dir/path", "dir/path/**"] to match both
 /// the directory itself and all contents recursively.
 ///
-/// Patterns containing glob characters (*, ?, [) are returned unchanged.
+/// The expansion is driven by the pattern's *final* component: it names a
+/// directory only when it holds no wildcard. `docs/*` therefore stays as
+/// written (it names direct children, and `docs/*/**` would newly exclude
+/// nested contents), while `**/.cursor/plans` gains its contents-expansion
+/// despite the wildcard earlier in the pattern.
 pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
-    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+    let base = pattern.trim_end_matches('/');
+    let final_component = base.rsplit('/').next().unwrap_or(base);
+
+    if final_component.is_empty() || final_component.contains(['*', '?', '[']) {
         return vec![pattern.to_string()];
     }
 
-    let base = pattern.trim_end_matches('/');
     vec![
         base.to_string(),     // Match the directory itself
         format!("{base}/**"), // Match everything underneath
@@ -223,22 +242,39 @@ pub fn expand_directory_pattern(pattern: &str) -> Vec<String> {
 /// `docs/drafts` behave identically everywhere.
 pub struct ExcludeMatchers {
     matchers: Vec<(String, GlobMatcher)>,
+    /// Whether any pattern is absolute, i.e. whether matching has to consider
+    /// a file's absolute path at all. Keeps the common (all-relative) case
+    /// from paying for the canonicalization that check needs.
+    has_absolute: bool,
     /// Patterns that failed to compile, with their errors. Callers decide
     /// how to surface these (CLI prints to stderr, LSP logs).
     pub invalid: Vec<(String, String)>,
+}
+
+/// Whether `pattern` names an absolute location. A leading `/` counts on every
+/// platform: patterns use `/` separators, so a Unix-style path stays absolute
+/// when the same config is read on Windows.
+fn is_absolute_pattern(pattern: &str) -> bool {
+    pattern.starts_with('/') || Path::new(pattern).is_absolute()
 }
 
 impl ExcludeMatchers {
     pub fn new(patterns: &[String]) -> Self {
         let mut matchers = Vec::new();
         let mut invalid = Vec::new();
+        let mut has_absolute = false;
         for pattern in patterns.iter().flat_map(|p| expand_directory_pattern(p)) {
+            has_absolute |= is_absolute_pattern(&pattern);
             match Glob::new(&pattern) {
                 Ok(glob) => matchers.push((pattern, glob.compile_matcher())),
                 Err(e) => invalid.push((pattern, e.to_string())),
             }
         }
-        Self { matchers, invalid }
+        Self {
+            matchers,
+            has_absolute,
+            invalid,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -255,6 +291,39 @@ impl ExcludeMatchers {
 
     pub fn is_match(&self, relative_path: &str) -> bool {
         self.matched_pattern(relative_path).is_some()
+    }
+
+    /// The first pattern matching a file, if any.
+    ///
+    /// Both forms of the file are tried: its `relative` form (how patterns are
+    /// normally written - relative to the project or workspace root) and its
+    /// absolute path, which is what an absolute pattern matches. Absolute
+    /// patterns reach config either written literally or through `~` expansion,
+    /// and the walker's overrides cannot apply them (the `ignore` crate anchors
+    /// a leading `/` to the walk root), so this is where they take effect.
+    ///
+    /// Checking the absolute path cannot widen a relative pattern: globs are
+    /// anchored at the start of the matched string, so `drafts/**` never
+    /// matches `/home/dev/proj/drafts/note.md`.
+    ///
+    /// `absolute` is canonicalized before matching, since an expanded `~`
+    /// resolves to a canonical location. Files that cannot be canonicalized
+    /// (already deleted, unreadable) are matched as given.
+    pub fn matched_pattern_for_file(&self, relative: Option<&str>, absolute: &Path) -> Option<&str> {
+        if let Some(pattern) = relative.and_then(|rel| self.matched_pattern(rel)) {
+            return Some(pattern);
+        }
+        if !self.has_absolute {
+            return None;
+        }
+        let canonical = absolute.canonicalize();
+        let absolute = canonical.as_deref().unwrap_or(absolute);
+        self.matched_pattern(&normalize_pattern_separators(absolute.to_string_lossy()))
+    }
+
+    /// Whether any pattern matches the file (see [`matched_pattern_for_file`](Self::matched_pattern_for_file)).
+    pub fn excludes_file(&self, relative: Option<&str>, absolute: &Path) -> bool {
+        self.matched_pattern_for_file(relative, absolute).is_some()
     }
 }
 
@@ -501,6 +570,65 @@ mod tests {
         assert!(!matchers.is_match("docs/guide.md"));
         assert_eq!(matchers.matched_pattern("drafts/inner.md"), Some("drafts/**"));
         assert!(matchers.invalid.is_empty());
+    }
+
+    #[test]
+    fn expand_directory_pattern_expands_a_literal_final_component() {
+        // A glob earlier in the pattern must not block contents-expansion: the
+        // final component names a directory, so its contents are excluded too.
+        assert_eq!(
+            expand_directory_pattern("**/.cursor/plans"),
+            vec!["**/.cursor/plans", "**/.cursor/plans/**"]
+        );
+        assert_eq!(
+            expand_directory_pattern("docs/**/drafts"),
+            vec!["docs/**/drafts", "docs/**/drafts/**"]
+        );
+        // Alternation names literal directories, so it keeps its expansion.
+        assert_eq!(
+            expand_directory_pattern("logs/{a,b}"),
+            vec!["logs/{a,b}", "logs/{a,b}/**"]
+        );
+    }
+
+    #[test]
+    fn expand_directory_pattern_leaves_a_wildcard_final_component_alone() {
+        // `docs/*` names direct children only; expanding it to `docs/*/**` would
+        // newly exclude nested contents.
+        for pattern in ["docs/*", "*.tmp.md", "build/**", "data.[ch]", "notes?"] {
+            assert_eq!(
+                expand_directory_pattern(pattern),
+                vec![pattern.to_string()],
+                "{pattern:?} must not gain a contents-expansion"
+            );
+        }
+    }
+
+    #[test]
+    fn exclude_matchers_match_an_absolute_pattern_against_an_absolute_path() {
+        let matchers = ExcludeMatchers::new(&["/home/dev/.cursor/plans".to_string()]);
+        let excluded = Path::new("/home/dev/.cursor/plans/plan.md");
+        assert!(
+            matchers.excludes_file(None, excluded),
+            "an absolute pattern must match the absolute path when there is no relative form"
+        );
+        assert_eq!(
+            matchers.matched_pattern_for_file(None, excluded),
+            Some("/home/dev/.cursor/plans/**")
+        );
+        // A file inside a project root still has a relative form; the absolute
+        // pattern must match it through the absolute path.
+        assert!(matchers.excludes_file(Some(".cursor/plans/plan.md"), excluded));
+        assert!(!matchers.excludes_file(Some("docs/guide.md"), Path::new("/home/dev/docs/guide.md")));
+    }
+
+    #[test]
+    fn exclude_matchers_do_not_let_relative_patterns_match_absolute_paths() {
+        // Relative patterns are anchored at the start of the matched string, so
+        // adding the absolute-path check must not widen them into `**/drafts`.
+        let matchers = ExcludeMatchers::new(&["drafts".to_string()]);
+        assert!(!matchers.excludes_file(None, Path::new("/home/dev/proj/drafts/note.md")));
+        assert!(matchers.excludes_file(Some("drafts/note.md"), Path::new("/home/dev/proj/drafts/note.md")));
     }
 
     #[test]
