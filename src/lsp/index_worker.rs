@@ -651,7 +651,10 @@ More text with [link](./other.md#section).
         use std::fs;
 
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        // Canonicalize the way production does, so the pattern built below has
+        // the shape an expanded `~` produces (on Windows that means no verbatim
+        // `\\?\` prefix, which would match nothing).
+        let root = crate::discovery::canonicalize_for_matching(dir.path()).unwrap();
 
         fs::write(root.join("README.md"), "# Readme\n").unwrap();
         fs::create_dir(root.join("drafts")).unwrap();
