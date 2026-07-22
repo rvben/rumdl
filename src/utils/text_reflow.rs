@@ -86,8 +86,9 @@ struct NestedStructure {
     /// Ranges a break may never land inside, merged into outermost,
     /// non-overlapping ranges. The whitespace in a code span is literal, and
     /// the whitespace in a link destination or an HTML tag is structural, so
-    /// replacing it with a newline rewrites the document. A link or image is
-    /// held whole beyond that too, matching how the top level treats one.
+    /// replacing it with a newline rewrites the document. A link, image or
+    /// attr list is held whole beyond that too, matching how the top level
+    /// treats one.
     atomic: Vec<(usize, usize)>,
     /// The delimiter runs of nested emphasis, strong and strikethrough spans.
     /// These marker characters belong to a well-formed span, so they do not
@@ -133,7 +134,7 @@ fn merge_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
 }
 
 /// Classify the inline constructs nested inside a span's content.
-fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
+fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>, attr_lists: bool) -> NestedStructure {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
 
@@ -209,6 +210,17 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>)
         from = found.end();
     }
 
+    // A MkDocs/kramdown attr list (`{.class key="value"}`) holds interior
+    // whitespace that is structural, so breaking inside one rewrites it. The
+    // pattern anchors on `{`, so a non-overlapping sweep finds the same units
+    // the top level does. Only when the flavor is enabled: otherwise `{a b}` is
+    // literal prose and breaks like any other words, matching the top level.
+    if attr_lists {
+        for found in ATTR_LIST_PATTERN.find_iter(content) {
+            atomic.push((found.start(), found.end()));
+        }
+    }
+
     NestedStructure {
         atomic: merge_ranges(atomic),
         markers: merge_ranges(markers),
@@ -237,14 +249,18 @@ fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>)
 /// whitespace inside it is ordinary prose whitespace, so it breaks like any
 /// other, and only its delimiter runs are held together with the words they
 /// flank.
-fn breakable_units<'a>(content: &'a str, defined_references: Option<&HashSet<String>>) -> Option<Vec<&'a str>> {
+fn breakable_units<'a>(
+    content: &'a str,
+    defined_references: Option<&HashSet<String>>,
+    attr_lists: bool,
+) -> Option<Vec<&'a str>> {
     // Plain prose cannot hold a nested construct, so every whitespace run is a
     // break point and the parse below can be skipped.
     if !content.contains(['`', '*', '_', '~', '[', '<', '$', '{']) {
         return Some(split_breakable_words(content).collect());
     }
 
-    let NestedStructure { atomic, markers } = nested_structure(content, defined_references);
+    let NestedStructure { atomic, markers } = nested_structure(content, defined_references, attr_lists);
 
     let mut units = Vec::new();
     let mut unit_start = None;
@@ -2968,7 +2984,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             .then(|| split_breakable_words(content).collect())
                     } else {
                         (!options.atomic_spans || element_len > options.line_length)
-                            .then(|| breakable_units(content, options.defined_references.as_ref()))
+                            .then(|| breakable_units(content, options.defined_references.as_ref(), options.attr_lists))
                             .flatten()
                     }
                 }
@@ -5034,6 +5050,41 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("[one two three four five six seven]")),
             "an undefined shortcut is prose and should break: {lines:?}"
+        );
+        assert_eq!(lines.join(" "), text, "wrapping must only move line breaks");
+    }
+
+    #[test]
+    fn test_overlong_span_never_breaks_inside_a_nested_attr_list() {
+        // A MkDocs/kramdown attr list carries structural interior whitespace, so
+        // splitting it rewrites the attributes. The top level holds it whole; an
+        // inner span has to agree. Only when the flavor is enabled.
+        let attr = "{.highlight key=\"a b c\"}";
+        let text = format!("_**alpha beta gamma delta epsilon zeta{attr} eta theta iota kappa**_");
+        let options = ReflowOptions {
+            line_length: 20,
+            atomic_spans: true,
+            attr_lists: true,
+            ..Default::default()
+        };
+        let lines = reflow_line(&text, &options);
+        assert!(lines.len() > 1, "over-long span should wrap: {lines:?}");
+        assert!(
+            lines.iter().any(|line| line.contains(attr)),
+            "attr list must stay on one line: {lines:?}"
+        );
+        assert_eq!(lines.join(" "), text, "wrapping must only move line breaks");
+
+        // With the flavor off, the same braces are literal prose and break like
+        // any other words, exactly as the top level treats them.
+        let plain = ReflowOptions {
+            attr_lists: false,
+            ..options
+        };
+        let lines = reflow_line(&text, &plain);
+        assert!(
+            !lines.iter().any(|line| line.contains(attr)),
+            "without the flavor the braces are prose and should break: {lines:?}"
         );
         assert_eq!(lines.join(" "), text, "wrapping must only move line breaks");
     }
