@@ -80,44 +80,44 @@ fn code_span_wraps_losslessly(content: &str) -> bool {
     true
 }
 
-/// Byte ranges of the inline constructs nested inside a span's content, merged
-/// into outermost, non-overlapping ranges. A line break may never land inside
-/// one: the whitespace in a code span is literal, and the whitespace in a link
-/// destination or an HTML tag is structural, so replacing it with a newline
-/// rewrites the document.
-fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_STRIKETHROUGH);
+/// How the inline structure nested inside a span's content constrains where a
+/// line break may land.
+struct NestedStructure {
+    /// Ranges a break may never land inside, merged into outermost,
+    /// non-overlapping ranges. The whitespace in a code span is literal, and
+    /// the whitespace in a link destination or an HTML tag is structural, so
+    /// replacing it with a newline rewrites the document.
+    atomic: Vec<(usize, usize)>,
+    /// The delimiter runs of nested emphasis, strong and strikethrough spans.
+    /// These marker characters belong to a well-formed span, so they do not
+    /// force the whole span to be kept whole, but they are not break points
+    /// either: the prose between them breaks at whitespace as usual.
+    markers: Vec<(usize, usize)>,
+}
 
-    let mut ranges: Vec<(usize, usize)> = Vec::new();
-    for (event, range) in Parser::new_ext(content, options).into_offset_iter() {
-        let protect = matches!(
-            event,
-            Event::Code(_)
-                | Event::InlineHtml(_)
-                | Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. })
-        );
-        if protect {
-            ranges.push((range.start, range.end));
+/// An emphasis, strong or strikethrough span whose end has not been seen yet.
+struct OpenSpan {
+    /// The span's full range, delimiters included.
+    span: (usize, usize),
+    /// Bounds of the content found inside it so far. What falls outside these
+    /// but inside `span` is the delimiter run.
+    content: Option<(usize, usize)>,
+}
+
+/// Record an event as content of every enclosing span still open, widening the
+/// bounds that separate a span's delimiters from what sits between them.
+fn note_span_content(open: &mut [OpenSpan], start: usize, end: usize) {
+    for open_span in open.iter_mut() {
+        if start >= open_span.span.0 && end <= open_span.span.1 {
+            open_span.content = Some(match open_span.content {
+                Some((known_start, known_end)) => (known_start.min(start), known_end.max(end)),
+                None => (start, end),
+            });
         }
     }
+}
 
-    // Constructs pulldown does not model, but that `parse_elements` holds
-    // atomic at the top level. Only those that can contain whitespace matter
-    // here: an emoji shortcode or HTML entity has no break point inside it.
-    for found in WIKI_LINK_REGEX
-        .find_iter(content)
-        .chain(HUGO_SHORTCODE_REGEX.find_iter(content))
-        .chain(DISPLAY_MATH_REGEX.find_iter(content))
-    {
-        ranges.push((found.start(), found.end()));
-    }
-    let mut from = 0;
-    while let Ok(Some(found)) = INLINE_MATH_REGEX.find_from_pos(content, from) {
-        ranges.push((found.start(), found.end()));
-        from = found.end();
-    }
-
+fn merge_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     // A nested construct is reported alongside its parent, so any range
     // starting at or before the current end is already covered by it.
     ranges.sort_unstable();
@@ -131,6 +131,81 @@ fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
     merged
 }
 
+/// Classify the inline constructs nested inside a span's content.
+fn nested_structure(content: &str) -> NestedStructure {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+
+    let mut atomic: Vec<(usize, usize)> = Vec::new();
+    let mut markers: Vec<(usize, usize)> = Vec::new();
+    // Emphasis-like spans whose end has not been seen yet, each with the bounds
+    // of the content found inside it so far.
+    let mut open: Vec<OpenSpan> = Vec::new();
+
+    for (event, range) in Parser::new_ext(content, options).into_offset_iter() {
+        let (start, end) = (range.start, range.end);
+        // An `End` repeats the range its `Start` already contributed, and the
+        // one closing a span covers that span whole, which would swallow its
+        // own delimiters.
+        if !matches!(event, Event::End(_)) {
+            note_span_content(&mut open, start, end);
+        }
+        match event {
+            Event::Code(_) | Event::InlineHtml(_) | Event::Start(Tag::Link { .. } | Tag::Image { .. }) => {
+                atomic.push((start, end));
+            }
+            Event::Start(Tag::Emphasis | Tag::Strong | Tag::Strikethrough) => {
+                open.push(OpenSpan {
+                    span: (start, end),
+                    content: None,
+                });
+            }
+            Event::End(TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough) => {
+                if let Some(OpenSpan {
+                    span: (span_start, span_end),
+                    content,
+                }) = open.pop()
+                {
+                    match content {
+                        // Whatever sits outside the content is the delimiter run.
+                        // Its length is read off the parse rather than assumed,
+                        // since `~x~` and `~~x~~` are both strikethrough.
+                        Some((content_start, content_end)) => {
+                            markers.push((span_start, content_start));
+                            markers.push((content_end, span_end));
+                        }
+                        // Nothing inside to anchor the delimiters against, so
+                        // keep the span whole rather than guess where they end.
+                        None => atomic.push((span_start, span_end)),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Constructs pulldown does not model, but that `parse_elements` holds
+    // atomic at the top level. Only those that can contain whitespace matter
+    // here: an emoji shortcode or HTML entity has no break point inside it.
+    for found in WIKI_LINK_REGEX
+        .find_iter(content)
+        .chain(HUGO_SHORTCODE_REGEX.find_iter(content))
+        .chain(DISPLAY_MATH_REGEX.find_iter(content))
+    {
+        atomic.push((found.start(), found.end()));
+    }
+    let mut from = 0;
+    while let Ok(Some(found)) = INLINE_MATH_REGEX.find_from_pos(content, from) {
+        atomic.push((found.start(), found.end()));
+        from = found.end();
+    }
+
+    NestedStructure {
+        atomic: merge_ranges(atomic),
+        markers: merge_ranges(markers),
+    }
+}
+
 /// Split an emphasis, strong or strikethrough span's content into the units
 /// that may be placed on separate lines, or `None` when the span has to stay
 /// atomic.
@@ -140,11 +215,19 @@ fn nested_construct_ranges(content: &str) -> Vec<(usize, usize)> {
 /// every delimiter keeps its flanking classification. Two things are not safe,
 /// and this rules them out:
 ///
-/// - A break inside a nested construct. Each is one unbreakable unit, matching
-///   how links, images and code spans are already held atomic at the top level.
+/// - A break inside a code span, link, image or HTML tag. Each is one
+///   unbreakable unit, matching how they are already held atomic at the top
+///   level, because the whitespace in one is literal or structural.
 /// - A marker character that belongs to no well-formed nested span: a stray or
 ///   backslash-escaped `` ` ``, `*`, `_` or `~`. The content's structure is then
 ///   not fully modelled, so the span is kept whole rather than broken on a guess.
+///   This matters: breaking `**a * b**` at its spaces would put a literal `*` at
+///   the start of a line, turning it into a list item.
+///
+/// A nested emphasis, strong or strikethrough span is not one of those. The
+/// whitespace inside it is ordinary prose whitespace, so it breaks like any
+/// other, and only its delimiter runs are held together with the words they
+/// flank.
 fn breakable_units(content: &str) -> Option<Vec<&str>> {
     // Plain prose cannot hold a nested construct, so every whitespace run is a
     // break point and the parse below can be skipped.
@@ -152,24 +235,28 @@ fn breakable_units(content: &str) -> Option<Vec<&str>> {
         return Some(split_breakable_words(content).collect());
     }
 
-    let protected = nested_construct_ranges(content);
+    let NestedStructure { atomic, markers } = nested_structure(content);
 
     let mut units = Vec::new();
     let mut unit_start = None;
-    let mut next_range = 0;
+    let mut next_atomic = 0;
+    let mut next_marker = 0;
     for (offset, ch) in content.char_indices() {
-        while protected.get(next_range).is_some_and(|&(_, end)| end <= offset) {
-            next_range += 1;
+        while atomic.get(next_atomic).is_some_and(|&(_, end)| end <= offset) {
+            next_atomic += 1;
         }
-        if protected.get(next_range).is_some_and(|&(start, _)| offset >= start) {
-            // Inside a nested construct: never a break point, and its markers
+        if atomic.get(next_atomic).is_some_and(|&(start, _)| offset >= start) {
+            // Inside an atomic construct: never a break point, and its markers
             // are accounted for.
             if unit_start.is_none() {
                 unit_start = Some(offset);
             }
             continue;
         }
-        if matches!(ch, '`' | '*' | '_' | '~') {
+        while markers.get(next_marker).is_some_and(|&(_, end)| end <= offset) {
+            next_marker += 1;
+        }
+        if matches!(ch, '`' | '*' | '_' | '~') && markers.get(next_marker).is_none_or(|&(start, _)| offset < start) {
             return None;
         }
         if is_breakable_whitespace(ch) {
@@ -4697,6 +4784,16 @@ mod tests {
             "**strong text with `code` and more words than fit on one single line**",
             "~~struck text with `code` and more words than fit on one single line~~",
             "_emphasis with **nested strong that is quite long** and trailing words_",
+            // Doubly nested spans: the whole content of the outer span is one
+            // nested span, so there is no prose outside it to break at.
+            "***A doubly nested bold italic span with more words than fit on a line***",
+            "___Another doubly nested span with more words than fit on a single line___",
+            "**_mixed strong then emphasis with more words than fit on a single line_**",
+            "*__mixed emphasis then strong with more words than fit on a single line__*",
+            "**~~strong strikethrough with more words than fit on a single line here~~**",
+            // A marker that belongs to no well-formed span. Breaking at these
+            // spaces would start a line with `* `, making it a list item.
+            "**a * b with a stray marker and plenty more words to pass the budget**",
             "_foo `a` bar `b` baz qux quux corge grault garply waldo fred plugh xyzzy_",
             "text before _a long emphasis with `code` inside of it here_ and after",
             "(_a parenthesized long emphasis with `code` inside of it right here_)",
@@ -4805,6 +4902,59 @@ mod tests {
                 "characters with some **bold** inside._",
             ]
         );
+    }
+
+    #[test]
+    fn test_overlong_doubly_nested_span_wraps() {
+        // The whole content of the outer span is a single nested emphasis span.
+        // Holding a nested span whole regardless of length left no break point
+        // anywhere inside, so the line could never be wrapped and MD013 reported
+        // a violation its own fixer refused to touch.
+        let options = ReflowOptions {
+            line_length: 80,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        let body = "This is a very, very, very, very, very, very, very, very, very, very long line that is emphasised.";
+        for (open, close) in [
+            ("***", "***"),
+            ("___", "___"),
+            ("**_", "_**"),
+            ("*__", "__*"),
+            ("**~~", "~~**"),
+        ] {
+            let text = format!("{open}{body}{close}");
+            assert!(text.len() > options.line_length, "case must start over budget");
+            let lines = reflow_line(&text, &options);
+            assert!(
+                lines.len() > 1,
+                "{open}...{close} should wrap but stayed on one line: {lines:?}"
+            );
+            assert!(
+                lines.iter().all(|line| line.len() <= options.line_length),
+                "{open}...{close} left a line over the budget: {lines:?}"
+            );
+            assert_eq!(
+                lines.join(" "),
+                text,
+                "{open}...{close} wrapping must only replace a space with a newline"
+            );
+        }
+    }
+
+    #[test]
+    fn test_overlong_span_with_stray_marker_stays_whole() {
+        // A `*` that belongs to no well-formed span means the content is not
+        // fully modelled. Breaking at these spaces would put `* ` at the start
+        // of a line, turning literal text into a list item.
+        let options = ReflowOptions {
+            line_length: 40,
+            atomic_spans: true,
+            ..Default::default()
+        };
+        let text = "**alpha * beta gamma delta epsilon zeta eta theta iota kappa**";
+        let lines = reflow_line(text, &options);
+        assert_eq!(lines, vec![text], "stray marker must keep the span whole");
     }
 
     #[test]
