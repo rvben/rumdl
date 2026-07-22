@@ -108,7 +108,12 @@ jobs:
           install: false
 
       - name: Install mise tools
-        run: ./scripts/mise-install.sh
+        # Only what the test run needs. A bare install also pulls git-cliff,
+        # cargo-zigbuild, lychee and friends, and Windows has no prebuilt
+        # binaries for several of them, so cargo-binstall falls back to building
+        # from source and blows past the installer's 600s per-attempt timeout.
+        # That failed this job twice on unrelated commits.
+        run: ./scripts/mise-install.sh rust "cargo:cargo-nextest"
 
       - uses: Swatinem/rust-cache@v2
         with:
