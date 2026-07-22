@@ -86,7 +86,8 @@ struct NestedStructure {
     /// Ranges a break may never land inside, merged into outermost,
     /// non-overlapping ranges. The whitespace in a code span is literal, and
     /// the whitespace in a link destination or an HTML tag is structural, so
-    /// replacing it with a newline rewrites the document.
+    /// replacing it with a newline rewrites the document. A link or image is
+    /// held whole beyond that too, matching how the top level treats one.
     atomic: Vec<(usize, usize)>,
     /// The delimiter runs of nested emphasis, strong and strikethrough spans.
     /// These marker characters belong to a well-formed span, so they do not
@@ -132,7 +133,7 @@ fn merge_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
 }
 
 /// Classify the inline constructs nested inside a span's content.
-fn nested_structure(content: &str) -> NestedStructure {
+fn nested_structure(content: &str, defined_references: Option<&HashSet<String>>) -> NestedStructure {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);
 
@@ -184,6 +185,14 @@ fn nested_structure(content: &str) -> NestedStructure {
         }
     }
 
+    // Reference-style links and images (`[text][ref]`, `[text][]`, `[text]`) and
+    // footnote references need the document's definitions to be recognised, which
+    // the parse above has no access to. Reusing the extractor the top level runs
+    // keeps a link atomic under exactly the same conditions wherever it appears.
+    for span in extract_link_spans(content, defined_references) {
+        atomic.push((span.start, span.end));
+    }
+
     // Constructs pulldown does not model, but that `parse_elements` holds
     // atomic at the top level. Only those that can contain whitespace matter
     // here: an emoji shortcode or HTML entity has no break point inside it.
@@ -228,14 +237,14 @@ fn nested_structure(content: &str) -> NestedStructure {
 /// whitespace inside it is ordinary prose whitespace, so it breaks like any
 /// other, and only its delimiter runs are held together with the words they
 /// flank.
-fn breakable_units(content: &str) -> Option<Vec<&str>> {
+fn breakable_units<'a>(content: &'a str, defined_references: Option<&HashSet<String>>) -> Option<Vec<&'a str>> {
     // Plain prose cannot hold a nested construct, so every whitespace run is a
     // break point and the parse below can be skipped.
     if !content.contains(['`', '*', '_', '~', '[', '<', '$', '{']) {
         return Some(split_breakable_words(content).collect());
     }
 
-    let NestedStructure { atomic, markers } = nested_structure(content);
+    let NestedStructure { atomic, markers } = nested_structure(content, defined_references);
 
     let mut units = Vec::new();
     let mut unit_start = None;
@@ -2959,7 +2968,7 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             .then(|| split_breakable_words(content).collect())
                     } else {
                         (!options.atomic_spans || element_len > options.line_length)
-                            .then(|| breakable_units(content))
+                            .then(|| breakable_units(content, options.defined_references.as_ref()))
                             .flatten()
                     }
                 }
@@ -4955,6 +4964,78 @@ mod tests {
         let text = "**alpha * beta gamma delta epsilon zeta eta theta iota kappa**";
         let lines = reflow_line(text, &options);
         assert_eq!(lines, vec![text], "stray marker must keep the span whole");
+    }
+
+    #[test]
+    fn test_overlong_span_never_breaks_inside_a_nested_reference_link() {
+        // A reference-style link only looks like a link once the document's
+        // definitions are in scope, so the span's own parse sees plain text and
+        // used to break inside the label. The top level holds these atomic, and
+        // an inner span has to agree or `fmt` splits a link in one context and
+        // not the other.
+        let options = ReflowOptions {
+            line_length: 30,
+            atomic_spans: true,
+            defined_references: Some(HashSet::from([
+                "ref".to_string(),
+                // A bare `[text]` is a link only when its own label is defined.
+                "one two three four five six seven".to_string(),
+            ])),
+            ..Default::default()
+        };
+        for (text, link) in [
+            (
+                "_**alpha [one two three four five six seven][ref] beta gamma delta**_",
+                "[one two three four five six seven][ref]",
+            ),
+            (
+                "**alpha [one two three four five six seven][ref] beta gamma delta**",
+                "[one two three four five six seven][ref]",
+            ),
+            (
+                "_**alpha ![one two three four five six seven][ref] beta gamma delta**_",
+                "![one two three four five six seven][ref]",
+            ),
+            (
+                "_**alpha [one two three four five six seven][] beta gamma delta**_",
+                "[one two three four five six seven][]",
+            ),
+            (
+                "_**alpha [one two three four five six seven] beta gamma delta**_",
+                "[one two three four five six seven]",
+            ),
+        ] {
+            let lines = reflow_line(text, &options);
+            assert!(lines.len() > 1, "over-long span should wrap: {lines:?}");
+            assert!(
+                lines.iter().any(|line| line.contains(link)),
+                "{link} must stay on one line: {lines:?}"
+            );
+            assert_eq!(lines.join(" "), text, "wrapping must only move line breaks");
+        }
+    }
+
+    #[test]
+    fn test_overlong_span_breaks_inside_an_undefined_shortcut_reference() {
+        // A bare `[text]` is only a link when its label is defined. With the
+        // definitions in scope and no match, it is literal prose and breaks like
+        // any other words, exactly as the top level treats it.
+        let options = ReflowOptions {
+            line_length: 30,
+            atomic_spans: true,
+            defined_references: Some(HashSet::new()),
+            ..Default::default()
+        };
+        let text = "_**alpha [one two three four five six seven] beta gamma delta**_";
+        let lines = reflow_line(text, &options);
+        assert!(lines.len() > 1, "over-long span should wrap: {lines:?}");
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("[one two three four five six seven]")),
+            "an undefined shortcut is prose and should break: {lines:?}"
+        );
+        assert_eq!(lines.join(" "), text, "wrapping must only move line breaks");
     }
 
     #[test]
