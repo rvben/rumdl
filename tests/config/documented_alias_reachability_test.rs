@@ -88,3 +88,28 @@ fn md052_camel_case_spelling_is_rejected_rather_than_silently_dropped() {
         "an unsupported spelling must be reported, not silently ignored, got:\n{stderr}"
     );
 }
+
+#[test]
+fn md013_documented_alias_is_not_reported_as_an_unknown_option() {
+    // `semantic-link-understanding` is documented in docs/md013.md and honored by
+    // serde, but the key validator did not know it and called it unknown.
+    let (_, stderr) = findings_for(
+        "MD013",
+        "[MD013]\nsemantic-link-understanding = true\n",
+        "# T\n\nbody\n",
+    );
+    assert!(
+        !stderr.contains("Unknown option"),
+        "documented, working alias must not be reported as unknown, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_genuinely_unknown_option_is_still_reported() {
+    // Control: the validator must still catch real typos.
+    let (_, stderr) = findings_for("MD013", "[MD013]\nignore-link-urlz = true\n", "# T\n\nbody\n");
+    assert!(
+        stderr.contains("Unknown option"),
+        "a misspelled key must still be reported, got:\n{stderr}"
+    );
+}
