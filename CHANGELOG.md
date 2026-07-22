@@ -79,6 +79,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.40](https://github.com/rvben/rumdl/compare/v0.2.39...v0.2.40) - 2026-07-22
+
+### Fixed
+
+- **md003**: consume the setext underline when converting a heading to ATX. Converting a setext heading left the underline behind, where a following blank line turned it into a thematic break, so `rumdl fmt` added a horizontal rule the document never had ([7363c34](https://github.com/rvben/rumdl/commit/7363c34e5adab8367eb41ad46feff87c2c2137bc))
+- **md077**: stop scoping list items inside blockquotes, which made a lazy continuation line gain indentation on every pass so the formatter never converged ([58fb25b](https://github.com/rvben/rumdl/commit/58fb25b47777d1745ad4dd854f7bb47685bd354a))
+- **reflow**: keep wiki links, shortcodes and math whole inside a wrapped span ([db12c2c](https://github.com/rvben/rumdl/commit/db12c2c5aa37b6dad600d8b4ff889b903cdf5571))
+- **config**: honor the documented MD033 `table_allowed` alias, which silently dropped the configured value ([db2c204](https://github.com/rvben/rumdl/commit/db2c2048f4f6df06e6a38cf5c7896ef6d1e677df))
+- **config**: stop reporting MD013's documented `semantic-link-understanding` alias as an unknown option ([1539a64](https://github.com/rvben/rumdl/commit/1539a64a54a419158586268dca97d87c264c1626))
+- **parity**: make the markdownlint comparison harness actually run ([182763c](https://github.com/rvben/rumdl/commit/182763c47dec12b1ee2d73dabbeff148330d6f30))
+
+### Documentation
+
+- **md013**: document that `ignore-link-urls` affects reporting only. Reflow measures the markdown as written, matching prettier and mdformat ([c4f8bad](https://github.com/rvben/rumdl/commit/c4f8badab81b051eb16fadb0a5a53c7c2a7238f4))
+
 ## [0.2.39](https://github.com/rvben/rumdl/compare/v0.2.38...v0.2.39) - 2026-07-21
 
 ### Added
