@@ -5,7 +5,7 @@
 //! This rule detects common mojibake sequences, which are typically caused by UTF-8 text being interpreted as Windows-1252 or ISO-8859-1.
 //!
 //! The Mojibake detection regex is based on the work of `ftfy` by Robyn Speer, at https://github.com/rspeer/python-ftfy, under Apache 2.0 License.
-//! The test cases are based on the test cases from https://github.com/kevinhu/plsfix/blob/main/core/src/badness.rs by Kevin Hu, under Apache 2.0 License.
+//! The test cases are based on https://github.com/kevinhu/plsfix/blob/main/core/src/badness.rs by Kevin Hu, under Apache 2.0 License.
 
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
@@ -49,7 +49,7 @@ r#"[{c1}]
 |
 [{lower_accented}{upper_accented}] [{end_punctuation}] \w
 |
-[Œœ][^A-Za-z]
+[Œœ][^A-Za-z\s"'»”’]
 |
 [ÂÃÎÐ][€Šš¢£Ÿž{nbsp}{soft_hyphen}®©°·»{start_punctuation}{end_punctuation}–—´]
 |
@@ -72,11 +72,9 @@ r#"[{c1}]
 |
 [ВГРС][{c1}{bad}{start_punctuation}{end_punctuation}{currency}°µ][ВГРС]
 |
-ГўВЂВ.[A-Za-z ]
+ГўВЂВ.[A-Za-z]
 |
 Ã[{nbsp}¡]
-|
-[a-z]\s?[ÃÂ][\s]
 |
 ^[ÃÂ][\s]
 |
@@ -515,8 +513,7 @@ Last clean line.\n",
         assert_eq!(check("ÞΑ-ΩΆΈΉΊΌΎΏΪΫЁ-Я").len(), 0);
     }
 
-    // Checks a sentence with consecutive bad ```rust
-    // characters
+    // Checks a sentence with consecutive bad ```rust characters
     #[test]
     fn test_consecutive_bad() {
         assert_eq!(
@@ -529,5 +526,25 @@ Last clean line.\n",
         assert_mojibake_at(&results[1], 1, 47, 1, 48);
         assert_mojibake_at(&results[2], 1, 48, 1, 49);
         assert_mojibake_at(&results[3], 1, 49, 1, 50);
+    }
+
+    // Checks that valid french sentences with a œ ligature are not considered as bad
+    #[test]
+    fn test_french_oe_ligature() {
+        assert_eq!(check("Œuvre d'art").len(), 0);
+        assert_eq!(check("Cœur de l'œuvre").len(), 0);
+        assert_eq!(check("L'œuvre est magnifique").len(), 0);
+        assert_eq!(check("Ce remarquable Œuf Fabergé est une œuvre d'art en forme d'œuf.").len(), 0);
+        assert_eq!(check("La ligature œ est formée de la contraction des caractères o et e.").len(), 0);
+        assert_eq!(check("La ligature \"œ\" s'écrit en majuscules \"Œ\".").len(), 0);
+    }
+
+    // Test single letters enumerations
+    #[test]
+    fn test_single_letters() {
+        assert_eq!(check("a b c d e f g h i j k l m n o p q r s t u v w x y z").len(), 0);
+        assert_eq!(check("A B C D E F G H I J K L M N O P Q R S T U V W X Y Z").len(), 0);
+        assert_eq!(check("sunt cuvinte cu Â și Î").len(), 0);
+        assert_eq!(check("Vietnamese nguyên âm có dấu mũ: a Â e Ê o Ô").len(), 0);
     }
 }
