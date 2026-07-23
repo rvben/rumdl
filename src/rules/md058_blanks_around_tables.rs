@@ -1,6 +1,6 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
-use crate::utils::kramdown_utils::is_kramdown_block_attribute;
+use crate::utils::mkdocs_attr_list::is_block_attribute_line;
 use serde::{Deserialize, Serialize};
 
 /// Rule MD058: Blanks around tables
@@ -158,9 +158,9 @@ impl Rule for MD058BlanksAroundTables {
 
             // Check for sufficient blank lines after table
             if table_block.end_line < lines.len() - 1 {
-                // Check if the next line is a Kramdown block attribute
+                // Check if the next line is a block attribute list attached to the table
                 let next_line_is_attribute = if table_block.end_line + 1 < lines.len() {
-                    is_kramdown_block_attribute(lines[table_block.end_line + 1])
+                    is_block_attribute_line(lines[table_block.end_line + 1], ctx.flavor)
                 } else {
                     false
                 };
@@ -1444,5 +1444,45 @@ More text.";
             result_std.is_empty(),
             "MD058 table with caption — caption not a table row under Standard: {result_std:?}"
         );
+    }
+
+    #[test]
+    fn md058_hugo_block_attribute_after_table_not_flagged() {
+        // Issue #756: a Goldmark/Hugo block attribute list directly under a table
+        // describes that table, so MD058 must not treat it as content needing a blank.
+        let rule = MD058BlanksAroundTables::default();
+        let content = "\
+Some text.
+
+| H1 | H2 |
+|----|-----|
+| a  | b  |
+{class=\"table table-striped\"}
+
+More text.";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Hugo,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::Kramdown,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let result = rule.check(&ctx).unwrap();
+            assert!(
+                result.is_empty(),
+                "MD058 should not flag the block attribute line under {flavor:?}: {result:?}"
+            );
+        }
+
+        // Negative control: in plain CommonMark `{class="a"}` is literal text, so the
+        // table genuinely lacks a blank line after it.
+        let ctx_std = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result_std = rule.check(&ctx_std).unwrap();
+        assert_eq!(
+            result_std.len(),
+            1,
+            "MD058 must flag the missing blank after table under Standard: {result_std:?}"
+        );
+        assert!(result_std[0].message.contains("Missing blank line after table"));
     }
 }

@@ -49,14 +49,17 @@ pub enum MarkdownFlavor {
     /// MyST (Markedly Structured Text) flavor — directives, roles, dollar math, % comments
     #[serde(rename = "myst", alias = "mystmd")]
     MyST,
+    /// Hugo flavor — GFM plus Goldmark block attribute lists (`{class="a" id="b"}`)
+    #[serde(rename = "hugo", alias = "goldmark")]
+    Hugo,
 }
 
 /// Custom JSON schema for MarkdownFlavor that includes all accepted values and aliases
 fn markdown_flavor_schema(_gen: &mut schemars::SchemaGenerator) -> schemars::Schema {
     schemars::json_schema!({
-        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst.",
+        "description": "Markdown flavor/dialect. Accepts: standard, gfm, mkdocs, mdx, pandoc, quarto, obsidian, kramdown, azure_devops, myst, hugo. Aliases: commonmark/github map to standard, qmd/rmd/rmarkdown map to quarto, jekyll maps to kramdown, azure/ado map to azure_devops, mystmd maps to myst, goldmark maps to hugo.",
         "type": "string",
-        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd"]
+        "enum": ["standard", "gfm", "github", "commonmark", "mkdocs", "mdx", "pandoc", "quarto", "qmd", "rmd", "rmarkdown", "obsidian", "kramdown", "jekyll", "azure_devops", "azure", "ado", "myst", "mystmd", "hugo", "goldmark"]
     })
 }
 
@@ -82,6 +85,7 @@ impl fmt::Display for MarkdownFlavor {
             MarkdownFlavor::Kramdown => write!(f, "kramdown"),
             MarkdownFlavor::AzureDevOps => write!(f, "azure_devops"),
             MarkdownFlavor::MyST => write!(f, "myst"),
+            MarkdownFlavor::Hugo => write!(f, "hugo"),
         }
     }
 }
@@ -100,6 +104,7 @@ impl FromStr for MarkdownFlavor {
             "kramdown" | "jekyll" => Ok(MarkdownFlavor::Kramdown),
             "azure_devops" | "azure" | "ado" => Ok(MarkdownFlavor::AzureDevOps),
             "myst" | "mystmd" => Ok(MarkdownFlavor::MyST),
+            "hugo" | "goldmark" => Ok(MarkdownFlavor::Hugo),
             // GFM and CommonMark are aliases for Standard since the base parser
             // (pulldown-cmark) already supports GFM extensions (tables, task lists,
             // strikethrough, autolinks, etc.) which are a superset of CommonMark
@@ -150,7 +155,7 @@ impl MarkdownFlavor {
 
     /// Check if this flavor supports attribute lists ({#id .class key="value"})
     pub fn supports_attr_lists(self) -> bool {
-        matches!(self, Self::MkDocs | Self::Kramdown)
+        matches!(self, Self::MkDocs | Self::Kramdown | Self::Hugo)
     }
 
     /// Check if this flavor requires strict (≥4-space) list continuation indent.
@@ -180,6 +185,7 @@ impl MarkdownFlavor {
             Self::Kramdown => "Kramdown",
             Self::AzureDevOps => "AzureDevOps",
             Self::MyST => "MyST",
+            Self::Hugo => "Hugo",
         }
     }
 
@@ -244,6 +250,7 @@ mod tests {
             (MarkdownFlavor::Kramdown, "kramdown"),
             (MarkdownFlavor::AzureDevOps, "azure_devops"),
             (MarkdownFlavor::MyST, "myst"),
+            (MarkdownFlavor::Hugo, "hugo"),
         ];
         for (variant, expected) in cases {
             let displayed = variant.to_string();
@@ -273,6 +280,7 @@ mod tests {
             MarkdownFlavor::Kramdown,
             MarkdownFlavor::AzureDevOps,
             MarkdownFlavor::MyST,
+            MarkdownFlavor::Hugo,
         ];
         for variant in variants {
             let displayed = variant.to_string();
@@ -393,5 +401,37 @@ mod tests {
     #[test]
     fn test_myst_name() {
         assert_eq!(MarkdownFlavor::MyST.name(), "MyST");
+    }
+
+    #[test]
+    fn test_hugo_from_str() {
+        assert_eq!("hugo".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::Hugo);
+        assert_eq!("HUGO".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::Hugo);
+        assert_eq!("goldmark".parse::<MarkdownFlavor>().unwrap(), MarkdownFlavor::Hugo);
+    }
+
+    #[test]
+    fn test_hugo_display_name_and_round_trip() {
+        assert_eq!(MarkdownFlavor::Hugo.to_string(), "hugo");
+        assert_eq!(MarkdownFlavor::Hugo.name(), "Hugo");
+        let parsed: MarkdownFlavor = "hugo".parse().unwrap();
+        assert_eq!(parsed, MarkdownFlavor::Hugo);
+    }
+
+    #[test]
+    fn test_hugo_supports_attr_lists() {
+        // Hugo/Goldmark supports block attribute lists like MkDocs and Kramdown.
+        assert!(MarkdownFlavor::Hugo.supports_attr_lists());
+        assert!(MarkdownFlavor::MkDocs.supports_attr_lists());
+        assert!(MarkdownFlavor::Kramdown.supports_attr_lists());
+
+        // Standard Markdown does not: there, `{class="a"}` is literal text.
+        assert!(!MarkdownFlavor::Standard.supports_attr_lists());
+        assert!(!MarkdownFlavor::Pandoc.supports_attr_lists());
+
+        // Hugo is otherwise plain GFM.
+        assert!(!MarkdownFlavor::Hugo.is_pandoc_compatible());
+        assert!(!MarkdownFlavor::Hugo.supports_myst_directives());
+        assert!(!MarkdownFlavor::Hugo.supports_colon_code_fences());
     }
 }

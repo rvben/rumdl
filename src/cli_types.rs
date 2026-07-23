@@ -426,6 +426,8 @@ pub enum Flavor {
     AzureDevOps,
     #[value(name = "myst", alias("mystmd"))]
     MyST,
+    #[value(alias("goldmark"))]
+    Hugo,
 }
 
 impl From<Flavor> for rumdl_lib::config::MarkdownFlavor {
@@ -440,6 +442,7 @@ impl From<Flavor> for rumdl_lib::config::MarkdownFlavor {
             Flavor::Kramdown => Self::Kramdown,
             Flavor::AzureDevOps => Self::AzureDevOps,
             Flavor::MyST => Self::MyST,
+            Flavor::Hugo => Self::Hugo,
         }
     }
 }
