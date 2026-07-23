@@ -7,10 +7,14 @@
 //! The Mojibake detection regex is based on the work of `ftfy` by Robyn Speer, at https://github.com/rspeer/python-ftfy, under Apache 2.0 License.
 //! The test cases are based on https://github.com/kevinhu/plsfix/blob/main/core/src/badness.rs by Kevin Hu, under Apache 2.0 License.
 
+mod md083_config;
+
 use crate::filtered_lines::FilteredLinesExt;
 use crate::lint_context::LintContext;
 use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::range_utils::byte_to_char_count;
+use md083_config::MD083Config;
+use std::collections::HashSet;
 
 fn build_mojibake_regex() -> regex::Regex {
     regex::Regex::new(
@@ -105,13 +109,38 @@ r#"[{c1}]
 #[derive(Debug, Clone)]
 pub struct MD083DetectMojibake {
     badness_re: regex::Regex,
+    config: MD083Config,
+    ignored_sequences: HashSet<String>,
 }
 
 impl Default for MD083DetectMojibake {
     fn default() -> Self {
+        Self::from_config_struct(MD083Config::default())
+    }
+}
+
+impl MD083DetectMojibake {
+    fn from_config_struct(config: MD083Config) -> Self {
+        let ignored_sequences = config.ignore.iter().cloned().collect();
         Self {
             badness_re: build_mojibake_regex(),
+            config,
+            ignored_sequences,
         }
+    }
+
+    fn is_ignored_match(&self, line: &str, start: usize, matched: &str) -> bool {
+        if self.ignored_sequences.is_empty() {
+            return false;
+        }
+
+        let Some(suffix) = line.get(start..) else {
+            return false;
+        };
+
+        self.ignored_sequences
+            .iter()
+            .any(|ignored| ignored == matched || (ignored.starts_with(matched) && suffix.starts_with(ignored)))
     }
 }
 
@@ -124,21 +153,22 @@ impl Rule for MD083DetectMojibake {
         "Detect mojibake due to encoding issues"
     }
 
-    fn from_config(_config: &crate::config::Config) -> Box<dyn Rule>
-    where
-        Self: Sized,
-    {
-        Box::new(MD083DetectMojibake::default())
-    }
-
     fn category(&self) -> RuleCategory {
         RuleCategory::Other
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
-        for line in ctx.filtered_lines() {
+        let mut filtered = ctx.filtered_lines();
+        if self.config.ignore_code_blocks {
+            filtered = filtered.skip_code_blocks();
+        }
+
+        for line in filtered {
             for mat in self.badness_re.find_iter(line.content) {
+                if self.is_ignored_match(line.content, mat.start(), mat.as_str()) {
+                    continue;
+                }
                 let (start, end) = (mat.start(), mat.end());
                 let line_num = line.line_num;
                 let column = byte_to_char_count(line.content, start);
@@ -170,16 +200,23 @@ impl Rule for MD083DetectMojibake {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    crate::impl_rule_config_methods!(MD083Config);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::MarkdownFlavor;
+    use crate::config::{Config, MarkdownFlavor};
     use crate::rule::LintWarning;
 
     fn check(content: &str) -> Vec<LintWarning> {
         let rule = MD083DetectMojibake::default();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        rule.check(&ctx).unwrap()
+    }
+
+    fn check_with_rule(rule: &MD083DetectMojibake, content: &str) -> Vec<LintWarning> {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         rule.check(&ctx).unwrap()
     }
@@ -384,6 +421,72 @@ Last clean line.\n",
         assert_mojibake_at(&results[1], 4, 19, 4, 21);
         assert_mojibake_at(&results[2], 6, 14, 6, 15);
         assert_mojibake_at(&results[3], 9, 15, 9, 17);
+    }
+
+    #[test]
+    fn test_ignore_sequences_config() {
+        let rule = MD083DetectMojibake::from_config_struct(MD083Config {
+            ignore: vec!["â€“".to_string()],
+            ..Default::default()
+        });
+
+        let results = check_with_rule(&rule, "Keep â€“ ignored but still flag Ã¡.\n");
+
+        assert_eq!(results.len(), 1);
+        assert_mojibake_at(&results[0], 1, 33, 1, 35);
+    }
+
+    #[test]
+    fn test_ignore_requires_full_mojibake_sequence() {
+        let rule = MD083DetectMojibake::from_config_struct(MD083Config {
+            ignore: vec!["â".to_string()],
+            ..Default::default()
+        });
+
+        let results = check_with_rule(&rule, "Keep â€“ still flagged.\n");
+
+        assert_eq!(results.len(), 1);
+        assert_mojibake_at(&results[0], 1, 6, 1, 8);
+    }
+
+    #[test]
+    fn test_code_blocks_ignored_by_default() {
+        let results = check(
+            "Paragraph with â€“ outside.\n\
+\n\
+```rust\n\
+let broken = \"Ã¡\";\n\
+```\n",
+        );
+
+        assert_eq!(results.len(), 1);
+        assert_mojibake_at(&results[0], 1, 16, 1, 18);
+    }
+
+    #[test]
+    fn test_code_blocks_checked_when_enabled() {
+        let config: Config = toml::from_str(
+            r#"
+            [MD083]
+            ignore-code-blocks = false
+            "#,
+        )
+        .unwrap();
+        let rule = MD083DetectMojibake::from_config(&config);
+        let rule = rule.as_any().downcast_ref::<MD083DetectMojibake>().unwrap();
+
+        let results = check_with_rule(
+            rule,
+            "Paragraph with â€“ outside.\n\
+\n\
+```rust\n\
+let broken = \"Ã¡\";\n\
+```\n",
+        );
+
+        assert_eq!(results.len(), 2);
+        assert_mojibake_at(&results[0], 1, 16, 1, 18);
+        assert_mojibake_at(&results[1], 4, 15, 4, 17);
     }
 
     // Check that a simple English sentence is not considered "bad"
