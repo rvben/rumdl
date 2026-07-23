@@ -2,7 +2,7 @@
 ///
 /// See [docs/md022.md](../../docs/md022.md) for full documentation, configuration, and examples.
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::utils::kramdown_utils::is_kramdown_block_attribute;
+use crate::utils::mkdocs_attr_list::is_block_attribute_line;
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_heading_range;
 use toml;
@@ -221,7 +221,7 @@ impl MD022BlanksAroundHeadings {
                     } else if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
                         // Skip HTML comments - they are transparent for blank line counting
                         check_idx -= 1;
-                    } else if is_kramdown_block_attribute(trimmed) {
+                    } else if is_block_attribute_line(trimmed, ctx.flavor) {
                         // Skip kramdown IAL - they are attached to headings and transparent
                         check_idx -= 1;
                     } else if is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)) {
@@ -271,7 +271,7 @@ impl MD022BlanksAroundHeadings {
                 while effective_end_idx + 1 < ctx.lines.len() {
                     let next_line = &ctx.lines[effective_end_idx + 1];
                     let next_trimmed = next_line.content(ctx.content).trim();
-                    if is_kramdown_block_attribute(next_trimmed) {
+                    if is_block_attribute_line(next_trimmed, ctx.flavor) {
                         result.push(next_trimmed.to_string());
                         effective_end_idx += 1;
                         ial_count += 1;
@@ -446,7 +446,7 @@ impl Rule for MD022BlanksAroundHeadings {
                     {
                         // Skip HTML comments - they are transparent for blank line counting
                         continue;
-                    } else if is_kramdown_block_attribute(trimmed) {
+                    } else if is_block_attribute_line(trimmed, ctx.flavor) {
                         // Skip kramdown IAL - they are attached to headings and transparent for blank line counting
                         continue;
                     } else if is_pandoc && (pandoc::is_div_open(trimmed) || pandoc::is_div_close(trimmed)) {
@@ -485,7 +485,7 @@ impl Rule for MD022BlanksAroundHeadings {
             while effective_last_line + 1 < ctx.lines.len() {
                 let next_line = &ctx.lines[effective_last_line + 1];
                 let next_trimmed = next_line.content(ctx.content).trim();
-                if is_kramdown_block_attribute(next_trimmed) {
+                if is_block_attribute_line(next_trimmed, ctx.flavor) {
                     effective_last_line += 1;
                 } else {
                     break;
@@ -2010,6 +2010,36 @@ More content."#;
         assert!(
             warnings.is_empty(),
             "MD022 should treat Pandoc div marker as transparent above heading: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_hugo_block_attribute_after_heading_not_flagged() {
+        // Issue #756: a Goldmark/Hugo block attribute list directly under a heading
+        // describes that heading, so MD022 must not require a blank between them.
+        let rule = MD022BlanksAroundHeadings::default();
+        let content = "Intro text.\n\n# Heading\n{class=\"anchor\"}\n\nContent.\n";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Hugo,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::Kramdown,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                warnings.is_empty(),
+                "MD022 should not flag the block attribute line under {flavor:?}: {warnings:?}"
+            );
+        }
+
+        // Negative control: in Standard `{class="a"}` is literal text, so the heading
+        // genuinely has no blank line below it.
+        let ctx_std = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_std = rule.check(&ctx_std).unwrap();
+        assert!(
+            warnings_std.iter().any(|w| w.message.contains("below heading")),
+            "MD022 must flag the missing blank below the heading under Standard: {warnings_std:?}"
         );
     }
 }

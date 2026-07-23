@@ -134,6 +134,25 @@ pub fn is_standalone_attr_list(line: &str) -> bool {
     ATTR_LIST_PATTERN.is_match(trimmed)
 }
 
+/// Check whether a line is a block attribute list attached to the preceding block.
+///
+/// Block attribute lists sit on their own line directly under a block (heading,
+/// table, fenced code, list) and describe that block, so the blanks-around rules
+/// (MD022, MD031, MD032, MD058) must not treat them as separate content needing a
+/// blank line between them and the block.
+///
+/// Two forms are recognized:
+/// - Kramdown IALs (`{:.class}`, `{:#id}`) in every flavor, matching long-standing
+///   behavior.
+/// - Bare attribute lists such as Hugo/Goldmark's `{class="a" id="b"}` only when
+///   the flavor enables attribute lists, because in plain CommonMark that text is
+///   literal content that legitimately needs surrounding blanks.
+#[inline]
+pub fn is_block_attribute_line(line: &str, flavor: crate::config::MarkdownFlavor) -> bool {
+    crate::utils::kramdown_utils::is_kramdown_block_attribute(line)
+        || (flavor.supports_attr_lists() && is_standalone_attr_list(line))
+}
+
 /// Check if a line is a MkDocs anchor line (empty link with attr_list)
 ///
 /// MkDocs anchor lines are used to create invisible anchor points in documentation.

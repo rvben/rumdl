@@ -4,8 +4,8 @@
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::RuleConfig;
 use crate::utils::calculate_indentation_width_default;
-use crate::utils::kramdown_utils::is_kramdown_block_attribute;
 use crate::utils::mkdocs_admonitions;
+use crate::utils::mkdocs_attr_list::is_block_attribute_line;
 use crate::utils::pandoc;
 use crate::utils::range_utils::calculate_line_range;
 use serde::{Deserialize, Serialize};
@@ -283,14 +283,15 @@ impl Rule for MD031BlanksAroundFences {
             }
 
             // Check for blank line after closing fence
-            // Allow Kramdown block attributes if configured
+            // Allow block attribute lists attached to the fence (Kramdown IALs in any
+            // flavor, Hugo/MkDocs bare attr lists when the flavor enables them)
             // Skip if followed by a Pandoc/Quarto div marker in Pandoc-compatible flavor
             // Use is_effectively_empty_line to handle blockquote blank lines (issue #284)
             let next_line_is_pandoc_marker =
                 *closing_line + 1 < lines.len() && is_pandoc_div_marker(lines[*closing_line + 1]);
             if *closing_line + 1 < lines.len()
                 && !Self::is_effectively_empty_line(*closing_line + 1, lines, ctx)
-                && !is_kramdown_block_attribute(lines[*closing_line + 1])
+                && !is_block_attribute_line(lines[*closing_line + 1], ctx.flavor)
                 && !next_line_is_pandoc_marker
                 && self.should_require_blank_line(*closing_line, lines)
             {
@@ -1171,6 +1172,38 @@ echo "nested"
         assert!(
             warnings.is_empty(),
             "MD031 should not require blank lines around fenced blocks inside HTML comments: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_md031_block_attribute_after_fence_not_flagged() {
+        // Issue #756: a block attribute list directly under a fenced code block
+        // describes that block, so MD031 must not require a blank between them.
+        let rule = MD031BlanksAroundFences::default();
+        let content = "Some text.\n\n```rust\nlet x = 1;\n```\n{class=\"highlight\"}\n\nMore text.";
+
+        for flavor in [
+            crate::config::MarkdownFlavor::Hugo,
+            crate::config::MarkdownFlavor::MkDocs,
+            crate::config::MarkdownFlavor::Kramdown,
+        ] {
+            let ctx = LintContext::new(content, flavor, None);
+            let warnings = rule.check(&ctx).unwrap();
+            assert!(
+                warnings.is_empty(),
+                "MD031 should not flag the block attribute line under {flavor:?}: {warnings:?}"
+            );
+        }
+
+        // Negative control: in Standard the attr list is literal content, so the
+        // closing fence genuinely has no blank line after it.
+        let ctx_std = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings_std = rule.check(&ctx_std).unwrap();
+        assert!(
+            warnings_std
+                .iter()
+                .any(|w| w.message == "No blank line after fenced code block"),
+            "MD031 must flag the missing blank after the fence under Standard: {warnings_std:?}"
         );
     }
 }

@@ -119,13 +119,21 @@ pub fn is_in_html_comment_ranges(ranges: &[ByteRange], byte_pos: usize) -> bool 
         .is_ok()
 }
 
-/// Check if a line is ENTIRELY within a single HTML comment
-/// Returns true only if both the line start AND end are within the same comment range
-pub fn is_line_entirely_in_html_comment(ranges: &[ByteRange], line_start: usize, line_end: usize) -> bool {
+/// Check if a line's content is ENTIRELY within a single HTML comment.
+///
+/// Callers must pass the byte range of the line's *content* (leading and
+/// trailing whitespace trimmed off), not the raw line bounds: an indented
+/// comment begins at the `<!--` after the indent, so passing the column-0
+/// line start would place `content_start` before the comment range and the
+/// line would never be recognised as being inside the comment.
+///
+/// Returns true only if both `content_start` AND `content_end` fall within the
+/// same comment range.
+pub fn is_line_entirely_in_html_comment(ranges: &[ByteRange], content_start: usize, content_end: usize) -> bool {
     for range in ranges {
-        // If line start is within this range, check if line end is also within it
-        if line_start >= range.start && line_start < range.end {
-            return line_end <= range.end;
+        // If the content start is within this range, check if the content end is also within it
+        if content_start >= range.start && content_start < range.end {
+            return content_end <= range.end;
         }
     }
     false
@@ -706,6 +714,31 @@ mod tests {
         let ranges4 = compute_html_comment_ranges(content4);
         // Line start is NOT in the comment range
         assert!(!is_line_entirely_in_html_comment(&ranges4, 0, 28));
+    }
+
+    #[test]
+    fn test_is_line_entirely_in_html_comment_indented() {
+        // An indented single-line comment: callers pass the trimmed content bounds
+        // (start at the `<!--`, end after the `-->`), so it is recognised as being
+        // entirely inside the comment even though the line starts with whitespace.
+        let content = "    <!-- comment -->";
+        let ranges = compute_html_comment_ranges(content);
+        let content_start = content.find("<!--").unwrap();
+        let content_end = content.trim_end().len();
+        assert!(is_line_entirely_in_html_comment(&ranges, content_start, content_end));
+        // Passing the raw column-0 line start would miss it (regression guard for #755).
+        assert!(!is_line_entirely_in_html_comment(&ranges, 0, content.len()));
+    }
+
+    #[test]
+    fn test_is_line_entirely_in_html_comment_trailing_whitespace() {
+        // Trailing whitespace after the closer must not push content_end past the range.
+        let content = "<!-- comment -->   ";
+        let ranges = compute_html_comment_ranges(content);
+        let content_end = content.trim_end().len();
+        assert!(is_line_entirely_in_html_comment(&ranges, 0, content_end));
+        // With the raw line length (incl. trailing spaces) it would fall outside the range.
+        assert!(!is_line_entirely_in_html_comment(&ranges, 0, content.len()));
     }
 
     #[test]

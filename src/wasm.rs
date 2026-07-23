@@ -193,7 +193,7 @@ pub struct LinterConfig {
     /// Line length limit (default: 80)
     pub line_length: Option<u64>,
 
-    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", or "myst"
+    /// Markdown flavor: "standard", "mkdocs", "mdx", "pandoc", "quarto", "obsidian", "kramdown", "azure_devops", "myst", or "hugo"
     pub flavor: Option<String>,
 
     /// Rules allowed to apply fixes (if specified, only these rules are fixed)
@@ -699,6 +699,7 @@ mod tests {
             MarkdownFlavor::Kramdown,
             MarkdownFlavor::AzureDevOps,
             MarkdownFlavor::MyST,
+            MarkdownFlavor::Hugo,
         ];
 
         for flavor in flavors {
@@ -713,6 +714,7 @@ mod tests {
                 MarkdownFlavor::Kramdown => "kramdown",
                 MarkdownFlavor::AzureDevOps => "azure_devops",
                 MarkdownFlavor::MyST => "myst",
+                MarkdownFlavor::Hugo => "hugo",
             };
 
             let config = LinterConfig {

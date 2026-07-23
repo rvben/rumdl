@@ -2192,6 +2192,52 @@ More javascript outside."#;
     }
 
     #[test]
+    fn test_indented_html_comment_escapes_via_link_and_backticks() {
+        // Regression for #755: MD044 checks inside HTML comments by default, but
+        // links and inline code inside a comment should escape the rule. That
+        // protection depends on the line being recognised as an HTML comment,
+        // which must hold whether or not the comment is indented.
+        let config = MD044Config {
+            names: vec!["Test".to_string()],
+            ..Default::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "<!-- see the [relevant page](test.md). -->\n<!-- see `test.md` -->\n  <!-- see the [relevant page](test.md). -->\n  <!-- see `test.md` -->\n";
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert!(
+            result.is_empty(),
+            "'test' inside a link URL or backticks must be ignored in both column-0 and indented comments, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_indented_html_comment_still_checks_bare_prose() {
+        // The indent fix must not suppress genuine violations: bare prose inside an
+        // indented comment is still checked (only links/backticks escape).
+        let config = MD044Config {
+            names: vec!["Test".to_string()],
+            ..Default::default()
+        };
+        let rule = MD044ProperNames::from_config_struct(config);
+
+        let content = "  <!-- this is a test comment -->\n";
+
+        let ctx = create_context(content);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "bare 'test' in an indented comment is still a violation"
+        );
+        assert_eq!(result[0].line, 1);
+    }
+
+    #[test]
     fn test_multiline_html_comments() {
         let config = MD044Config {
             names: vec!["Python".to_string(), "JavaScript".to_string()],
