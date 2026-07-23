@@ -80,6 +80,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.41](https://github.com/rvben/rumdl/compare/v0.2.40...v0.2.41) - 2026-07-23
+
+### Added
+
+- **flavor**: add Hugo flavor and skip block attribute lists in blanks-around rules ([e6bb033](https://github.com/rvben/rumdl/commit/e6bb033813121b898784003e1af73df1b464e097))
+
+### Fixed
+
+- **md044**: recognize indented HTML comments so links and code escape the rule ([3d6191c](https://github.com/rvben/rumdl/commit/3d6191cb56366439bf7814e29463fcc157aaf5ac))
+- **md013**: keep an attr list whole inside a wrapped span ([e06f03d](https://github.com/rvben/rumdl/commit/e06f03d515fc81054e3929b25d252020960a9c11))
+- **md013**: keep a reference-style link whole inside a wrapped span ([de42709](https://github.com/rvben/rumdl/commit/de427094fece132be1dae78efcc0e524e7cad5cd))
+- **md013**: wrap an over-long span whose whole content is another span ([f6c7c9c](https://github.com/rvben/rumdl/commit/f6c7c9c45ffe924c6ef429dd70197109a2a33296))
+
 ## [0.2.40](https://github.com/rvben/rumdl/compare/v0.2.39...v0.2.40) - 2026-07-22
 
 ### Fixed
