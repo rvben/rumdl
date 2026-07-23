@@ -91,11 +91,15 @@ pub(super) fn compute_basic_line_info(
         // Detect list items (skip if in frontmatter, in mkdocstrings block, or in HTML comment)
         let in_mkdocstrings =
             crate::utils::mkdocstrings_refs::is_within_autodoc_block_ranges(skip_ranges.autodoc_ranges, byte_offset);
-        let line_end_offset = byte_offset + line.len();
+        // Use the line's content bounds (indent and trailing whitespace trimmed) so an
+        // indented HTML comment, whose `<!--` begins after the leading whitespace, is
+        // still recognised as being inside the comment range.
+        let content_start = byte_offset + indent;
+        let content_end = byte_offset + line.trim_end().len();
         let in_html_comment = crate::utils::skip_context::is_line_entirely_in_html_comment(
             skip_ranges.html_comment_ranges,
-            byte_offset,
-            line_end_offset,
+            content_start,
+            content_end,
         );
 
         let in_front_matter = front_matter_end > 0 && i < front_matter_end;
