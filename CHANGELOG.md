@@ -82,6 +82,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.43](https://github.com/rvben/rumdl/compare/v0.2.42...v0.2.43) - 2026-07-24
+
+### Added
+
+- **invisiblechars**: new rule MD084 for detecting invisible characters (#758) ([0a6354a](https://github.com/rvben/rumdl/commit/0a6354a7107d47a1c55c8fe5f26e7faafad996c0))
+
+### Fixed
+
+- **md084**: treat a zero width joiner between visible characters as presentation ([4fbb1cc](https://github.com/rvben/rumdl/commit/4fbb1cc1441ff3df6a9f8814271502fc3ad56add))
+- **md084**: keep attached variation selectors in consecutive-character detection ([f4e9fd3](https://github.com/rvben/rumdl/commit/f4e9fd3c1ee21a514869fee3dc11a48c3d743b42))
+- **md084**: don't flag variation selectors attached to a base character ([14941bb](https://github.com/rvben/rumdl/commit/14941bbbe4c4dd733b4b8c7356a542668a61d71b))
+
 ## [0.2.42](https://github.com/rvben/rumdl/compare/v0.2.41...v0.2.42) - 2026-07-24
 
 ### Added
