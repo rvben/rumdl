@@ -17,7 +17,7 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 ### Implemented Rules
 
-rumdl implements **<!-- RULE_COUNT -->76<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->23<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
+rumdl implements **<!-- RULE_COUNT -->78<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->25<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 

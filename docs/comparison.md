@@ -136,7 +136,7 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 **Notes:**
 
-- **mado** is faster in cold-start benchmarks because it does less work per file: fewer rules (38 vs <!-- RULE_COUNT -->77<!-- /RULE_COUNT -->), no fix generation, and no flavor detection.
+- **mado** is faster in cold-start benchmarks because it does less work per file: fewer rules (38 vs <!-- RULE_COUNT -->78<!-- /RULE_COUNT -->), no fix generation, and no flavor detection.
   The gap reflects feature surface area, not implementation quality.
 - **rumdl** supports result caching (`rumdl check` without `--no-cache`), which skips unchanged files on subsequent runs — typically under 50 ms, faster than mado's cold start.
 - **pymarkdown** performs well for a Python tool due to its efficient scanner architecture.
@@ -147,5 +147,5 @@ Cold start benchmark on the Rust Book (478 Markdown files), measured with [hyper
 
 - [Comparison with markdownlint](markdownlint-comparison.md) — detailed rule-by-rule comparison and migration guide
 - [Comparison with mdformat](mdformat-comparison.md) — formatting feature comparison and migration guide
-- [Rules Reference](rules.md) — complete list of rumdl's <!-- RULE_COUNT -->77<!-- /RULE_COUNT --> rules
+- [Rules Reference](rules.md) — complete list of rumdl's <!-- RULE_COUNT -->78<!-- /RULE_COUNT --> rules
 - [Markdown Flavors](flavors.md) — flavor configuration and per-rule adjustments
