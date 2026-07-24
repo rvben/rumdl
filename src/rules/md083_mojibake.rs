@@ -53,8 +53,6 @@ r#"[{c1}]
 |
 [{lower_accented}{upper_accented}] [{end_punctuation}] \w
 |
-[Œœ][^A-Za-z\s"'»”’]
-|
 [ÂÃÎÐ][€Šš¢£Ÿž{nbsp}{soft_hyphen}®©°·»{start_punctuation}{end_punctuation}–—´]
 |
 × [²³]
