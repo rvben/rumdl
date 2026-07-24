@@ -61,7 +61,8 @@ impl MD084InvisibleCharacters {
         let cp = c as u32;
         matches!(
             cp,
-            0x0000..=0x001F // C0 control characters
+            0x0000..=0x0008
+                | 0x000A..=0x001F // C0 Control characters, excluding TAB (0x0009)
                 | 0x007F..=0x009F // DEL + C1 control characters
                 | 0x00AD // SOFT HYPHEN
                 | 0x034F // COMBINING GRAPHEME JOINER
@@ -447,6 +448,15 @@ mod tests {
         let rule = rule.as_any().downcast_ref::<MD084InvisibleCharacters>().unwrap();
 
         let ctx = LintContext::new("\u{200B}safe\u{200B}", MarkdownFlavor::Standard, None);
+        let findings = rule.check(&ctx).unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_tab_characters() {
+        let rule = MD084InvisibleCharacters::default();
+        let content = "text\n\tindented\n";
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let findings = rule.check(&ctx).unwrap();
         assert!(findings.is_empty());
     }
