@@ -92,6 +92,33 @@ impl MD084InvisibleCharacters {
         Self::is_invisible_char(c) && !self.is_allowed(c)
     }
 
+    /// Variation selectors modify the *preceding* base character: `U+26A0 U+FE0F`
+    /// is the emoji-presentation warning sign `⚠️`, where `U+26A0` alone is the
+    /// text-presentation `⚠`.
+    fn is_variation_selector(c: char) -> bool {
+        matches!(
+            c as u32,
+            0x180B..=0x180D // Mongolian free variation selectors FVS1..FVS3
+                | 0xFE00..=0xFE0F // Variation Selectors VS1..VS16
+                | 0xE0100..=0xE01EF // Variation Selectors Supplement VS17..VS256
+        )
+    }
+
+    /// Whether the character at `index` is a variation selector with a base character
+    /// to modify. Attached, it is part of that grapheme cluster rather than hidden
+    /// content, so removing it would change the rendered glyph. Orphaned - at the start
+    /// of a line, after whitespace, or after another invisible character - it modifies
+    /// nothing and stays flaggable.
+    fn is_attached_variation_selector(chars: &[char], index: usize) -> bool {
+        if !Self::is_variation_selector(chars[index]) {
+            return false;
+        }
+
+        index
+            .checked_sub(1)
+            .is_some_and(|prev| !chars[prev].is_whitespace() && !Self::is_invisible_char(chars[prev]))
+    }
+
     /// Build a single-character-run warning, optionally with a removal fix.
     fn build_warning(
         rule_name: &str,
@@ -184,11 +211,17 @@ impl Rule for MD084InvisibleCharacters {
                 continue;
             }
 
-            // In non-strict mode, we only flag the three triggers defined in the rule description.
+            // In non-strict mode, we only flag the three triggers defined in the rule
+            // description, and a variation selector attached to a base character is
+            // presentation rather than hidden content.
             let mut flagged = vec![false; chars.len()];
+            let is_target: Vec<bool> = chars
+                .iter()
+                .enumerate()
+                .map(|(i, &c)| self.is_flaggable(c) && !Self::is_attached_variation_selector(&chars, i))
+                .collect();
 
             // Trigger 1: runs of two or more consecutive invisible characters.
-            let is_target: Vec<bool> = chars.iter().map(|&c| self.is_flaggable(c)).collect();
             let mut offset = 0;
             for group in is_target.chunk_by(|a, b| a == b) {
                 let len = group.len();
@@ -213,7 +246,7 @@ impl Rule for MD084InvisibleCharacters {
 
             // Triggers 2 and 3 need to inspect each remaining candidate's neighbors.
             for (i, &c) in chars.iter().enumerate() {
-                if !self.is_flaggable(c) || flagged[i] {
+                if !is_target[i] || flagged[i] {
                     continue;
                 }
 
@@ -459,5 +492,80 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let findings = rule.check(&ctx).unwrap();
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_default_ignores_variation_selector_attached_to_base() {
+        // U+FE0F gives the preceding character emoji presentation. It legitimately
+        // sits at a line end or next to a space, which are two of the default triggers.
+        let findings = check("> \u{26A0}\u{FE0F} Note: important\nends with \u{2764}\u{FE0F}\n");
+        assert!(findings.is_empty(), "attached variation selectors: {findings:?}");
+
+        let findings = check("# Features \u{25B6}\u{FE0F}\n\ntwo \u{2714}\u{FE0F}\u{2764}\u{FE0F} in a row\n");
+        assert!(findings.is_empty(), "attached variation selectors: {findings:?}");
+    }
+
+    #[test]
+    fn test_default_fix_preserves_emoji_presentation() {
+        let content = "> \u{26A0}\u{FE0F} Note: important\n";
+        let rule = MD084InvisibleCharacters::default();
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+
+        assert_eq!(rule.fix(&ctx).unwrap(), content);
+    }
+
+    #[test]
+    fn test_default_flags_orphaned_variation_selector() {
+        // No base character to modify: the selector is hidden content, not presentation.
+        let findings = check("\u{FE0F}starts with a selector");
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("U+FE0F detected at line boundary"));
+
+        let findings = check("a \u{FE0F}b");
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0]
+                .message
+                .contains("U+FE0F detected adjacent to visible whitespace")
+        );
+
+        // Preceded by another invisible character, so it still modifies nothing.
+        let findings = check("a\u{200B}\u{FE0F}b");
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0]
+                .message
+                .contains("2 multiple consecutive invisible characters")
+        );
+    }
+
+    #[test]
+    fn test_default_flags_redundant_variation_selector() {
+        // The first selector is attached to the base; the duplicate after it is not.
+        let findings = check("\u{26A0}\u{FE0F}\u{FE0F}");
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].column, 3);
+        assert!(findings[0].message.contains("U+FE0F detected at line boundary"));
+    }
+
+    #[test]
+    fn test_strict_still_flags_attached_variation_selector() {
+        // Strict mode is deliberately literal: it reports every invisible codepoint,
+        // and users who want emoji left alone allow-list U+FE0F.
+        let config: Config = toml::from_str(
+            r#"
+            [MD084]
+            strict = true
+            "#,
+        )
+        .unwrap();
+
+        let rule = MD084InvisibleCharacters::from_config(&config);
+        let rule = rule.as_any().downcast_ref::<MD084InvisibleCharacters>().unwrap();
+
+        let ctx = LintContext::new("\u{26A0}\u{FE0F} Note", MarkdownFlavor::Standard, None);
+        let findings = rule.check(&ctx).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("strict mode"));
     }
 }
