@@ -769,10 +769,20 @@
     "code": "MD083",
     "name": "mojibake",
     "aliases": [],
-    "summary": "Detect mojibake due to encoding issues",
+    "summary": "Detects common encoding issues (aka mojibake).",
     "category": "other",
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md083/"
+  },
+  {
+    "code": "MD084",
+    "name": "invisible-characters",
+    "aliases": [],
+    "summary": "Invisible Unicode characters should be intentional",
+    "category": "whitespace",
+    "fix": "Fix is sometimes available.",
+    "fix_availability": "Sometimes",
+    "url": "https://rumdl.dev/md084/"
   }
 ]
