@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->76<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->77<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -40,6 +40,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD074](md074.md) | MkDocs nav validation    | Requires `flavor = "mkdocs"` to activate                      |
 | [MD080](md080.md) | Heading anchor collision | Collisions are functional under platform auto-suffixing       |
 | [MD082](md082.md) | No empty sections        | Empty sections are sometimes intentional stubs                |
+| [MD083](md083.md) | Detect Mojibake          | Turn it on once you encounter encoding issues                 |
 
 ### Enabling Opt-in Rules
 
