@@ -81,6 +81,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.42](https://github.com/rvben/rumdl/compare/v0.2.41...v0.2.42) - 2026-07-24
+
+### Added
+
+- **mojibake**: new rule MD083 for mojibake detection (#753) ([552842b](https://github.com/rvben/rumdl/commit/552842bc70abf9a58317e1b47737321ff9b44e4c))
+
+### Fixed
+
+- **lint_context**: prevent panic when HTML tag window splits a UTF-8 char ([d14b252](https://github.com/rvben/rumdl/commit/d14b252671ec96cf7a2beea148a9a0f8c3341d4b))
+
 ## [0.2.41](https://github.com/rvben/rumdl/compare/v0.2.40...v0.2.41) - 2026-07-23
 
 ### Added

@@ -769,7 +769,7 @@
     "code": "MD083",
     "name": "mojibake",
     "aliases": [],
-    "summary": "Detects common encoding issues (aka mojibake).",
+    "summary": "Detect mojibake due to encoding issues",
     "category": "other",
     "fix": "Fix is not available.",
     "fix_availability": "None",
