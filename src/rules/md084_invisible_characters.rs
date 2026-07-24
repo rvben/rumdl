@@ -104,24 +104,56 @@ impl MD084InvisibleCharacters {
         )
     }
 
-    /// Whether the character at `index` is a variation selector with a base character
-    /// to modify. Attached, it is part of that grapheme cluster rather than hidden
-    /// content, so removing it would change the rendered glyph. Orphaned - at the start
-    /// of a line, after whitespace, or after another invisible character - it modifies
-    /// nothing and stays flaggable.
-    fn is_attached_variation_selector(chars: &[char], index: usize) -> bool {
-        if !Self::is_variation_selector(chars[index]) {
+    /// ZERO WIDTH JOINER, which fuses adjacent characters into one glyph.
+    const ZWJ: char = '\u{200D}';
+
+    /// Whether the character at `index` is visible content: present, not whitespace,
+    /// and not one of the invisible code points this rule tracks.
+    fn is_visible_base(chars: &[char], index: usize) -> bool {
+        chars
+            .get(index)
+            .is_some_and(|&c| !c.is_whitespace() && !Self::is_invisible_char(c))
+    }
+
+    /// Whether the character before `index` resolves to visible content, looking past
+    /// a variation selector that is itself attached to a base. That is what lets the
+    /// joiner in `U+1F3F3 U+FE0F U+200D U+1F308` (the rainbow flag) see its base.
+    fn follows_visible_base(chars: &[char], index: usize) -> bool {
+        let Some(prev) = index.checked_sub(1) else {
             return false;
+        };
+
+        Self::is_visible_base(chars, prev)
+            || (Self::is_variation_selector(chars[prev])
+                && prev
+                    .checked_sub(1)
+                    .is_some_and(|base| Self::is_visible_base(chars, base)))
+    }
+
+    /// Whether the character at `index` is presentation rather than hidden content.
+    /// Both forms below are part of the grapheme cluster a reader sees, so removing
+    /// one changes the rendered text: a variation selector picks the glyph form of the
+    /// character before it, and a joiner fuses the characters on either side of it.
+    /// Orphaned - at the start or end of a line, next to whitespace, or with another
+    /// invisible character where its base should be - neither is doing that job, and
+    /// stays reportable.
+    fn is_presentation(chars: &[char], index: usize) -> bool {
+        let c = chars[index];
+
+        if Self::is_variation_selector(c) {
+            // A selector modifies exactly the character before it, so a duplicated
+            // selector has nothing left of its own to modify.
+            return index
+                .checked_sub(1)
+                .is_some_and(|prev| Self::is_visible_base(chars, prev));
         }
 
-        index
-            .checked_sub(1)
-            .is_some_and(|prev| !chars[prev].is_whitespace() && !Self::is_invisible_char(chars[prev]))
+        c == Self::ZWJ && Self::follows_visible_base(chars, index) && Self::is_visible_base(chars, index + 1)
     }
 
     /// Message for a reportable stretch inside a run of consecutive invisible
-    /// characters. A stretch shortens to one character when an attached variation
-    /// selector sits next to it, which is still a cluster worth reporting.
+    /// characters. A stretch shortens to one character when presentation sits next
+    /// to it, which is still a cluster worth reporting.
     fn cluster_message(len: usize, first: char) -> String {
         let codepoint = Self::format_codepoint(first);
         if len >= 2 {
@@ -224,22 +256,19 @@ impl Rule for MD084InvisibleCharacters {
             }
 
             // In non-strict mode, we only flag the three triggers defined in the rule
-            // description. A variation selector attached to a base character is
-            // presentation rather than hidden content, so it is never reported or
-            // removed - but it stays an invisible character for the purpose of
-            // detecting a cluster, so nothing can hide behind an emoji.
+            // description. Presentation characters are never reported or removed, but
+            // they stay invisible characters for the purpose of detecting a cluster,
+            // so nothing can hide behind an emoji.
             let mut flagged = vec![false; chars.len()];
-            let invisible: Vec<bool> = chars.iter().map(|&c| self.is_flaggable(c)).collect();
-            let exempt: Vec<bool> = (0..chars.len())
-                .map(|i| Self::is_attached_variation_selector(&chars, i))
-                .collect();
-            let is_target: Vec<bool> = (0..chars.len()).map(|i| invisible[i] && !exempt[i]).collect();
+            let flaggable: Vec<bool> = chars.iter().map(|&c| self.is_flaggable(c)).collect();
+            let exempt: Vec<bool> = (0..chars.len()).map(|i| Self::is_presentation(&chars, i)).collect();
+            let is_target: Vec<bool> = (0..chars.len()).map(|i| flaggable[i] && !exempt[i]).collect();
 
             // Trigger 1: runs of two or more consecutive invisible characters. The run
             // is measured over every invisible character, then reported one reportable
-            // stretch at a time so an attached selector inside it is left intact.
+            // stretch at a time so presentation inside it is left intact.
             let mut offset = 0;
-            for group in invisible.chunk_by(|a, b| a == b) {
+            for group in flaggable.chunk_by(|a, b| a == b) {
                 let len = group.len();
                 if group[0] && len >= 2 {
                     let mut start = offset;
@@ -577,6 +606,57 @@ mod tests {
                 findings[0].message
             );
         }
+    }
+
+    #[test]
+    fn test_default_ignores_emoji_zwj_sequences() {
+        // Each of these is a single glyph held together by joiners, and some carry a
+        // variation selector next to the joiner. Removing either splits the emoji.
+        let sequences = [
+            "\u{1F3F3}\u{FE0F}\u{200D}\u{1F308}",                           // rainbow flag
+            "\u{1F469}\u{200D}\u{2764}\u{FE0F}\u{200D}\u{1F468}",           // couple with heart
+            "\u{26F9}\u{FE0F}\u{200D}\u{2640}\u{FE0F}",                     // woman bouncing ball
+            "\u{1F3F4}\u{200D}\u{2620}\u{FE0F}",                            // pirate flag
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}", // family
+        ];
+
+        for sequence in sequences {
+            let content = format!("look: {sequence} here");
+            let findings = check(&content);
+            assert!(findings.is_empty(), "sequence {sequence:?}: {findings:?}");
+
+            let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+            assert_eq!(
+                MD084InvisibleCharacters::default().fix(&ctx).unwrap(),
+                content,
+                "sequence {sequence:?} was rewritten"
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_flags_orphaned_joiner() {
+        // A joiner only earns its exemption by fusing visible characters on both sides.
+        let findings = check("joins nothing\u{200D}");
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("U+200D detected at line boundary"));
+
+        let findings = check("a \u{200D}b");
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0]
+                .message
+                .contains("U+200D detected adjacent to visible whitespace")
+        );
+
+        // Joiner followed by a zero-width space rather than a visible character.
+        let findings = check("a\u{200D}\u{200B}b");
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0]
+                .message
+                .contains("2 multiple consecutive invisible characters")
+        );
     }
 
     #[test]
