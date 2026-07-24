@@ -119,6 +119,18 @@ impl MD084InvisibleCharacters {
             .is_some_and(|prev| !chars[prev].is_whitespace() && !Self::is_invisible_char(chars[prev]))
     }
 
+    /// Message for a reportable stretch inside a run of consecutive invisible
+    /// characters. A stretch shortens to one character when an attached variation
+    /// selector sits next to it, which is still a cluster worth reporting.
+    fn cluster_message(len: usize, first: char) -> String {
+        let codepoint = Self::format_codepoint(first);
+        if len >= 2 {
+            format!("{len} multiple consecutive invisible characters detected, first one is {codepoint}")
+        } else {
+            format!("Invisible character {codepoint} detected next to another invisible character")
+        }
+    }
+
     /// Build a single-character-run warning, optionally with a removal fix.
     fn build_warning(
         rule_name: &str,
@@ -212,34 +224,41 @@ impl Rule for MD084InvisibleCharacters {
             }
 
             // In non-strict mode, we only flag the three triggers defined in the rule
-            // description, and a variation selector attached to a base character is
-            // presentation rather than hidden content.
+            // description. A variation selector attached to a base character is
+            // presentation rather than hidden content, so it is never reported or
+            // removed - but it stays an invisible character for the purpose of
+            // detecting a cluster, so nothing can hide behind an emoji.
             let mut flagged = vec![false; chars.len()];
-            let is_target: Vec<bool> = chars
-                .iter()
-                .enumerate()
-                .map(|(i, &c)| self.is_flaggable(c) && !Self::is_attached_variation_selector(&chars, i))
+            let invisible: Vec<bool> = chars.iter().map(|&c| self.is_flaggable(c)).collect();
+            let exempt: Vec<bool> = (0..chars.len())
+                .map(|i| Self::is_attached_variation_selector(&chars, i))
                 .collect();
+            let is_target: Vec<bool> = (0..chars.len()).map(|i| invisible[i] && !exempt[i]).collect();
 
-            // Trigger 1: runs of two or more consecutive invisible characters.
+            // Trigger 1: runs of two or more consecutive invisible characters. The run
+            // is measured over every invisible character, then reported one reportable
+            // stretch at a time so an attached selector inside it is left intact.
             let mut offset = 0;
-            for group in is_target.chunk_by(|a, b| a == b) {
+            for group in invisible.chunk_by(|a, b| a == b) {
                 let len = group.len();
                 if group[0] && len >= 2 {
-                    flagged[offset..offset + len].fill(true);
-                    warnings.push(Self::build_warning(
-                        self.name(),
-                        ctx,
-                        line_num,
-                        offset + 1,
-                        len,
-                        format!(
-                            "{} multiple consecutive invisible characters detected, first one is {}",
-                            group.len(),
-                            Self::format_codepoint(chars[offset])
-                        ),
-                        true,
-                    ));
+                    let mut start = offset;
+                    for stretch in exempt[offset..offset + len].chunk_by(|a, b| a == b) {
+                        let stretch_len = stretch.len();
+                        if !stretch[0] {
+                            flagged[start..start + stretch_len].fill(true);
+                            warnings.push(Self::build_warning(
+                                self.name(),
+                                ctx,
+                                line_num,
+                                start + 1,
+                                stretch_len,
+                                Self::cluster_message(stretch_len, chars[start]),
+                                true,
+                            ));
+                        }
+                        start += stretch_len;
+                    }
                 }
                 offset += len;
             }
@@ -542,10 +561,45 @@ mod tests {
     #[test]
     fn test_default_flags_redundant_variation_selector() {
         // The first selector is attached to the base; the duplicate after it is not.
-        let findings = check("\u{26A0}\u{FE0F}\u{FE0F}");
+        // Mid-line matters here: the duplicate is neither at a boundary nor next to
+        // whitespace, so it is only caught by counting the attached selector as part
+        // of the cluster.
+        for content in ["\u{26A0}\u{FE0F}\u{FE0F}", "\u{26A0}\u{FE0F}\u{FE0F}x"] {
+            let findings = check(content);
+            assert_eq!(findings.len(), 1, "content {content:?}");
+            assert_eq!(findings[0].column, 3, "content {content:?}");
+            assert_eq!(findings[0].end_column, 4, "content {content:?}");
+            assert!(
+                findings[0]
+                    .message
+                    .contains("U+FE0F detected next to another invisible character"),
+                "content {content:?}: {}",
+                findings[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn test_default_flags_invisible_hiding_behind_an_emoji() {
+        // A zero-width space tucked between an emoji and the next word is surrounded
+        // by an attached selector on one side, so it only surfaces if the selector
+        // still counts toward the cluster.
+        let content = "\u{26A0}\u{FE0F}\u{200B}x";
+        let findings = check(content);
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].column, 3);
-        assert!(findings[0].message.contains("U+FE0F detected at line boundary"));
+        assert!(
+            findings[0]
+                .message
+                .contains("U+200B detected next to another invisible character")
+        );
+
+        // The fix removes only the zero-width space, leaving the emoji intact.
+        let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+        assert_eq!(
+            MD084InvisibleCharacters::default().fix(&ctx).unwrap(),
+            "\u{26A0}\u{FE0F}x"
+        );
     }
 
     #[test]
