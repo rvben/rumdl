@@ -100,7 +100,7 @@ r#"[{c1}]
         common = "\u{a0}\u{ad}\u{b7}\u{b4}\u{2013}\u{2014}\u{2015}\u{2026}\u{2019}",
         nbsp = "`\u{a0}",
         soft_hyphen = "\u{ad}",
-    ).replace("\n", "").replace(' ', "")
+    ).replace('\n', "").replace(' ', "")
     ).unwrap()
 }
 
@@ -164,10 +164,19 @@ impl Rule for MD083DetectMojibake {
 
         for line in filtered {
             for mat in self.badness_re.find_iter(line.content) {
-                if self.is_ignored_match(line.content, mat.start(), mat.as_str()) {
+                let (start, end) = (mat.start(), mat.end());
+                // `ignore_code_blocks` also covers inline code spans: a backtick
+                // span holds a literal or already-encoded snippet, so mojibake
+                // there is intentional. `filtered_lines()` drops fenced and
+                // indented blocks above; this handles the inline case using the
+                // document-absolute byte offset of the match.
+                if self.config.ignore_code_blocks && ctx.is_byte_offset_in_code_span(line.line_info.byte_offset + start)
+                {
                     continue;
                 }
-                let (start, end) = (mat.start(), mat.end());
+                if self.is_ignored_match(line.content, start, mat.as_str()) {
+                    continue;
+                }
                 let line_num = line.line_num;
                 let column = byte_to_char_count(line.content, start);
                 let end_column = byte_to_char_count(line.content, end);
@@ -219,13 +228,7 @@ mod tests {
         rule.check(&ctx).unwrap()
     }
 
-    fn assert_mojibake_at(
-        warning: &LintWarning,
-        line: usize,
-        column: usize,
-        end_line: usize,
-        end_column: usize,
-    ) {
+    fn assert_mojibake_at(warning: &LintWarning, line: usize, column: usize, end_line: usize, end_column: usize) {
         assert!(warning.rule_name.as_deref() == Some("MD083"));
         assert!(warning.message.contains("Mojibake detected"));
         assert_eq!(warning.line, line);
@@ -299,33 +302,33 @@ mod tests {
 
     #[test]
     fn test_numeric_char() {
-        assert!(check("²³¹±¼½¾×µ÷⁄∂∆").len() == 0);
+        assert!(check("²³¹±¼½¾×µ÷⁄∂∆").is_empty());
     }
 
     #[test]
     fn test_kaomoji_char() {
-        assert!(check("Ò-ÖÙ-Üò-öø-üŐ°").len() == 0);
+        assert!(check("Ò-ÖÙ-Üò-öø-üŐ°").is_empty());
     }
 
     #[test]
     fn test_upper_common_chars() {
-        assert!(check("ÞΑ-ΩΆΈΉΊΌΎΏΪΫЁ-Я").len() == 0);
+        assert!(check("ÞΑ-ΩΆΈΉΊΌΎΏΪΫЁ-Я").is_empty());
     }
 
     #[test]
     fn test_lower_common_chars() {
-        assert!(check("α-ωάέήίΰа-џ").len() == 0);
+        assert!(check("α-ωάέήίΰа-џ").is_empty());
     }
 
     #[test]
     fn test_currency_chars() {
-        assert!(check("¢£¥₧€").len() == 0);
+        assert!(check("¢£¥₧€").is_empty());
     }
 
     #[test]
     fn test_punctuation_chars() {
-        assert!(check("¡«¿©΄΅‘‚“„•‹\u{f8ff}").len() == 0);
-        assert!(check("®»˝”›™").len() == 0);
+        assert!(check("¡«¿©΄΅‘‚“„•‹\u{f8ff}").is_empty());
+        assert!(check("®»˝”›™").is_empty());
     }
 
     #[test]
@@ -337,12 +340,12 @@ mod tests {
 
     #[test]
     fn test_box_drawing_chars() {
-        assert!(check("│┌┐┘├┤┬┼═-╬▀▄█▌▐░▒▓").len() == 0);
+        assert!(check("│┌┐┘├┤┬┼═-╬▀▄█▌▐░▒▓").is_empty());
     }
 
     #[test]
     fn test_known_badness_emoji() {
-        assert!(check("😀").len() == 0);
+        assert!(check("😀").is_empty());
     }
 
     #[test]
@@ -375,13 +378,13 @@ mod tests {
     // Checks if punctuation character are not considered as bad
     #[test]
     fn test_punctuation() {
-        assert!(check("!@#$%^&*()_-+={}|[]\\:\";'<>,.?/").len() == 0);
+        assert!(check("!@#$%^&*()_-+={}|[]\\:\";'<>,.?/").is_empty());
     }
 
     // Checks a sentence including lower common characters and numbers, should return false
     #[test]
     fn test_lower_common_chars_and_numbers() {
-        assert!(check("Один два απο ένα δύο α-ωάέήίΰа-џ 123 £$%").len() == 0);
+        assert!(check("Один два απο ένα δύο α-ωάέήίΰа-џ 123 £$%").is_empty());
     }
 
     // Test checks if non-breaking space and soft hyphen are not considered as bad
@@ -487,6 +490,40 @@ let broken = \"Ã¡\";\n\
         assert_mojibake_at(&results[1], 4, 15, 4, 17);
     }
 
+    #[test]
+    fn test_inline_code_span_ignored_by_default() {
+        // A backtick span holds a literal or already-encoded snippet, so mojibake
+        // inside it is intentional and ignored when ignore_code_blocks is true.
+        let results = check("Broken dash `â€“` inside inline code.\n");
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_inline_code_span_checked_when_disabled() {
+        let rule = MD083DetectMojibake::from_config_struct(MD083Config {
+            ignore_code_blocks: false,
+            ..Default::default()
+        });
+        let results = check_with_rule(&rule, "Broken dash `â€“` inside inline code.\n");
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_inline_code_span_prose_still_flagged() {
+        // Mojibake in prose is still flagged even when an inline code span on the
+        // same line is exempted.
+        let results = check("Prose â€“ and code `Ã¡` together.\n");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].line, 1);
+    }
+
+    #[test]
+    fn test_multiline_inline_code_span_ignored() {
+        // A code span that spans a line break is exempted across both lines.
+        let results = check("Start `code spanning â€“\nsecond line Ã¡` end.\n");
+        assert!(results.is_empty());
+    }
+
     // Check that a simple English sentence is not considered "bad"
     #[test]
     fn test_simple_sentence() {
@@ -520,7 +557,8 @@ let broken = \"Ã¡\";\n\
     // Check badness calculation with all character categories
     #[test]
     fn test_all_categories() {
-        let results = check("¢£¥₧€¡«¿©΄΅‘‚“„•‹\u{f8ff}®»˝”›™²³¹±¼½¾×µ÷⁄∂∆ÞΑ-ΩΆΈΉΊΌΎΏΪΫЁ-Яα-ωάέήίΰа-џ│┌┐┘├┤┬┼═-╬▀▄█▌▐░▒▓");
+        let results =
+            check("¢£¥₧€¡«¿©΄΅‘‚“„•‹\u{f8ff}®»˝”›™²³¹±¼½¾×µ÷⁄∂∆ÞΑ-ΩΆΈΉΊΌΎΏΪΫЁ-Яα-ωάέήίΰа-џ│┌┐┘├┤┬┼═-╬▀▄█▌▐░▒▓");
         assert_eq!(results.len(), 1);
         assert!(results[0].message.contains("Mojibake detected"));
         assert_mojibake_at(&results[0], 1, 5, 1, 7);
@@ -535,7 +573,7 @@ let broken = \"Ã¡\";\n\
     // Check badness calculation with a range of special characters
     #[test]
     fn test_special() {
-        assert_eq!(check("&quot;ًٌٍََُِّْٕٖٜٟٓٔٗ٘ٙٚٛٝٞ").len(), 0);
+        assert_eq!(check("&quot;ًٌٍََُِّْٕٖٜٟٓٔٗ٘ٙٚٛٝٞ").len(), 0);
     }
 
     // Test checks a sentence including upper common characters and numbers, should return false
@@ -635,8 +673,14 @@ let broken = \"Ã¡\";\n\
         assert_eq!(check("Œuvre d'art").len(), 0);
         assert_eq!(check("Cœur de l'œuvre").len(), 0);
         assert_eq!(check("L'œuvre est magnifique").len(), 0);
-        assert_eq!(check("Ce remarquable Œuf Fabergé est une œuvre d'art en forme d'œuf.").len(), 0);
-        assert_eq!(check("La ligature œ est formée de la contraction des caractères o et e.").len(), 0);
+        assert_eq!(
+            check("Ce remarquable Œuf Fabergé est une œuvre d'art en forme d'œuf.").len(),
+            0
+        );
+        assert_eq!(
+            check("La ligature œ est formée de la contraction des caractères o et e.").len(),
+            0
+        );
         assert_eq!(check("La ligature \"œ\" s'écrit en majuscules \"Œ\".").len(), 0);
     }
 
