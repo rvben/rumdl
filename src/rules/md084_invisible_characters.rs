@@ -136,11 +136,7 @@ impl Rule for MD084InvisibleCharacters {
     }
 
     fn fix_capability(&self) -> FixCapability {
-        if self.config.strict {
-            FixCapability::Unfixable
-        } else {
-            FixCapability::ConditionallyFixable
-        }
+        FixCapability::ConditionallyFixable
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
@@ -180,7 +176,7 @@ impl Rule for MD084InvisibleCharacters {
                                     "Invisible character {} detected (strict mode)",
                                     Self::format_codepoint(c)
                                 ),
-                                false,
+                                true,
                             )
                         }),
                 );
@@ -263,10 +259,6 @@ impl Rule for MD084InvisibleCharacters {
     }
 
     fn fix(&self, ctx: &LintContext) -> Result<String, LintError> {
-        if self.config.strict {
-            return Ok(ctx.content.to_string());
-        }
-
         if self.should_skip(ctx) {
             return Ok(ctx.content.to_string());
         }
@@ -387,9 +379,9 @@ mod tests {
         let findings = rule.check(&ctx).unwrap();
         assert_eq!(findings.len(), 1);
         assert!(findings[0].message.contains("strict mode"));
-        assert!(findings[0].fix.is_none());
+        assert!(findings[0].fix.is_some());
 
-        assert_eq!(rule.fix(&ctx).unwrap(), "ca\u{200C}t");
+        assert_eq!(rule.fix(&ctx).unwrap(), "cat");
     }
 
     #[test]
@@ -439,7 +431,7 @@ mod tests {
         let findings = rule.check(&ctx).unwrap();
 
         assert_eq!(findings.len(), 1);
-        assert!(findings[0].fix.is_none());
+        assert!(findings[0].fix.is_some());
     }
 
     #[test]
