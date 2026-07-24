@@ -434,10 +434,15 @@ pub(super) fn parse_html_tags(
 
         // Determine search window: from '<' to the next '>' (with a reasonable limit)
         // This handles multi-line tags where attributes span lines
-        let window_end = bytes[lt_pos..]
+        let mut window_end = bytes[lt_pos..]
             .iter()
             .position(|&b| b == b'>')
             .map_or(content_len.min(lt_pos + 4096), |offset| lt_pos + offset + 1);
+        // The 4096-byte cap is a raw byte offset that can fall inside a multi-byte
+        // UTF-8 character; walk back to the nearest char boundary before slicing.
+        while window_end > lt_pos && !content.is_char_boundary(window_end) {
+            window_end -= 1;
+        }
         let window = &content[lt_pos..window_end];
 
         if let Some(cap) = HTML_TAG_REGEX.captures(window) {

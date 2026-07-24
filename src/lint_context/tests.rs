@@ -807,6 +807,22 @@ fn test_is_in_html_tag_nested_angle_brackets() {
 }
 
 #[test]
+fn test_html_tag_window_ends_inside_multibyte_char() {
+    // Issue #757: an unterminated HTML-like tag (`<a...` with no closing `>`) whose
+    // 4096-byte search window ends inside a multi-byte UTF-8 character must not panic.
+    // `<a` (2 bytes) + 4093 * 'a' (4093 bytes) puts byte 4096 inside the following
+    // '的' (bytes 4095..4098), which previously panicked when slicing the window.
+    let content = format!("<a{}的", "a".repeat(4093));
+    let ctx = LintContext::new(&content, MarkdownFlavor::Standard, None);
+    let _ = ctx.html_tags(); // must not panic
+
+    // A closing '>' beyond the window boundary, still landing inside a multi-byte char.
+    let content2 = format!("<a {}的>", "b".repeat(5000));
+    let ctx2 = LintContext::new(&content2, MarkdownFlavor::Standard, None);
+    let _ = ctx2.html_tags(); // must not panic
+}
+
+#[test]
 fn test_is_in_html_tag_no_tags() {
     let content = "Plain text without any HTML";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
