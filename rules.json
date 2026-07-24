@@ -764,5 +764,15 @@
     "fix": "Fix is not available.",
     "fix_availability": "None",
     "url": "https://rumdl.dev/md082/"
+  },
+  {
+    "code": "MD083",
+    "name": "mojibake",
+    "aliases": [],
+    "summary": "Detects common encoding issues (aka mojibake).",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md083/"
   }
 ]
