@@ -297,6 +297,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD067" => Some("Text[^2][^1]\n\n[^1]: First\n[^2]: Second"),
         "MD068" => Some("[^1]:\n\n[^1]: Empty footnote"),
         "MD083" => Some("Broken dash â€“ here"),
+        "MD084" => Some("left \u{2060} right"),
         _ => None,
     }
 }

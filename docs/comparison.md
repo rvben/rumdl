@@ -13,7 +13,7 @@ For detailed comparisons with specific tools, see:
 
 | Tool                  | Type          | Language | Rules                                     | Auto-fix | Flavors | Config format           | Plugins      | LSP |
 | --------------------- | ------------- | -------- | ----------------------------------------- | -------- | ------- | ----------------------- | ------------ | --- |
-| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->77<!-- /RULE_COUNT --> | Yes      | 9       | TOML, JSON, YAML        | No           | Yes |
+| **rumdl**             | Lint + Format | Rust     | <!-- RULE_COUNT -->78<!-- /RULE_COUNT --> | Yes      | 9       | TOML, JSON, YAML        | No           | Yes |
 | **markdownlint-cli**  | Lint          | Node.js  | 53                                        | Yes      | No      | JSON, JSONC, YAML, TOML | Yes (JS)     | No  |
 | **markdownlint-cli2** | Lint          | Node.js  | 53                                        | Yes      | No      | JSONC, YAML, JS         | Yes (JS)     | No  |
 | **remark-lint**       | Lint          | Node.js  | ~80 (via presets)                         | No       | No      | JS, JSON, YAML          | Yes (JS)     | No  |
@@ -33,7 +33,7 @@ cover common cases. No built-in auto-fix for lint violations (remark itself can 
 
 **mado** is a Rust-based linter with 38 rules (33 stable, 5 unstable). It has no auto-fix and no plugin system.
 
-**rumdl** implements all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->24<!-- /RULE_COUNT_ADDITIONAL --> additional rules (<!-- RULE_COUNT -->77<!-- /RULE_COUNT --> total). It supports
+**rumdl** implements all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->25<!-- /RULE_COUNT_ADDITIONAL --> additional rules (<!-- RULE_COUNT -->78<!-- /RULE_COUNT --> total). It supports
 auto-fix for most rules and includes rules not found in other tools, such as relative link validation (MD057), footnote checks (MD066-MD068), nested code fence detection (MD070), and TOC validation
 (MD073).
 

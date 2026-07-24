@@ -7,7 +7,7 @@ This document compares rumdl and mdformat, focusing on their formatting capabili
 Both tools format Markdown files, but serve different purposes:
 
 - **mdformat**: Pure formatter focused on consistent Markdown output
-- **rumdl**: Combined linter and formatter with <!-- RULE_COUNT -->77<!-- /RULE_COUNT --> rules plus formatting
+- **rumdl**: Combined linter and formatter with <!-- RULE_COUNT -->78<!-- /RULE_COUNT --> rules plus formatting
 
 **Key Differences:**
 

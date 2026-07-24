@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->77<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->78<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -30,17 +30,18 @@ For flavor-specific behavior (MkDocs, MDX, Quarto), see the [Markdown Flavors Re
 
 The following rules are **disabled by default** because they enforce opinionated style choices that may not suit all projects. Enable them explicitly if your project requires these checks.
 
-| Rule              | Description              | Why opt-in                                                    |
-| ----------------- | ------------------------ | ------------------------------------------------------------- |
-| [MD060](md060.md) | Table formatting         | Makes significant formatting changes to existing tables       |
-| [MD063](md063.md) | Heading capitalization   | Style varies by guide (AP, Chicago, APA)                      |
-| [MD070](md070.md) | Nested code fence        | Auto-fix modifies document structure, false positives on docs |
-| [MD072](md072.md) | Frontmatter key sort     | Many projects prefer semantic ordering over alphabetical      |
-| [MD073](md073.md) | TOC validation           | Requires specific TOC markers in document                     |
-| [MD074](md074.md) | MkDocs nav validation    | Requires `flavor = "mkdocs"` to activate                      |
-| [MD080](md080.md) | Heading anchor collision | Collisions are functional under platform auto-suffixing       |
-| [MD082](md082.md) | No empty sections        | Empty sections are sometimes intentional stubs                |
-| [MD083](md083.md) | Detect Mojibake          | Turn it on once you encounter encoding issues                 |
+| Rule              | Description              | Why opt-in                                                        |
+| ----------------- | ------------------------ | ----------------------------------------------------------------- |
+| [MD060](md060.md) | Table formatting         | Makes significant formatting changes to existing tables           |
+| [MD063](md063.md) | Heading capitalization   | Style varies by guide (AP, Chicago, APA)                          |
+| [MD070](md070.md) | Nested code fence        | Auto-fix modifies document structure, false positives on docs     |
+| [MD072](md072.md) | Frontmatter key sort     | Many projects prefer semantic ordering over alphabetical          |
+| [MD073](md073.md) | TOC validation           | Requires specific TOC markers in document                         |
+| [MD074](md074.md) | MkDocs nav validation    | Requires `flavor = "mkdocs"` to activate                          |
+| [MD080](md080.md) | Heading anchor collision | Collisions are functional under platform auto-suffixing           |
+| [MD082](md082.md) | No empty sections        | Empty sections are sometimes intentional stubs                    |
+| [MD083](md083.md) | Detect Mojibake          | Turn it on once you encounter encoding issues                     |
+| [MD084](md084.md) | Invisible characters     | May trigger false positives in languages that use direction marks |
 
 ### Enabling Opt-in Rules
 

@@ -16,7 +16,7 @@ icon: lucide/file-check
 
     [:octicons-arrow-right-24: Benchmarks](#performance)
 
--   :mag:{ .lg .middle } **<!-- RULE_COUNT -->77<!-- /RULE_COUNT --> lint rules**
+-   :mag:{ .lg .middle } **<!-- RULE_COUNT -->78<!-- /RULE_COUNT --> lint rules**
 
     ---
 
