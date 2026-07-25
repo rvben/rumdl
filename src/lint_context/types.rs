@@ -483,19 +483,6 @@ pub struct EmphasisSpan {
     pub content: String,
 }
 
-/// Pre-parsed table row information
-#[derive(Debug, Clone)]
-pub struct TableRow {
-    /// Line number (1-indexed)
-    pub line: usize,
-    /// Whether this is a separator row (contains only |, -, :, and spaces)
-    pub is_separator: bool,
-    /// Number of columns (pipe-separated cells)
-    pub column_count: usize,
-    /// Alignment info from separator row
-    pub column_alignments: Vec<String>, // "left", "center", "right", "none"
-}
-
 /// Pre-parsed bare URL information (not in links)
 #[derive(Debug, Clone)]
 pub struct BareUrl {

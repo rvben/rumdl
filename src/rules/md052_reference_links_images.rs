@@ -2,7 +2,7 @@ use crate::rule::{FixCapability, LintError, LintResult, LintWarning, Rule, RuleC
 use crate::utils::mkdocs_patterns::is_mkdocs_auto_reference;
 use crate::utils::range_utils::calculate_match_range;
 use crate::utils::regex_cache::SHORTCUT_REF_REGEX;
-use crate::utils::skip_context::{is_in_math_context, is_in_table_cell};
+use crate::utils::skip_context::is_in_math_context;
 use pulldown_cmark::LinkType;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -390,11 +390,6 @@ impl MD052ReferenceLinkImages {
                 continue;
             }
 
-            // Skip links inside table cells
-            if is_in_table_cell(ctx, link.line, link.start_col) {
-                continue;
-            }
-
             // Skip links inside frontmatter
             if ctx.line_info(link.line).is_some_and(|info| info.in_front_matter) {
                 continue;
@@ -501,11 +496,6 @@ impl MD052ReferenceLinkImages {
 
             // Skip images inside math contexts
             if is_in_math_context(ctx, image.byte_offset) {
-                continue;
-            }
-
-            // Skip images inside table cells
-            if is_in_table_cell(ctx, image.line, image.start_col) {
                 continue;
             }
 
@@ -780,11 +770,6 @@ impl MD052ReferenceLinkImages {
                                 continue;
                             }
 
-                            // Skip if inside table cell
-                            if is_in_table_cell(ctx, line_num + 1, col) {
-                                continue;
-                            }
-
                             let byte_end = byte_pos + (full_match.end() - full_match.start());
 
                             // Check if this shortcut ref overlaps with any parsed link/image
@@ -1055,6 +1040,23 @@ mod tests {
         let result = rule.check(&ctx).unwrap();
 
         assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("Reference 'undefined' not found"));
+    }
+
+    #[test]
+    fn test_shortcut_reference_in_table_cell_with_shortcut_syntax_enabled() {
+        // A table cell is an ordinary inline context, so a shortcut reference in
+        // one is checked like any other once shortcut_syntax is on.
+        let rule = MD052ReferenceLinkImages::from_config_struct(MD052Config {
+            shortcut_syntax: true,
+            ..Default::default()
+        });
+        let content = "| A | B |\n| --- | --- |\n| [undefined] | [defined] |\n\n[defined]: https://example.com\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+
+        assert_eq!(result.len(), 1, "{result:?}");
+        assert_eq!(result[0].line, 3);
         assert!(result[0].message.contains("Reference 'undefined' not found"));
     }
 

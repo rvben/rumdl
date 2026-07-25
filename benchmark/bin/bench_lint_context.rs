@@ -94,11 +94,6 @@ More **emphasis** and _underscores_ everywhere.
     println!("Emphasis span parsing (first access): {emphasis_parse_time:?}");
 
     let start = Instant::now();
-    let _table_rows = ctx.table_rows();
-    let table_parse_time = start.elapsed();
-    println!("Table parsing (first access): {table_parse_time:?}");
-
-    let start = Instant::now();
     let _bare_urls = ctx.bare_urls();
     let url_parse_time = start.elapsed();
     println!("Bare URL parsing (first access): {url_parse_time:?}");
@@ -120,7 +115,7 @@ More **emphasis** and _underscores_ everywhere.
     println!("  - Images: {}", ctx.images.len());
     println!("  - HTML tags: {}", ctx.html_tags().len());
     println!("  - Emphasis spans: {}", ctx.emphasis_spans().len());
-    println!("  - Table rows: {}", ctx.table_rows().len());
+    println!("  - Table blocks: {}", ctx.table_blocks.len());
     println!("  - Bare URLs: {}", ctx.bare_urls().len());
     println!("  - List blocks: {}", ctx.list_blocks.len());
 }

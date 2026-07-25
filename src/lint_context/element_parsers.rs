@@ -504,62 +504,6 @@ pub(super) fn parse_html_tags(
     (html_tags, jsx_component_tags)
 }
 
-/// Parse table rows in the content
-pub(super) fn parse_table_rows(content: &str, lines: &[LineInfo]) -> Vec<TableRow> {
-    let mut table_rows = Vec::with_capacity(lines.len() / 20);
-
-    for (line_idx, line_info) in lines.iter().enumerate() {
-        // Skip lines in code blocks or blank lines
-        if line_info.in_code_block || line_info.is_blank {
-            continue;
-        }
-
-        let line = line_info.content(content);
-        let line_num = line_idx + 1;
-
-        // Check if this line contains pipes (potential table row)
-        if !line.contains('|') {
-            continue;
-        }
-
-        // Count columns by splitting on pipes, masking escaped and code-span pipes
-        let escaped = crate::utils::table_utils::TableUtils::mask_pipes_for_table_parsing(line);
-        let masked = crate::utils::table_utils::TableUtils::mask_pipes_in_inline_code(&escaped);
-        let parts: Vec<&str> = masked.split('|').collect();
-        let column_count = if parts.len() > 2 { parts.len() - 2 } else { parts.len() };
-
-        // Check if this is a separator row
-        let is_separator = line.chars().all(|c| "|:-+ \t".contains(c));
-        let mut column_alignments = Vec::new();
-
-        if is_separator {
-            for part in &parts[1..parts.len() - 1] {
-                // Skip first and last empty parts
-                let trimmed = part.trim();
-                let alignment = if trimmed.starts_with(':') && trimmed.ends_with(':') {
-                    "center".to_string()
-                } else if trimmed.ends_with(':') {
-                    "right".to_string()
-                } else if trimmed.starts_with(':') {
-                    "left".to_string()
-                } else {
-                    "none".to_string()
-                };
-                column_alignments.push(alignment);
-            }
-        }
-
-        table_rows.push(TableRow {
-            line: line_num,
-            is_separator,
-            column_count,
-            column_alignments,
-        });
-    }
-
-    table_rows
-}
-
 /// Parse bare URLs and emails in the content
 pub(super) fn parse_bare_urls(content: &str, lines: &[LineInfo], code_blocks: &[(usize, usize)]) -> Vec<BareUrl> {
     let mut bare_urls = Vec::with_capacity(content.matches("http").count() + content.matches('@').count());

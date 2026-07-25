@@ -159,10 +159,11 @@ But this [link][missing_ref] reference outside math should be flagged."#;
 }
 
 #[test]
-fn test_md052_skips_tables() {
+fn test_md052_checks_references_inside_tables() {
     let rule = MD052ReferenceLinkImages::new();
 
-    // Test that reference-like patterns in tables are not flagged
+    // An undefined reference is undefined wherever it appears; a table cell is an
+    // ordinary inline context. markdownlint reports every one of these too.
     // Using full reference syntax [text][ref] since shortcut_syntax is false by default
     let content = r#"# Test MD052 with Tables
 
@@ -170,41 +171,41 @@ Regular [link][undefined_ref] reference that should be flagged.
 
 | Header | Column |
 |--------|--------|
-| Cell with [ref1][x] | Another [ref2][y] |
-| More [ref3][z] data | Final [ref4][w] cell |
+| Cell with [ref1][alpha] | Another [ref2][beta] |
+| More [ref3][gamma] data | Final [ref4][delta] cell |
 
 This [link2][missing_ref] reference outside the table should be flagged.
 
 Another table:
+
 | Col 1 | Col 2 | Col 3 |
 |-------|-------|-------|
-| [a][x1] | [b][x2] | [c][x3] |
+| [a][eps] | [b][zeta] | [c][eta] |
 
 Final [link3][broken_ref] reference should be flagged."#;
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = rule.check(&ctx).unwrap();
 
-    // Should flag exactly 3 undefined references (outside tables)
-    // Note: This assumes table detection is working properly
-    // If table cells aren't being skipped yet, this test will fail and that's okay
-    // as it indicates we need to enhance table detection
-    assert_eq!(result.len(), 3, "Expected 3 warnings for references outside tables");
-
-    // Verify the correct references are flagged
     let messages: Vec<String> = result.iter().map(|w| w.message.clone()).collect();
-    assert!(
-        messages.iter().any(|m| m.contains("undefined_ref")),
-        "Should flag 'undefined_ref'"
-    );
-    assert!(
-        messages.iter().any(|m| m.contains("missing_ref")),
-        "Should flag 'missing_ref'"
-    );
-    assert!(
-        messages.iter().any(|m| m.contains("broken_ref")),
-        "Should flag 'broken_ref'"
-    );
+    for label in [
+        "undefined_ref",
+        "alpha",
+        "beta",
+        "gamma",
+        "delta",
+        "missing_ref",
+        "eps",
+        "zeta",
+        "eta",
+        "broken_ref",
+    ] {
+        assert!(
+            messages.iter().any(|m| m.contains(&format!("'{label}'"))),
+            "Should flag '{label}', got: {messages:?}"
+        );
+    }
+    assert_eq!(result.len(), 10, "Expected 10 warnings, got: {messages:?}");
 }
 
 #[test]
@@ -363,12 +364,18 @@ Outside contexts: * spaced * emphasis and [link][missing_ref] reference and (htt
     let md037 = MD037NoSpaceInEmphasis;
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = md037.check(&ctx).unwrap();
-    assert_eq!(result.len(), 2, "MD037: Expected 2 warnings outside skip contexts");
+    // Front matter, the HTML comment and both math contexts are skipped; the table
+    // row is not a skip context, so its `* spaces *` cell is flagged like any other.
+    assert_eq!(result.len(), 3, "MD037: Expected 3 warnings outside skip contexts");
 
     // Test MD052
     let md052 = MD052ReferenceLinkImages::new();
     let result = md052.check(&ctx).unwrap();
-    assert_eq!(result.len(), 1, "MD052: Expected 1 warning for 'missing_ref' reference");
+    assert_eq!(
+        result.len(),
+        2,
+        "MD052: Expected warnings for 'x' (in the table) and 'missing_ref'"
+    );
 
     // Test MD011
     let md011 = MD011NoReversedLinks;

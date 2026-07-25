@@ -12,13 +12,66 @@ use crate::utils::range_utils::byte_to_char_count;
 use crate::utils::regex_cache::UNORDERED_LIST_MARKER_REGEX;
 use crate::utils::skip_context::{
     is_in_inline_html_code, is_in_jsx_expression, is_in_math_context, is_in_mdx_comment, is_in_mkdocs_markup,
-    is_in_table_cell,
 };
+use crate::utils::table_utils::TableUtils;
+use std::ops::Range;
 
 /// Check if an emphasis span has spacing issues that should be flagged
 #[inline]
 fn has_spacing_issues(span: &EmphasisSpan) -> bool {
     span.has_leading_space || span.has_trailing_space
+}
+
+/// Flags marking which lines belong to a GFM table, indexed by 0-based line number.
+/// Empty when the document contains no table.
+fn table_line_flags(ctx: &crate::lint_context::LintContext) -> Vec<bool> {
+    if ctx.table_blocks.is_empty() {
+        return Vec::new();
+    }
+
+    let mut flags = vec![false; ctx.lines.len()];
+    // TableBlock line numbers are 0-indexed, matching this vector.
+    for block in &ctx.table_blocks {
+        for idx in block.start_line..=block.end_line {
+            if let Some(flag) = flags.get_mut(idx) {
+                *flag = true;
+            }
+        }
+    }
+    flags
+}
+
+/// Byte ranges of the cells in a table row.
+///
+/// A row is split on pipes that are neither escaped nor inside a code span, and
+/// every cell is parsed as its own inline context, so a marker in one cell can
+/// never pair with a marker in the next. Scanning cells separately gives the
+/// line-level emphasis finder the boundaries the parser already uses.
+fn table_cell_ranges(line: &str) -> Vec<Range<usize>> {
+    // Only an escape or a code span can hide a pipe from the split, so a row
+    // containing neither is scanned as it stands. Masking copies the row.
+    let masked;
+    let scan = if line.contains('\\') || line.contains('`') {
+        let escaped = TableUtils::mask_pipes_for_table_parsing(line);
+        masked = TableUtils::mask_pipes_in_inline_code(&escaped);
+        debug_assert_eq!(
+            masked.len(),
+            line.len(),
+            "pipe masking must preserve byte offsets for cell slicing"
+        );
+        masked.as_str()
+    } else {
+        line
+    };
+
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for (pipe_pos, _) in scan.match_indices('|') {
+        ranges.push(start..pipe_pos);
+        start = pipe_pos + 1;
+    }
+    ranges.push(start..line.len());
+    ranges
 }
 
 /// Truncate long text for display in warning messages
@@ -96,6 +149,7 @@ impl Rule for MD037NoSpaceInEmphasis {
         let line_index = &ctx.line_index;
 
         let mut warnings = Vec::new();
+        let table_lines = table_line_flags(ctx);
 
         // Process content lines, automatically skipping front matter, code blocks, math blocks,
         // and Obsidian comments (when in Obsidian flavor)
@@ -113,6 +167,26 @@ impl Rule for MD037NoSpaceInEmphasis {
         {
             // Skip if the line doesn't contain any emphasis markers
             if !line.content.contains('*') && !line.content.contains('_') {
+                continue;
+            }
+
+            if table_lines.get(line.line_num - 1).copied().unwrap_or(false) {
+                // Each table cell is its own inline context, so scan cells separately.
+                // A marker in one cell can never pair with a marker in the next, and a
+                // cell holds inline content only (never a list item), so the line-level
+                // list-marker handling does not apply here.
+                for cell in table_cell_ranges(line.content) {
+                    let Some(cell_content) = line.content.get(cell.clone()) else {
+                        continue;
+                    };
+                    if !cell_content.contains('*') && !cell_content.contains('_') {
+                        continue;
+                    }
+                    if has_doc_patterns(cell_content) {
+                        continue;
+                    }
+                    self.check_line_content_for_emphasis_fast(cell_content, line.line_num, cell.start, &mut warnings);
+                }
                 continue;
             }
 
@@ -139,7 +213,7 @@ impl Rule for MD037NoSpaceInEmphasis {
                     let line_pos = warning.column - 1;
                     let char_col = byte_to_char_count(line, warning.column - 1);
 
-                    // Skip if inside links, HTML comments, math contexts, tables, code spans, MDX constructs, or MkDocs markup
+                    // Skip if inside links, HTML comments, math contexts, code spans, MDX constructs, or MkDocs markup
                     // Note: is_in_code_span uses pulldown-cmark and correctly handles multi-line spans
                     // Pandoc bracketed spans `[text]{.class}` may contain spaced
                     // emphasis markers as literal content; suppress MD037 there.
@@ -151,7 +225,6 @@ impl Rule for MD037NoSpaceInEmphasis {
                         && !self.is_in_link(ctx, byte_pos)
                         && !ctx.is_in_html_comment(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
-                        && !is_in_table_cell(ctx, line_num, char_col)
                         && !ctx.is_in_code_span(line_num, char_col)
                         && !is_in_inline_html_code(line, line_pos)
                         && !is_in_jsx_expression(ctx, byte_pos)
@@ -380,6 +453,41 @@ impl MD037NoSpaceInEmphasis {
 mod tests {
     use super::*;
     use crate::lint_context::LintContext;
+
+    #[test]
+    fn table_cell_ranges_unmasked_scan_matches_masked_scan() {
+        // Rows without an escape or a code span skip the masking copy. Both
+        // paths must split a row into the same cells.
+        fn always_masked(line: &str) -> Vec<Range<usize>> {
+            let escaped = TableUtils::mask_pipes_for_table_parsing(line);
+            let masked = TableUtils::mask_pipes_in_inline_code(&escaped);
+            let mut ranges = Vec::new();
+            let mut start = 0;
+            for (pipe_pos, _) in masked.match_indices('|') {
+                ranges.push(start..pipe_pos);
+                start = pipe_pos + 1;
+            }
+            ranges.push(start..line.len());
+            ranges
+        }
+
+        for line in [
+            "| a | b |",
+            "| a * x * | b |",
+            "a | b",
+            "no pipes at all",
+            "",
+            "|||",
+            "| naïve ünïcode | 日本語 |",
+            r"| a \| b | c |",
+            "| `a | b` | c |",
+            r"| `a \| b` | c |",
+            r"| a \\ | b |",
+            "> | a * x * | b |",
+        ] {
+            assert_eq!(table_cell_ranges(line), always_masked(line), "line: {line:?}");
+        }
+    }
 
     #[test]
     fn test_emphasis_marker_parsing() {

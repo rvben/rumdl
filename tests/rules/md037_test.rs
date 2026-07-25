@@ -934,3 +934,268 @@ fn test_md037_interior_other_delimiter_vs_standalone() {
     );
     assert!(result[0].message.contains("_ y _"));
 }
+
+/// Collect `(line, column, message)` for every warning, for readable assertions.
+fn warnings_at(content: &str) -> Vec<(usize, usize, String)> {
+    let rule = MD037NoSpaceInEmphasis;
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    rule.check(&ctx)
+        .unwrap()
+        .into_iter()
+        .map(|w| (w.line, w.column, w.message))
+        .collect()
+}
+
+/// Issue #759: spaced emphasis inside a table cell is a violation like anywhere
+/// else. markdownlint reports the same span.
+#[test]
+fn test_md037_flags_spaced_emphasis_in_table_cell() {
+    let content = "\
+# Konten
+
+| Webseite    | E-Mail-Adresse |
+| :---------- | :------------- |
+| **Archiv ** |                |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "expected the table cell to be flagged: {found:?}");
+    assert_eq!((found[0].0, found[0].1), (5, 3));
+    assert!(found[0].2.contains("**Archiv **"), "{found:?}");
+}
+
+/// A table row is scanned cell by cell, so an opener in one cell can never pair
+/// with a closer in the next. `| 2 * 3 | 4 * 5 |` is arithmetic, not emphasis -
+/// markdownlint does not flag it either, and a fix here would corrupt the row.
+#[test]
+fn test_md037_does_not_pair_emphasis_across_table_cells() {
+    let content = "\
+| A | B |
+| --- | --- |
+| 2 * 3 | 4 * 5 |
+| 2 _ 3 | 4 _ 5 |
+";
+    assert!(warnings_at(content).is_empty(), "{:?}", warnings_at(content));
+}
+
+/// An escaped pipe stays cell content, so the markers around it are in the SAME
+/// cell and do pair. This is the mirror image of the test above.
+#[test]
+fn test_md037_escaped_pipe_keeps_one_cell() {
+    let content = "\
+| A | B |
+| --- | --- |
+| 2 * 3 \\| 4 * 5 | x |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (3, 5));
+}
+
+/// Pipes inside a code span are content, matching how rumdl splits every other
+/// table row, and emphasis markers inside the code span itself stay literal.
+#[test]
+fn test_md037_code_span_in_table_cell() {
+    let content = "\
+| A | B |
+| --- | --- |
+| `code * a *` | y |
+| `a | b` * c * | y |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "only the emphasis outside the code span: {found:?}");
+    assert_eq!((found[0].0, found[0].1), (4, 11));
+}
+
+/// Cell offsets are byte ranges but warning columns are character columns, so a
+/// multi-byte cell earlier in the row must not shift the reported position.
+#[test]
+fn test_md037_table_cell_column_after_multibyte_cell() {
+    let content = "\
+| A | B |
+| --- | --- |
+| ünïcödé | * a * |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (3, 13));
+}
+
+/// A table cell holds inline content only, never a list item, so a leading `*`
+/// is an emphasis marker rather than a bullet.
+#[test]
+fn test_md037_leading_marker_in_cell_is_not_a_list_marker() {
+    let content = "\
+| A | B |
+| --- | --- |
+| * Header * | plain |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (3, 3));
+    assert!(found[0].2.contains("* Header *"), "{found:?}");
+}
+
+/// Each cell is judged on its own, so valid bold in one cell no longer masks a
+/// spacing violation in the next.
+#[test]
+fn test_md037_valid_bold_in_one_cell_does_not_mask_another() {
+    let content = "\
+| A | B |
+| --- | --- |
+| **Bold** | **Archiv ** |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (3, 14));
+}
+
+/// Table rows nested in a blockquote or a list item are still table rows.
+#[test]
+fn test_md037_table_rows_in_blockquote_and_list() {
+    let content = "\
+> | Q | R |
+> | --- | --- |
+> | * a * | b |
+
+- item
+
+  | L | M |
+  | --- | --- |
+  | * a * | b |
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (3, 5));
+    assert_eq!((found[1].0, found[1].1), (9, 5));
+}
+
+/// A pipe outside a table is ordinary text and must not disable the rule. The
+/// wiki-link case is the shape found in real documents.
+#[test]
+fn test_md037_pipe_outside_table_does_not_suppress() {
+    let content = "\
+This line has * spaced emphasis * and a | pipe character.
+
+A wiki link [[a|b]] with **spaced ** emphasis.
+";
+    let found = warnings_at(content);
+    assert_eq!(found.len(), 2, "{found:?}");
+    assert_eq!((found[0].0, found[0].1), (1, 15));
+    assert_eq!((found[1].0, found[1].1), (3, 26));
+}
+
+/// Fixing a table row must rewrite only the emphasis, leaving every cell
+/// boundary intact, and must converge in one pass.
+#[test]
+fn test_md037_fix_preserves_table_structure() {
+    let rule = MD037NoSpaceInEmphasis;
+    let content = "\
+| A | B |
+| --- | --- |
+| **Archiv ** | 2 * 3 | 4 * 5 |
+| ünïcödé | * a * |
+| 2 * 3 \\| 4 * 5 | x |
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let fixed = rule.fix(&ctx).unwrap();
+    assert_eq!(
+        fixed,
+        "\
+| A | B |
+| --- | --- |
+| **Archiv** | 2 * 3 | 4 * 5 |
+| ünïcödé | *a* |
+| 2 *3 \\| 4* 5 | x |
+"
+    );
+
+    let ctx = LintContext::new(&fixed, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert!(rule.check(&ctx).unwrap().is_empty(), "fix must converge in one pass");
+    assert_eq!(rule.fix(&ctx).unwrap(), fixed, "fix must be idempotent");
+}
+
+/// A pipe-bearing line inside a fenced code block is not a table row and is not
+/// scanned at all.
+#[test]
+fn test_md037_pipes_in_code_block_still_skipped() {
+    let content = "\
+```text
+| code * a * | b |
+```
+";
+    assert!(warnings_at(content).is_empty());
+}
+
+/// A table cell is an inline context like any other, so a snippet must produce
+/// the same findings in a cell as it does in a paragraph, shifted by the cell's
+/// offset. This is the property the per-cell scan is built on: it pins every
+/// other skip context (links, code spans, math, HTML, escapes) as still applying
+/// inside a cell.
+#[test]
+fn test_md037_table_cell_matches_paragraph_behavior() {
+    // Snippets carry no pipe, so the cell holds each one whole. Each is prefixed
+    // with a word in both forms so neither can start a list item.
+    let snippets = [
+        "*foo * bar*",
+        "* a *",
+        "** b **",
+        "_ c _",
+        "__ d __",
+        "***x ***",
+        "a * b * c",
+        "5 * 3 * 2",
+        "`* a *`",
+        "[* a *](https://example.com)",
+        "<!-- * a * -->",
+        "$* a *$",
+        r"\* a \*",
+        "<b>* a *</b>",
+        "~~* a *~~",
+        "[[* a *]]",
+        "**bold** and *ital*",
+        "snake_case_word",
+        "a ** b",
+        "*a* * b *",
+    ];
+
+    for snippet in snippets {
+        let paragraph = warnings_at(&format!("text {snippet}\n"));
+        let cell = warnings_at(&format!("| A | B |\n| --- | --- |\n| text {snippet} | y |\n"));
+
+        assert_eq!(
+            paragraph.len(),
+            cell.len(),
+            "finding count differs for {snippet:?}: paragraph {paragraph:?} vs cell {cell:?}"
+        );
+        for (para, cell) in paragraph.iter().zip(cell.iter()) {
+            // "| " puts the cell text two characters into the row.
+            assert_eq!(
+                (para.1 + 2, &para.2),
+                (cell.1, &cell.2),
+                "finding differs for {snippet:?}"
+            );
+        }
+    }
+}
+
+/// Cell offsets are byte ranges into the raw line, so a CRLF document must be
+/// reported at the same columns and keep its line endings through a fix.
+#[test]
+fn test_md037_crlf_table() {
+    let rule = MD037NoSpaceInEmphasis;
+    let content = "| H | I |\r\n| --- | --- |\r\n| * x * | y |\r\n| a | ** b ** |\r\n";
+
+    assert_eq!(
+        warnings_at(content)
+            .iter()
+            .map(|(line, col, _)| (*line, *col))
+            .collect::<Vec<_>>(),
+        vec![(3, 3), (4, 7)]
+    );
+
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "| H | I |\r\n| --- | --- |\r\n| *x* | y |\r\n| a | **b** |\r\n"
+    );
+}

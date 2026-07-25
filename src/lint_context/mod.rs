@@ -77,7 +77,6 @@ pub struct LintContext<'a> {
     html_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded HTML tags
     jsx_component_tags_cache: OnceLock<Arc<Vec<HtmlTag>>>, // Lazy-loaded JSX component tags (shares the html_tags parse)
     emphasis_spans_cache: OnceLock<Arc<Vec<EmphasisSpan>>>, // Lazy-loaded emphasis spans
-    table_rows_cache: OnceLock<Arc<Vec<TableRow>>>,        // Lazy-loaded table rows
     bare_urls_cache: OnceLock<Arc<Vec<BareUrl>>>,          // Lazy-loaded bare URLs
     has_mixed_list_nesting_cache: OnceLock<bool>, // Cached result for mixed ordered/unordered list nesting detection
     html_comment_ranges: Vec<crate::utils::skip_context::ByteRange>, // Pre-computed HTML comment ranges
@@ -898,7 +897,6 @@ impl<'a> LintContext<'a> {
             html_tags_cache: OnceLock::new(),
             jsx_component_tags_cache: OnceLock::new(),
             emphasis_spans_cache: OnceLock::from(Arc::new(emphasis_spans)),
-            table_rows_cache: OnceLock::new(),
             bare_urls_cache: OnceLock::new(),
             has_mixed_list_nesting_cache: OnceLock::new(),
             html_comment_ranges,
@@ -1138,14 +1136,6 @@ impl<'a> LintContext<'a> {
             self.emphasis_spans_cache
                 .get()
                 .expect("emphasis_spans_cache initialized during construction"),
-        )
-    }
-
-    /// Get table rows - computed lazily on first access
-    pub fn table_rows(&self) -> Arc<Vec<TableRow>> {
-        Arc::clone(
-            self.table_rows_cache
-                .get_or_init(|| Arc::new(element_parsers::parse_table_rows(self.content, &self.lines))),
         )
     }
 

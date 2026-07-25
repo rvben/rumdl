@@ -31,7 +31,7 @@ fuzz_target!(|data: &[u8]| {
     let _ = ctx.math_spans();
     let _ = ctx.html_tags();
     let _ = ctx.emphasis_spans();
-    let _ = ctx.table_rows();
+    let _ = &ctx.table_blocks;
     let _ = ctx.bare_urls();
     let _ = ctx.lazy_continuation_lines();
     let _ = ctx.has_mixed_list_nesting();

@@ -862,3 +862,32 @@ fn test_reference_defined_in_blockquote_resolves() {
         "a blockquote-defined reference should resolve: {result:?}"
     );
 }
+
+// A table cell is an ordinary inline context: an undefined reference in one is
+// just as undefined, and a defined one still resolves. markdownlint reports the
+// same three findings on this document.
+#[test]
+fn test_references_in_table_cells_are_checked() {
+    let rule = MD052ReferenceLinkImages::new();
+    let content = "\
+| Link | Image |
+| --- | --- |
+| [text][undef_link] | ![alt][undef_image] |
+| [text][good] | ![alt][good] |
+
+Prose with a | pipe and a [link][undef_prose] reference.
+
+[good]: https://example.com
+";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    let result = rule.check(&ctx).unwrap();
+    let found: Vec<(usize, usize, &str)> = result.iter().map(|w| (w.line, w.column, w.message.as_str())).collect();
+    assert_eq!(
+        found,
+        vec![
+            (3, 3, "Reference 'undef_link' not found"),
+            (3, 24, "Reference 'undef_image' not found"),
+            (6, 27, "Reference 'undef_prose' not found"),
+        ]
+    );
+}

@@ -297,20 +297,6 @@ pub fn math_byte_ranges(content: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
-/// Check if a position is within a table cell
-pub fn is_in_table_cell(ctx: &LintContext, line_num: usize, _col: usize) -> bool {
-    // Check if this line is part of a table
-    for table_row in ctx.table_rows().iter() {
-        if table_row.line == line_num {
-            // This line is part of a table
-            // For now, we'll skip the entire table row
-            // Future enhancement: check specific column boundaries
-            return true;
-        }
-    }
-    false
-}
-
 /// Check if a line contains table syntax
 pub fn is_table_line(line: &str) -> bool {
     let trimmed = line.trim();

@@ -498,8 +498,10 @@ fn test_emphasis_in_special_constructs() {
 
     let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
     let result = md037.check(&ctx).unwrap();
-    // Should detect spaces in blockquotes and lists (not in links, tables, comments, or HTML tags)
-    assert_eq!(result.len(), 2, "Should detect spaces in blockquotes and lists");
+    // Should detect spaces in blockquotes, lists and table cells
+    // (not in links, comments, or HTML tags)
+    let lines: Vec<usize> = result.iter().map(|w| w.line).collect();
+    assert_eq!(lines, vec![9, 11, 13, 15], "Unexpected warnings: {result:?}");
 }
 
 #[test]
