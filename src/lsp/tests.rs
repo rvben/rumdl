@@ -8436,6 +8436,117 @@ async fn test_lsp_matches_cli_values_under_a_discovered_config() {
     }
 }
 
+/// A broken user config makes a nearer markdownlint config unresolvable, since
+/// that is the one project config rumdl merges onto the user config. The server
+/// must not answer with a config from further up the tree: `rumdl check` refuses
+/// to run at all in this state, so silently substituting the parent's rules would
+/// have the editor lint against a ruleset that exists nowhere on disk.
+#[tokio::test]
+async fn test_resolve_config_does_not_substitute_a_parent_config_when_the_user_config_is_broken() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.join("project");
+    let sub = project.join("sub");
+    let user_config_dir = root.join("xdg");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&sub).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "this is not valid toml {{{\n",
+    )
+    .unwrap();
+
+    // A parent config that resolves fine, so substituting it would look like success.
+    fs::write(project.join(".rumdl.toml"), "[MD004]\nstyle = \"dash\"\n").unwrap();
+    // The nearer config, which needs the broken user config as its base.
+    fs::write(
+        sub.join(".markdownlint.json"),
+        r#"{ "MD004": { "style": "asterisk" } }"#,
+    )
+    .unwrap();
+
+    let md_file = sub.join("test.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let config = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(
+        crate::config::get_rule_config_value::<String>(&config, "MD004", "style"),
+        None,
+        "resolution should stop at the unresolvable config, not walk on to the parent's"
+    );
+}
+
+/// Control for the test above: with a valid user config, the same tree resolves to
+/// the nearer markdownlint config. Without this, the assertion above would also
+/// pass if the walk never reached that config in the first place.
+#[tokio::test]
+async fn test_resolve_config_uses_the_nearer_markdownlint_config_when_the_user_config_loads() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.join("project");
+    let sub = project.join("sub");
+    let user_config_dir = root.join("xdg");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&sub).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "[MD007]\nindent = 4\n",
+    )
+    .unwrap();
+
+    fs::write(project.join(".rumdl.toml"), "[MD004]\nstyle = \"dash\"\n").unwrap();
+    fs::write(
+        sub.join(".markdownlint.json"),
+        r#"{ "MD004": { "style": "asterisk" } }"#,
+    )
+    .unwrap();
+
+    let md_file = sub.join("test.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let config = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(
+        crate::config::get_rule_config_value::<String>(&config, "MD004", "style"),
+        Some("asterisk".to_string()),
+        "the nearer markdownlint config should win over the parent rumdl config"
+    );
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        Some(4),
+        "and it should carry the user config as its base"
+    );
+}
+
 /// Regression test for rumdl-vscode#115: an opt-in rule enabled via
 /// `extend-enable` in a `.config/rumdl.toml` at a parent directory must fire
 /// from the LSP, matching CLI behaviour.

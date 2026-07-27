@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use tower_lsp::lsp_types::*;
 
-use crate::config::{Config, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES};
+use crate::config::{Config, DiscoveredConfigError, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES};
 use crate::rule::Rule;
 
 use super::server::{ConfigCacheEntry, RumdlLanguageServer};
@@ -544,8 +544,20 @@ impl RumdlLanguageServer {
                     found_config = Some((sourced.into_validated_unchecked().into(), Some(config_path)));
                     break;
                 }
-                Err(e) => {
+                Err(DiscoveredConfigError::ProjectConfig(e)) => {
                     log::debug!("Skipping unloadable config {}: {e}", config_path.display());
+                }
+                Err(DiscoveredConfigError::UserConfig(e)) => {
+                    // The candidate is fine; the user config it merges onto is broken.
+                    // `rumdl check` refuses to run at all in this state, so stop the walk
+                    // instead of quietly linting with a config from further up the tree,
+                    // and say why.
+                    log::warn!(
+                        "Cannot resolve {} for {}: {e}",
+                        config_path.display(),
+                        file_path.display()
+                    );
+                    break;
                 }
             }
         }

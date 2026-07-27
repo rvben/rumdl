@@ -1001,6 +1001,33 @@ pub enum ConfigError {
     UnknownPreset { name: String },
 }
 
+/// Why a config file found by discovery could not be loaded.
+///
+/// The two cases call for different handling. A discovered project file that
+/// cannot be parsed is local to one project and a caller may reasonably skip it
+/// and keep looking. A broken user config is machine-wide: every project that
+/// merges onto it resolves to something other than what the user configured, so
+/// it has to be surfaced instead of worked around.
+#[derive(Debug, thiserror::Error)]
+pub enum DiscoveredConfigError {
+    /// The discovered file itself is unusable.
+    #[error(transparent)]
+    ProjectConfig(ConfigError),
+
+    /// The discovered file is fine, but the user config it merges on top of is
+    /// unusable. Only a discovered markdownlint config has such a base.
+    #[error(transparent)]
+    UserConfig(ConfigError),
+}
+
+impl From<DiscoveredConfigError> for ConfigError {
+    fn from(error: DiscoveredConfigError) -> Self {
+        match error {
+            DiscoveredConfigError::ProjectConfig(error) | DiscoveredConfigError::UserConfig(error) => error,
+        }
+    }
+}
+
 /// Get a rule-specific configuration value
 /// Automatically tries both the original key and normalized variants (kebab-case ↔ snake_case)
 /// for better markdownlint compatibility

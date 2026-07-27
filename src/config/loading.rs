@@ -11,7 +11,9 @@ use super::registry::RuleRegistry;
 use super::source_tracking::{
     ConfigSource, ConfigValidationWarning, SourcedConfig, SourcedConfigFragment, SourcedGlobalConfig, SourcedValue,
 };
-use super::types::{Config, ConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES, RuleConfig};
+use super::types::{
+    Config, ConfigError, DiscoveredConfigError, GlobalConfig, MARKDOWNLINT_CONFIG_FILES, RUMDL_CONFIG_FILES, RuleConfig,
+};
 use super::validation::validate_config_sourced_internal;
 use crate::utils::upward_walk::UpwardWalk;
 
@@ -806,20 +808,22 @@ impl SourcedConfig<ConfigLoaded> {
         config_file: &Path,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
-    ) -> Result<(), ConfigError> {
+    ) -> Result<(), DiscoveredConfigError> {
         let filename = config_file.file_name().and_then(|name| name.to_str()).unwrap_or("");
 
         if MARKDOWNLINT_CONFIG_FILES.contains(&filename) {
-            Self::load_user_config(sourced_config, user_config_dir, home_dir)?;
+            Self::load_user_config(sourced_config, user_config_dir, home_dir)
+                .map_err(DiscoveredConfigError::UserConfig)?;
 
             let path_str = config_file.display().to_string();
-            let fragment = parsers::load_from_markdownlint(&path_str)?;
+            let fragment = parsers::load_from_markdownlint(&path_str).map_err(DiscoveredConfigError::ProjectConfig)?;
             sourced_config.merge(fragment);
             sourced_config.loaded_files.push(path_str);
         } else {
             let mut visited = IndexSet::new();
             let chain_source = source_from_filename(filename);
-            load_config_with_extends(sourced_config, config_file, &mut visited, chain_source)?;
+            load_config_with_extends(sourced_config, config_file, &mut visited, chain_source)
+                .map_err(DiscoveredConfigError::ProjectConfig)?;
         }
 
         Ok(())
@@ -838,11 +842,15 @@ impl SourcedConfig<ConfigLoaded> {
     /// `user_config_dir` and `home_dir` override the platform user-config directory
     /// and the home directory; the server passes the home directory it already
     /// resolved for its walk boundary, and tests pass both.
+    ///
+    /// The error distinguishes an unusable discovered file from an unusable user
+    /// config so a caller walking several candidates can tell "try the next one"
+    /// from "nothing here will resolve correctly".
     pub fn load_discovered(
         config_file: &Path,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
-    ) -> Result<Self, ConfigError> {
+    ) -> Result<Self, DiscoveredConfigError> {
         let mut sourced_config = SourcedConfig::default();
 
         if let Some(config_parent) = config_file.parent() {
@@ -921,15 +929,18 @@ impl SourcedConfig<ConfigLoaded> {
                     if let Err(e) =
                         Self::load_discovered_config(&mut sourced_config, &markdownlint_path, user_config_dir, home_dir)
                     {
-                        // A markdownlint file rumdl cannot parse is skipped rather than
-                        // fatal: the user never named it, and rumdl only reads the format
-                        // as a courtesy. Loading the user config again restores the state
-                        // of the no-project-config case, and re-raises the error if it was
-                        // the user config that failed - that stays fatal, as in every
-                        // other arm.
-                        log::debug!("[rumdl-config] Failed to load markdownlint config: {e}");
-                        sourced_config = SourcedConfig::default();
-                        Self::load_user_config(&mut sourced_config, user_config_dir, home_dir)?;
+                        match e {
+                            // A markdownlint file rumdl cannot parse is skipped rather
+                            // than fatal: the user never named it, and rumdl only reads
+                            // the format as a courtesy. The user config it would have
+                            // merged onto is already loaded, which is the state of the
+                            // no-project-config case.
+                            DiscoveredConfigError::ProjectConfig(e) => {
+                                log::debug!("[rumdl-config] Failed to load markdownlint config: {e}");
+                            }
+                            // A broken user config is fatal, as in every other arm.
+                            DiscoveredConfigError::UserConfig(e) => return Err(e),
+                        }
                     }
                 } else {
                     // No project config at all - use user config as fallback

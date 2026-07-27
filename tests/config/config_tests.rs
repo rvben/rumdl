@@ -1,4 +1,5 @@
 use rumdl_lib::config::Config; // Ensure Config is imported
+use rumdl_lib::config::DiscoveredConfigError;
 use rumdl_lib::config::RuleRegistry;
 use rumdl_lib::config::SourcedConfig;
 use rumdl_lib::rules::*;
@@ -3605,8 +3606,9 @@ fn explicit_markdownlint_config_ignores_the_user_config() {
     );
 }
 
-/// A config that fails to parse is reported, so the LSP's candidate walk can fall
-/// through to the next one up instead of caching a half-loaded config.
+/// A config that fails to parse is reported as a project-config failure, so the
+/// LSP's candidate walk can fall through to the next one up instead of caching a
+/// half-loaded config.
 #[test]
 fn discovered_config_reports_a_parse_failure() {
     let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
@@ -3614,5 +3616,86 @@ fn discovered_config_reports_a_parse_failure() {
     fs::write(&config_file, "{ not json").unwrap();
 
     let result = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path()));
-    assert!(result.is_err(), "a malformed discovered config should be an error");
+
+    assert!(
+        matches!(result, Err(DiscoveredConfigError::ProjectConfig(_))),
+        "a malformed discovered config is the project's problem, not the user config's"
+    );
+}
+
+/// A broken *user* config under a discovered markdownlint config is a different
+/// failure: the discovered file is fine, but nothing that merges onto that base
+/// can resolve correctly, so a caller must not treat it as one more unusable
+/// candidate and keep walking.
+#[test]
+fn discovered_markdownlint_config_distinguishes_a_broken_user_config() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "this is not valid toml {{{\n",
+    )
+    .unwrap();
+    let config_file = project_dir.join(".markdownlint.json");
+    fs::write(&config_file, r#"{ "MD004": { "style": "asterisk" } }"#).unwrap();
+
+    let result = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path()));
+
+    assert!(
+        matches!(result, Err(DiscoveredConfigError::UserConfig(_))),
+        "the markdownlint file parses; the user config it merges onto does not"
+    );
+}
+
+/// Control for the test above: with no user-config base to break, a discovered
+/// rumdl config loads regardless of what the user config contains.
+#[test]
+fn discovered_rumdl_config_is_unaffected_by_a_broken_user_config() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "this is not valid toml {{{\n",
+    )
+    .unwrap();
+    let config_file = project_dir.join(".rumdl.toml");
+    fs::write(&config_file, "[MD004]\nstyle = \"asterisk\"\n").unwrap();
+
+    let sourced = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path()))
+        .expect("a standalone rumdl config never reads the user config");
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style"),
+        Some("asterisk".to_string()),
+    );
+}
+
+/// The CLI treats the same broken user config as fatal rather than falling back to
+/// defaults, which is the behavior the LSP's `UserConfig` arm mirrors.
+#[test]
+#[serial(cwd)]
+fn cli_discovery_fails_on_a_broken_user_config_under_a_markdownlint_config() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "this is not valid toml {{{\n",
+    )
+    .unwrap();
+    // Bound the upward walk to the fixture so no config outside it is discovered.
+    fs::create_dir_all(project_dir.join(".git")).unwrap();
+    fs::write(
+        project_dir.join(".markdownlint.json"),
+        r#"{ "MD004": { "style": "asterisk" } }"#,
+    )
+    .unwrap();
+
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&project_dir).unwrap();
+    let result =
+        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(temp_dir.path()));
+    std::env::set_current_dir(original_dir).unwrap();
+
+    assert!(
+        result.is_err(),
+        "a broken user config under a discovered markdownlint config is fatal for the CLI"
+    );
 }
