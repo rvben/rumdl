@@ -288,6 +288,88 @@ fn math_blocks_defaults_to_reporting() {
     }
 }
 
+/// The exemption covers display math, not whatever else shares its line. A
+/// delimiter can be preceded or followed by ordinary Markdown: `$$ trailing
+/// prose` closes a block and continues in prose, and `leading prose $$` opens one
+/// at the end of a sentence. Exempting the whole line would hide arbitrarily long
+/// prose behind a delimiter.
+#[test]
+fn math_blocks_false_still_reports_prose_sharing_a_delimiter_line() {
+    let cases = [
+        (
+            "trailing prose",
+            format!("$$\nE = mc^2\n$$ {LONG_PROSE}\n"),
+            "test.md:3:",
+        ),
+        (
+            "leading prose",
+            format!("{LONG_PROSE} $$\nE = mc^2\n$$\n"),
+            "test.md:1:",
+        ),
+    ];
+
+    for (name, content, location) in cases {
+        let dir = TempDir::new().unwrap();
+        let default = md013_findings(dir.path(), &content, &[]);
+        assert_eq!(
+            default.len(),
+            1,
+            "{name}: control, the mixed line must be over-long, got {default:?}"
+        );
+
+        let dir = TempDir::new().unwrap();
+        let findings = md013_findings(dir.path(), &content, &["MD013.math-blocks = false"]);
+        assert_eq!(
+            findings.len(),
+            1,
+            "{name}: the prose must still be reported, got {findings:?}"
+        );
+        assert!(
+            findings[0].contains(location),
+            "{name}: expected the report at {location}, got {findings:?}"
+        );
+    }
+}
+
+/// The counterpart: a delimiter line that holds only math stays exempt, whatever
+/// structure introduces it. Without this, tightening the rule above could simply
+/// have dropped the exemption for delimiter lines.
+#[test]
+fn math_blocks_false_exempts_delimiter_lines_holding_only_math() {
+    let cases = [
+        ("row before the closing delimiter", format!("$$\n{LONG_MATH_ROW}$$\n")),
+        (
+            "row after the opening delimiter",
+            format!("$$ {LONG_MATH_ROW}\nF &= ma\n$$\n"),
+        ),
+        (
+            "opener on a list marker line",
+            format!("- $$ {LONG_MATH_ROW}\n  F &= ma\n  $$\n"),
+        ),
+        (
+            "opener in a blockquote",
+            format!("> $$ {LONG_MATH_ROW}\n> F &= ma\n> $$\n"),
+        ),
+    ];
+
+    for (name, content) in cases {
+        let dir = TempDir::new().unwrap();
+        let default = md013_findings(dir.path(), &content, &[]);
+        assert_eq!(
+            default.len(),
+            1,
+            "{name}: control, the row must be over-long, got {default:?}"
+        );
+
+        let dir = TempDir::new().unwrap();
+        let findings = md013_findings(dir.path(), &content, &["MD013.math-blocks = false"]);
+        assert!(
+            findings.is_empty(),
+            "{name}: the row should be exempt, got {findings:?}"
+        );
+    }
+}
+
 /// `strict` disables the block-level exemptions, as it already does for
 /// `tables`, `headings` and `code-blocks`.
 #[test]

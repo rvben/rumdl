@@ -758,8 +758,59 @@ impl MD013LineLength {
     /// opener is flagged by neither, so a stray delimiter cannot exempt the rest
     /// of the document.
     fn line_is_display_math(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
-        self.line_in_multiline_math_span(line_num, ctx)
+        self.line_holds_only_multiline_math(line_num, ctx)
             || ctx.line_info(line_num).is_some_and(|info| info.in_math_block)
+    }
+
+    /// True when a multi-line `$$` span covers `line_num` (1-indexed) and the line
+    /// holds nothing besides that math.
+    ///
+    /// A delimiter line can carry Markdown outside the delimiter: `$$ trailing
+    /// prose` closes a block and then continues in prose, and `leading prose $$`
+    /// opens one at the end of a sentence. That prose is ordinary text and counts
+    /// toward the line's length like any other, so exempting the whole line would
+    /// hide arbitrarily long prose behind a delimiter. The line-level map already
+    /// leaves such mixed lines unflagged; this is the byte-level half of the same
+    /// judgement.
+    fn line_holds_only_multiline_math(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        let Some(info) = ctx.line_info(line_num) else {
+            return false;
+        };
+        let line = info.content(ctx.content);
+
+        ctx.math_spans().iter().any(|span| {
+            if !span.is_display || span.end_line <= span.line || !(span.line..=span.end_line).contains(&line_num) {
+                return false;
+            }
+            if line_num == span.line {
+                let before = line.get(..span.byte_offset.saturating_sub(info.byte_offset));
+                if !before.is_none_or(|before| Self::only_structure_precedes_math(before, info)) {
+                    return false;
+                }
+            }
+            if line_num == span.end_line {
+                let after = line.get(span.byte_end.saturating_sub(info.byte_offset)..);
+                if !after.is_none_or(|after| after.trim().is_empty()) {
+                    return false;
+                }
+            }
+            true
+        })
+    }
+
+    /// True when the text before a block's opening delimiter is only the structure
+    /// the block sits in: indentation, a blockquote marker, or the list marker
+    /// introducing it. Such a block still owns its whole line.
+    fn only_structure_precedes_math(before: &str, info: &crate::lint_context::LineInfo) -> bool {
+        let after_marker =
+            crate::utils::blockquote::parse_blockquote_prefix(before).map_or(before, |prefix| prefix.content);
+        if after_marker.trim().is_empty() {
+            return true;
+        }
+        info.list_item.as_ref().is_some_and(|item| {
+            let mut chars = before.chars();
+            chars.by_ref().take(item.content_column).count() == item.content_column && chars.as_str().trim().is_empty()
+        })
     }
 
     /// True when `line_num` (1-indexed) falls inside a display-math block that
