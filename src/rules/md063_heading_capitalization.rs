@@ -154,7 +154,7 @@ impl MD063HeadingCapitalization {
     /// Build a map from word byte-position → canonical form for all proper names
     /// that appear in the heading text (case-insensitive phrase match).
     ///
-    /// This is used in `apply_sentence_case` so that words belonging to a proper
+    /// This is used in `apply_sentence_case_from` so that words belonging to a proper
     /// name phrase are never lowercased to begin with.
     fn proper_name_canonical_forms(&self, text: &str) -> std::collections::HashMap<usize, &str> {
         let mut map = std::collections::HashMap::new();
@@ -523,8 +523,22 @@ impl MD063HeadingCapitalization {
         result_parts.join("-")
     }
 
-    /// Apply sentence case to text
-    fn apply_sentence_case(&self, text: &str) -> String {
+    /// True when a word ends a sentence, so the next word is capitalized.
+    ///
+    /// The comparison is against the end of the whole word rather than a scan through
+    /// it, so `Overview: details` restarts and `a:b` does not. That keeps the boundary
+    /// where a reader sees one and leaves `https://example.com` alone.
+    fn ends_sentence(&self, word: &str) -> bool {
+        self.config
+            .sentence_case_restart_after
+            .iter()
+            .any(|boundary| !boundary.is_empty() && word.ends_with(boundary.as_str()))
+    }
+
+    /// Apply sentence case to text, capitalizing the leading word only when it opens
+    /// the heading. A segment that follows a code span or link continues the sentence
+    /// the earlier segment started, so it begins mid-sentence.
+    fn apply_sentence_case_from(&self, text: &str, starts_sentence: bool) -> String {
         if text.is_empty() {
             return text.to_string();
         }
@@ -532,7 +546,7 @@ impl MD063HeadingCapitalization {
         let canonical_forms = self.proper_name_canonical_forms(text);
         let mut result = String::new();
         let mut current_pos = 0;
-        let mut is_first_word = true;
+        let mut at_sentence_start = starts_sentence;
 
         // Use original text positions to preserve whitespace correctly
         for word in text.split_whitespace() {
@@ -546,14 +560,13 @@ impl MD063HeadingCapitalization {
                 // directly, bypassing sentence-case lowercasing entirely.
                 if let Some(&canonical) = canonical_forms.get(&abs_pos) {
                     result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
-                    is_first_word = false;
-                } else if is_first_word {
+                } else if at_sentence_start {
                     // Check if word should be preserved BEFORE any capitalization
                     if self.should_preserve_word(word) {
                         // Preserve ignore-words exactly as-is, even at start
                         result.push_str(word);
                     } else {
-                        // First word: capitalize first letter, lowercase rest
+                        // Sentence-initial word: capitalize first letter, lowercase rest
                         let mut chars = word.chars();
                         if let Some(first) = chars.next() {
                             result.push_str(&Self::uppercase_preserving_composition(&first.to_string()));
@@ -561,9 +574,8 @@ impl MD063HeadingCapitalization {
                             result.push_str(&Self::lowercase_preserving_composition(&rest));
                         }
                     }
-                    is_first_word = false;
                 } else {
-                    // Non-first words: preserve if needed, otherwise lowercase
+                    // Mid-sentence words: preserve if needed, otherwise lowercase
                     if self.should_preserve_word(word) {
                         result.push_str(word);
                     } else {
@@ -571,6 +583,7 @@ impl MD063HeadingCapitalization {
                     }
                 }
 
+                at_sentence_start = self.ends_sentence(word);
                 current_pos = abs_pos + word.len();
             }
         }
@@ -747,6 +760,11 @@ impl MD063HeadingCapitalization {
         // Apply capitalization to each segment
         let mut result_parts: Vec<String> = Vec::new();
 
+        // Where the heading's sentence currently stands, carried across segments so a
+        // boundary in one segment governs the next. A heading opening with code, a link
+        // or an image already has a first element, so its first text is mid-sentence.
+        let mut at_sentence_start = first_segment_is_text;
+
         for (i, segment) in segments.iter().enumerate() {
             match segment {
                 HeadingSegment::Text(t) => {
@@ -758,17 +776,7 @@ impl MD063HeadingCapitalization {
 
                     let capitalized = match self.config.style {
                         HeadingCapStyle::TitleCase => self.apply_title_case_segment(t, is_first_text, is_last_text),
-                        HeadingCapStyle::SentenceCase => {
-                            // For sentence case, only capitalize first word if:
-                            // 1. This is the first text segment, AND
-                            // 2. The heading actually starts with text (not code/link)
-                            if is_first_text && first_segment_is_text {
-                                self.apply_sentence_case(t)
-                            } else {
-                                // Non-first segments OR heading starts with code/link
-                                self.apply_sentence_case_non_first(t)
-                            }
-                        }
+                        HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(t, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(t),
                     };
                     result_parts.push(capitalized);
@@ -785,9 +793,9 @@ impl MD063HeadingCapitalization {
                     let link_text = &full[*text_start..*text_end];
                     let capitalized_text = match self.config.style {
                         HeadingCapStyle::TitleCase => self.apply_title_case(link_text),
-                        // For sentence case, apply same preservation logic as non-first text
+                        // For sentence case, apply same preservation logic as text
                         // This preserves acronyms (API), brand names (iPhone), etc.
-                        HeadingCapStyle::SentenceCase => self.apply_sentence_case_non_first(link_text),
+                        HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(link_text, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(link_text),
                     };
 
@@ -805,6 +813,12 @@ impl MD063HeadingCapitalization {
                     // Preserve images as-is, including alt text.
                     result_parts.push(img.clone());
                 }
+            }
+
+            // Only text can close a sentence: code, links, HTML and images all end in a
+            // delimiter, so this leaves them mid-sentence without a special case.
+            if let Some(part) = result_parts.last() {
+                at_sentence_start = self.ends_sentence(part.trim_end());
             }
         }
 
@@ -880,46 +894,6 @@ impl MD063HeadingCapitalization {
                 }
                 in_word = true;
             }
-        }
-
-        result
-    }
-
-    /// Apply sentence case to non-first segments (just lowercase, preserve whitespace)
-    fn apply_sentence_case_non_first(&self, text: &str) -> String {
-        if text.is_empty() {
-            return text.to_string();
-        }
-
-        let canonical_forms = self.proper_name_canonical_forms(text);
-        let mut result = String::new();
-        let mut current_pos = 0;
-
-        // Iterate over words in the original text so byte positions are consistent
-        // with the positions in canonical_forms (built from the same text).
-        for word in text.split_whitespace() {
-            if let Some(pos) = text[current_pos..].find(word) {
-                let abs_pos = current_pos + pos;
-
-                // Preserve whitespace before this word
-                result.push_str(&text[current_pos..abs_pos]);
-
-                // Words that are part of an MD044 proper name use the canonical form directly.
-                if let Some(&canonical) = canonical_forms.get(&abs_pos) {
-                    result.push_str(&Self::apply_canonical_form_to_word(word, canonical));
-                } else if self.should_preserve_word(word) {
-                    result.push_str(word);
-                } else {
-                    result.push_str(&Self::lowercase_preserving_composition(word));
-                }
-
-                current_pos = abs_pos + word.len();
-            }
-        }
-
-        // Preserve any trailing whitespace
-        if current_pos < text.len() {
-            result.push_str(&text[current_pos..]);
         }
 
         result
@@ -3101,5 +3075,197 @@ mod tests {
             let result = rule.check(&ctx).unwrap();
             assert!(result.is_empty(), "Should not flag {content:?}, got: {result:?}");
         }
+    }
+
+    // --- sentence-case-restart-after ---
+
+    fn restart_rule(boundaries: &[&str]) -> MD063HeadingCapitalization {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            sentence_case_restart_after: boundaries.iter().copied().map(String::from).collect(),
+            ..Default::default()
+        };
+        MD063HeadingCapitalization::from_config_struct(config)
+    }
+
+    /// The heading text MD063 would rewrite this content to, or `None` when it is
+    /// already compliant.
+    fn suggested(rule: &MD063HeadingCapitalization, content: &str) -> Option<String> {
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&ctx).unwrap();
+        let fixed = rule.fix(&ctx).unwrap();
+        assert_eq!(
+            warnings.is_empty(),
+            fixed == content,
+            "a warning and a rewrite must agree for {content:?}"
+        );
+        (!warnings.is_empty()).then(|| fixed.trim_start_matches('#').trim().to_string())
+    }
+
+    #[test]
+    fn test_restart_after_capitalizes_the_word_following_a_boundary() {
+        let rule = restart_rule(&[":"]);
+        assert_eq!(
+            suggested(&rule, "# Requirement 1: Struct to Logger Slice Conversion\n").as_deref(),
+            Some("Requirement 1: Struct to logger slice conversion")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_defaults_to_no_boundaries() {
+        // The empty default must leave sentence case as it was: first word only.
+        let rule = create_rule_with_style(HeadingCapStyle::SentenceCase);
+        assert_eq!(
+            suggested(&rule, "# Requirement 1: Struct to Logger Slice Conversion\n").as_deref(),
+            Some("Requirement 1: struct to logger slice conversion")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_only_honors_configured_punctuation() {
+        // A colon-only configuration must not drag in the dash and semicolon cases.
+        let rule = restart_rule(&[":"]);
+        assert_eq!(
+            suggested(&rule, "# Design - Data Model Overview\n").as_deref(),
+            Some("Design - data model overview")
+        );
+        assert_eq!(
+            suggested(&rule, "# Setup; Then Run\n").as_deref(),
+            Some("Setup; then run")
+        );
+
+        let rule = restart_rule(&[";", "\u{2014}"]);
+        assert_eq!(
+            suggested(&rule, "# Setup; Then Run\n").as_deref(),
+            Some("Setup; Then run")
+        );
+        assert_eq!(
+            suggested(&rule, "# Part One \u{2014} The Big Idea\n").as_deref(),
+            Some("Part one \u{2014} The big idea")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_matches_only_at_the_end_of_a_word() {
+        // An intra-word hyphen is not a sentence boundary, so a configured dash must
+        // not restart inside `Well-Known`, and a URL's punctuation must not either.
+        let rule = restart_rule(&["-", ":"]);
+        assert_eq!(
+            suggested(&rule, "# Ports: Well-Known Ports Explained\n").as_deref(),
+            Some("Ports: Well-Known ports explained")
+        );
+        assert_eq!(
+            suggested(&rule, "# See https://example.com/A/B For Details\n").as_deref(),
+            Some("See https://example.com/A/B for details")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_a_trailing_boundary_is_a_no_op() {
+        let rule = restart_rule(&[":"]);
+        assert_eq!(suggested(&rule, "# Setup:\n"), None);
+    }
+
+    #[test]
+    fn test_restart_after_does_not_override_preserved_words() {
+        // The likeliest regression: a preserved brand name landing right after a
+        // boundary must not be re-capitalized into `IPhone`.
+        let rule = restart_rule(&[":"]);
+        assert_eq!(
+            suggested(&rule, "# Devices: iPhone And Android\n").as_deref(),
+            Some("Devices: iPhone and android")
+        );
+
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            sentence_case_restart_after: vec![":".to_string()],
+            ignore_words: vec!["kubectl".to_string()],
+            preserve_cased_words: false,
+            ..Default::default()
+        };
+        let rule = MD063HeadingCapitalization::from_config_struct(config);
+        assert_eq!(
+            suggested(&rule, "# Tools: kubectl And Helm\n").as_deref(),
+            Some("Tools: kubectl and helm")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_keeps_md044_canonical_forms() {
+        let config = MD063Config {
+            enabled: true,
+            style: HeadingCapStyle::SentenceCase,
+            sentence_case_restart_after: vec![":".to_string()],
+            ..Default::default()
+        };
+        let mut rule = MD063HeadingCapitalization::from_config_struct(config);
+        rule.proper_names = vec!["GitHub".to_string()];
+
+        // The canonical form wins over the restart, so this is `GitHub`, not `Github`.
+        assert_eq!(
+            suggested(&rule, "# Docs: github Actions Guide\n").as_deref(),
+            Some("Docs: GitHub actions guide")
+        );
+        assert_eq!(suggested(&rule, "# Docs: GitHub actions guide\n"), None);
+    }
+
+    #[test]
+    fn test_restart_after_carries_across_segments() {
+        // A boundary in one segment governs the next, so a heading with a link behaves
+        // the same as one without.
+        let rule = restart_rule(&[":"]);
+        assert_eq!(
+            suggested(
+                &rule,
+                "# Overview: [Some Link Here](https://example.com) Trailing Words\n"
+            )
+            .as_deref(),
+            Some("Overview: [Some link here](https://example.com) trailing words")
+        );
+        assert_eq!(
+            suggested(&rule, "# Overview: `code` Then More Words\n").as_deref(),
+            Some("Overview: `code` then more words")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_leaves_a_leading_link_mid_sentence() {
+        // A heading opening with a link already has a first element, so the link text
+        // is not treated as sentence-initial. This must not change with the option on.
+        for rule in [restart_rule(&[]), restart_rule(&[":"])] {
+            assert_eq!(
+                suggested(&rule, "# [Some Link Here](https://example.com) Trailing Words\n").as_deref(),
+                Some("[some link here](https://example.com) trailing words")
+            );
+        }
+    }
+
+    #[test]
+    fn test_restart_after_fix_is_idempotent() {
+        let rule = restart_rule(&[":", ";", "-", "\u{2014}"]);
+        for content in [
+            "# Requirement 1: Struct to Logger Slice Conversion\n",
+            "# Ports: Well-Known Ports Explained\n",
+            "# Devices: iPhone And Android\n",
+            "# Overview: [Some Link Here](https://example.com) Trailing Words\n",
+            "# Setup:\n",
+        ] {
+            let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+            let once = rule.fix(&ctx).unwrap();
+            let ctx = LintContext::new(&once, crate::config::MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&ctx).unwrap(), once, "fix is not idempotent for {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_restart_after_ignores_empty_boundary_entries() {
+        // An empty string would otherwise end every word, capitalizing the whole heading.
+        let rule = restart_rule(&[""]);
+        assert_eq!(
+            suggested(&rule, "# Requirement 1: Struct to Logger Slice Conversion\n").as_deref(),
+            Some("Requirement 1: struct to logger slice conversion")
+        );
     }
 }

@@ -75,6 +75,17 @@ pub struct MD063Config {
     )]
     pub preserve_cased_words: bool,
 
+    /// Punctuation that starts a new sentence in sentence case, so the word after it
+    /// is capitalized like the first word of the heading. Matched against the end of a
+    /// word, so the boundary is only recognized where whitespace follows it.
+    /// Empty by default, which capitalizes only the heading's first word.
+    #[serde(
+        default,
+        rename = "sentence-case-restart-after",
+        alias = "sentence_case_restart_after"
+    )]
+    pub sentence_case_restart_after: Vec<String>,
+
     /// Minimum heading level to check (1-6)
     #[serde(default = "default_min_level", rename = "min-level", alias = "min_level")]
     pub min_level: u8,
@@ -115,6 +126,7 @@ impl Default for MD063Config {
             lowercase_words: default_lowercase_words(),
             ignore_words: Vec::new(),
             preserve_cased_words: default_preserve_cased_words(),
+            sentence_case_restart_after: Vec::new(),
             min_level: default_min_level(),
             max_level: default_max_level(),
         }
@@ -138,8 +150,21 @@ mod tests {
         assert!(config.lowercase_words.contains(&"the".to_string()));
         assert!(config.ignore_words.is_empty());
         assert!(config.preserve_cased_words);
+        assert!(config.sentence_case_restart_after.is_empty());
         assert_eq!(config.min_level, 1);
         assert_eq!(config.max_level, 6);
+    }
+
+    #[test]
+    fn test_sentence_case_restart_after_reads_kebab_case() {
+        // Config keys reach serde already lowercase-kebab, so this is the spelling
+        // that has to work.
+        let config: MD063Config = toml::from_str(r#"sentence-case-restart-after = [":", ";"]"#).unwrap();
+        assert_eq!(config.sentence_case_restart_after, vec![":", ";"]);
+
+        let toml_str = toml::to_string(&MD063Config::default()).unwrap();
+        assert!(toml_str.contains("sentence-case-restart-after"));
+        assert!(!toml_str.contains("sentence_case_restart_after"));
     }
 
     #[test]
