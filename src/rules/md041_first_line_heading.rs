@@ -548,9 +548,9 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
 
-        // Find the first non-blank, non-preamble line in the document
+        // Find the first non-blank content line in the document
         let Some(mut first_line_idx) = Self::first_content_line_idx(ctx) else {
-            return Ok(warnings); // Empty or preamble-only document is not a violation
+            return Ok(warnings); // Empty document is not a violation
         };
 
         if self.allow_preamble {
@@ -577,7 +577,8 @@ impl Rule for MD041FirstLineHeading {
                 first_line_idx += 1;
             }
             if first_line_idx >= ctx.lines.len() {
-                return Ok(warnings); // No heading or title candidate found
+                // No heading or title candidate found, reset to the first content line for warning reporting
+                first_line_idx = Self::first_content_line_idx(ctx).unwrap_or(0);
             }
         }
 
@@ -2676,17 +2677,14 @@ Content.
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
-        assert_eq!(
-            result[0].message,
-            "First line in file should be a level 1 heading"
-        );
+        assert_eq!(result[0].message, "First line in file should be a level 1 heading");
         assert_eq!(
             result[0].line, 8,
             "Warning should be on line 8 (the first content line after front matter)"
         );
     }
 
-        #[test]
+    #[test]
     fn test_allows_preamble_with_frontmatter_and_long_preamble() {
         let rule = MD041FirstLineHeading {
             allow_preamble: true,
@@ -2712,7 +2710,7 @@ Content.
         assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
     }
 
-        #[test]
+    #[test]
     fn test_allows_preamble_triggers_with_frontmatter_and_long_preamble() {
         let rule = MD041FirstLineHeading {
             allow_preamble: true,
@@ -2736,13 +2734,36 @@ Content.
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
-        assert_eq!(
-            result[0].message,
-            "First line in file should be a level 1 heading"
-        );
+        assert_eq!(result[0].message, "First line in file should be a level 1 heading");
         assert_eq!(
             result[0].line, 10,
             "Warning should be on line 10 (the first content line after front matter)"
+        );
+    }
+
+    #[test]
+    fn test_allows_preamble_with_frontmatter_and_no_heading() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+author: John Doe
+date: 2024-01-15
+---
+Preamble continues with more text.
+
+No heading in sight.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
+        assert_eq!(result[0].message, "First line in file should be a level 1 heading");
+        assert_eq!(
+            result[0].line, 5,
+            "Warning should be on line 5 (the first content line after front matter)"
         );
     }
 }
