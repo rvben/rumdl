@@ -378,6 +378,47 @@ fn math_blocks_does_not_change_what_reflow_rewrites() {
     }
 }
 
+/// A math block ends the paragraph above it and starts none below it, so prose
+/// written directly against either delimiter is still rewrapped. Guarding the
+/// block by skipping whatever paragraph it was collected with would leave that
+/// prose over-long while the check kept reporting it.
+#[test]
+fn prose_touching_the_delimiters_reflows_around_the_block() {
+    const WRAPPED: &str =
+        "This paragraph is definitely much longer\nthan forty columns and therefore has to\nbe rewrapped.";
+
+    let cases = [
+        (
+            "above",
+            format!("{LONG_PROSE}\n$$\n{MATH}\n$$\n"),
+            format!("{WRAPPED}\n$$\n{MATH}\n$$\n"),
+        ),
+        (
+            "below",
+            format!("$$\n{MATH}\n$$\n{LONG_PROSE}\n"),
+            format!("$$\n{MATH}\n$$\n{WRAPPED}\n"),
+        ),
+        (
+            "both sides",
+            format!("{LONG_PROSE}\n$$\n{MATH}\n$$\n{LONG_PROSE}\n"),
+            format!("{WRAPPED}\n$$\n{MATH}\n$$\n{WRAPPED}\n"),
+        ),
+    ];
+
+    for (name, content, expected) in cases {
+        for mode in [None, Some("normalize")] {
+            let dir = TempDir::new().unwrap();
+            let actual = fmt_reflow_40(dir.path(), "test.md", &content, mode);
+            assert_eq!(
+                actual,
+                expected,
+                "prose {name} the block, reflow-mode {}\n--- input ---\n{content}\n--- output ---\n{actual}",
+                mode.unwrap_or("default")
+            );
+        }
+    }
+}
+
 /// Controls. Without these, a guard that simply switched reflow off would pass
 /// every test above.
 #[test]

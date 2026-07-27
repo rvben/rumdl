@@ -3285,6 +3285,7 @@ impl MD013LineLength {
                     || is_snippet_block_delimiter(next_line)
                     || ctx.line_info(next_line_num).is_some_and(|info| info.is_div_marker)
                     || is_html_only_line(next_line)
+                    || self.line_in_multiline_math_block(next_line_num, ctx)
                     || (!config.strict && is_standalone_link_or_image_line(next_line))
                 {
                     break;
@@ -3367,15 +3368,17 @@ impl MD013LineLength {
                 continue;
             }
 
-            // Skip reflowing if any line of this paragraph sits inside a
-            // multi-line display-math block, where joining lines would corrupt
-            // the equation (see `line_in_multiline_math_block`).
-            let overlaps_multiline_math = (paragraph_start + 1..=paragraph_start + paragraph_lines.len())
-                .any(|line_num| self.line_in_multiline_math_block(line_num, ctx));
-
-            if overlaps_multiline_math {
-                // Don't reflow across a multi-line math block - skip this paragraph
-                i = paragraph_start + paragraph_lines.len();
+            // Leave a line of a multi-line display-math block as it is, where
+            // joining lines would corrupt the equation (see
+            // `line_in_multiline_math_block`). Only the first line has to be
+            // asked about: such a line ends the paragraph above it, so a
+            // paragraph reaching here holds one only when it starts on one.
+            //
+            // Only that line is passed over, not the rest of what was collected
+            // with it: prose written directly under the closing delimiter is an
+            // ordinary paragraph and still reflows.
+            if self.line_in_multiline_math_block(paragraph_start + 1, ctx) {
+                i = paragraph_start + 1;
                 continue;
             }
 
