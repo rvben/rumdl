@@ -784,5 +784,15 @@
     "fix": "Fix is sometimes available.",
     "fix_availability": "Sometimes",
     "url": "https://rumdl.dev/md084/"
+  },
+  {
+    "code": "MD085",
+    "name": "paragraph-continuation-indent",
+    "aliases": [],
+    "summary": "Paragraph continuation lines should not be indented",
+    "category": "whitespace",
+    "fix": "Fix is always available.",
+    "fix_availability": "Always",
+    "url": "https://rumdl.dev/md085/"
   }
 ]

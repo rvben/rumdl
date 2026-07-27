@@ -7,8 +7,8 @@ fn test_all_rules_returns_all_rules() {
     let config = Config::default();
     let rules = all_rules(&config);
 
-    // Should return all 78 rules as defined in the RULES array (MD001-MD084)
-    assert_eq!(rules.len(), 78);
+    // Should return all 79 rules as defined in the RULES array (MD001-MD085)
+    assert_eq!(rules.len(), 79);
 
     // Verify some specific rules are present
     let rule_names: HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
@@ -28,15 +28,15 @@ fn test_all_rules_returns_all_rules() {
 /// `docs/rules.md` and `docs/stability.md`): which rules run by default must not
 /// change silently. Flipping a rule's `opt_in` flag, adding a new opt-in rule, or
 /// removing one all change the default set and trip this guard. The sibling test
-/// `test_all_rules_returns_all_rules` pins the total at 77, so together they pin
-/// the default-enabled set as well.
+/// `test_all_rules_returns_all_rules` pins the total, so together they pin the
+/// default-enabled set as well.
 ///
 /// If this fails because of an intentional change, update both this set and the
 /// opt-in table in `docs/rules.md`.
 #[test]
 fn test_opt_in_rule_set_is_frozen() {
     let expected: HashSet<&'static str> = [
-        "MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082", "MD083", "MD084",
+        "MD060", "MD063", "MD070", "MD072", "MD073", "MD074", "MD080", "MD082", "MD083", "MD084", "MD085",
     ]
     .into_iter()
     .collect();
