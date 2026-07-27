@@ -766,7 +766,11 @@ impl MD063HeadingCapitalization {
         let mut at_sentence_start = first_segment_is_text;
 
         for (i, segment) in segments.iter().enumerate() {
-            match segment {
+            // Whether this segment closes a sentence, which decides how the next one
+            // starts. Only prose can, and the prose of a heading is what this rule
+            // capitalizes: plain text and link text. Code, HTML and images are opaque,
+            // so a boundary inside them is not one a reader is offered.
+            at_sentence_start = match segment {
                 HeadingSegment::Text(t) => {
                     let is_first_text = text_segments.first() == Some(&i);
                     // A text segment is "last" only if it's the last text segment AND
@@ -779,10 +783,13 @@ impl MD063HeadingCapitalization {
                         HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(t, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(t),
                     };
+                    let ends_sentence = self.ends_sentence(capitalized.trim_end());
                     result_parts.push(capitalized);
+                    ends_sentence
                 }
                 HeadingSegment::Code(c) => {
                     result_parts.push(c.clone());
+                    false
                 }
                 HeadingSegment::Link {
                     full,
@@ -798,28 +805,28 @@ impl MD063HeadingCapitalization {
                         HeadingCapStyle::SentenceCase => self.apply_sentence_case_from(link_text, at_sentence_start),
                         HeadingCapStyle::AllCaps => self.apply_all_caps(link_text),
                     };
+                    // The link's own text ends the sentence, not its destination: a reader
+                    // sees `[see:](url)` as `see:`, so the boundary is where they read it.
+                    let ends_sentence = self.ends_sentence(capitalized_text.trim_end());
 
                     let mut new_link = String::new();
                     new_link.push_str(&full[..*text_start]);
                     new_link.push_str(&capitalized_text);
                     new_link.push_str(&full[*text_end..]);
                     result_parts.push(new_link);
+                    ends_sentence
                 }
                 HeadingSegment::Html(h) => {
                     // Preserve HTML tags as-is (like code)
                     result_parts.push(h.clone());
+                    false
                 }
                 HeadingSegment::Image(img) => {
                     // Preserve images as-is, including alt text.
                     result_parts.push(img.clone());
+                    false
                 }
-            }
-
-            // Only text can close a sentence: code, links, HTML and images all end in a
-            // delimiter, so this leaves them mid-sentence without a special case.
-            if let Some(part) = result_parts.last() {
-                at_sentence_start = self.ends_sentence(part.trim_end());
-            }
+            };
         }
 
         let mut result = result_parts.join("");
@@ -3228,6 +3235,42 @@ mod tests {
             suggested(&rule, "# Overview: `code` Then More Words\n").as_deref(),
             Some("Overview: `code` then more words")
         );
+    }
+
+    #[test]
+    fn test_restart_after_ends_a_sentence_at_the_end_of_link_text() {
+        // A reader sees `[see:](url)` as `see:`, so the boundary is where they read it,
+        // not at the closing paren of the destination. This is the complement of a
+        // boundary before a link carrying into its text.
+        let rule = restart_rule(&[":"]);
+        assert_eq!(
+            suggested(&rule, "# Topic [See:](https://example.com) More Words\n").as_deref(),
+            Some("Topic [see:](https://example.com) More words")
+        );
+
+        // A boundary that only appears in the destination is not visible prose.
+        assert_eq!(
+            suggested(&rule, "# Topic [See](https://example.com) More Words\n").as_deref(),
+            Some("Topic [see](https://example.com) more words")
+        );
+    }
+
+    #[test]
+    fn test_restart_after_ignores_boundaries_inside_opaque_segments() {
+        // Code, HTML and image alt text are preserved verbatim rather than capitalized,
+        // so a boundary inside them is not one this rule offers the reader.
+        let rule = restart_rule(&[":"]);
+        for content in [
+            "# Topic `see:` More Words\n",
+            "# Topic ![alt:](image.png) More Words\n",
+            "# Topic <span title=\"x:\">y</span> More Words\n",
+        ] {
+            let fixed = suggested(&rule, content).expect("heading should be rewritten");
+            assert!(
+                fixed.ends_with("more words"),
+                "opaque segment restarted the sentence in {content:?}: {fixed}"
+            );
+        }
     }
 
     #[test]
