@@ -2916,8 +2916,14 @@ fn test_all_implemented_rules_have_aliases() {
 }
 
 // ==================== to_relative_display_path Tests ====================
+//
+// `to_relative_display_path` is relative to the process cwd, so these tests read
+// global state that other tests in this binary mutate. They join the same
+// `#[serial_test::serial]` group as the cwd mutators; without it they observe a
+// cwd change mid-test and fail spuriously.
 
 #[test]
+#[serial_test::serial]
 fn test_relative_path_in_cwd() {
     // Create a temp file in the current directory
     let cwd = std::env::current_dir().unwrap();
@@ -2934,6 +2940,7 @@ fn test_relative_path_in_cwd() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_relative_path_in_subdirectory() {
     // Create a temp file in a subdirectory
     let cwd = std::env::current_dir().unwrap();
@@ -2953,6 +2960,7 @@ fn test_relative_path_in_subdirectory() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_relative_path_outside_cwd_returns_original() {
     // Use a path that's definitely outside CWD (root level)
     let outside_path = "/tmp/definitely_not_in_cwd_test.md";
@@ -2979,6 +2987,7 @@ fn test_relative_path_already_relative() {
 }
 
 #[test]
+#[serial_test::serial]
 fn test_relative_path_with_dot_components() {
     // Path with . and .. components
     let cwd = std::env::current_dir().unwrap();

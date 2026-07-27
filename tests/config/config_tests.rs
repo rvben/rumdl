@@ -3490,3 +3490,129 @@ typo-key = true
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(config.global.line_length.get(), 100);
 }
+
+/// A project tree with a user config, used by the `load_discovered` tests below.
+/// Returns (temp dir, user-config dir to pass as `user_config_dir`, project dir).
+///
+/// The user config sets MD007 `indent = 4`; nothing else in these fixtures does,
+/// so MD007's value alone says whether the user config was used as a base.
+fn discovered_config_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let temp_dir = tempdir().unwrap();
+    let project_dir = temp_dir.path().join("project");
+    let user_config_dir = temp_dir.path().join("config");
+
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+
+    fs::write(
+        user_config_dir.join("rumdl").join("rumdl.toml"),
+        "[MD007]\nindent = 4\n",
+    )
+    .unwrap();
+
+    (temp_dir, user_config_dir, project_dir)
+}
+
+/// A discovered markdownlint config keeps the user config as a base, because the
+/// markdownlint format cannot express rumdl's own settings. This is what
+/// `load_with_discovery` does for the CLI, and `load_discovered` is the entry
+/// point that lets the LSP reach the same behavior from its own tree walk.
+#[test]
+fn discovered_markdownlint_config_keeps_the_user_config_as_a_base() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    let config_file = project_dir.join(".markdownlint.json");
+    fs::write(&config_file, r#"{ "MD004": { "style": "asterisk" } }"#).unwrap();
+
+    let sourced = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path())).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        Some(4),
+        "a discovered markdownlint config should load the user config as a base"
+    );
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style"),
+        Some("asterisk".to_string()),
+        "the markdownlint config's own settings should still apply"
+    );
+}
+
+/// The project config still wins on every key both files set: the markdownlint
+/// fragment is `ConfigSource::ProjectConfig`, the base is `ConfigSource::UserConfig`.
+#[test]
+fn discovered_markdownlint_config_overrides_the_user_config_on_shared_keys() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    let config_file = project_dir.join(".markdownlint.json");
+    fs::write(&config_file, r#"{ "MD007": { "indent": 2 } }"#).unwrap();
+
+    let sourced = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path())).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        Some(2),
+        "the project config should win over the user config on a shared key"
+    );
+}
+
+/// Negative control for the two tests above: a discovered *rumdl* config is
+/// standalone, because it can express every setting itself. Merging the user
+/// config in here would break the guarantee that a project's ruleset resolves the
+/// same way on every machine.
+#[test]
+fn discovered_rumdl_config_ignores_the_user_config() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    let config_file = project_dir.join(".rumdl.toml");
+    fs::write(&config_file, "[MD004]\nstyle = \"asterisk\"\n").unwrap();
+
+    let sourced = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path())).unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        None,
+        "a discovered rumdl config is standalone and must not pull in the user config"
+    );
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<String>(&config, "MD004", "style"),
+        Some("asterisk".to_string()),
+    );
+}
+
+/// Second negative control: naming a markdownlint config explicitly (`--config`)
+/// stays standalone. Only discovery gets the user-config base.
+#[test]
+fn explicit_markdownlint_config_ignores_the_user_config() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    let config_file = project_dir.join(".markdownlint.json");
+    fs::write(&config_file, r#"{ "MD004": { "style": "asterisk" } }"#).unwrap();
+
+    let sourced = SourcedConfig::load_with_discovery_impl(
+        Some(config_file.to_str().unwrap()),
+        None,
+        false,
+        Some(&user_config_dir),
+        Some(temp_dir.path()),
+    )
+    .unwrap();
+    let config: Config = sourced.into_validated_unchecked().into();
+
+    assert_eq!(
+        rumdl_lib::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        None,
+        "an explicitly named config is standalone, markdownlint format or not"
+    );
+}
+
+/// A config that fails to parse is reported, so the LSP's candidate walk can fall
+/// through to the next one up instead of caching a half-loaded config.
+#[test]
+fn discovered_config_reports_a_parse_failure() {
+    let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
+    let config_file = project_dir.join(".markdownlint.json");
+    fs::write(&config_file, "{ not json").unwrap();
+
+    let result = SourcedConfig::load_discovered(&config_file, Some(&user_config_dir), Some(temp_dir.path()));
+    assert!(result.is_err(), "a malformed discovered config should be an error");
+}

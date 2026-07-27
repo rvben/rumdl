@@ -438,6 +438,18 @@ impl RumdlLanguageServer {
     /// `src/config/loading.rs::load_with_discovery_impl`) and ensures that a distributed
     /// ruleset is not silently overridden by `.rumdl.toml` files in the user's project.
     pub(crate) async fn resolve_config_for_file(&self, file_path: &std::path::Path) -> Config {
+        self.resolve_config_for_file_impl(file_path, None, None).await
+    }
+
+    /// Internal implementation that accepts the user-config directory and the home
+    /// directory for testing, mirroring `SourcedConfig::load_with_discovery_impl`.
+    /// Both are resolved from the platform when not given.
+    pub(crate) async fn resolve_config_for_file_impl(
+        &self,
+        file_path: &std::path::Path,
+        user_config_dir: Option<&std::path::Path>,
+        home_dir_override: Option<&std::path::Path>,
+    ) -> Config {
         if self.cli_config_path.is_some() || self.config.read().await.config_path.is_some() {
             log::debug!(
                 "Explicit config path set; bypassing per-file discovery for {}",
@@ -510,26 +522,31 @@ impl RumdlLanguageServer {
         // Resolve the home-directory boundary so a user-level `~/.rumdl.toml` is not
         // mistaken for a project config; it stays a user-config fallback instead,
         // preserving the platform user-config directory's precedence over the dotfile.
-        let home_dir = {
+        let home_dir = home_dir_override.map(std::path::Path::to_path_buf).or_else(|| {
             use etcetera::{BaseStrategy, choose_base_strategy};
             choose_base_strategy().ok().map(|s| s.home_dir().to_path_buf())
-        };
+        });
 
         // Walk upward from the file's directory, bounded by the workspace root and the
         // home directory. Candidates are nearest-first; load the first that parses so a
         // malformed nearer config falls through to the next one up, mirroring the CLI.
         let candidates = collect_project_config_candidates(&search_dir, workspace_root.as_deref(), home_dir.as_deref());
 
+        // These candidates were discovered, not named by the user, so they load through
+        // the discovery loader: it keeps the user config as a base under a markdownlint
+        // project config, which is what `rumdl check` resolves for the same file. The
+        // explicit-config loader is standalone and belongs to the `--config` path above.
         let mut found_config: Option<(Config, Option<PathBuf>)> = None;
         for config_path in candidates {
-            if let Some(config_path_str) = config_path.to_str() {
-                if let Ok(sourced) = Self::load_config_for_lsp(Some(config_path_str)) {
+            match crate::config::SourcedConfig::load_discovered(&config_path, user_config_dir, home_dir.as_deref()) {
+                Ok(sourced) => {
                     log::debug!("Found config file: {}", config_path.display());
                     found_config = Some((sourced.into_validated_unchecked().into(), Some(config_path)));
                     break;
                 }
-            } else {
-                log::warn!("Skipping config file with non-UTF-8 path: {}", config_path.display());
+                Err(e) => {
+                    log::debug!("Skipping unloadable config {}: {e}", config_path.display());
+                }
             }
         }
 

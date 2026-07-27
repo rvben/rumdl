@@ -174,7 +174,8 @@ Add to your Emacs configuration:
 
 ## Configuration
 
-The LSP server uses the same configuration as the CLI. It automatically discovers `.rumdl.toml` or `pyproject.toml` in your project.
+The LSP server uses the same configuration as the CLI, resolved per file: it searches upward from the file's directory for a project config (`.rumdl.toml`, `rumdl.toml`, `.config/rumdl.toml`,
+`pyproject.toml`, or a `.markdownlint.*` file) and falls back to your user configuration when there is none. A file resolves to the same configuration in your editor as it does under `rumdl check`.
 
 You can override the config path:
 

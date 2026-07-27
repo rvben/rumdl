@@ -3720,9 +3720,10 @@ reflow-mode = "semantic-line-breaks"
 
     let uri = Url::from_file_path(&test_md_path).unwrap();
 
-    // Simulate what resolve_config_for_file does: load config from the pyproject.toml
-    let config_path_str = pyproject_path.to_str().unwrap();
-    let sourced = RumdlLanguageServer::load_config_for_lsp(Some(config_path_str)).expect("Should load config");
+    // Load the pyproject.toml the way resolve_config_for_file loads a config it
+    // discovered, so this exercises the production loader rather than a lookalike.
+    let sourced =
+        crate::config::SourcedConfig::load_discovered(&pyproject_path, None, None).expect("Should load config");
     let file_config: crate::config::Config = sourced.into_validated_unchecked().into();
 
     // Verify the config loaded correctly
@@ -8325,6 +8326,112 @@ async fn test_lsp_cli_resolver_parity_on_fixtures() {
             fx.name,
             lsp_path,
             cli_path,
+        );
+    }
+}
+
+/// Regression test for #751: the LSP resolved every discovered config through the
+/// *explicit*-config entry point, which is standalone by design. That is right for
+/// a config the user named with `--config`, but a discovered markdownlint config is
+/// the one case where the CLI keeps the user config as a base, since the
+/// markdownlint format cannot express rumdl's own settings. The server therefore
+/// resolved a different config than `rumdl check` on the same file, and reported
+/// different diagnostics.
+///
+/// Both fixtures compare against the CLI's own result rather than a hardcoded one,
+/// so the rumdl-native fixture is a live negative control: a fix that merged the
+/// user config into every discovered config would fail it.
+///
+/// Mutates the process cwd to run the CLI half, so it runs serially.
+#[tokio::test]
+#[serial_test::serial]
+async fn test_lsp_matches_cli_values_under_a_discovered_config() {
+    use crate::config::{Config, SourcedConfig};
+    use std::fs;
+    use tempfile::tempdir;
+
+    // (fixture name, project config filename, contents, expected MD007 indent).
+    // MD007 is set only by the user config, so its resolved value is exactly
+    // "was the user config used as a base".
+    let fixtures: &[(&str, &str, &str, Option<usize>)] = &[
+        (
+            "markdownlint_project_config",
+            ".markdownlint.json",
+            r#"{ "MD004": { "style": "asterisk" } }"#,
+            Some(4),
+        ),
+        (
+            "rumdl_project_config",
+            ".rumdl.toml",
+            "[MD004]\nstyle = \"asterisk\"\n",
+            None,
+        ),
+    ];
+
+    for (name, config_name, config_body, expected_indent) in fixtures {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let project = root.join("project");
+        let sub = project.join("sub");
+        let user_config_dir = root.join("xdg");
+        let home_dir = root.join("fakehome");
+
+        fs::create_dir_all(&sub).unwrap();
+        fs::create_dir_all(project.join(".git")).unwrap(); // bound both walks here
+        fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::write(
+            user_config_dir.join("rumdl").join("rumdl.toml"),
+            "[MD007]\nindent = 4\n",
+        )
+        .unwrap();
+        fs::write(project.join(config_name), config_body).unwrap();
+
+        let md_file = sub.join("test.md");
+        fs::write(&md_file, "").unwrap();
+
+        // CLI resolution: discovery walks up from the process cwd.
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&sub).unwrap();
+        let cli_sourced =
+            SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&home_dir));
+        std::env::set_current_dir(&prev_cwd).unwrap();
+        let cli_config: Config = cli_sourced
+            .expect("CLI config should load")
+            .into_validated_unchecked()
+            .into();
+
+        // LSP resolution: its own walk up from the file, workspace root = project.
+        let server = create_test_server();
+        {
+            let mut roots = server.workspace_roots.write().await;
+            roots.push(project.clone());
+        }
+        let lsp_config = server
+            .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+            .await;
+
+        // Positive control: the markdownlint fixture must actually reach the user
+        // config, or the parity assertion below would hold vacuously.
+        assert_eq!(
+            crate::config::get_rule_config_value::<usize>(&cli_config, "MD007", "indent"),
+            *expected_indent,
+            "fixture `{name}`: the CLI itself did not behave as the fixture assumes"
+        );
+        assert_eq!(
+            crate::config::get_rule_config_value::<usize>(&lsp_config, "MD007", "indent"),
+            *expected_indent,
+            "fixture `{name}`: LSP resolved MD007 differently than the CLI"
+        );
+        assert_eq!(
+            crate::config::get_rule_config_value::<String>(&lsp_config, "MD004", "style"),
+            Some("asterisk".to_string()),
+            "fixture `{name}`: the project config's own settings must still apply"
+        );
+        assert_eq!(
+            serde_json::to_value(&lsp_config).unwrap(),
+            serde_json::to_value(&cli_config).unwrap(),
+            "fixture `{name}`: LSP and CLI must resolve the same configuration"
         );
     }
 }

@@ -784,6 +784,76 @@ impl SourcedConfig<ConfigLoaded> {
         Ok(())
     }
 
+    /// Load a project config file that discovery found, as opposed to one the user
+    /// named explicitly.
+    ///
+    /// The two are not interchangeable. An explicit config is standalone by design
+    /// (`load_explicit_config`), and so is a discovered rumdl-native config: a
+    /// project's ruleset has to be reproducible on any machine. A discovered
+    /// *markdownlint* config is the exception. That format cannot express
+    /// rumdl-specific settings (flavor, cache, per-file ignores), so the user config
+    /// is loaded first as a base and the markdownlint fragment merged on top. The
+    /// fragment carries `ConfigSource::ProjectConfig` (precedence 3) against the
+    /// base's `ConfigSource::UserConfig` (1), so project settings still win on every
+    /// overlapping key.
+    ///
+    /// Both the CLI (`load_with_discovery_impl`) and the LSP (`load_discovered`,
+    /// via `RumdlLanguageServer::resolve_config_for_file`) load discovered files
+    /// through here, so a discovered config resolves the same way in an editor as
+    /// it does on the command line.
+    fn load_discovered_config(
+        sourced_config: &mut Self,
+        config_file: &Path,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> Result<(), ConfigError> {
+        let filename = config_file.file_name().and_then(|name| name.to_str()).unwrap_or("");
+
+        if MARKDOWNLINT_CONFIG_FILES.contains(&filename) {
+            Self::load_user_config(sourced_config, user_config_dir, home_dir)?;
+
+            let path_str = config_file.display().to_string();
+            let fragment = parsers::load_from_markdownlint(&path_str)?;
+            sourced_config.merge(fragment);
+            sourced_config.loaded_files.push(path_str);
+        } else {
+            let mut visited = IndexSet::new();
+            let chain_source = source_from_filename(filename);
+            load_config_with_extends(sourced_config, config_file, &mut visited, chain_source)?;
+        }
+
+        Ok(())
+    }
+
+    /// Load a config file that the caller discovered by walking the tree itself.
+    ///
+    /// The LSP cannot use `load_with_discovery`: that walk starts at the process
+    /// working directory, while the server resolves a config per document and stops
+    /// at the workspace root. It finds the file with its own walk and hands it here,
+    /// so the discovered-config rules in `load_discovered_config` still apply.
+    ///
+    /// `project_root` comes from the config file's own location, which is what
+    /// per-file ignore globs are matched against.
+    ///
+    /// `user_config_dir` and `home_dir` override the platform user-config directory
+    /// and the home directory; the server passes the home directory it already
+    /// resolved for its walk boundary, and tests pass both.
+    pub fn load_discovered(
+        config_file: &Path,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> Result<Self, ConfigError> {
+        let mut sourced_config = SourcedConfig::default();
+
+        if let Some(config_parent) = config_file.parent() {
+            sourced_config.project_root = Some(Self::find_project_root_from(config_parent));
+        }
+
+        Self::load_discovered_config(&mut sourced_config, config_file, user_config_dir, home_dir)?;
+
+        Ok(sourced_config)
+    }
+
     /// Internal implementation that accepts user config directory and home directory for testing
     #[doc(hidden)]
     pub fn load_with_discovery_impl(
@@ -837,31 +907,29 @@ impl SourcedConfig<ConfigLoaded> {
 
                 sourced_config.project_root = Some(project_root);
 
-                // Use extends-aware loading for discovered configs
-                let mut visited = IndexSet::new();
-                let root_filename = config_file.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let chain_source = source_from_filename(root_filename);
-                load_config_with_extends(&mut sourced_config, &config_file, &mut visited, chain_source)?;
+                Self::load_discovered_config(&mut sourced_config, &config_file, user_config_dir, home_dir)?;
             } else {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");
 
                 if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward(home_dir) {
-                    let path_str = markdownlint_path.display().to_string();
-                    log::debug!("[rumdl-config] Found markdownlint config: {path_str}");
-                    // Load user config first as a base so rumdl-specific settings (e.g. flavor,
-                    // cache) take effect. Markdownlint configs cannot express these settings.
-                    // The markdownlint fragment uses ConfigSource::ProjectConfig (precedence 3)
-                    // vs UserConfig (precedence 1), so project settings always win on overlap.
-                    Self::load_user_config(&mut sourced_config, user_config_dir, home_dir)?;
-                    match parsers::load_from_markdownlint(&path_str) {
-                        Ok(fragment) => {
-                            sourced_config.merge(fragment);
-                            sourced_config.loaded_files.push(path_str);
-                        }
-                        Err(_e) => {
-                            log::debug!("[rumdl-config] Failed to load markdownlint config");
-                        }
+                    log::debug!(
+                        "[rumdl-config] Found markdownlint config: {}",
+                        markdownlint_path.display()
+                    );
+
+                    if let Err(e) =
+                        Self::load_discovered_config(&mut sourced_config, &markdownlint_path, user_config_dir, home_dir)
+                    {
+                        // A markdownlint file rumdl cannot parse is skipped rather than
+                        // fatal: the user never named it, and rumdl only reads the format
+                        // as a courtesy. Loading the user config again restores the state
+                        // of the no-project-config case, and re-raises the error if it was
+                        // the user config that failed - that stays fatal, as in every
+                        // other arm.
+                        log::debug!("[rumdl-config] Failed to load markdownlint config: {e}");
+                        sourced_config = SourcedConfig::default();
+                        Self::load_user_config(&mut sourced_config, user_config_dir, home_dir)?;
                     }
                 } else {
                     // No project config at all - use user config as fallback
