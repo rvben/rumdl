@@ -659,6 +659,13 @@ pub struct GlobalConfig {
     #[serde(default, alias = "extend_disable")]
     pub extend_disable: Vec<String>,
 
+    /// Whether to read settings from `.editorconfig` files (default: false).
+    /// When enabled, the `.editorconfig` properties that map onto rumdl
+    /// settings fill in anything no rumdl config sets, resolved per file so
+    /// section globs and nested `.editorconfig` files apply as written.
+    #[serde(default)]
+    pub editorconfig: bool,
+
     /// Whether the enable list was explicitly set (even if empty).
     /// Used to distinguish "no enable list configured" from "enable list is empty"
     /// (e.g., markdownlint `default: false` with no rules enabled).
@@ -694,6 +701,7 @@ impl Default for GlobalConfig {
             cache: true,
             extend_enable: Vec::new(),
             extend_disable: Vec::new(),
+            editorconfig: false,
             enable_is_explicit: false,
         }
     }

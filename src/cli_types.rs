@@ -109,8 +109,9 @@ pub struct SharedCliArgs {
 
     /// Exit with the tool-error code (2) if any configuration problem is
     /// detected (unknown rule or option in a config file or CLI flag, unknown
-    /// rule in an inline disable comment, or a shadowed config file). Config
-    /// problems are non-fatal warnings by default.
+    /// rule in an inline disable comment, a shadowed config file, or an
+    /// `.editorconfig` property rumdl cannot apply). Config problems are
+    /// non-fatal warnings by default.
     #[arg(long, help = "Treat configuration warnings as errors (exit code 2)")]
     pub deny_config_warnings: bool,
 }

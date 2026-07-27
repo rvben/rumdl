@@ -36,6 +36,7 @@ pub const GLOBAL_VALUE_KEYS: &[&str] = &[
     "fixable",
     "unfixable",
     "flavor",
+    "editorconfig",
 ];
 
 /// Whether a (normalized) key names a global value setting.
@@ -111,7 +112,7 @@ pub fn apply_global_key(
             }
             ApplyOutcome::Applied
         }
-        "respect-gitignore" | "force-exclude" | "cache" => {
+        "respect-gitignore" | "force-exclude" | "cache" | "editorconfig" => {
             let Some(b) = value.as_bool() else {
                 return ApplyOutcome::TypeMismatch { expected: "boolean" };
             };
@@ -119,6 +120,7 @@ pub fn apply_global_key(
                 "respect-gitignore" => global.respect_gitignore.push_override(b, source, origin),
                 "force-exclude" => global.force_exclude.push_override(b, source, origin),
                 "cache" => global.cache.push_override(b, source, origin),
+                "editorconfig" => global.editorconfig.push_override(b, source, origin),
                 _ => unreachable!("outer match limits the keys"),
             }
             ApplyOutcome::Applied

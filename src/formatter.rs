@@ -104,6 +104,7 @@ pub fn format_provenance(src: rumdl_config::ConfigSource) -> &'static str {
         rumdl_config::ConfigSource::UserConfig => "user config",
         rumdl_config::ConfigSource::ProjectConfig => "project config",
         rumdl_config::ConfigSource::PyprojectToml => "pyproject.toml",
+        rumdl_config::ConfigSource::EditorConfig => ".editorconfig",
         rumdl_config::ConfigSource::Default => "default",
     }
 }
@@ -239,6 +240,13 @@ pub fn print_config_with_provenance_no_defaults(sourced: &rumdl_config::SourcedC
         global_lines.push((format!("cache = {}", g.cache.value), provenance_label(&g.cache, root)));
         has_global_section = true;
     }
+    if g.editorconfig.source != rumdl_config::ConfigSource::Default {
+        global_lines.push((
+            format!("editorconfig = {}", g.editorconfig.value),
+            provenance_label(&g.editorconfig, root),
+        ));
+        has_global_section = true;
+    }
     if let Some(ref output_format) = g.output_format
         && output_format.source != rumdl_config::ConfigSource::Default
     {
@@ -372,6 +380,10 @@ pub fn print_config_with_provenance(sourced: &rumdl_config::SourcedConfig, all_r
         (
             format!("respect_gitignore = {}", g.respect_gitignore.value),
             provenance_label(&g.respect_gitignore, root),
+        ),
+        (
+            format!("editorconfig = {}", g.editorconfig.value),
+            provenance_label(&g.editorconfig, root),
         ),
     ];
 

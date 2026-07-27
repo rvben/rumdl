@@ -36,6 +36,7 @@ order. These settings control file selection, rule enablement, and general linti
 | [`output-format`](#output-format)         | `string`   | `"text"`       | Output format for linting results         |
 | [`cache`](#cache)                         | `boolean`  | `true`         | Enable result caching                     |
 | [`cache-dir`](#cache-dir)                 | `string`   | `.rumdl_cache` | Directory for cache files                 |
+| [`editorconfig`](#editorconfig)           | `boolean`  | `false`        | Read settings from `.editorconfig` files  |
 
 ## Configuration Examples
 
@@ -1113,6 +1114,72 @@ RUMDL_CACHE_DIR=/tmp/rumdl-cache rumdl check .
 # rumdl cache
 .rumdl_cache/
 ```
+
+### `editorconfig`
+
+**Type**: `boolean`
+**Default**: `false`
+
+Reads the `.editorconfig` files that apply to each Markdown file and uses the
+properties that have a rumdl equivalent.
+
+```toml
+[global]
+editorconfig = true
+```
+
+**Mapped properties**:
+
+| `.editorconfig` property | rumdl setting    | Notes                                               |
+| ------------------------ | ---------------- | --------------------------------------------------- |
+| `max_line_length`        | `line-length`    | `off` means no limit                                |
+| `indent_size`            | MD007's `indent` | `tab` resolves through `tab_width`; 1-8 spaces only |
+
+**Behavior**:
+
+- A `.editorconfig` value only fills in a setting that no rumdl config sets. A
+  `line-length` in `.rumdl.toml` always wins, whether it is set under `[global]`
+  or on MD013 itself, and so does a `--config` override.
+- Properties are resolved per file, so section globs (`[docs/**.md]`) and nested
+  `.editorconfig` files apply exactly as written.
+- Properties with no rumdl equivalent are reported once, naming the rule whose
+  behavior contradicts them, so you can decide whether to disable that rule:
+  `indent_style = tab` (MD010), `trim_trailing_whitespace = false` (MD009) and
+  `insert_final_newline = false` (MD047).
+- A `.editorconfig` value rumdl cannot use (an unparseable number, an
+  `indent_size` outside 1-8, `indent_size = tab` with no `tab_width`) is
+  reported and ignored rather than guessed at.
+- Both kinds of report are configuration warnings, so `--deny-config-warnings`
+  exits with the tool-error code (2) on them.
+
+**Usage Notes**:
+
+- Because resolution is per file, `rumdl config` cannot show the values a
+  `.editorconfig` supplies; it prints a note saying so when this is enabled.
+- The setting itself is read from your rumdl config, so it is a project-level
+  opt-in: a `.editorconfig` alone never changes rumdl's behavior.
+- `rumdl check --watch` re-runs when an `.editorconfig` it reads changes, the
+  same as for a rumdl config file.
+
+**Example**:
+
+```ini
+# .editorconfig
+root = true
+
+[*.md]
+max_line_length = 100
+indent_size = 4
+```
+
+```toml
+# .rumdl.toml
+[global]
+editorconfig = true
+```
+
+MD013 now allows 100 characters and MD007 expects 4-space list indentation,
+without repeating either value in the rumdl config.
 
 ## Per-Directory Configuration
 

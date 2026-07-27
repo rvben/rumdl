@@ -7,16 +7,23 @@ use super::flavor::{ConfigLoaded, MarkdownFlavor};
 
 /// Configuration source with clear precedence hierarchy.
 ///
-/// Precedence order (lower values override higher values):
+/// Precedence order (higher values override lower values):
 /// - Default (0): Built-in defaults
-/// - UserConfig (1): User-level ~/.config/rumdl/rumdl.toml
-/// - PyprojectToml (2): Project-level pyproject.toml
-/// - ProjectConfig (3): Project-level .rumdl.toml (most specific)
-/// - Cli (4): Command-line flags (highest priority)
+/// - EditorConfig (1): A `.editorconfig` file, when `editorconfig = true`
+/// - UserConfig (2): User-level ~/.config/rumdl/rumdl.toml
+/// - PyprojectToml (3): Project-level pyproject.toml
+/// - ProjectConfig (4): Project-level .rumdl.toml (most specific)
+/// - Cli (5): Command-line flags (highest priority)
+///
+/// `.editorconfig` sits directly above the built-in defaults: it fills in
+/// settings no rumdl config mentions, and anything written in a rumdl config
+/// wins over it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfigSource {
     /// Built-in default configuration
     Default,
+    /// A `.editorconfig` file applying to the linted file
+    EditorConfig,
     /// User-level configuration from ~/.config/rumdl/rumdl.toml
     UserConfig,
     /// Project-level configuration from pyproject.toml
@@ -30,10 +37,11 @@ pub enum ConfigSource {
 fn source_precedence(src: ConfigSource) -> u8 {
     match src {
         ConfigSource::Default => 0,
-        ConfigSource::UserConfig => 1,
-        ConfigSource::PyprojectToml => 2,
-        ConfigSource::ProjectConfig => 3,
-        ConfigSource::Cli => 4,
+        ConfigSource::EditorConfig => 1,
+        ConfigSource::UserConfig => 2,
+        ConfigSource::PyprojectToml => 3,
+        ConfigSource::ProjectConfig => 4,
+        ConfigSource::Cli => 5,
     }
 }
 
@@ -124,6 +132,7 @@ pub struct SourcedGlobalConfig {
     pub cache: SourcedValue<bool>,
     pub extend_enable: SourcedValue<Vec<String>>,
     pub extend_disable: SourcedValue<Vec<String>>,
+    pub editorconfig: SourcedValue<bool>,
 }
 
 impl Default for SourcedGlobalConfig {
@@ -144,6 +153,7 @@ impl Default for SourcedGlobalConfig {
             cache: SourcedValue::new(true, ConfigSource::Default),
             extend_enable: SourcedValue::new(Vec::new(), ConfigSource::Default),
             extend_disable: SourcedValue::new(Vec::new(), ConfigSource::Default),
+            editorconfig: SourcedValue::new(false, ConfigSource::Default),
         }
     }
 }

@@ -87,6 +87,12 @@ serde-wasm-bindgen = { version = "0.6", optional = true }
 futures = { version = "0.3.31", features = ["alloc"] }
 clap_complete = "4.5.65"
 
+# `.editorconfig` reading, opt-in per project via `editorconfig = true`. Needs a
+# real filesystem to walk for `.editorconfig` files, so it is absent from the
+# browser wasm build. `track-source` records which file and line each value came
+# from, which `rumdl config` reports as the value's origin.
+ec4rs = { version = "1.2.0", features = ["track-source"], optional = true }
+
 [features]
 default = ["parallel", "native"]
 parallel = ["rayon"]
@@ -102,6 +108,7 @@ native = [
     "postcard",
     "colored",
     "memory-stats",
+    "ec4rs",
 ]
 wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 # Build the CLI for wasm/WASI targets (e.g. wasm32-wasip1-threads under wasmtime).
@@ -109,7 +116,7 @@ wasm = ["wasm-bindgen", "console_error_panic_hook", "serde-wasm-bindgen"]
 # linter, config loading, cache, and watch keep working while the language server
 # is left out. Usage:
 #   cargo build --target wasm32-wasip1-threads --no-default-features --features wasi
-wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify"]
+wasi = ["parallel", "colored", "blake3", "postcard", "chrono", "env_logger", "notify", "ec4rs"]
 
 [dev-dependencies]
 assert_cmd = "2.1.1"

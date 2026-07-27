@@ -1047,6 +1047,23 @@ lint = ["ruff:check"]
 format = ["ruff:format"]
 ```
 
+### Using `.editorconfig`
+
+Set `editorconfig = true` to let the `.editorconfig` files in your project supply
+settings that your rumdl config does not:
+
+```toml
+[global]
+editorconfig = true
+```
+
+`max_line_length` becomes rumdl's `line-length` and `indent_size` becomes MD007's
+`indent`. Anything your rumdl config sets wins, and properties are resolved per
+file so section globs and nested `.editorconfig` files apply as written.
+Properties rumdl cannot act on (`indent_style = tab`, for instance) are reported
+once, naming the rule that contradicts them. See
+[`editorconfig`](docs/global-settings.md#editorconfig) for the full mapping.
+
 ### Style Guide Presets
 
 Ready-to-use configurations for popular style guides are available in the [`examples/`](examples/) directory:

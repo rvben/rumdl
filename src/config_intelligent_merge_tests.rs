@@ -248,23 +248,33 @@ mod tests {
 
     #[test]
     fn test_precedence_order() {
-        use crate::config::ConfigSource;
+        use crate::config::{ConfigSource, SourcedValue};
 
-        fn get_precedence(src: ConfigSource) -> u8 {
-            match src {
-                ConfigSource::Default => 0,
-                ConfigSource::UserConfig => 1,
-                ConfigSource::PyprojectToml => 2,
-                ConfigSource::ProjectConfig => 3,
-                ConfigSource::Cli => 4,
+        // Read the ordering off the real merge, not a copy of the precedence
+        // table: a source only wins when it outranks the one already there.
+        const ASCENDING: &[ConfigSource] = &[
+            ConfigSource::Default,
+            ConfigSource::EditorConfig,
+            ConfigSource::UserConfig,
+            ConfigSource::PyprojectToml,
+            ConfigSource::ProjectConfig,
+            ConfigSource::Cli,
+        ];
+
+        for (rank, &weaker) in ASCENDING.iter().enumerate() {
+            for &stronger in &ASCENDING[rank + 1..] {
+                let mut value = SourcedValue::new("weaker", stronger);
+                value.merge_override("stronger", weaker, None);
+                assert_eq!(
+                    value.value, "weaker",
+                    "{weaker:?} must not override the higher-precedence {stronger:?}"
+                );
+
+                let mut value = SourcedValue::new("weaker", weaker);
+                value.merge_override("stronger", stronger, None);
+                assert_eq!(value.value, "stronger", "{stronger:?} must override {weaker:?}");
             }
         }
-
-        // Verify precedence order
-        assert!(get_precedence(ConfigSource::Default) < get_precedence(ConfigSource::UserConfig));
-        assert!(get_precedence(ConfigSource::UserConfig) < get_precedence(ConfigSource::PyprojectToml));
-        assert!(get_precedence(ConfigSource::PyprojectToml) < get_precedence(ConfigSource::ProjectConfig));
-        assert!(get_precedence(ConfigSource::ProjectConfig) < get_precedence(ConfigSource::Cli));
     }
 
     #[test]

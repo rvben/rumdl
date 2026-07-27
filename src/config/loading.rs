@@ -380,6 +380,7 @@ impl SourcedConfig<ConfigLoaded> {
         self.global.unfixable.merge_from(fragment.global.unfixable);
         self.global.flavor.merge_from(fragment.global.flavor);
         self.global.force_exclude.merge_from(fragment.global.force_exclude);
+        self.global.editorconfig.merge_from(fragment.global.editorconfig);
 
         // Merge output_format if present
         if let Some(output_format_fragment) = fragment.global.output_format {
@@ -1202,6 +1203,7 @@ impl From<SourcedConfig<ConfigValidated>> for Config {
             cache: sourced.global.cache.value,
             extend_enable: sourced.global.extend_enable.value,
             extend_disable: sourced.global.extend_disable.value,
+            editorconfig: sourced.global.editorconfig.value,
             enable_is_explicit,
         };
 

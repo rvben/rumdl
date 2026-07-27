@@ -825,6 +825,9 @@ fn test_wasm_config_parity_all_global_fields_wired() {
         force_exclude: _,
         cache_dir: _,
         cache: _,
+        // `.editorconfig` is discovered by walking the filesystem; the browser
+        // build has none, and the JS host supplies the content directly.
+        editorconfig: _,
     } = gc;
 
     // Verify the WASM-relevant fields have known defaults

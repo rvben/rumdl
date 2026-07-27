@@ -271,24 +271,19 @@ fn validate_config_sourced_impl(
             }
         }
     }
-    // 3. Unknown global options (from unknown_keys)
-    let known_global_keys = vec![
-        "enable".to_string(),
-        "disable".to_string(),
-        "extend-enable".to_string(),
-        "extend-disable".to_string(),
-        "include".to_string(),
-        "exclude".to_string(),
-        "respect-gitignore".to_string(),
-        "line-length".to_string(),
-        "fixable".to_string(),
-        "unfixable".to_string(),
-        "flavor".to_string(),
-        "force-exclude".to_string(),
-        "output-format".to_string(),
-        "cache-dir".to_string(),
-        "cache".to_string(),
-    ];
+    // 3. Unknown global options (from unknown_keys). Suggestions come from the
+    // dispatch table itself, so a newly added global key is suggestible without a
+    // second list to keep in step, plus the keys holding a table or a path rather
+    // than a plain value.
+    let known_global_keys: Vec<String> = super::global_keys::GLOBAL_VALUE_KEYS
+        .iter()
+        .map(|k| (*k).to_string())
+        .chain(
+            ["per-file-ignores", "per-file-flavor", "extends"]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .collect();
 
     for (section, key, file_path) in unknown_keys {
         // Convert file path to relative for cleaner output

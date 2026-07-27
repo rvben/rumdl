@@ -415,11 +415,23 @@ fn handle_config_display(
             }
         }
         _ => {
+            // `.editorconfig` resolves per file, so no single value can be shown
+            // here. Say so rather than print a settled-looking number that the
+            // next `rumdl check` overrides.
+            let editorconfig_enabled = final_sourced_to_print.global.editorconfig.value;
+
             // Otherwise, print the smart output with provenance annotations
             if no_defaults {
                 formatter::print_config_with_provenance_no_defaults(&final_sourced_to_print, &all_rules_reg);
             } else {
                 formatter::print_config_with_provenance(&final_sourced_to_print, &all_rules_reg);
+            }
+
+            if editorconfig_enabled {
+                println!(
+                    "\nNote: editorconfig = true. Settings that a `.editorconfig` supplies are resolved \
+                     per file and are not shown above."
+                );
             }
         }
     }
@@ -458,6 +470,9 @@ fn filter_sourced_config_to_non_defaults(
     }
     if sourced.global.cache.source != rumdl_config::ConfigSource::Default {
         filtered.global.cache = sourced.global.cache.clone();
+    }
+    if sourced.global.editorconfig.source != rumdl_config::ConfigSource::Default {
+        filtered.global.editorconfig = sourced.global.editorconfig.clone();
     }
     if sourced.global.fixable.source != rumdl_config::ConfigSource::Default {
         filtered.global.fixable = sourced.global.fixable.clone();

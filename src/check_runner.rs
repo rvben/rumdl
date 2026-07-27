@@ -18,6 +18,10 @@ use std::time::Instant;
 pub struct CheckRunContext<'a> {
     pub args: &'a crate::CheckArgs,
     pub config: &'a rumdl_config::Config,
+    /// The same configuration with provenance intact. `.editorconfig` layers
+    /// into it, which is what lets it fill in a setting no rumdl config mentions
+    /// while losing to any that one does.
+    pub sourced: &'a rumdl_config::SourcedConfig<rumdl_config::ConfigValidated>,
     pub quiet: bool,
     pub cache: Option<Arc<crate::cache::LintCache>>,
     pub workspace_cache_dir: Option<&'a Path>,
@@ -56,6 +60,10 @@ pub struct CheckRunOutcome {
     /// An inline disable comment referenced an unknown rule name in at least one
     /// processed file. Feeds the --deny-config-warnings exit decision.
     pub config_warning: bool,
+    /// Whether any config this run resolved reads `.editorconfig` files. The
+    /// opt-in can come from a subdirectory config, which only per-file
+    /// resolution knows about, so watch mode learns it from the run it just did.
+    pub reads_editorconfig: bool,
 }
 
 impl CheckRunOutcome {
@@ -68,6 +76,7 @@ impl CheckRunOutcome {
             total_issues_fixed: 0,
             had_tool_error: false,
             config_warning: false,
+            reads_editorconfig: false,
         }
     }
 
@@ -85,6 +94,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let CheckRunContext {
         args,
         config,
+        sourced,
         quiet,
         ref cache,
         workspace_cache_dir,
@@ -112,8 +122,13 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
 
     // Handle stdin input - either explicit --stdin flag or "-" as file argument
     if args.stdin || (args.paths.len() == 1 && args.paths[0] == "-") {
-        let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, config);
-        crate::stdin_processor::process_stdin(&enabled_rules, args, config, external_config_warning);
+        let stdin = crate::resolution::resolve_stdin_config(&crate::resolution::RootConfig { config, sourced }, args);
+        crate::stdin_processor::process_stdin(
+            &stdin.rules,
+            args,
+            &stdin.config,
+            external_config_warning || stdin.config_warning,
+        );
         // stdin owns its own exit (including the --deny-config-warnings decision,
         // wired in the stdin processor), so nothing to report here.
         return CheckRunOutcome::empty();
@@ -143,11 +158,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     }
 
     // Resolve files into config groups (per-directory config discovery)
-    let config_groups = rumdl_lib::time_function!(
+    let resolved = rumdl_lib::time_function!(
         "check: resolve config groups",
         crate::resolution::resolve_config_groups(
             &file_paths,
-            config,
+            &crate::resolution::RootConfig { config, sourced },
             args,
             &crate::resolution::ResolutionRoots {
                 grouping_root,
@@ -158,6 +173,14 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             explicit_config || isolated,
         )
     );
+    let crate::resolution::ResolvedGroups {
+        groups: config_groups,
+        config_warning: editorconfig_warning,
+    } = resolved;
+
+    // A subdirectory config can opt in on its own, so the answer is only known
+    // once every file has been resolved.
+    let reads_editorconfig = config_groups.iter().any(|group| group.config.global.editorconfig);
 
     // Build file → group index mapping for cross-file analysis (Phase 2)
     let file_group_map: HashMap<PathBuf, usize> = rumdl_lib::time_function!(
@@ -245,9 +268,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let mut had_tool_error = false;
 
     // Set when any processed file had an inline disable comment naming an unknown
-    // rule. OR-aggregated across files and reported so run_check can honor
+    // rule, or when config resolution read an `.editorconfig` property it could
+    // not apply. OR-aggregated across files and reported so run_check can honor
     // --deny-config-warnings.
-    let mut config_warning = false;
+    let mut config_warning = editorconfig_warning;
 
     let (
         mut has_issues,
@@ -713,5 +737,6 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
         total_issues_fixed,
         had_tool_error,
         config_warning,
+        reads_editorconfig,
     }
 }

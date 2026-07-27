@@ -170,6 +170,7 @@ pub(super) fn parse_pyproject_toml(
                 "extend-disable",
                 "extend_disable",
                 "extends",
+                "editorconfig",
             ]
             .contains(&norm_rule_key.as_str());
 
@@ -309,6 +310,7 @@ pub(super) fn parse_pyproject_toml(
         || fragment.global.flavor.source != ConfigSource::Default
         || fragment.global.respect_gitignore.source != ConfigSource::Default
         || fragment.global.force_exclude.source != ConfigSource::Default
+        || fragment.global.editorconfig.source != ConfigSource::Default
         || !fragment.per_file_ignores.value.is_empty()
         || !fragment.per_file_flavor.value.is_empty()
         || !fragment.rules.is_empty();

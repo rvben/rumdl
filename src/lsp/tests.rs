@@ -8627,6 +8627,178 @@ async fn test_resolve_config_uses_the_nearer_markdownlint_config_when_the_user_c
     );
 }
 
+/// The editor must resolve the same configuration `rumdl check` does, so a
+/// project that opts into `.editorconfig` gets those settings here too.
+#[tokio::test]
+async fn test_resolve_config_applies_editorconfig_when_the_project_opts_in() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.join("project");
+    let user_config_dir = root.join("xdg");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(project.join(".rumdl.toml"), "[global]\neditorconfig = true\n").unwrap();
+    fs::write(
+        project.join(".editorconfig"),
+        "root = true\n[*.md]\nmax_line_length = 111\nindent_size = 4\n",
+    )
+    .unwrap();
+
+    let md_file = project.join("test.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let config = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(config.global.line_length.get(), 111, "max_line_length should apply");
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        Some(4),
+        "indent_size should apply"
+    );
+}
+
+/// The config cache is keyed by directory, but `.editorconfig` sections can name
+/// a single file. Two neighbours must still resolve to their own settings.
+#[tokio::test]
+async fn test_resolve_config_applies_editorconfig_sections_per_file() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.join("project");
+    let user_config_dir = root.join("xdg");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&project).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    fs::write(project.join(".rumdl.toml"), "[global]\neditorconfig = true\n").unwrap();
+    fs::write(
+        project.join(".editorconfig"),
+        "root = true\n[narrow.md]\nmax_line_length = 40\n[wide.md]\nmax_line_length = 120\n",
+    )
+    .unwrap();
+
+    let narrow = project.join("narrow.md");
+    let wide = project.join("wide.md");
+    fs::write(&narrow, "").unwrap();
+    fs::write(&wide, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    // Resolve the cached directory entry first, so the second file is answered
+    // from the cache: that is where a per-directory answer would leak.
+    let narrow_config = server
+        .resolve_config_for_file_impl(&narrow, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    let wide_config = server
+        .resolve_config_for_file_impl(&wide, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(narrow_config.global.line_length.get(), 40);
+    assert_eq!(
+        wide_config.global.line_length.get(),
+        120,
+        "a cache hit must not reuse the neighbour's section"
+    );
+}
+
+/// Build a project whose config opts into `.editorconfig` when asked to, and a
+/// server that has already resolved the file's config once.
+#[cfg(test)]
+async fn server_with_resolved_editorconfig_project(opt_in: bool) -> (tempfile::TempDir, RumdlLanguageServer, PathBuf) {
+    use std::fs;
+
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().canonicalize().unwrap();
+
+    let rumdl_toml = if opt_in {
+        "[global]\neditorconfig = true\n"
+    } else {
+        "[global]\n"
+    };
+    fs::write(project.join(".rumdl.toml"), rumdl_toml).unwrap();
+    fs::write(
+        project.join(".editorconfig"),
+        "root = true\n[*.md]\nmax_line_length = 40\n",
+    )
+    .unwrap();
+    let md_file = project.join("doc.md");
+    fs::write(&md_file, "# Title\n").unwrap();
+
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(project.clone());
+    server.resolve_config_for_file(&md_file).await;
+    assert!(
+        !server.config_cache.read().await.is_empty(),
+        "the resolved config is what the change under test has to invalidate"
+    );
+
+    (temp, server, project)
+}
+
+fn editorconfig_changed(project: &std::path::Path) -> DidChangeWatchedFilesParams {
+    DidChangeWatchedFilesParams {
+        changes: vec![FileEvent {
+            uri: Url::from_file_path(project.join(".editorconfig")).unwrap(),
+            typ: FileChangeType::CHANGED,
+        }],
+    }
+}
+
+/// An `.editorconfig` edit changes what the editor should report, so it has to
+/// invalidate the cached configs the way any other config file does.
+#[tokio::test]
+async fn test_editorconfig_change_invalidates_the_config_cache() {
+    use tower_lsp::LanguageServer;
+
+    let (_temp, server, project) = server_with_resolved_editorconfig_project(true).await;
+
+    server.did_change_watched_files(editorconfig_changed(&project)).await;
+
+    assert!(
+        server.config_cache.read().await.is_empty(),
+        "an opted-in workspace must re-resolve after its .editorconfig changes"
+    );
+}
+
+/// Without the opt-in the file supplies nothing, so an edit to it cannot change
+/// a result and must not throw away work.
+#[tokio::test]
+async fn test_editorconfig_change_is_ignored_without_the_opt_in() {
+    use tower_lsp::LanguageServer;
+
+    let (_temp, server, project) = server_with_resolved_editorconfig_project(false).await;
+
+    server.did_change_watched_files(editorconfig_changed(&project)).await;
+
+    assert!(
+        !server.config_cache.read().await.is_empty(),
+        "a file rumdl does not read cannot invalidate anything"
+    );
+}
+
 /// Regression test for rumdl-vscode#115: an opt-in rule enabled via
 /// `extend-enable` in a `.config/rumdl.toml` at a parent directory must fire
 /// from the LSP, matching CLI behaviour.

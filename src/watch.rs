@@ -16,8 +16,12 @@ pub enum ChangeKind {
     SourceFile,
 }
 
-/// Detects what kind of change occurred based on the file extension
-pub fn change_detected(event: &Event) -> Option<ChangeKind> {
+/// Detects what kind of change occurred based on the file extension.
+///
+/// `editorconfig` is the current config's opt-in. An `.editorconfig` counts as a
+/// configuration file only while rumdl reads it, so a project that never opted in
+/// is not re-linted for an edit that cannot change its result.
+pub fn change_detected(event: &Event, editorconfig: bool) -> Option<ChangeKind> {
     // Skip access and other non-modification events
     if !matches!(
         event.kind,
@@ -31,7 +35,8 @@ pub fn change_detected(event: &Event) -> Option<ChangeKind> {
         // Check if this is a configuration file
         if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
             && (matches!(file_name, ".rumdl.toml" | "rumdl.toml" | "pyproject.toml")
-                || MARKDOWNLINT_CONFIG_FILES.contains(&file_name))
+                || MARKDOWNLINT_CONFIG_FILES.contains(&file_name)
+                || (editorconfig && file_name == ".editorconfig"))
         {
             return Some(ChangeKind::Configuration);
         }
@@ -91,8 +96,11 @@ pub fn run_watch_mode(
     // Extract project_root before converting to Config (for exclude pattern resolution)
     let mut project_root = sourced.project_root.clone();
 
-    // Convert to Config (watch mode doesn't need validation warnings)
-    let mut config: rumdl_config::Config = sourced.clone().into_validated_unchecked().into();
+    // Convert to Config (watch mode doesn't need validation warnings). The
+    // validated sourced form is kept alongside it for `.editorconfig` layering,
+    // which needs each setting's provenance.
+    let mut validated = sourced.clone().into_validated_unchecked();
+    let mut config: rumdl_config::Config = validated.clone().into();
 
     // Configure the file watcher
     let (tx, rx) = channel();
@@ -137,9 +145,10 @@ pub fn run_watch_mode(
     println!();
 
     let explicit_config = global_config_path.is_some();
-    let _outcome = perform_check_run(&CheckRunContext {
+    let outcome = perform_check_run(&CheckRunContext {
         args,
         config: &config,
+        sourced: &validated,
         quiet,
         cache: None,
         workspace_cache_dir: None,
@@ -156,6 +165,12 @@ pub fn run_watch_mode(
         println!("\n{}", "Watching for file changes...".cyan());
     }
 
+    // Whether an `.editorconfig` edit can change a result here. The opt-in may
+    // live in a subdirectory config, which only the run itself resolves, so it
+    // is read back from the run as well as from the root config: a run that
+    // linted nothing answers for no subdirectory.
+    let mut reads_editorconfig = config.global.editorconfig || outcome.reads_editorconfig;
+
     // Main watch loop with improved debouncing
     let debounce_duration = Duration::from_millis(100); // 100ms debounce - responsive while catching most duplicate events
 
@@ -165,7 +180,7 @@ pub fn run_watch_mode(
                 match event_result {
                     Ok(first_event) => {
                         // Check what kind of change occurred
-                        let Some(mut change_kind) = change_detected(&first_event) else {
+                        let Some(mut change_kind) = change_detected(&first_event, reads_editorconfig) else {
                             continue;
                         };
 
@@ -175,7 +190,7 @@ pub fn run_watch_mode(
                             // Try to receive more events with a short timeout
                             if let Ok(Ok(event)) = rx.recv_timeout(Duration::from_millis(10)) {
                                 // If we get a config change, that takes priority
-                                if let Some(kind) = change_detected(&event)
+                                if let Some(kind) = change_detected(&event, reads_editorconfig)
                                     && matches!(kind, ChangeKind::Configuration)
                                 {
                                     change_kind = ChangeKind::Configuration;
@@ -208,7 +223,8 @@ pub fn run_watch_mode(
 
                             // Update project_root from reloaded config
                             project_root = sourced.project_root.clone();
-                            config = sourced.clone().into_validated_unchecked().into();
+                            validated = sourced.clone().into_validated_unchecked();
+                            config = validated.clone().into();
                         }
 
                         // Build the header message before clearing
@@ -232,9 +248,10 @@ pub fn run_watch_mode(
                         let _ = io::stdout().flush();
 
                         // Re-run the check
-                        let _outcome = perform_check_run(&CheckRunContext {
+                        let outcome = perform_check_run(&CheckRunContext {
                             args,
                             config: &config,
+                            sourced: &validated,
                             quiet,
                             cache: None,
                             workspace_cache_dir: None,
@@ -246,6 +263,7 @@ pub fn run_watch_mode(
                             // Watch never owns a process exit; the flag does not apply.
                             external_config_warning: false,
                         });
+                        reads_editorconfig = config.global.editorconfig || outcome.reads_editorconfig;
                         if !quiet {
                             println!("\n{}", "Watching for file changes...".cyan());
                         }
@@ -260,5 +278,70 @@ pub fn run_watch_mode(
                 crate::exit::tool_error();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{CreateKind, ModifyKind};
+    use std::path::PathBuf;
+
+    fn modified(path: &str) -> Event {
+        Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![PathBuf::from(path)],
+            attrs: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_markdown_edit_is_a_source_change() {
+        assert!(matches!(
+            change_detected(&modified("docs/guide.md"), false),
+            Some(ChangeKind::SourceFile)
+        ));
+    }
+
+    #[test]
+    fn a_rumdl_config_edit_is_a_configuration_change() {
+        assert!(matches!(
+            change_detected(&modified(".rumdl.toml"), false),
+            Some(ChangeKind::Configuration)
+        ));
+    }
+
+    #[test]
+    fn an_editorconfig_edit_is_a_configuration_change_when_rumdl_reads_it() {
+        assert!(
+            matches!(
+                change_detected(&modified("docs/.editorconfig"), true),
+                Some(ChangeKind::Configuration)
+            ),
+            "an opted-in project must re-lint when its .editorconfig changes"
+        );
+    }
+
+    #[test]
+    fn an_editorconfig_edit_is_ignored_when_rumdl_does_not_read_it() {
+        assert!(
+            change_detected(&modified(".editorconfig"), false).is_none(),
+            "without the opt-in the file cannot change the result, so it must not trigger a run"
+        );
+    }
+
+    #[test]
+    fn a_file_rumdl_never_lints_is_ignored() {
+        assert!(change_detected(&modified("src/main.rs"), true).is_none());
+    }
+
+    #[test]
+    fn a_new_editorconfig_counts_like_an_edited_one() {
+        let event = Event {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![PathBuf::from(".editorconfig")],
+            attrs: Default::default(),
+        };
+        assert!(matches!(change_detected(&event, true), Some(ChangeKind::Configuration)));
     }
 }

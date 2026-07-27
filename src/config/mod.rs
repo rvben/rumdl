@@ -11,6 +11,12 @@ pub use types::*;
 pub mod source_tracking;
 pub use source_tracking::*;
 
+/// `.editorconfig` reading. Needs a real filesystem to walk, so it is absent
+/// from the browser wasm build; there `editorconfig = true` parses and has
+/// nothing to find.
+#[cfg(feature = "ec4rs")]
+pub mod editorconfig;
+
 mod loading;
 // Re-exported for the native LSP (`lsp::configuration`), the only cross-module
 // consumer; gated so non-native builds (e.g. wasm/WASI) don't warn on it.

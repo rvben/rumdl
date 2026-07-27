@@ -5,11 +5,12 @@
 //! the Ruff model: subdirectory configs are standalone by default, and
 //! users can use `extends` for inheritance.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rumdl_lib::config as rumdl_config;
+use rumdl_lib::config::editorconfig::{self, EditorConfigSettings, EditorConfigWarning};
 use rumdl_lib::rule::Rule;
 
 use crate::cache::LintCache;
@@ -21,6 +22,17 @@ pub struct ConfigGroup {
     pub rules: Vec<Box<dyn Rule>>,
     pub cache_hashes: Option<Arc<CacheHashes>>,
     pub files: Vec<String>,
+}
+
+/// The run's root configuration, in both the forms grouping needs.
+///
+/// `config` is what every file falls back to. `sourced` is the same
+/// configuration with provenance intact, which `.editorconfig` layers into: it
+/// can only fill in a setting no rumdl config mentions, and that distinction
+/// exists solely in the sourced form.
+pub struct RootConfig<'a> {
+    pub config: &'a rumdl_config::Config,
+    pub sourced: &'a rumdl_config::SourcedConfig<rumdl_config::ConfigValidated>,
 }
 
 /// The two roots that anchor config resolution for a run.
@@ -91,26 +103,19 @@ fn is_root_level_config(config_path: &Path, project_root: &Path) -> bool {
 /// See [`ResolutionRoots`] for how the grouping root and project root relate.
 pub fn resolve_config_groups(
     file_paths: &[String],
-    root_config: &rumdl_config::Config,
+    root: &RootConfig<'_>,
     args: &crate::CheckArgs,
     roots: &ResolutionRoots<'_>,
     inline_overrides: &[toml::Table],
     cache: &Option<Arc<LintCache>>,
     bypass_discovery: bool,
-) -> Vec<ConfigGroup> {
+) -> ResolvedGroups {
+    let mut grouping = Grouping::default();
+
     // Fast path: discovery bypassed or no grouping root; all files use the root config
     if bypass_discovery || roots.grouping_root.is_none() {
-        let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, root_config);
-        let cache_hashes = cache
-            .as_ref()
-            .map(|_| Arc::new(CacheHashes::new(root_config, &enabled_rules)));
-
-        return vec![ConfigGroup {
-            config: root_config.clone(),
-            rules: enabled_rules,
-            cache_hashes,
-            files: file_paths.to_vec(),
-        }];
+        grouping.push_groups(root.sourced, root.config.clone(), file_paths.to_vec(), args, cache);
+        return grouping.finish();
     }
 
     let grouping_root = roots.grouping_root.unwrap();
@@ -142,23 +147,11 @@ pub fn resolve_config_groups(
             .push(file_path.clone());
     }
 
-    let mut groups = Vec::new();
-
     for (config_path, files) in file_config_map {
         match config_path {
             None => {
                 // Root config group
-                let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, root_config);
-                let cache_hashes = cache
-                    .as_ref()
-                    .map(|_| Arc::new(CacheHashes::new(root_config, &enabled_rules)));
-
-                groups.push(ConfigGroup {
-                    config: root_config.clone(),
-                    rules: enabled_rules,
-                    cache_hashes,
-                    files,
-                });
+                grouping.push_groups(root.sourced, root.config.clone(), files, args, cache);
             }
             Some(path) => {
                 // Subdirectory config group. Base its per-file globs on the real
@@ -174,21 +167,11 @@ pub fn resolve_config_groups(
                         // (as the global config does), then convert and apply the
                         // flavor / gitignore overrides that take effect everywhere.
                         crate::cli_config_override::apply_inline_overrides(&mut sourced, inline_overrides);
-                        let mut subdir_config: rumdl_config::Config = sourced.into_validated_unchecked().into();
+                        let sourced = sourced.into_validated_unchecked();
+                        let mut subdir_config: rumdl_config::Config = sourced.clone().into();
                         apply_cli_config_overrides(&mut subdir_config, args);
 
-                        let enabled_rules =
-                            crate::file_processor::get_enabled_rules_from_checkargs(args, &subdir_config);
-                        let cache_hashes = cache
-                            .as_ref()
-                            .map(|_| Arc::new(CacheHashes::new(&subdir_config, &enabled_rules)));
-
-                        groups.push(ConfigGroup {
-                            config: subdir_config,
-                            rules: enabled_rules,
-                            cache_hashes,
-                            files,
-                        });
+                        grouping.push_groups(&sourced, subdir_config, files, args, cache);
                     }
                     Err(e) => {
                         // Config validation error in subdirectory: fall back to root config
@@ -198,24 +181,229 @@ pub fn resolve_config_groups(
                             e
                         );
 
-                        let enabled_rules = crate::file_processor::get_enabled_rules_from_checkargs(args, root_config);
-                        let cache_hashes = cache
-                            .as_ref()
-                            .map(|_| Arc::new(CacheHashes::new(root_config, &enabled_rules)));
-
-                        groups.push(ConfigGroup {
-                            config: root_config.clone(),
-                            rules: enabled_rules,
-                            cache_hashes,
-                            files,
-                        });
+                        grouping.push_groups(root.sourced, root.config.clone(), files, args, cache);
                     }
                 }
             }
         }
     }
 
-    groups
+    grouping.finish()
+}
+
+/// The config groups a run resolved to, and whether resolving them turned up a
+/// configuration problem.
+pub struct ResolvedGroups {
+    pub groups: Vec<ConfigGroup>,
+    /// Set when an `.editorconfig` property was read but could not be applied.
+    /// Reported like rumdl's own config warnings, and counted the same way by
+    /// `--deny-config-warnings`.
+    pub config_warning: bool,
+}
+
+/// The groups being built, plus the state that spans them.
+#[derive(Default)]
+struct Grouping {
+    groups: Vec<ConfigGroup>,
+    /// The `.editorconfig` messages already printed, so one covering many files
+    /// is reported once for the run rather than once per group.
+    reported: BTreeSet<String>,
+    config_warning: bool,
+}
+
+impl Grouping {
+    fn finish(self) -> ResolvedGroups {
+        ResolvedGroups {
+            groups: self.groups,
+            config_warning: self.config_warning,
+        }
+    }
+
+    /// Build the config groups for a set of files that share one rumdl config.
+    ///
+    /// That is a single group unless the config opts into `.editorconfig`
+    /// reading, in which case the files are sub-grouped by the properties
+    /// resolved for each: section globs and nested `.editorconfig` files can
+    /// give two files in the same directory different settings, so the grouping
+    /// has to be per file even though the rules are instantiated per group.
+    fn push_groups(
+        &mut self,
+        base: &rumdl_config::SourcedConfig<rumdl_config::ConfigValidated>,
+        base_config: rumdl_config::Config,
+        files: Vec<String>,
+        args: &crate::CheckArgs,
+        cache: &Option<Arc<LintCache>>,
+    ) {
+        if !base_config.global.editorconfig {
+            self.groups.push(build_group(base_config, files, args, cache));
+            return;
+        }
+
+        // Keyed by the resolved settings so files resolving identically share one
+        // config, and by a `BTreeMap` so the group order is the same on every run.
+        let mut by_settings: BTreeMap<(EditorConfigSettings, Option<String>), SettingsGroup> = BTreeMap::new();
+
+        for file in files {
+            let resolution = editorconfig::resolve(Path::new(&file));
+            let group = by_settings.entry((resolution.settings, resolution.origin)).or_default();
+            group
+                .warnings
+                .extend(resolution.warnings.into_iter().map(|warning| (file.clone(), warning)));
+            group.files.push(file);
+        }
+
+        for ((settings, origin), group) in by_settings {
+            let config = config_with_editorconfig(base, &base_config, &settings, origin.as_deref(), args);
+            let built = build_group(config, group.files, args, cache);
+            self.config_warning |=
+                report_editorconfig_warnings(&group.warnings, &built.rules, &built.config, &mut self.reported, args);
+            self.groups.push(built);
+        }
+    }
+}
+
+/// The files that resolved to one set of `.editorconfig` settings, along with the
+/// warnings those resolutions raised.
+///
+/// Each warning keeps the file it came from: whether it is worth reporting
+/// depends on the rules that run for that one file, and `per-file-ignores` can
+/// make those differ from the ones its group-mates run.
+#[derive(Default)]
+struct SettingsGroup {
+    files: Vec<String>,
+    warnings: Vec<(String, EditorConfigWarning)>,
+}
+
+/// Layer a file's resolved `.editorconfig` settings onto the config it would
+/// otherwise use.
+fn config_with_editorconfig(
+    base: &rumdl_config::SourcedConfig<rumdl_config::ConfigValidated>,
+    base_config: &rumdl_config::Config,
+    settings: &EditorConfigSettings,
+    origin: Option<&str>,
+    args: &crate::CheckArgs,
+) -> rumdl_config::Config {
+    if settings.is_empty() {
+        return base_config.clone();
+    }
+
+    let mut sourced = base.clone();
+    editorconfig::apply(&mut sourced, settings, origin);
+    let mut config: rumdl_config::Config = sourced.into();
+    apply_cli_config_overrides(&mut config, args);
+    config
+}
+
+/// Whether the rule a warning names runs for the file that raised it: enabled by
+/// that file's config, and left on for its path by `per-file-ignores`.
+///
+/// This is the decision `filter_rules_for_file` makes before linting, asked
+/// without cloning a rule set that is only being consulted.
+fn rule_runs_for(rule: &str, rules: &[Box<dyn Rule>], config: &rumdl_config::Config, path: &Path) -> bool {
+    rules.iter().any(|candidate| candidate.name() == rule) && !config.get_ignored_rules_for_file(path).contains(rule)
+}
+
+/// Report the `.editorconfig` properties rumdl read but does not act on, and
+/// answer whether any of them counts as a configuration problem.
+///
+/// A warning naming a rule is only true while that rule runs for the file that
+/// raised it, so it is dropped otherwise. The rest count whether or not they are
+/// printed, so `--silent` suppresses the output without changing what
+/// `--deny-config-warnings` sees. `reported` carries the messages already
+/// printed: one `.editorconfig` typically covers many files, and repeating a
+/// message once per file would bury the lint output.
+fn report_editorconfig_warnings(
+    warnings: &[(String, EditorConfigWarning)],
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    reported: &mut BTreeSet<String>,
+    args: &crate::CheckArgs,
+) -> bool {
+    let mut problem = false;
+    for (file, warning) in warnings {
+        if let Some(rule) = warning.rule
+            && !rule_runs_for(rule, rules, config, Path::new(file))
+        {
+            continue;
+        }
+        problem = true;
+        if !args.silent && reported.insert(warning.message.clone()) {
+            eprintln!("\x1b[33m[config warning]\x1b[0m {}", warning.message);
+        }
+    }
+    problem
+}
+
+/// The configuration content piped in on stdin is linted with.
+pub struct StdinConfig {
+    pub config: rumdl_config::Config,
+    pub rules: Vec<Box<dyn Rule>>,
+    /// Set when an `.editorconfig` property was read but could not be applied.
+    pub config_warning: bool,
+}
+
+/// Resolve the configuration for content piped in on stdin.
+///
+/// `--stdin-filename` names a file in the project, and the rest of the stdin
+/// path already treats it as one for per-file ignores and flavor, so the
+/// `.editorconfig` that applies to that file applies to this content too.
+/// Without a filename there is no file to resolve properties for. Per-directory
+/// rumdl configs are deliberately not discovered here: that is the caller's
+/// decision, unchanged by this.
+pub fn resolve_stdin_config(root: &RootConfig<'_>, args: &crate::CheckArgs) -> StdinConfig {
+    let file = args
+        .stdin_filename
+        .as_deref()
+        .filter(|_| root.config.global.editorconfig);
+
+    let Some(file) = file else {
+        return StdinConfig {
+            rules: crate::file_processor::get_enabled_rules_from_checkargs(args, root.config),
+            config: root.config.clone(),
+            config_warning: false,
+        };
+    };
+
+    let resolution = editorconfig::resolve(Path::new(file));
+    let config = config_with_editorconfig(
+        root.sourced,
+        root.config,
+        &resolution.settings,
+        resolution.origin.as_deref(),
+        args,
+    );
+    let rules = crate::file_processor::get_enabled_rules_from_checkargs(args, &config);
+
+    let warnings: Vec<(String, EditorConfigWarning)> = resolution
+        .warnings
+        .into_iter()
+        .map(|warning| (file.to_string(), warning))
+        .collect();
+    let config_warning = report_editorconfig_warnings(&warnings, &rules, &config, &mut BTreeSet::new(), args);
+
+    StdinConfig {
+        config,
+        rules,
+        config_warning,
+    }
+}
+
+/// Instantiate the rules and cache hashes a config implies.
+fn build_group(
+    config: rumdl_config::Config,
+    files: Vec<String>,
+    args: &crate::CheckArgs,
+    cache: &Option<Arc<LintCache>>,
+) -> ConfigGroup {
+    let rules = crate::file_processor::get_enabled_rules_from_checkargs(args, &config);
+    let cache_hashes = cache.as_ref().map(|_| Arc::new(CacheHashes::new(&config, &rules)));
+
+    ConfigGroup {
+        config,
+        rules,
+        cache_hashes,
+        files,
+    }
 }
 
 /// Discover the config file for a directory, using and populating the cache.

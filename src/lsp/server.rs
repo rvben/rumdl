@@ -13,7 +13,7 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::config::{Config, is_valid_rule_name};
+use crate::config::{Config, ConfigValidated, SourcedConfig, is_valid_rule_name};
 use crate::discovery::{ExcludeMatchers, is_markdown_extension};
 use crate::lsp::index_worker::IndexWorker;
 use crate::lsp::types::{IndexState, IndexUpdate, LspRuleSettings, RumdlLspConfig};
@@ -65,6 +65,11 @@ pub(crate) struct DocumentEntry {
 pub(crate) struct ConfigCacheEntry {
     /// The resolved configuration
     pub(crate) config: Config,
+    /// The same configuration with provenance intact, kept only when it opts
+    /// into `.editorconfig` reading. That layering is per file (a section glob
+    /// can match one file in a directory and not its neighbour) while this cache
+    /// is per directory, so the sourced form has to survive the cache hit.
+    pub(crate) sourced: Option<Arc<SourcedConfig<ConfigValidated>>>,
     /// Config file path that was loaded (for invalidation)
     pub(crate) config_file: Option<PathBuf>,
     /// True if this entry came from the global/user fallback (no project config)
@@ -87,6 +92,9 @@ pub struct RumdlLanguageServer {
     pub(crate) config: Arc<RwLock<RumdlLspConfig>>,
     /// Rumdl core configuration (fallback/default)
     pub(crate) rumdl_config: Arc<RwLock<Config>>,
+    /// `rumdl_config` with provenance intact, kept only when it opts into
+    /// `.editorconfig` reading; written wherever `rumdl_config` is.
+    pub(crate) rumdl_sourced: Arc<RwLock<Option<Arc<SourcedConfig<ConfigValidated>>>>>,
     /// Document store for open files and cached disk files
     pub(crate) documents: Arc<RwLock<HashMap<Url, DocumentEntry>>>,
     /// Workspace root folders from the client
@@ -148,6 +156,7 @@ impl RumdlLanguageServer {
             client,
             config: Arc::new(RwLock::new(initial_config)),
             rumdl_config,
+            rumdl_sourced: Arc::new(RwLock::new(None)),
             documents: Arc::new(RwLock::new(HashMap::new())),
             workspace_roots,
             config_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -417,6 +426,9 @@ impl LanguageServer for RumdlLanguageServer {
             "**/*.qmd",
             "**/*.rmd",
         ];
+        // `.editorconfig` is subscribed to unconditionally: a project can opt in
+        // after the client registered these, and the handler decides whether an
+        // event counts.
         let config_patterns = [
             "**/.rumdl.toml",
             "**/rumdl.toml",
@@ -424,6 +436,7 @@ impl LanguageServer for RumdlLanguageServer {
             "**/.markdownlint.json",
             "**/.markdownlint-cli2.yaml",
             "**/.markdownlint-cli2.jsonc",
+            "**/.editorconfig",
         ];
         let watchers: Vec<_> = markdown_patterns
             .iter()
@@ -972,6 +985,9 @@ impl LanguageServer for RumdlLanguageServer {
         ];
 
         let mut config_changed = false;
+        // An `.editorconfig` supplies settings only while a config opts into
+        // reading it, so it is a config file here only in a workspace that did.
+        let reads_editorconfig = self.reads_editorconfig().await;
 
         for change in &params.changes {
             if let Ok(path) = change.uri.to_file_path() {
@@ -979,7 +995,7 @@ impl LanguageServer for RumdlLanguageServer {
 
                 // Handle config file changes
                 if let Some(name) = file_name
-                    && CONFIG_FILES.contains(&name)
+                    && (CONFIG_FILES.contains(&name) || (reads_editorconfig && name == ".editorconfig"))
                     && !config_changed
                 {
                     log::info!("Config file changed: {}, invalidating config cache", path.display());

@@ -162,7 +162,10 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
 
     // 5. Convert to Config for the rest of the linter
     // Validation warnings are already printed above, so we use into_validated_unchecked
-    let config: rumdl_config::Config = sourced.into_validated_unchecked().into();
+    // The sourced form is kept alongside it: `.editorconfig` layers into that one,
+    // where a setting's provenance still says whether a rumdl config set it.
+    let sourced = sourced.into_validated_unchecked();
+    let config: rumdl_config::Config = sourced.clone().into();
 
     // 6. Initialize cache if enabled
     // CLI --no-cache flag takes precedence over config
@@ -198,6 +201,7 @@ pub fn run_check(args: &CheckArgs, global_config_path: Option<&str>, isolated: b
     let ctx = crate::check_runner::CheckRunContext {
         args,
         config: &config,
+        sourced: &sourced,
         quiet,
         cache,
         workspace_cache_dir,
