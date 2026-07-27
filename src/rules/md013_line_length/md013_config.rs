@@ -74,6 +74,20 @@ pub struct MD013Config {
     #[serde(default = "default_headings")]
     pub headings: bool,
 
+    /// Check display-math blocks for line length (default: true)
+    ///
+    /// A `$$ ... $$` block is unbreakable in the same way a code block or a table
+    /// row is: LaTeX cannot be wrapped without changing the equation. When
+    /// `false`, lines that hold nothing but display math are not reported. This
+    /// covers both a multi-line block and a whole line that is one complete
+    /// `$$...$$` span, delimiter lines included, matching how `code-blocks =
+    /// false` also exempts the surrounding fences.
+    ///
+    /// Inline `$...$` math is not covered, for the same reason `code-spans` is a
+    /// separate key from `code-blocks`.
+    #[serde(default = "default_math_blocks")]
+    pub math_blocks: bool,
+
     /// Check paragraph/text line length (default: true)
     /// When false, line length violations in regular text are not reported,
     /// but reflow can still be used to format paragraphs.
@@ -193,6 +207,10 @@ fn default_headings() -> bool {
     true
 }
 
+fn default_math_blocks() -> bool {
+    true
+}
+
 fn default_paragraphs() -> bool {
     true
 }
@@ -221,6 +239,7 @@ impl Default for MD013Config {
             code_spans: default_code_spans(),
             tables: default_tables(),
             headings: default_headings(),
+            math_blocks: default_math_blocks(),
             paragraphs: default_paragraphs(),
             blockquotes: default_blockquotes(),
             strict: false,
@@ -413,6 +432,7 @@ mod tests {
             require_sentence_capital: true,
             ignore_link_urls: true,
             atomic_spans: true,
+            ..Default::default()
         };
 
         let toml_str = toml::to_string(&config).unwrap();

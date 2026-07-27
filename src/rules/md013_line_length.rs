@@ -61,6 +61,7 @@ impl MD013LineLength {
                 code_spans: true,
                 tables,
                 headings,
+                math_blocks: true,
                 paragraphs: true,  // Default to true for backwards compatibility
                 blockquotes: true, // Default to true for backwards compatibility
                 strict,
@@ -262,6 +263,13 @@ impl Rule for MD013LineLength {
                 }
                 if let Some(headings) = obj.get("headings").and_then(serde_json::Value::as_bool) {
                     config.headings = headings;
+                }
+                if let Some(math_blocks) = obj
+                    .get("math_blocks")
+                    .or_else(|| obj.get("math-blocks"))
+                    .and_then(serde_json::Value::as_bool)
+                {
+                    config.math_blocks = math_blocks;
                 }
                 if let Some(blockquotes) = obj.get("blockquotes").and_then(serde_json::Value::as_bool) {
                     config.blockquotes = blockquotes;
@@ -516,6 +524,7 @@ impl Rule for MD013LineLength {
                     || (!effective_config.code_blocks
                         && ctx.line_info(line_number).is_some_and(|info| info.in_code_block))
                     || (!effective_config.tables && table_lines_set.contains(&line_number))
+                    || (!effective_config.math_blocks && self.line_is_display_math(line_number, ctx))
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_block)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_html_comment)
                     || ctx.line_info(line_number).is_some_and(|info| info.in_esm_block)
@@ -726,13 +735,18 @@ impl Rule for MD013LineLength {
 }
 
 impl MD013LineLength {
-    /// True when `line_num` (1-indexed) falls inside a display-math block that
-    /// spans more than one line.
-    ///
-    /// Line breaks carry meaning inside such a block: a TeX `%` comment runs to
-    /// the end of its line, so joining the lines pulls whatever followed on later
-    /// lines into the comment and drops it from the rendered equation, which can
-    /// also leave an environment unclosed.
+    /// True when `line_num` (1-indexed) sits inside a `$$` span covering more
+    /// than one line, as seen by the byte-level math parser.
+    fn line_in_multiline_math_span(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        ctx.math_spans()
+            .iter()
+            .any(|span| span.is_display && span.end_line > span.line && (span.line..=span.end_line).contains(&line_num))
+    }
+
+    /// True when `line_num` (1-indexed) holds nothing but display math, whether
+    /// that is one line of a multi-line block, a delimiter line, or a whole line
+    /// that is a single complete `$$...$$` span. This is what `math-blocks =
+    /// false` exempts from the length check.
     ///
     /// rumdl models math twice and the two models miss different containers, so
     /// this consults both. `math_spans()` is byte-level and sees a block opened on
@@ -740,20 +754,30 @@ impl MD013LineLength {
     /// line does not begin with `$$`. `LineInfo::in_math_block` is line-level and
     /// sees a four-space-indented block inside a footnote, which the byte-level
     /// parser reads as an indented code block. Taking the union only ever adds
-    /// protection: neither signal fires on ordinary prose.
-    ///
-    /// The line-level flag also marks a whole line that is one complete
-    /// `$$...$$` span. That case is excluded, because such a line is a single
-    /// atomic element reflow can move around freely; only a multi-line block has
-    /// meaningful internal line breaks. An unmatched `$$` opener is flagged by
-    /// neither model, so a stray delimiter cannot make the rest of the document
-    /// verbatim.
-    fn line_in_multiline_math_block(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
-        let in_multiline_span = ctx.math_spans().iter().any(|span| {
-            span.is_display && span.end_line > span.line && (span.line..=span.end_line).contains(&line_num)
-        });
+    /// coverage: neither signal fires on ordinary prose, and an unmatched `$$`
+    /// opener is flagged by neither, so a stray delimiter cannot exempt the rest
+    /// of the document.
+    fn line_is_display_math(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        self.line_in_multiline_math_span(line_num, ctx)
+            || ctx.line_info(line_num).is_some_and(|info| info.in_math_block)
+    }
 
-        in_multiline_span
+    /// True when `line_num` (1-indexed) falls inside a display-math block that
+    /// spans more than one line.
+    ///
+    /// Line breaks carry meaning inside such a block: a TeX `%` comment runs to
+    /// the end of its line, so joining the lines pulls whatever followed on later
+    /// lines into the comment and drops it from the rendered equation, which can
+    /// also leave an environment unclosed. Reflow therefore leaves these blocks
+    /// alone regardless of the `math_blocks` setting, which governs only whether
+    /// their length is reported.
+    ///
+    /// This is `line_is_display_math` minus the case of a whole line that is one
+    /// complete `$$...$$` span: such a line is a single atomic element reflow can
+    /// move around freely, and only a multi-line block has meaningful internal
+    /// line breaks.
+    fn line_in_multiline_math_block(&self, line_num: usize, ctx: &crate::lint_context::LintContext) -> bool {
+        self.line_in_multiline_math_span(line_num, ctx)
             || ctx.line_info(line_num).is_some_and(|info| {
                 info.in_math_block && !Self::is_self_contained_display_math_line(info.content(ctx.content))
             })

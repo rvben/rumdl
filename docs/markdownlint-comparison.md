@@ -385,6 +385,8 @@ boundaries.
 more selectively. rumdl supports markdownlint's `stern`, `heading_line_length`, and `code_block_line_length` options for context-specific limits and a stricter trailing-token policy. One known
 divergence: markdownlint exempts heading lines that contain any link, autolink, or image (its `linkOnlyLineNumbers` covers headings because heading text is not classified as paragraph data); rumdl
 applies its URL/inline-link suppression to heading lines but does not exempt heading lines that contain bare autolinks. Affected lines can be tagged with `<!-- rumdl-disable-line MD013 -->` if needed.
+rumdl also adds a `math-blocks` option (default `true`) that exempts display-math (`$$ ... $$`) lines from the length check, and never reflows a multi-line math block, since LaTeX cannot be rewrapped
+without changing the equation. markdownlint has no math-aware handling here.
 
 **MD027 (no-multiple-space-blockquote):** rumdl's `list-items` option defaults to `false`; markdownlint's `list_items` defaults to `true`. List items inside blockquotes inherently need extra
 indentation (`>  - item`, continuation lines), so flagging them by default produces noise. Set `list-items = true` to opt into strict markdownlint behavior.

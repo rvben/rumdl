@@ -196,6 +196,188 @@ fn over_long_math_line_is_still_reported_and_not_fixable() {
     );
 }
 
+/// A math row long enough to be reported at a 40-column limit.
+const LONG_MATH_ROW: &str = "E &= mc^2 + xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \\\\";
+
+/// Run `rumdl check` at a 40-column limit with `extra` appended to `[MD013]` and
+/// return the reported MD013 lines.
+fn md013_findings(dir: &Path, content: &str, extra: &[&str]) -> Vec<String> {
+    let file_path = dir.join("test.md");
+    fs::write(&file_path, content).unwrap();
+
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"));
+    cmd.arg("check")
+        .arg("--no-config")
+        .arg("--no-cache")
+        .arg("-c")
+        .arg("MD013.line-length = 40");
+    for setting in extra {
+        cmd.arg("-c").arg(setting);
+    }
+    let output = cmd.arg(&file_path).output().expect("Failed to execute rumdl");
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| line.contains("[MD013]"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Every container a display-math block can sit in, each with one over-long math
+/// row and one over-long prose line. The prose line is the per-case control: it
+/// must still be reported, so a `math-blocks` implementation that simply
+/// silenced the file cannot pass.
+fn math_and_prose_documents() -> Vec<(&'static str, String)> {
+    vec![
+        (
+            "multi-line block",
+            format!("{LONG_PROSE}\n\n$$\n\\begin{{aligned}}\n{LONG_MATH_ROW}\nF &= ma\n\\end{{aligned}}\n$$\n"),
+        ),
+        (
+            "whole line that is one span",
+            format!("{LONG_PROSE}\n\n$$ {LONG_MATH_ROW} $$\n"),
+        ),
+        (
+            "block opening on the list marker line",
+            format!("{LONG_PROSE}\n\n- $$\n  {LONG_MATH_ROW}\n  $$\n"),
+        ),
+        (
+            "block in a footnote",
+            format!("{LONG_PROSE}\n\n[^a]: note\n\n    $$\n    {LONG_MATH_ROW}\n    $$\n"),
+        ),
+    ]
+}
+
+/// `math-blocks = false` stops the length of display-math lines being reported,
+/// in every container, under both spellings of the key. Config keys are
+/// normalized to lowercase kebab-case before deserialization, so both must work.
+#[test]
+fn math_blocks_false_exempts_display_math_lines() {
+    for (name, content) in math_and_prose_documents() {
+        for spelling in ["MD013.math-blocks = false", "MD013.math_blocks = false"] {
+            let dir = TempDir::new().unwrap();
+            let findings = md013_findings(dir.path(), &content, &[spelling]);
+            assert_eq!(
+                findings.len(),
+                1,
+                "{name} with `{spelling}` should report only the prose line, got {findings:?}"
+            );
+            assert!(
+                findings[0].contains("test.md:1:"),
+                "{name}: the surviving report should be the prose line, got {findings:?}"
+            );
+        }
+    }
+}
+
+/// The default reports math lines, and setting the key to `true` explicitly is
+/// the same as not setting it at all. Without this, the test above would pass
+/// against a build that never measured math in the first place.
+#[test]
+fn math_blocks_defaults_to_reporting() {
+    for (name, content) in math_and_prose_documents() {
+        for extra in [vec![], vec!["MD013.math-blocks = true"]] {
+            let dir = TempDir::new().unwrap();
+            let findings = md013_findings(dir.path(), &content, &extra);
+            assert_eq!(
+                findings.len(),
+                2,
+                "{name} with {extra:?} should report both the prose and the math line, got {findings:?}"
+            );
+        }
+    }
+}
+
+/// `strict` disables the block-level exemptions, as it already does for
+/// `tables`, `headings` and `code-blocks`.
+#[test]
+fn strict_overrides_math_blocks() {
+    let content = format!("$$\n\\begin{{aligned}}\n{LONG_MATH_ROW}\n\\end{{aligned}}\n$$\n");
+    let dir = TempDir::new().unwrap();
+    let lax = md013_findings(dir.path(), &content, &["MD013.math-blocks = false"]);
+    assert!(lax.is_empty(), "math-blocks = false should exempt the row, got {lax:?}");
+
+    let dir = TempDir::new().unwrap();
+    let strict = md013_findings(
+        dir.path(),
+        &content,
+        &["MD013.math-blocks = false", "MD013.strict = true"],
+    );
+    assert_eq!(
+        strict.len(),
+        1,
+        "strict should re-report the row despite math-blocks = false, got {strict:?}"
+    );
+}
+
+/// The key is also settable per file through an inline `configure-file`
+/// directive, in both spellings.
+#[test]
+fn math_blocks_is_settable_inline() {
+    let math = format!("$$\n\\begin{{aligned}}\n{LONG_MATH_ROW}\n\\end{{aligned}}\n$$\n");
+
+    let dir = TempDir::new().unwrap();
+    let without = md013_findings(dir.path(), &math, &[]);
+    assert_eq!(without.len(), 1, "control: the row must be reported, got {without:?}");
+
+    for key in ["math-blocks", "math_blocks"] {
+        let dir = TempDir::new().unwrap();
+        let content = format!("<!-- rumdl-configure-file {{ \"MD013\": {{ \"{key}\": false }} }} -->\n\n{math}");
+        let findings = md013_findings(dir.path(), &content, &[]);
+        assert!(
+            findings.is_empty(),
+            "inline `{key}: false` should exempt the row, got {findings:?}"
+        );
+
+        let dir = TempDir::new().unwrap();
+        let content = format!("<!-- rumdl-configure-file {{ \"MD013\": {{ \"{key}\": true }} }} -->\n\n{math}");
+        let findings = md013_findings(dir.path(), &content, &[]);
+        assert_eq!(
+            findings.len(),
+            1,
+            "inline `{key}: true` should keep reporting the row, got {findings:?}"
+        );
+    }
+}
+
+/// `math-blocks` governs reporting only. Reflow never rewrites a multi-line math
+/// block either way, since that would corrupt the equation.
+#[test]
+fn math_blocks_does_not_change_what_reflow_rewrites() {
+    let content = format!("$$\n{MATH}\n$$\n");
+    for spelling in ["MD013.math-blocks = true", "MD013.math-blocks = false"] {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, &content).unwrap();
+
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .arg("fmt")
+            .arg("--no-config")
+            .arg("--no-cache")
+            .arg("-c")
+            .arg("MD013.line-length = 40")
+            .arg("-c")
+            .arg("MD013.reflow = true")
+            .arg("-c")
+            .arg(spelling)
+            .arg(&file_path)
+            .output()
+            .expect("Failed to execute rumdl");
+        let status = output.status.code();
+        assert!(
+            status == Some(0) || status == Some(1),
+            "rumdl fmt should succeed, got status {status:?}; stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        assert_eq!(
+            fs::read_to_string(&file_path).unwrap(),
+            content,
+            "the math block was rewritten with `{spelling}`"
+        );
+    }
+}
+
 /// Controls. Without these, a guard that simply switched reflow off would pass
 /// every test above.
 #[test]
