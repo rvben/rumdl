@@ -2677,12 +2677,72 @@ Content.
         let result = rule.check(&ctx).unwrap();
         assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
         assert_eq!(
+            result[0].message,
+            "First line in file should be a level 1 heading"
+        );
+        assert_eq!(
             result[0].line, 8,
             "Warning should be on line 8 (the first content line after front matter)"
         );
+    }
+
+        #[test]
+    fn test_allows_preamble_with_frontmatter_and_long_preamble() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+author: John Doe
+date: 2024-01-15
+---
+
+Long preamble text that is not a heading, but is allowed because allow_preamble is true.
+
+Preamble continues with more text.
+
+# Title
+
+Content.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
+    }
+
+        #[test]
+    fn test_allows_preamble_triggers_with_frontmatter_and_long_preamble() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+author: John Doe
+date: 2024-01-15
+---
+
+Long...
+
+Preamble...
+
+## Level 2 title
+
+Content.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
         assert_eq!(
             result[0].message,
             "First line in file should be a level 1 heading"
+        );
+        assert_eq!(
+            result[0].line, 10,
+            "Warning should be on line 10 (the first content line after front matter)"
         );
     }
 }
