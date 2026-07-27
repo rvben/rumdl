@@ -49,6 +49,22 @@ def table(ids: list[str]) -> str:
     return "\n".join(f"| [{i}]({i.lower()}.md) | x | y |" for i in ids)
 
 
+def rules_doc(
+    category_ids: list[str],
+    opt_in_ids: list[str] | None = None,
+    opt_in_heading: str = "Opt-in Rules",
+) -> str:
+    """A miniature docs/rules.md: an opt-in overview plus one category table.
+
+    `opt_in_ids=None` omits the overview section entirely.
+    """
+    sections = ["# Rules\n"]
+    if opt_in_ids is not None:
+        sections.append(f"## {opt_in_heading}\n\n{table(opt_in_ids)}\n")
+    sections.append(f"## Other Rules\n\n{table(category_ids)}\n")
+    return "\n".join(sections)
+
+
 SENTINELS = (
     "<!-- RULE_COUNT -->74<!-- /RULE_COUNT --> "
     "<!-- RULE_COUNT_ADDITIONAL -->21<!-- /RULE_COUNT_ADDITIONAL --> "
@@ -108,17 +124,19 @@ class Sentinels(unittest.TestCase):
 class RulesTable(unittest.TestCase):
     def test_every_id_present_is_clean(self):
         ids = ["MD001", "MD050", "MD080"]
-        with doc_root(rules_text=table(ids)) as root:
+        with doc_root(rules_text=rules_doc(ids, opt_in_ids=[])) as root:
             self.assertEqual(crd.check_rules_table(ids, root), [])
 
     def test_missing_row_is_flagged(self):
-        with doc_root(rules_text=table(["MD001", "MD050"])) as root:
+        doc = rules_doc(["MD001", "MD050"], opt_in_ids=[])
+        with doc_root(rules_text=doc) as root:
             problems = crd.check_rules_table(["MD001", "MD050", "MD080"], root)
             self.assertEqual(len(problems), 1)
-            self.assertIn("missing table rows for MD080", problems[0])
+            self.assertIn("missing category table rows for MD080", problems[0])
 
     def test_nonexistent_row_is_flagged(self):
-        with doc_root(rules_text=table(["MD001", "MD050", "MD999"])) as root:
+        doc = rules_doc(["MD001", "MD050", "MD999"], opt_in_ids=[])
+        with doc_root(rules_text=doc) as root:
             problems = crd.check_rules_table(["MD001", "MD050"], root)
             self.assertEqual(len(problems), 1)
             self.assertIn("nonexistent rules MD999", problems[0])
@@ -126,9 +144,40 @@ class RulesTable(unittest.TestCase):
     def test_duplicate_rows_allowed(self):
         # Opt-in rules legitimately appear in both the overview and category
         # tables; repetition must not be drift.
-        dup = table(["MD001", "MD050"]) + "\n" + table(["MD050"])
-        with doc_root(rules_text=dup) as root:
+        doc = rules_doc(["MD001", "MD050"], opt_in_ids=["MD050"])
+        with doc_root(rules_text=doc) as root:
             self.assertEqual(crd.check_rules_table(["MD001", "MD050"], root), [])
+
+    def test_opt_in_overview_alone_does_not_satisfy_coverage(self):
+        # The drift that shipped: four rules were listed in the opt-in
+        # overview only and were absent from every category table, which the
+        # whole-file scan happily accepted.
+        doc = rules_doc(["MD001"], opt_in_ids=["MD050"])
+        with doc_root(rules_text=doc) as root:
+            problems = crd.check_rules_table(["MD001", "MD050"], root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("missing category table rows for MD050", problems[0])
+
+    def test_missing_opt_in_section_is_flagged(self):
+        # Without the overview heading the guard cannot tell which rows are
+        # repeats, so it must report rather than silently count them.
+        doc = rules_doc(["MD001"], opt_in_ids=None)
+        with doc_root(rules_text=doc) as root:
+            problems = crd.check_rules_table(["MD001"], root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("no `## Opt-in Rules` section", problems[0])
+
+    def test_renamed_opt_in_section_is_flagged(self):
+        doc = rules_doc(["MD001"], opt_in_ids=["MD050"], opt_in_heading="Optional Rules")
+        with doc_root(rules_text=doc) as root:
+            problems = crd.check_rules_table(["MD001", "MD050"], root)
+            self.assertIn("no `## Opt-in Rules` section", problems[0])
+
+    def test_no_sections_is_flagged(self):
+        with doc_root(rules_text=table(["MD001"])) as root:
+            problems = crd.check_rules_table(["MD001"], root)
+            self.assertEqual(len(problems), 1)
+            self.assertIn("no `## ` sections found", problems[0])
 
 
 class UnwrappedCounts(unittest.TestCase):

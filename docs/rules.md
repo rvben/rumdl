@@ -201,6 +201,8 @@ Severity affects:
 | [MD047](md047.md) | File end newline               | Files should end with a single newline character       |
 | [MD064](md064.md) | No multiple consecutive spaces | Multiple consecutive spaces in content                 |
 | [MD065](md065.md) | Blanks around HR               | Horizontal rules should be surrounded by blank lines   |
+| [MD084](md084.md) | Invisible characters           | Invisible Unicode characters should be intentional     |
+| [MD085](md085.md) | Paragraph continuation indent  | Paragraph continuation lines should not be indented    |
 
 ## Formatting Rules
 
@@ -225,6 +227,7 @@ Severity affects:
 | [MD040](md040.md) | Fenced code language | Fenced code blocks should have a language specified |
 | [MD046](md046.md) | Code block style     | Code block style                                    |
 | [MD048](md048.md) | Code fence style     | Code fence style                                    |
+| [MD070](md070.md) | Nested code fence    | Nested code fences should use a longer outer fence  |
 | [MD078](md078.md) | Missing chunk labels | Executable Quarto chunks should have a label        |
 | [MD079](md079.md) | Chunk label spaces   | Quarto chunk labels must not contain whitespace     |
 
@@ -276,6 +279,7 @@ Severity affects:
 | [MD062](md062.md) | Link destination space | No whitespace in link destinations         |
 | [MD073](md073.md) | TOC validation         | Table of Contents should match headings    |
 | [MD074](md074.md) | MkDocs nav validation  | Nav entries should point to existing files |
+| [MD083](md083.md) | Mojibake               | Detect mojibake due to encoding issues     |
 
 ## Using Rules
 

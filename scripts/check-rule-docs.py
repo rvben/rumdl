@@ -57,6 +57,14 @@ RULES_REFERENCE = "docs/rules.md"
 # A table row in docs/rules.md, e.g. `| [MD080](md080.md) | ... | ... |`.
 RULES_TABLE_ROW = re.compile(r"\|\s*\[(MD\d{3})\]\(")
 
+# Start of a `## ` section in docs/rules.md, capturing the heading text.
+SECTION_HEADING = re.compile(r"^## +(.+?)\s*$", re.MULTILINE)
+
+# The overview section that lists every off-by-default rule a second time.
+# Rules listed there do not count toward category-table coverage: a rule
+# present only in this table is missing from the reference proper.
+OPT_IN_SECTION = "Opt-in Rules"
+
 # Any rule-count sentinel span, used to blank out machine-owned values
 # before scanning for stray unwrapped counts.
 ANY_SENTINEL = re.compile(r"<!-- (RULE_\w+) -->[^\n<]*<!-- /\1 -->")
@@ -132,24 +140,56 @@ def write_sentinels(values: dict[str, str], root: Path = ROOT) -> list[str]:
     return changed
 
 
+def category_table_ids(content: str) -> set[str]:
+    """Rule ids listed in the per-category tables of docs/rules.md.
+
+    Every `## ` section except the opt-in overview is a category table. The
+    overview is excluded on purpose: it repeats rules that must also be listed
+    under their category, so counting it would let a rule satisfy the coverage
+    check while being absent from the reference proper.
+    """
+    ids: set[str] = set()
+    headings = list(SECTION_HEADING.finditer(content))
+    for i, heading in enumerate(headings):
+        if heading.group(1) == OPT_IN_SECTION:
+            continue
+        end = headings[i + 1].start() if i + 1 < len(headings) else len(content)
+        ids.update(RULES_TABLE_ROW.findall(content[heading.end() : end]))
+    return ids
+
+
 def check_rules_table(ids: list[str], root: Path = ROOT) -> list[str]:
-    """Every registry id must appear in docs/rules.md; no nonexistent rows.
+    """Every registry id must have a category-table row; no nonexistent rows.
 
     A rule may legitimately appear more than once: opt-in rules are listed
     both in the "Opt-in Rules" overview table and in their category table.
-    Repetition is therefore allowed; only absence and nonexistent rows are
-    drift.
+    Repetition is therefore allowed; only absence from the category tables and
+    rows for rules that do not exist are drift.
     """
     content = (root / RULES_REFERENCE).read_text()
-    seen = set(RULES_TABLE_ROW.findall(content))
+    seen_anywhere = set(RULES_TABLE_ROW.findall(content))
     registry = set(ids)
 
     problems: list[str] = []
-    missing = sorted(registry - seen)
-    extra = sorted(seen - registry)
+    headings = [m.group(1) for m in SECTION_HEADING.finditer(content)]
+    if not headings:
+        problems.append(
+            f"  {RULES_REFERENCE}: no `## ` sections found; the category tables "
+            "cannot be checked"
+        )
+        return problems
+    if OPT_IN_SECTION not in headings:
+        problems.append(
+            f"  {RULES_REFERENCE}: no `## {OPT_IN_SECTION}` section; if it was "
+            "renamed, update OPT_IN_SECTION so its rows stay excluded from "
+            "category coverage"
+        )
+
+    missing = sorted(registry - category_table_ids(content))
+    extra = sorted(seen_anywhere - registry)
     if missing:
         problems.append(
-            f"  {RULES_REFERENCE}: missing table rows for {', '.join(missing)}"
+            f"  {RULES_REFERENCE}: missing category table rows for {', '.join(missing)}"
         )
     if extra:
         problems.append(
