@@ -8512,6 +8512,65 @@ async fn test_resolve_config_does_not_substitute_a_parent_config_when_the_user_c
     );
 }
 
+/// A config that cannot be resolved is a temporary state the user fixes outside the
+/// workspace, so nothing the server watches changes when they do. Caching it would
+/// pin the file to defaults for the rest of the session.
+#[tokio::test]
+async fn test_resolve_config_retries_after_a_broken_user_config_is_fixed() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let project = root.join("project");
+    // The unresolvable config sits above the file's own directory, so a cache entry
+    // keyed on that directory would never notice it.
+    let deep = project.join("sub").join("deep");
+    let user_config_dir = root.join("xdg");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&deep).unwrap();
+    fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+
+    let user_config = user_config_dir.join("rumdl").join("rumdl.toml");
+    fs::write(&user_config, "this is not valid toml {{{\n").unwrap();
+    fs::write(
+        project.join("sub").join(".markdownlint.json"),
+        r#"{ "MD004": { "style": "asterisk" } }"#,
+    )
+    .unwrap();
+
+    let md_file = deep.join("test.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(project.clone());
+    }
+
+    let broken = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<String>(&broken, "MD004", "style"),
+        None,
+        "precondition: the config cannot be resolved while the user config is broken"
+    );
+
+    fs::write(&user_config, "[MD007]\nindent = 4\n").unwrap();
+
+    let fixed = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+    assert_eq!(
+        crate::config::get_rule_config_value::<String>(&fixed, "MD004", "style"),
+        Some("asterisk".to_string()),
+        "the config should resolve as soon as the user config parses again"
+    );
+}
+
 /// Control for the test above: with a valid user config, the same tree resolves to
 /// the nearer markdownlint config. Without this, the assertion above would also
 /// pass if the walk never reached that config in the first place.

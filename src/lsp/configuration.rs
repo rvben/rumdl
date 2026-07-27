@@ -14,6 +14,20 @@ use crate::rule::Rule;
 use super::server::{ConfigCacheEntry, RumdlLanguageServer};
 use super::types::{ConfigurationPreference, LspRuleSettings, RumdlLspConfig};
 
+/// Outcome of walking a file's project-config candidates.
+enum ResolvedProjectConfig {
+    /// A candidate loaded. Boxed so the variant does not dominate the enum's size.
+    Loaded(Box<Config>, PathBuf),
+    /// No candidate applies to this file, so the config loaded at startup governs it.
+    NotFound,
+    /// A candidate applies but cannot be loaded, because the user config it merges
+    /// onto is broken. `rumdl check` exits with a config error here. The server
+    /// cannot exit, and any substitute - a config from further up the tree, or the
+    /// one discovery found at startup - would lint against a ruleset that exists
+    /// nowhere on disk, so the answer is defaults.
+    Unresolvable,
+}
+
 /// Collect candidate project-config file paths by walking up from `search_dir`,
 /// nearest directory first.
 ///
@@ -536,43 +550,45 @@ impl RumdlLanguageServer {
         // the discovery loader: it keeps the user config as a base under a markdownlint
         // project config, which is what `rumdl check` resolves for the same file. The
         // explicit-config loader is standalone and belongs to the `--config` path above.
-        let mut found_config: Option<(Config, Option<PathBuf>)> = None;
+        let mut resolution = ResolvedProjectConfig::NotFound;
         for config_path in candidates {
             match crate::config::SourcedConfig::load_discovered(&config_path, user_config_dir, home_dir.as_deref()) {
                 Ok(sourced) => {
                     log::debug!("Found config file: {}", config_path.display());
-                    found_config = Some((sourced.into_validated_unchecked().into(), Some(config_path)));
+                    resolution =
+                        ResolvedProjectConfig::Loaded(Box::new(sourced.into_validated_unchecked().into()), config_path);
                     break;
                 }
                 Err(DiscoveredConfigError::ProjectConfig(e)) => {
                     log::debug!("Skipping unloadable config {}: {e}", config_path.display());
                 }
                 Err(DiscoveredConfigError::UserConfig(e)) => {
-                    // The candidate itself is fine; the user config it merges onto is not,
-                    // so this file has no resolvable configuration. `rumdl check` exits
-                    // with a config error here. The server cannot exit, and any substitute
-                    // - a config from further up the tree, or the one discovery found at
-                    // startup - would lint against a ruleset that exists nowhere on disk.
-                    // Report defaults, which is the same answer as having no config at all,
-                    // and say why.
                     log::warn!(
                         "Cannot resolve {} for {}: {e}. Using default rules until the user config is fixed.",
                         config_path.display(),
                         file_path.display()
                     );
-                    found_config = Some((Config::default(), None));
+                    resolution = ResolvedProjectConfig::Unresolvable;
                     break;
                 }
             }
         }
 
+        // The user config lives outside the workspace, so nothing this server watches
+        // changes when it is repaired. Answering with defaults and skipping the cache
+        // keeps the file linting on the next resolution instead of for the session.
+        if matches!(resolution, ResolvedProjectConfig::Unresolvable) {
+            return Config::default();
+        }
+
         // Use found config or fall back to global/user config loaded at initialization
-        let (config, config_file) = if let Some((cfg, path)) = found_config {
-            (cfg, path)
-        } else {
-            log::debug!("No project config found; using global/user fallback config");
-            let fallback = self.rumdl_config.read().await.clone();
-            (fallback, None)
+        let (config, config_file) = match resolution {
+            ResolvedProjectConfig::Loaded(cfg, path) => (*cfg, Some(path)),
+            _ => {
+                log::debug!("No project config found; using global/user fallback config");
+                let fallback = self.rumdl_config.read().await.clone();
+                (fallback, None)
+            }
         };
 
         // Cache the result
