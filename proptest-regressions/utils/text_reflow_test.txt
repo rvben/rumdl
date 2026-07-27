@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 77fbe19382b35ddbddb84057613348be65d2581a38b29ec6eefae56dc18fba31 # shrinks to words = ["aaaaAaAa", "-"], width = 4, mode = 2
 cc b5706b007b248bb6b4a052e60bcd220adf586c1eecf9ce58f2d874789dab24a4 # shrinks to words = ["-", "##", "-", "[a](b)", "[ref]:"], width = 4, mode = 0
+cc b6352a0185e3aecb52a032476b0c6aea56233c44c664236ef8317df7acecb5df # shrinks to words = ["-", "##", "-", "1.", "[ref]:"], width = 4, mode = 0

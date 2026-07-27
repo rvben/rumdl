@@ -1627,8 +1627,13 @@ fn assert_no_marker_led_lines(text: &str, allowed_prefixes: &[&str]) {
             || trimmed.starts_with('>')
             || trimmed.starts_with("# ")
             || trimmed.starts_with("```")
+            // Only a list numbered 1 with a non-empty first item can interrupt
+            // a paragraph; `12) x` and a bare `1.` stay prose to the parser.
             || (trimmed.split_once(['.', ')']).is_some_and(|(n, rest)| {
-                !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && (rest.is_empty() || rest.starts_with(' '))
+                !n.is_empty()
+                    && n.chars().all(|c| c.is_ascii_digit())
+                    && n.trim_start_matches('0') == "1"
+                    && rest.starts_with(' ')
             }));
         assert!(
             !opens_construct,

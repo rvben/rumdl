@@ -1919,12 +1919,19 @@ fn starts_block_construct(text: &str) -> bool {
         }
         b'`' => bytes.iter().take_while(|&&b| b == b'`').count() >= 3,
         b'~' => bytes.iter().take_while(|&&b| b == b'~').count() >= 3,
+        // An ordered list is the one construct here that cannot always
+        // interrupt a paragraph: it does so only when it is numbered 1 and its
+        // first item has content. `7. item` and a bare `123456.` are prose to
+        // the parser, so guarding them would refuse a legal wrap and leave an
+        // unfixable long line. Leading zeros still make the number 1 (`01.`),
+        // and a marker is at most 9 digits.
         b'0'..=b'9' => {
             let digits = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
             digits <= 9
-                && bytes.len() > digits
+                && text[..digits].trim_start_matches('0') == "1"
+                && bytes.len() > digits + 1
                 && (bytes[digits] == b'.' || bytes[digits] == b')')
-                && marker_then_boundary(digits + 1)
+                && (bytes[digits + 1] == b' ' || bytes[digits + 1] == b'\t')
         }
         // Footnote/link-reference definition: `[label]:` anchored at line
         // start, meaning the label's own closing bracket is immediately
@@ -1966,12 +1973,15 @@ fn starts_block_construct(text: &str) -> bool {
 fn merge_block_construct_continuations(lines: Vec<String>) -> Vec<String> {
     let mut merged: Vec<String> = Vec::with_capacity(lines.len());
     for line in lines {
-        match merged.last_mut() {
-            Some(prev) if starts_block_construct(&line) => {
-                prev.push(' ');
-                prev.push_str(line.trim_start());
-            }
-            _ => merged.push(line),
+        merged.push(line);
+        // A merge can itself produce an opener: a line holding just `1.` is
+        // inert on its own, but absorbing a following `[ref]:` turns it into
+        // `1. [ref]:`, a real list item. Keep folding until the tail is inert.
+        while merged.len() > 1 && starts_block_construct(merged.last().expect("non-empty")) {
+            let last = merged.pop().expect("non-empty");
+            let prev = merged.last_mut().expect("len > 1");
+            prev.push(' ');
+            prev.push_str(last.trim_start());
         }
     }
     merged
@@ -4380,8 +4390,9 @@ mod tests {
         for case in ["- item", "-", "* item", "*", "+ item", "+", "-\titem"] {
             assert!(starts_block_construct(case), "bullet: {case:?}");
         }
-        // Ordered list markers: up to 9 digits, `.` or `)`, then space or end
-        for case in ["1. item", "1) item", "9. x", "123456789. x", "1.", "42) x"] {
+        // Ordered list markers: only a list numbered 1 with a non-empty first
+        // item interrupts a paragraph. Leading zeros keep the number 1.
+        for case in ["1. item", "1) item", "01. x", "000000001. x", "1.\titem"] {
             assert!(starts_block_construct(case), "ordered: {case:?}");
         }
         // Blockquote: `>` needs no following space
@@ -4428,6 +4439,19 @@ mod tests {
             "####### seven hashes is not a heading",
             "1.5 million",
             "1234567890. ten digits is not a list marker",
+            "0000000001. ten digits is not a list marker either",
+            // A number other than 1 cannot interrupt a paragraph, nor can an
+            // empty first item, so neither changes the parse at line start.
+            "2. item",
+            "7. item",
+            "0. item",
+            "42) x",
+            "123456. item",
+            "1.",
+            "1)",
+            "123456.",
+            "123456)",
+            "1.item",
             "1:30 pm",
             "*emphasis*",
             "**bold** text",
@@ -4476,6 +4500,15 @@ mod tests {
             merge_block_construct_continuations(lines.clone()),
             lines,
             "first line must never be merged"
+        );
+
+        // Folding cascades: `1.` alone is inert, but absorbing `[ref]:` makes
+        // it a list item, so the grown line has to fold back in turn.
+        let lines = vec!["prose".to_string(), "1.".to_string(), "[ref]:".to_string()];
+        assert_eq!(
+            merge_block_construct_continuations(lines),
+            vec!["prose 1. [ref]:".to_string()],
+            "a merge that creates an opener must fold again"
         );
     }
 

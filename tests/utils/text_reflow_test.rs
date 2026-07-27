@@ -6653,9 +6653,16 @@ fn oracle_opens_block_construct(line: &str) -> bool {
         }
         b'`' => bytes.iter().take_while(|&&b| b == b'`').count() >= 3,
         b'~' => bytes.iter().take_while(|&&b| b == b'~').count() >= 3,
+        // An ordered list interrupts a paragraph only when it is numbered 1
+        // (leading zeros allowed) and its first item has content, so `12) x`
+        // and a bare `1.` leave the paragraph alone.
         b'0'..=b'9' => {
             let n = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
-            n <= 9 && bytes.len() > n && (bytes[n] == b'.' || bytes[n] == b')') && boundary(n + 1)
+            n <= 9
+                && t[..n].trim_start_matches('0') == "1"
+                && bytes.len() > n + 1
+                && (bytes[n] == b'.' || bytes[n] == b')')
+                && (bytes[n + 1] == b' ' || bytes[n + 1] == b'\t')
         }
         // Footnote / link-reference definition: the label's own closing
         // bracket must be immediately followed by a colon
