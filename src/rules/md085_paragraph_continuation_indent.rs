@@ -135,14 +135,17 @@ impl MD085ParagraphContinuationIndent {
     /// and a digit a list item, `-`, `*` and `_` a thematic break, `-` and `=` a setext
     /// underline, `` ` `` and `~` a fence, `<` an HTML block, `|` a table row, `$` a math
     /// block, `[` a link reference or footnote definition, `:` a definition, `!` an
-    /// admonition and `{` an attribute list. Each of those interrupts the paragraph in at
-    /// least one of the dialects rumdl reads, so here the indentation is what keeps the
-    /// line prose and removing it would restructure the document.
+    /// admonition, `{` an attribute list and `%` a comment. Each of those interrupts the
+    /// paragraph in at least one of the dialects rumdl reads, so here the indentation is
+    /// what keeps the line prose and removing it would restructure the document.
+    ///
+    /// The set is not conditioned on the flavor in force, because a document is often read
+    /// by more than one tool and a marker that is inert to one is structural to the next.
     ///
     /// The test is the first byte rather than the whole marker. That accepts lines which
     /// would have stayed prose, which costs a finding and never a document.
     fn would_open_a_block(text: &str) -> bool {
-        const BLOCK_STARTERS: &[u8] = b"#>-+*_=`~<|[{:$!0123456789";
+        const BLOCK_STARTERS: &[u8] = b"#>-+*_=`~<|[{:$!%0123456789";
         match text.trim_start_matches([' ', '\t']).as_bytes().first() {
             Some(byte) => BLOCK_STARTERS.contains(byte),
             None => false,
@@ -446,6 +449,51 @@ mod tests {
                     render(&content),
                     "removing the indentation changed the rendering of {content:?}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn a_stripped_continuation_is_still_prose_in_every_flavor() {
+        // The render sweep above can only speak for standard Markdown, because the
+        // reference parser knows no flavor. Every flavor adds markers of its own, so the
+        // oracle here is rumdl's own reading of the document: a line the rule rewrote has
+        // to still be the top-level prose it was, and so does every other line, since a
+        // marker at the margin also reparents what follows it.
+        for flavor in [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::MkDocs,
+            MarkdownFlavor::MDX,
+            MarkdownFlavor::Pandoc,
+            MarkdownFlavor::Quarto,
+            MarkdownFlavor::Obsidian,
+            MarkdownFlavor::MyST,
+        ] {
+            for byte in 0x21u8..=0x7e {
+                let c = byte as char;
+                for template in [
+                    "para\n    @ tail\n",
+                    "para\n    @@ tail\n",
+                    "para\n    @@@\n",
+                    "para\n    @tail\n",
+                    "para\n    @ tail\n  more\n",
+                ] {
+                    let content = template.replace('@', &c.to_string());
+                    let out = fixed(&content, flavor);
+                    if out == content {
+                        continue;
+                    }
+                    let before = LintContext::new(&content, flavor, None);
+                    let after = LintContext::new(&out, flavor, None);
+                    for (idx, (was, now)) in before.lines.iter().zip(after.lines.iter()).enumerate() {
+                        assert_eq!(
+                            MD085ParagraphContinuationIndent::is_top_level_prose(was, &content),
+                            MD085ParagraphContinuationIndent::is_top_level_prose(now, &out),
+                            "line {} stopped being prose under {flavor:?} when {content:?} became {out:?}",
+                            idx + 1
+                        );
+                    }
+                }
             }
         }
     }
