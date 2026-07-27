@@ -424,7 +424,7 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let config = MD084Config {
             strict,
-            allow: allow.iter().map(|s| s.to_string()).collect(),
+            allow: allow.iter().map(std::string::ToString::to_string).collect(),
         };
         MD084InvisibleCharacters::from_config_struct(config)
             .check(&ctx)
@@ -439,13 +439,13 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let config = MD084Config {
             strict,
-            allow: allow.iter().map(|s| s.to_string()).collect(),
+            allow: allow.iter().map(std::string::ToString::to_string).collect(),
         };
         MD084InvisibleCharacters::from_config_struct(config).fix(&ctx).unwrap()
     }
 
     fn fix(content: &str) -> String {
-        fix_with_config(&content, false, &vec![])
+        fix_with_config(content, false, &vec![])
     }
 
     #[test]
@@ -684,7 +684,7 @@ mod tests {
     fn test_default_deprecated_characters_are_flagged_and_not_fixable() {
         // Check that the deprecated characters are flagged and not fixable, even in default mode.
         let findings = check("\u{0340}deprecated\u{0341}\u{FFFC}");
-        assert_eq!(findings.len(), 3, "Got {:?}", findings);
+        assert_eq!(findings.len(), 3, "Got {findings:?}");
         assert!(findings[0].message.contains("U+0340"));
         assert!(findings[1].message.contains("U+0341"));
         assert!(findings[2].message.contains("U+FFFC"));
@@ -695,7 +695,7 @@ mod tests {
     fn test_strict_deprecated_characters_are_flagged_and_not_fixable() {
         // Check that the deprecated characters are flagged and not fixable, even in strict mode.
         let findings = check_with_config("\u{0340}deprecated\u{0341}\u{FFFC}", true, &vec![]);
-        assert_eq!(findings.len(), 3, "Got {:?}", findings);
+        assert_eq!(findings.len(), 3, "Got {findings:?}");
         assert!(findings[0].message.contains("U+0340"));
         assert!(findings[1].message.contains("U+0341"));
         assert!(findings[2].message.contains("U+FFFC"));
