@@ -226,6 +226,20 @@ impl MD041FirstLineHeading {
         None
     }
 
+    /// The line this rule judges, which is also the line it reports on and the line
+    /// whose inline directives govern it.
+    ///
+    /// Allowing preamble moves the subject of the rule from the document's first
+    /// content line to its first heading, so a document with no heading has nothing
+    /// to judge.
+    fn checked_line_idx(&self, ctx: &crate::lint_context::LintContext) -> Option<usize> {
+        if self.allow_preamble {
+            Self::first_top_level_heading_idx(ctx)
+        } else {
+            Self::first_content_line_idx(ctx)
+        }
+    }
+
     /// Check if a line consists only of badge/shield images
     /// Common patterns:
     /// - `![badge](url)`
@@ -617,15 +631,7 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
 
-        // Allowing preamble moves the subject of the rule from the document's first
-        // content line to its first heading, so a document with no heading has nothing
-        // to judge.
-        let first_line_idx = if self.allow_preamble {
-            Self::first_top_level_heading_idx(ctx)
-        } else {
-            Self::first_content_line_idx(ctx)
-        };
-        let Some(first_line_idx) = first_line_idx else {
+        let Some(first_line_idx) = self.checked_line_idx(ctx) else {
             return Ok(warnings);
         };
 
@@ -731,10 +737,10 @@ impl Rule for MD041FirstLineHeading {
             return Ok(ctx.content.to_string());
         }
 
-        // Respect inline disable comments — use the same first-content-line
-        // logic as check() so both paths agree on which line to check.
-        let first_content_line = Self::first_content_line_idx(ctx).map_or(1, |i| i + 1);
-        if ctx.inline_config().is_rule_disabled(self.name(), first_content_line) {
+        // Respect inline disable comments, resolving the line the same way check()
+        // does so a directive suppresses exactly the warning it appears to suppress.
+        let checked_line = self.checked_line_idx(ctx).map_or(1, |i| i + 1);
+        if ctx.inline_config().is_rule_disabled(self.name(), checked_line) {
             return Ok(ctx.content.to_string());
         }
 

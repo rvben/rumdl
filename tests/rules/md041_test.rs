@@ -608,6 +608,28 @@ fn test_allow_preamble_fix_leaves_a_heading_less_document_alone() {
 }
 
 #[test]
+fn test_allow_preamble_fix_reads_inline_directives_at_the_reported_line() {
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
+
+    // A directive aimed at the preamble must not silence a fix for the heading,
+    // which is the line the warning is reported on.
+    let content = "<!-- rumdl-disable-next-line MD041 -->\nIntro paragraph.\n\n## Sub\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(check_lines(&rule, content), vec![4]);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "<!-- rumdl-disable-next-line MD041 -->\nIntro paragraph.\n\n# Sub\n"
+    );
+
+    // A directive aimed at the heading does silence the fix. Warning suppression
+    // itself happens in the lint pipeline, so check() still reports here.
+    let content = "Intro paragraph.\n\n<!-- rumdl-disable-next-line MD041 -->\n## Sub\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(check_lines(&rule, content), vec![4]);
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
+
+#[test]
 fn test_allow_preamble_fix_is_idempotent() {
     let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
     for content in [
