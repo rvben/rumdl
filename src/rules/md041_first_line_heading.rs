@@ -21,6 +21,7 @@ pub struct MD041FirstLineHeading {
     pub front_matter_title: bool,
     pub front_matter_title_pattern: Option<Regex>,
     pub fix_enabled: bool,
+    pub allow_preamble: bool,
 }
 
 impl Default for MD041FirstLineHeading {
@@ -30,6 +31,7 @@ impl Default for MD041FirstLineHeading {
             front_matter_title: true,
             front_matter_title_pattern: None,
             fix_enabled: false,
+            allow_preamble: false,
         }
     }
 }
@@ -65,10 +67,17 @@ impl MD041FirstLineHeading {
             front_matter_title,
             front_matter_title_pattern: None,
             fix_enabled: false,
+            allow_preamble: false,
         }
     }
 
-    pub fn with_pattern(level: usize, front_matter_title: bool, pattern: Option<String>, fix_enabled: bool) -> Self {
+    pub fn with_pattern(
+        level: usize,
+        front_matter_title: bool,
+        pattern: Option<String>,
+        fix_enabled: bool,
+        allow_preamble: bool,
+    ) -> Self {
         let front_matter_title_pattern = pattern.and_then(|p| match Regex::new(&p) {
             Ok(regex) => Some(regex),
             Err(e) => {
@@ -82,6 +91,7 @@ impl MD041FirstLineHeading {
             front_matter_title,
             front_matter_title_pattern,
             fix_enabled,
+            allow_preamble,
         }
     }
 
@@ -538,9 +548,38 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
 
-        let Some(first_line_idx) = Self::first_content_line_idx(ctx) else {
-            return Ok(warnings);
+        // Find the first non-blank, non-preamble line in the document
+        let Some(mut first_line_idx) = Self::first_content_line_idx(ctx) else {
+            return Ok(warnings); // Empty or preamble-only document is not a violation
         };
+
+        if self.allow_preamble {
+            // If preamble is allowed, skip to the first heading or title candidate after the preamble
+            while first_line_idx < ctx.lines.len() {
+                let line_info = &ctx.lines[first_line_idx];
+                let line_content = line_info.content(ctx.content);
+
+                // Stop if we find a heading
+                if line_info.heading.is_some() {
+                    break;
+                }
+
+                // Stop if we find a title candidate
+                let next_is_blank_or_eof = ctx
+                    .lines
+                    .get(first_line_idx + 1)
+                    .is_none_or(|l| l.content(ctx.content).trim().is_empty());
+                if Self::is_title_candidate(line_content.trim(), next_is_blank_or_eof) {
+                    break;
+                }
+
+                // Otherwise, move to the next line
+                first_line_idx += 1;
+            }
+            if first_line_idx >= ctx.lines.len() {
+                return Ok(warnings); // No heading or title candidate found
+            }
+        }
 
         // Check if the first non-blank line is a heading of the required level
         let first_line_info = &ctx.lines[first_line_idx];
@@ -766,6 +805,7 @@ impl Rule for MD041FirstLineHeading {
             use_front_matter,
             md041_config.front_matter_title_pattern,
             md041_config.fix,
+            md041_config.allow_preamble,
         ))
     }
 
@@ -785,6 +825,7 @@ impl Rule for MD041FirstLineHeading {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::lint_context::LintContext;
 
@@ -1218,7 +1259,7 @@ mod tests {
     #[test]
     fn test_toml_front_matter_level_2_heading_with_yaml_style_pattern() {
         // Reproduces the exact config shape from issue #427
-        let rule = MD041FirstLineHeading::with_pattern(2, true, Some("^(title|header):".to_string()), false);
+        let rule = MD041FirstLineHeading::with_pattern(2, true, Some("^(title|header):".to_string()), false, false);
 
         let content = "+++\ntitle = \"Title\"\n+++\n\n## Documentation\n\nWrite stuff here...";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -1675,6 +1716,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // ## should become #
@@ -1692,6 +1734,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Heading after blank lines should be moved up
@@ -1712,6 +1755,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Heading after HTML comment should be moved up
@@ -1732,6 +1776,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Heading with wrong level after preamble should be fixed and moved
@@ -1752,6 +1797,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Heading after front matter and preamble
@@ -1772,6 +1818,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Heading after TOML front matter and preamble
@@ -1792,6 +1839,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // No heading in document - cannot fix
@@ -1809,6 +1857,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Real content before heading - cannot safely fix
@@ -1829,6 +1878,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Already correct - no changes needed
@@ -1846,6 +1896,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Setext heading (level 2 with --- underline)
@@ -1866,6 +1917,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Setext h1 heading (=== underline) after preamble - needs move but not level fix
@@ -1886,6 +1938,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // HTML heading - should NOT be claimed as fixable (we can't convert HTML to ATX)
@@ -1907,6 +1960,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // No heading in document - should NOT be claimed as fixable
@@ -1928,6 +1982,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Content before heading - should NOT be claimed as fixable
@@ -1951,6 +2006,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // HTML block (badges div) before the real heading – was unfixable before Phase 1
@@ -1979,6 +2035,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         let content = "<div>\n  badge\n</div>\n\n## Wrong Level\n\nContent.\n";
@@ -2000,6 +2057,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         let content = "My Project\n\nSome content.\n";
@@ -2027,6 +2085,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         let content = "---\nauthor: John\n---\n\nMy Project\n\nContent.\n";
@@ -2046,6 +2105,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Sentence-ending punctuation → NOT a title candidate
@@ -2066,6 +2126,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         let content = "Note:\n\nContent.\n";
@@ -2082,6 +2143,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // >80 chars → not a title candidate
@@ -2100,6 +2162,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // No blank line after potential title → NOT a title candidate
@@ -2117,6 +2180,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Title candidate exists but so does a heading later → can't safely fix
@@ -2141,6 +2205,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Single title line at EOF with no trailing newline
@@ -2161,6 +2226,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Document with only a note admonition and no heading
@@ -2190,6 +2256,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // No source_file → derive_title returns None → InsertDerived unavailable
@@ -2208,6 +2275,7 @@ mod tests {
             front_matter_title: false,
             front_matter_title_pattern: None,
             fix_enabled: true,
+            allow_preamble: false,
         };
 
         // Document has real paragraph content in addition to directive blocks
@@ -2359,7 +2427,7 @@ mod tests {
     fn test_fix_replacement_not_empty_for_plain_text_promotion() {
         // Verify that the fix replacement for plain-text-to-heading promotion is
         // non-empty, so applying the fix does not delete the line.
-        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true, false);
         // Title candidate: short text, no trailing punctuation, followed by blank line
         let content = "My Document Title\n\nMore content follows.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -2385,7 +2453,7 @@ mod tests {
     fn test_fix_replacement_not_empty_for_releveling() {
         // When the first line is a heading at the wrong level, the Fix should
         // contain the correctly-leveled heading, not an empty string.
-        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true, false);
         let content = "## Wrong Level\n\nContent.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
         let warnings = rule.check(&ctx).unwrap();
@@ -2401,7 +2469,7 @@ mod tests {
     #[test]
     fn test_fix_replacement_applied_produces_valid_output() {
         // Verify that applying the Fix from check() produces the same result as fix()
-        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true);
+        let rule = MD041FirstLineHeading::with_pattern(1, false, None, true, false);
         // Title candidate: short, no trailing punctuation, followed by blank line
         let content = "My Document\n\nMore content.";
         let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
@@ -2517,6 +2585,104 @@ mod tests {
         assert!(
             result.is_empty(),
             "HTML comment should still be treated as preamble (regression test)"
+        );
+    }
+
+    #[test]
+    fn test_allows_preamble_option_allows_content_before_heading() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+
+        // Content before heading is allowed when allow_preamble is true
+        let content = r#"
+Some intro text.
+
+# Title
+
+Content."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(
+            result.is_empty(),
+            "With allow_preamble=true, content before heading should not trigger warning"
+        );
+    }
+
+    #[test]
+    fn test_allows_preamble_with_frontmatter() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+title: My Document
+author: John Doe
+date: 2024-01-15
+---
+
+Content."#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
+    }
+
+    #[test]
+    fn test_allows_preamble_with_frontmatter_missing_title() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+author: John Doe
+date: 2024-01-15
+---
+
+Preamble.
+
+# Title
+
+Content.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert!(result.is_empty(), "Expected no warnings, got: {result:?}");
+    }
+
+    #[test]
+    fn test_allows_preamble_triggers_with_frontmatter_missing_title() {
+        let rule = MD041FirstLineHeading {
+            allow_preamble: true,
+            ..MD041FirstLineHeading::default()
+        };
+        // Content before heading is allowed when allow_preamble is true,
+        // but a heading is still required
+        let content = r#"---
+author: John Doe
+date: 2024-01-15
+---
+
+Preamble.
+
+## Level 2 title
+
+Content.
+"#;
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+        let result = rule.check(&ctx).unwrap();
+        assert_eq!(result.len(), 1, "Expected one warning, got: {result:?}");
+        assert_eq!(
+            result[0].line, 8,
+            "Warning should be on line 8 (the first content line after front matter)"
+        );
+        assert_eq!(
+            result[0].message,
+            "First line in file should be a level 1 heading"
         );
     }
 }

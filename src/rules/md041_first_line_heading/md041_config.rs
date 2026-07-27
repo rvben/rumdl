@@ -26,6 +26,11 @@ pub(crate) struct MD041Config {
     /// - Move the first heading above preamble (blank lines, HTML comments) if safe
     #[serde(default)]
     pub fix: bool,
+
+    /// Allow preamble before first heading (default: false)
+    /// When enabled, allows content before the first heading.
+    #[serde(default, alias = "allow_preamble")]
+    pub allow_preamble: bool,
 }
 
 fn default_front_matter_title() -> String {
@@ -39,6 +44,7 @@ impl Default for MD041Config {
             front_matter_title: default_front_matter_title(),
             front_matter_title_pattern: None,
             fix: false,
+            allow_preamble: false,
         }
     }
 }
@@ -91,6 +97,7 @@ mod tests {
             front_matter_title: "header".to_string(),
             front_matter_title_pattern: Some("^heading:".to_string()),
             fix: false,
+            allow_preamble: false,
         };
 
         let toml_str = toml::to_string(&config).unwrap();
@@ -108,5 +115,16 @@ mod tests {
         "#;
         let config: MD041Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.front_matter_title, "");
+    }
+
+    #[test]
+    fn test_fix_and_allow_preamble() {
+        let toml_str = r#"
+            fix = true
+            allow-preamble = true
+        "#;
+        let config: MD041Config = toml::from_str(toml_str).unwrap();
+        assert!(config.fix);
+        assert!(config.allow_preamble);
     }
 }
