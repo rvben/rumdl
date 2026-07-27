@@ -8,6 +8,12 @@
 //! it only touches paragraphs that no container owns. Inside a list item, a
 //! blockquote, a definition list, a footnote body, a table or an MkDocs container,
 //! the leading whitespace carries meaning and is left alone.
+//!
+//! Two more things keep it invisible. A continuation line whose indentation is the
+//! only reason it is not a block start stays where it is, because at the margin it
+//! would interrupt the paragraph. And a region opened by a line beginning with `<`
+//! stays untouched until the blank line that ends it, because that is where an HTML
+//! block ends and everything inside one is the author's raw markup.
 
 use crate::lint_context::{HeadingStyle, LineInfo, LintContext};
 use crate::rule::{Fix, FixCapability, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
@@ -37,9 +43,25 @@ impl MD085ParagraphContinuationIndent {
     ///
     /// `is_paragraph_context` rules out the non-paragraph blocks (code, HTML, math,
     /// headings, front matter, extension blocks); `in_container` rules out the
-    /// containers, where the leading whitespace is what puts the line inside them.
-    fn is_top_level_prose(line: &LineInfo) -> bool {
-        line.is_paragraph_context() && !line.is_blank && !Self::in_container(line)
+    /// containers, where the leading whitespace is what puts the line inside them;
+    /// `looks_like_html` rules out the raw HTML the block detector leaves unmarked.
+    fn is_top_level_prose(line: &LineInfo, content: &str) -> bool {
+        line.is_paragraph_context()
+            && !line.is_blank
+            && !Self::in_container(line)
+            && !Self::looks_like_html(line, content)
+    }
+
+    /// Whether this line is raw HTML rather than prose.
+    ///
+    /// An HTML block runs to the next blank line, so every line under one is raw HTML
+    /// whose whitespace is the author's. rumdl marks a block that opens and closes on
+    /// the same line, and a stray closing tag, on that line alone, and does not treat
+    /// an inline-level tag as a block start at all. A line that begins with `<`
+    /// therefore opens the region here, and the state machine keeps it open until the
+    /// blank line that ends it.
+    fn looks_like_html(line: &LineInfo, content: &str) -> bool {
+        line.content(content).trim_start().starts_with('<')
     }
 
     /// Whether a container owns this line.
@@ -73,6 +95,10 @@ impl MD085ParagraphContinuationIndent {
     /// A heading inside a container is the same case but is invisible here, because
     /// headings are recorded only at the top level. Prose below one therefore keeps the
     /// container's benefit of the doubt and goes unchecked.
+    ///
+    /// Every block listed here carries its own end: a closing fence, a dedent, a
+    /// delimiter line. HTML is the exception and is deliberately absent, because an
+    /// HTML block ends at a blank line rather than at its closing tag.
     fn ends_its_block(line: &LineInfo) -> bool {
         if let Some(heading) = &line.heading {
             // A setext heading's underline is still to come.
@@ -80,8 +106,6 @@ impl MD085ParagraphContinuationIndent {
         }
         line.in_code_block
             || line.in_front_matter
-            || line.in_html_block
-            || line.in_html_comment
             || line.in_math_block
             || line.is_horizontal_rule
             || line.is_kramdown_block_ial
@@ -102,6 +126,27 @@ impl MD085ParagraphContinuationIndent {
     /// so removing it would change the document.
     fn strippable_indent(text: &str) -> usize {
         text.len() - text.trim_start_matches([' ', '\t']).len()
+    }
+
+    /// Whether the line would open a block once its indentation is gone.
+    ///
+    /// A continuation line is free whitespace only for as long as it stays inside the
+    /// paragraph. At column zero `#` opens a heading, `>` a blockquote, `-`, `+`, `*`
+    /// and a digit a list item, `-`, `*` and `_` a thematic break, `-` and `=` a setext
+    /// underline, `` ` `` and `~` a fence, `<` an HTML block, `|` a table row, `$` a math
+    /// block, `[` a link reference or footnote definition, `:` a definition, `!` an
+    /// admonition and `{` an attribute list. Each of those interrupts the paragraph in at
+    /// least one of the dialects rumdl reads, so here the indentation is what keeps the
+    /// line prose and removing it would restructure the document.
+    ///
+    /// The test is the first byte rather than the whole marker. That accepts lines which
+    /// would have stayed prose, which costs a finding and never a document.
+    fn would_open_a_block(text: &str) -> bool {
+        const BLOCK_STARTERS: &[u8] = b"#>-+*_=`~<|[{:$!0123456789";
+        match text.trim_start_matches([' ', '\t']).as_bytes().first() {
+            Some(byte) => BLOCK_STARTERS.contains(byte),
+            None => false,
+        }
     }
 }
 
@@ -145,7 +190,7 @@ impl Rule for MD085ParagraphContinuationIndent {
                 continue;
             }
 
-            if !Self::is_top_level_prose(line) {
+            if !Self::is_top_level_prose(line, ctx.content) {
                 expect_setext_underline = Self::opens_setext_heading(line);
                 state = if Self::ends_its_block(line) {
                     Block::Between
@@ -167,8 +212,13 @@ impl Rule for MD085ParagraphContinuationIndent {
                     if line.in_code_span_continuation {
                         continue;
                     }
-                    let indent = Self::strippable_indent(line.content(ctx.content));
+                    let text = line.content(ctx.content);
+                    let indent = Self::strippable_indent(text);
                     if indent == 0 {
+                        continue;
+                    }
+                    // At column zero the line would stop being prose.
+                    if Self::would_open_a_block(text) {
                         continue;
                     }
 
@@ -217,6 +267,7 @@ impl Rule for MD085ParagraphContinuationIndent {
 mod tests {
     use super::*;
     use crate::config::MarkdownFlavor;
+    use pulldown_cmark::{Options, Parser};
 
     fn warned_lines(content: &str, flavor: MarkdownFlavor) -> Vec<usize> {
         let ctx = LintContext::new(content, flavor, None);
@@ -238,6 +289,22 @@ mod tests {
             out == content,
             "warnings and fix disagree for {content:?}"
         );
+        out
+    }
+
+    /// The document as a reader sees it. CommonMark already strips the indentation of a
+    /// paragraph continuation line, so a rewrite the rule is allowed to make renders
+    /// byte-for-byte identically and any other one does not.
+    fn render(markdown: &str) -> String {
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_FOOTNOTES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
+        options.insert(Options::ENABLE_MATH);
+        options.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+        let mut out = String::new();
+        pulldown_cmark::html::push_html(&mut out, Parser::new_ext(markdown, options));
         out
     }
 
@@ -302,9 +369,85 @@ mod tests {
         ] {
             assert_unchanged(content, MarkdownFlavor::Standard);
         }
-        // An HTML block runs to the next blank line, so what follows the closing tag
-        // is still raw HTML rather than a paragraph.
-        assert_unchanged("<div>\nhtml\n</div>\npara\n  cont\n", MarkdownFlavor::Standard);
+    }
+
+    #[test]
+    fn leaves_html_alone_until_the_blank_line_that_ends_it() {
+        // An HTML block runs to the next blank line whatever its tags do, so everything
+        // under one is raw HTML whose whitespace belongs to the author. These are the
+        // shapes rumdl's block detector does not mark past their first line: a tag that
+        // opens and closes on one line, a stray closing tag, an inline-level tag, and a
+        // comment.
+        for content in [
+            "<div>\nhtml\n</div>\npara\n  cont\n",
+            "<h2>x</h2>\npara\n  cont\n",
+            "</div>\npara\n  cont\n",
+            "<em>\n  cont\n",
+            "<!-- comment -->\npara\n  cont\n",
+        ] {
+            assert_unchanged(content, MarkdownFlavor::Standard);
+        }
+        // The blank line ends it, and the paragraph below is checked again.
+        assert_eq!(
+            fixed("<h2>x</h2>\n\npara\n  cont\n", MarkdownFlavor::Standard),
+            "<h2>x</h2>\n\npara\ncont\n"
+        );
+    }
+
+    #[test]
+    fn leaves_a_continuation_that_would_open_a_block_alone() {
+        // At four spaces none of these can interrupt the paragraph, so each one is prose
+        // that the rule sees. At column zero every one of them opens a block instead, so
+        // the indentation is what keeps the line where the author put it.
+        for line in [
+            "# heading",
+            "> quote",
+            "- item",
+            "+ item",
+            "* item",
+            "1. item",
+            "***",
+            "---",
+            "===",
+            "```",
+            "~~~",
+            "<div>",
+            "| a | b |",
+            "[^1]: note",
+            "{: .class }",
+            ": definition",
+            "$$",
+            "!!! note",
+        ] {
+            assert_unchanged(&format!("para\n    {line}\n"), MarkdownFlavor::Standard);
+        }
+    }
+
+    #[test]
+    fn a_stripped_continuation_renders_identically() {
+        // The rule's whole premise is that the indentation it removes is invisible.
+        // Sweeping every printable ASCII character through the shapes that open a block
+        // makes a missed block starter fail here instead of corrupting a document. Four
+        // spaces is the interesting width: nothing can interrupt a paragraph from there,
+        // so every one of these lines reaches the rule as prose.
+        for byte in 0x21u8..=0x7e {
+            let c = byte as char;
+            for template in [
+                "para\n    @ tail\n",
+                "para\n    @@@\n",
+                "para\n    @. tail\n",
+                "para\n    @tail\n",
+                "para\n    @ tail\n    more\n",
+            ] {
+                let content = template.replace('@', &c.to_string());
+                let out = fixed(&content, MarkdownFlavor::Standard);
+                assert_eq!(
+                    render(&out),
+                    render(&content),
+                    "removing the indentation changed the rendering of {content:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -331,7 +474,6 @@ mod tests {
             "# Heading\n",
             "***\n",
             "```\ncode\n```\n",
-            "<!-- comment -->\n",
             "$$\nx = 1\n$$\n",
             "Setext heading\n==============\n",
             "---\ntitle: front matter\n---\n",
@@ -355,6 +497,26 @@ mod tests {
                 fixed(&content, MarkdownFlavor::Standard),
                 format!("{prefix}para\ncont\n"),
                 "continuation after {prefix:?} was not checked"
+            );
+        }
+    }
+
+    #[test]
+    fn real_world_documents_survive_the_fix() {
+        // Minimized from documents the rule rewrote into something that renders
+        // differently: a closing tag whose HTML block rumdl stops tracking, a list
+        // marker and a template tag under a paragraph, and a setext underline.
+        for content in [
+            "```\n```\n</div>\n  dateformat.i18n = require('./lang/' + l)\n  return true;\n",
+            ":   A site that uses `just-the-docs` automatically\n    - features that are likely to be removed.\n",
+            "```html\n```\n  {% for stylesheet in page.page_css %}\n    <link rel=\"stylesheet\" href=\"{{ stylesheet }}\">\n",
+            "![Image *\"alt\"* & \\\"\n    <em>html</em>\n    ---\n",
+        ] {
+            assert_unchanged(content, MarkdownFlavor::Standard);
+            assert_eq!(
+                render(&fixed(content, MarkdownFlavor::Standard)),
+                render(content),
+                "the fix changed the rendering of {content:?}"
             );
         }
     }
