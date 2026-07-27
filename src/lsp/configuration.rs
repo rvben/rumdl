@@ -548,15 +548,19 @@ impl RumdlLanguageServer {
                     log::debug!("Skipping unloadable config {}: {e}", config_path.display());
                 }
                 Err(DiscoveredConfigError::UserConfig(e)) => {
-                    // The candidate is fine; the user config it merges onto is broken.
-                    // `rumdl check` refuses to run at all in this state, so stop the walk
-                    // instead of quietly linting with a config from further up the tree,
+                    // The candidate itself is fine; the user config it merges onto is not,
+                    // so this file has no resolvable configuration. `rumdl check` exits
+                    // with a config error here. The server cannot exit, and any substitute
+                    // - a config from further up the tree, or the one discovery found at
+                    // startup - would lint against a ruleset that exists nowhere on disk.
+                    // Report defaults, which is the same answer as having no config at all,
                     // and say why.
                     log::warn!(
-                        "Cannot resolve {} for {}: {e}",
+                        "Cannot resolve {} for {}: {e}. Using default rules until the user config is fixed.",
                         config_path.display(),
                         file_path.display()
                     );
+                    found_config = Some((Config::default(), None));
                     break;
                 }
             }

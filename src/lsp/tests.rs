@@ -8479,6 +8479,27 @@ async fn test_resolve_config_does_not_substitute_a_parent_config_when_the_user_c
         let mut roots = server.workspace_roots.write().await;
         roots.push(project.clone());
     }
+    // Startup discovery runs from the workspace root, where the parent config is
+    // rumdl-native and so resolves standalone. That leaves the parent's rules in
+    // `rumdl_config`, which is the second route by which they could reach this file.
+    {
+        let mut startup = server.rumdl_config.write().await;
+        *startup = crate::config::SourcedConfig::load_with_discovery_impl(
+            Some(&project.join(".rumdl.toml").to_string_lossy()),
+            None,
+            true,
+            Some(&user_config_dir),
+            Some(&home_dir),
+        )
+        .expect("the parent config resolves standalone")
+        .into_validated_unchecked()
+        .into();
+        assert_eq!(
+            crate::config::get_rule_config_value::<String>(&startup, "MD004", "style"),
+            Some("dash".to_string()),
+            "precondition: the startup config carries the parent's rules"
+        );
+    }
 
     let config = server
         .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
@@ -8487,7 +8508,7 @@ async fn test_resolve_config_does_not_substitute_a_parent_config_when_the_user_c
     assert_eq!(
         crate::config::get_rule_config_value::<String>(&config, "MD004", "style"),
         None,
-        "resolution should stop at the unresolvable config, not walk on to the parent's"
+        "resolution should stop at the unresolvable config, not reach for the parent's rules"
     );
 }
 
