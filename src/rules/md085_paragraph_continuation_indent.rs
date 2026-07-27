@@ -19,10 +19,10 @@ enum Block {
     Between,
     /// A top-level paragraph is open, so its next line is a continuation.
     Paragraph,
-    /// Some other block is open. Its later lines can look like bare prose (a lazy
+    /// A container is open. Its later lines can look like bare prose (a lazy
     /// blockquote or list continuation carries no markers of its own), so the state
     /// has to outlive them.
-    Other,
+    Container,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -36,36 +36,71 @@ impl MD085ParagraphContinuationIndent {
     /// Whether this line can belong to a paragraph that no container owns.
     ///
     /// `is_paragraph_context` rules out the non-paragraph blocks (code, HTML, math,
-    /// headings, front matter, extension blocks); the rest of the list rules out the
+    /// headings, front matter, extension blocks); `in_container` rules out the
     /// containers, where the leading whitespace is what puts the line inside them.
     fn is_top_level_prose(line: &LineInfo) -> bool {
-        line.is_paragraph_context()
-            && !line.is_blank
-            && !line.in_list_block
-            && line.blockquote.is_none()
-            && !line.in_table_block
-            && !line.in_definition_list
-            && !line.in_footnote_definition
-            && !line.in_admonition
-            && !line.in_content_tab
-            && !line.in_mkdocs_html_markdown
-            && !line.in_pandoc_div
-            && !line.in_mkdocstrings
-            && !line.in_myst_directive
-            && !line.in_jsx_block
-            && !line.in_jsx_expression
-            && !line.in_esm_block
-            && !line.in_mdx_comment
-            && !line.in_obsidian_comment
+        line.is_paragraph_context() && !line.is_blank && !Self::in_container(line)
     }
 
-    /// Whether a non-paragraph line is a block all by itself, so the line after it
-    /// starts fresh. A setext heading is not: its underline is still to come.
-    fn is_self_contained(line: &LineInfo) -> bool {
+    /// Whether a container owns this line.
+    fn in_container(line: &LineInfo) -> bool {
+        line.in_list_block
+            || line.blockquote.is_some()
+            || line.in_table_block
+            || line.in_definition_list
+            || line.in_footnote_definition
+            || line.in_admonition
+            || line.in_content_tab
+            || line.in_mkdocs_html_markdown
+            || line.in_pandoc_div
+            || line.in_mkdocstrings
+            || line.in_myst_directive
+            || line.in_jsx_block
+            || line.in_jsx_expression
+            || line.in_esm_block
+            || line.in_mdx_comment
+            || line.in_obsidian_comment
+    }
+
+    /// Whether a non-paragraph line ends its block, so the line after it starts a new
+    /// one.
+    ///
+    /// Only a block that can own a lazy continuation has to outlive its last line: a
+    /// lazy line carries no marker of its own, so it reads exactly like top-level
+    /// prose. Everything closed by its own last line is over when that line is, and
+    /// the paragraph after it is a paragraph like any other.
+    fn ends_its_block(line: &LineInfo) -> bool {
+        if Self::in_container(line) {
+            return false;
+        }
         if let Some(heading) = &line.heading {
+            // A setext heading's underline is still to come.
             return heading.style == HeadingStyle::ATX;
         }
-        line.is_horizontal_rule || line.is_kramdown_block_ial || line.is_myst_comment
+        line.in_code_block
+            || line.in_front_matter
+            || line.in_html_block
+            || line.in_html_comment
+            || line.in_math_block
+            || line.is_horizontal_rule
+            || line.is_kramdown_block_ial
+            || line.is_myst_comment
+    }
+
+    /// Whether this line is the text of a setext heading, whose underline follows on
+    /// the next line and carries no markers of its own.
+    fn opens_setext_heading(line: &LineInfo) -> bool {
+        match &line.heading {
+            Some(heading) => heading.style != HeadingStyle::ATX && !Self::in_container(line),
+            None => false,
+        }
+    }
+
+    /// The leading whitespace CommonMark strips from a paragraph continuation line,
+    /// which is spaces and tabs only. Other Unicode whitespace is content and renders,
+    /// so removing it would change the document.
+    fn strippable_indent(text: &str) -> usize {
+        text.len() - text.trim_start_matches([' ', '\t']).len()
     }
 }
 
@@ -87,25 +122,34 @@ impl Rule for MD085ParagraphContinuationIndent {
     }
 
     fn should_skip(&self, ctx: &LintContext) -> bool {
-        // Nothing to strip unless some line begins with whitespace.
-        !ctx.lines.iter().any(|line| line.indent > 0 && !line.is_blank)
+        // Nothing to strip unless some line begins with a space or a tab.
+        !ctx.lines
+            .iter()
+            .any(|line| !line.is_blank && Self::strippable_indent(line.content(ctx.content)) > 0)
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
         let mut warnings = Vec::new();
         let mut state = Block::Between;
+        let mut expect_setext_underline = false;
 
         for (idx, line) in ctx.lines.iter().enumerate() {
+            if std::mem::take(&mut expect_setext_underline) {
+                state = Block::Between;
+                continue;
+            }
+
             if line.is_blank {
                 state = Block::Between;
                 continue;
             }
 
             if !Self::is_top_level_prose(line) {
-                state = if Self::is_self_contained(line) {
+                expect_setext_underline = Self::opens_setext_heading(line);
+                state = if Self::ends_its_block(line) {
                     Block::Between
                 } else {
-                    Block::Other
+                    Block::Container
                 };
                 continue;
             }
@@ -114,12 +158,16 @@ impl Rule for MD085ParagraphContinuationIndent {
                 // The line that opens a paragraph is its first line, whose indentation
                 // decides what the block is. Only later lines are free whitespace.
                 Block::Between => state = Block::Paragraph,
-                // Prose reached while another block is open is a lazy continuation of
-                // that block, not a paragraph of its own.
-                Block::Other => {}
+                // Prose reached while a container is open is a lazy continuation of
+                // that container, not a paragraph of its own.
+                Block::Container => {}
                 Block::Paragraph => {
                     // Leading whitespace inside a multi-line code span is span content.
-                    if line.indent == 0 || line.in_code_span_continuation {
+                    if line.in_code_span_continuation {
+                        continue;
+                    }
+                    let indent = Self::strippable_indent(line.content(ctx.content));
+                    if indent == 0 {
                         continue;
                     }
 
@@ -129,13 +177,10 @@ impl Rule for MD085ParagraphContinuationIndent {
                         line: line_num,
                         column: 1,
                         end_line: line_num,
-                        end_column: 1 + line.content(ctx.content)[..line.indent].chars().count(),
+                        end_column: 1 + indent,
                         severity: Severity::Warning,
                         message: "Paragraph continuation line should not be indented".to_string(),
-                        fix: Some(Fix::new(
-                            line.byte_offset..line.byte_offset + line.indent,
-                            String::new(),
-                        )),
+                        fix: Some(Fix::new(line.byte_offset..line.byte_offset + indent, String::new())),
                     });
                 }
             }
@@ -256,6 +301,9 @@ mod tests {
         ] {
             assert_unchanged(content, MarkdownFlavor::Standard);
         }
+        // An HTML block runs to the next blank line, so what follows the closing tag
+        // is still raw HTML rather than a paragraph.
+        assert_unchanged("<div>\nhtml\n</div>\npara\n  cont\n", MarkdownFlavor::Standard);
     }
 
     #[test]
@@ -275,14 +323,37 @@ mod tests {
     }
 
     #[test]
-    fn a_paragraph_after_a_self_contained_block_is_still_checked() {
-        for prefix in ["# Heading\n", "***\n"] {
+    fn a_paragraph_after_a_closed_block_is_still_checked() {
+        // None of these can own a lazy continuation line, so the prose below each one
+        // is a paragraph of its own even without a blank line between them.
+        for prefix in [
+            "# Heading\n",
+            "***\n",
+            "```\ncode\n```\n",
+            "<!-- comment -->\n",
+            "$$\nx = 1\n$$\n",
+            "Setext heading\n==============\n",
+            "---\ntitle: front matter\n---\n",
+        ] {
             let content = format!("{prefix}para\n  cont\n");
             assert_eq!(
                 fixed(&content, MarkdownFlavor::Standard),
-                format!("{prefix}para\ncont\n")
+                format!("{prefix}para\ncont\n"),
+                "continuation after {prefix:?} was not checked"
             );
         }
+    }
+
+    #[test]
+    fn strips_only_the_whitespace_commonmark_strips() {
+        // CommonMark strips spaces and tabs from a continuation line. Other Unicode
+        // whitespace is content that renders, so removing it changes the document.
+        assert_unchanged("para\n\u{a0}cont\n", MarkdownFlavor::Standard);
+        assert_unchanged("para\n\u{3000}cont\n", MarkdownFlavor::Standard);
+        assert_eq!(
+            fixed("para\n  \u{3000}cont\n", MarkdownFlavor::Standard),
+            "para\n\u{3000}cont\n"
+        );
     }
 
     #[test]
