@@ -20,6 +20,13 @@ pub(crate) struct MD041Config {
     #[serde(default, alias = "front_matter_title_pattern")]
     pub front_matter_title_pattern: Option<String>,
 
+    /// Allow content before the first heading (default: false)
+    /// When enabled, the rule checks the level of the document's first top-level
+    /// heading instead of requiring the document to open with one. A document with
+    /// no top-level heading is not flagged.
+    #[serde(default)]
+    pub allow_preamble: bool,
+
     /// Enable auto-fix for MD041 (default: false)
     /// When enabled, `rumdl check --fix` will:
     /// - Rewrite headings to the correct level if the first content is a heading with wrong level
@@ -38,6 +45,7 @@ impl Default for MD041Config {
             level: HeadingLevel::default(),
             front_matter_title: default_front_matter_title(),
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix: false,
         }
     }
@@ -90,6 +98,7 @@ mod tests {
             level: HeadingLevel::new(2).unwrap(),
             front_matter_title: "header".to_string(),
             front_matter_title_pattern: Some("^heading:".to_string()),
+            allow_preamble: false,
             fix: false,
         };
 
@@ -98,6 +107,15 @@ mod tests {
         assert!(toml_str.contains("front-matter-title"));
         assert!(toml_str.contains("front-matter-title-pattern"));
         assert!(!toml_str.contains("front_matter_title"));
+        assert!(toml_str.contains("allow-preamble"));
+    }
+
+    #[test]
+    fn test_allow_preamble_defaults_off_and_reads_kebab_case() {
+        assert!(!MD041Config::default().allow_preamble);
+
+        let config: MD041Config = toml::from_str("allow-preamble = true\n").unwrap();
+        assert!(config.allow_preamble);
     }
 
     #[test]

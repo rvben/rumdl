@@ -20,6 +20,7 @@ pub struct MD041FirstLineHeading {
     pub level: usize,
     pub front_matter_title: bool,
     pub front_matter_title_pattern: Option<Regex>,
+    pub allow_preamble: bool,
     pub fix_enabled: bool,
 }
 
@@ -29,6 +30,7 @@ impl Default for MD041FirstLineHeading {
             level: 1,
             front_matter_title: true,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: false,
         }
     }
@@ -56,6 +58,14 @@ enum FixPlan {
         front_matter_end_idx: usize,
         derived_title: String,
     },
+    /// Rewrite an existing heading to the required level, leaving it where it is.
+    /// Used when preamble is allowed: moving the heading to the top would delete the
+    /// preamble that the configuration exists to permit.
+    RelevelInPlace {
+        heading_idx: usize,
+        is_setext: bool,
+        current_level: usize,
+    },
 }
 
 impl MD041FirstLineHeading {
@@ -64,6 +74,7 @@ impl MD041FirstLineHeading {
             level,
             front_matter_title,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: false,
         }
     }
@@ -81,8 +92,15 @@ impl MD041FirstLineHeading {
             level,
             front_matter_title,
             front_matter_title_pattern,
+            allow_preamble: false,
             fix_enabled,
         }
+    }
+
+    /// Allow content before the document's first heading.
+    pub fn with_allow_preamble(mut self, allow_preamble: bool) -> Self {
+        self.allow_preamble = allow_preamble;
+        self
     }
 
     fn has_front_matter_title(&self, content: &str) -> bool {
@@ -159,6 +177,51 @@ impl MD041FirstLineHeading {
                 continue;
             }
             return Some(idx);
+        }
+        None
+    }
+
+    /// Find the index (0-indexed) of the document's first top-level heading.
+    ///
+    /// Used when preamble is allowed, where the rule judges the level of the first
+    /// heading rather than requiring the document to open with one. Only top-level
+    /// headings count: one inside a list, blockquote, directive block or HTML element
+    /// is that container's content, so the scan passes over it and keeps looking.
+    /// Returns `None` for a document with no top-level heading, which the rule then
+    /// has nothing to judge.
+    fn first_top_level_heading_idx(ctx: &crate::lint_context::LintContext) -> Option<usize> {
+        for (idx, line_info) in ctx.lines.iter().enumerate() {
+            if line_info.is_blank
+                || line_info.in_front_matter
+                || line_info.in_code_block
+                || line_info.in_html_comment
+                || line_info.in_mdx_comment
+                || line_info.in_math_block
+            {
+                continue;
+            }
+
+            let in_container = line_info.in_list_block
+                || line_info.blockquote.is_some()
+                || line_info.in_admonition
+                || line_info.in_content_tab
+                || line_info.in_pandoc_div
+                || line_info.in_pymdown_block
+                || line_info.in_kramdown_extension_block;
+            if in_container {
+                continue;
+            }
+
+            if line_info.heading.is_some() {
+                return Some(idx);
+            }
+
+            // An HTML heading counts only where its block begins. An `<h1>` on a later
+            // line of the block is nested in whatever element opened it.
+            let continues_html_block = idx > 0 && line_info.in_html_block && ctx.lines[idx - 1].in_html_block;
+            if !continues_html_block && (1..=6).any(|level| Self::is_html_heading(ctx, idx, level)) {
+                return Some(idx);
+            }
         }
         None
     }
@@ -393,6 +456,22 @@ impl MD041FirstLineHeading {
             return None;
         }
 
+        // Preamble is allowed, so the only safe repair is releveling the heading where
+        // it stands. Every other plan promotes something to the top of the document,
+        // which would remove the preamble this configuration permits.
+        if self.allow_preamble {
+            let heading_idx = Self::first_top_level_heading_idx(ctx)?;
+            let heading = ctx.lines[heading_idx].heading.as_ref()?;
+            if heading.level as usize == self.level {
+                return None;
+            }
+            return Some(FixPlan::RelevelInPlace {
+                heading_idx,
+                is_setext: matches!(heading.style, HeadingStyle::Setext1 | HeadingStyle::Setext2),
+                current_level: heading.level as usize,
+            });
+        }
+
         // Find front matter end (handles YAML, TOML, JSON, malformed)
         let mut front_matter_end_idx = 0;
         for line_info in &ctx.lines {
@@ -538,7 +617,15 @@ impl Rule for MD041FirstLineHeading {
             return Ok(warnings);
         }
 
-        let Some(first_line_idx) = Self::first_content_line_idx(ctx) else {
+        // Allowing preamble moves the subject of the rule from the document's first
+        // content line to its first heading, so a document with no heading has nothing
+        // to judge.
+        let first_line_idx = if self.allow_preamble {
+            Self::first_top_level_heading_idx(ctx)
+        } else {
+            Self::first_content_line_idx(ctx)
+        };
+        let Some(first_line_idx) = first_line_idx else {
             return Ok(warnings);
         };
 
@@ -583,6 +670,18 @@ impl Rule for MD041FirstLineHeading {
                             };
                             Some(Fix::new(range_start..range_end, replacement))
                         }
+                        FixPlan::RelevelInPlace {
+                            heading_idx,
+                            current_level,
+                            is_setext,
+                        } if *heading_idx == first_line_idx && !*is_setext => {
+                            let replacement = self.fix_heading_level(
+                                ctx.lines[*heading_idx].content(ctx.content),
+                                *current_level,
+                                self.level,
+                            );
+                            Some(Fix::new(range_start..range_end, replacement))
+                        }
                         FixPlan::PromotePlainText { title_line_idx, .. } if *title_line_idx == first_line_idx => {
                             let replacement = format!(
                                 "{} {}",
@@ -611,7 +710,11 @@ impl Rule for MD041FirstLineHeading {
                 column: start_col,
                 end_line,
                 end_column: end_col,
-                message: format!("First line in file should be a level {} heading", self.level),
+                message: if self.allow_preamble {
+                    format!("First heading in file should be a level {} heading", self.level)
+                } else {
+                    format!("First line in file should be a level {} heading", self.level)
+                },
                 severity: Severity::Warning,
                 fix,
             });
@@ -700,6 +803,26 @@ impl Rule for MD041FirstLineHeading {
                 }
             }
 
+            FixPlan::RelevelInPlace {
+                heading_idx,
+                is_setext,
+                current_level,
+            } => {
+                for (idx, line) in lines.iter().enumerate() {
+                    if idx == heading_idx {
+                        result.push_str(&self.fix_heading_level(line, current_level, self.level));
+                        result.push('\n');
+                        continue;
+                    }
+                    // The underline is gone: releveling rewrites a setext heading as ATX.
+                    if is_setext && idx == heading_idx + 1 {
+                        continue;
+                    }
+                    result.push_str(line);
+                    result.push('\n');
+                }
+            }
+
             FixPlan::InsertDerived {
                 front_matter_end_idx,
                 derived_title,
@@ -761,12 +884,15 @@ impl Rule for MD041FirstLineHeading {
 
         let use_front_matter = !md041_config.front_matter_title.is_empty();
 
-        Box::new(MD041FirstLineHeading::with_pattern(
-            md041_config.level.as_usize(),
-            use_front_matter,
-            md041_config.front_matter_title_pattern,
-            md041_config.fix,
-        ))
+        Box::new(
+            MD041FirstLineHeading::with_pattern(
+                md041_config.level.as_usize(),
+                use_front_matter,
+                md041_config.front_matter_title_pattern,
+                md041_config.fix,
+            )
+            .with_allow_preamble(md041_config.allow_preamble),
+        )
     }
 
     fn default_config_section(&self) -> Option<(String, toml::Value)> {
@@ -776,6 +902,7 @@ impl Rule for MD041FirstLineHeading {
                 level = 1
                 front-matter-title = "title"
                 front-matter-title-pattern = ""
+                allow-preamble = false
                 fix = false
             }
             .into(),
@@ -1674,6 +1801,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1691,6 +1819,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1711,6 +1840,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1731,6 +1861,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1751,6 +1882,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1771,6 +1903,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1791,6 +1924,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1808,6 +1942,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1828,6 +1963,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1845,6 +1981,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1865,6 +2002,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1885,6 +2023,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1906,6 +2045,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1927,6 +2067,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1950,6 +2091,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1978,6 +2120,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -1999,6 +2142,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2026,6 +2170,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2045,6 +2190,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2065,6 +2211,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2081,6 +2228,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2099,6 +2247,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2116,6 +2265,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2140,6 +2290,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2160,6 +2311,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2189,6 +2341,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 
@@ -2207,6 +2360,7 @@ mod tests {
             level: 1,
             front_matter_title: false,
             front_matter_title_pattern: None,
+            allow_preamble: false,
             fix_enabled: true,
         };
 

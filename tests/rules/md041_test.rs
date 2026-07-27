@@ -453,3 +453,172 @@ fn test_issue_186_setext_heading_with_colon() {
         "Test should complete without panic"
     );
 }
+
+// --- allow-preamble ---
+//
+// With preamble allowed the rule judges the level of the document's first
+// top-level heading instead of requiring the document to open with one.
+// The expectations below were taken from markdownlint-cli2 v0.23.1 run over the
+// same fixtures with `MD041: { allow_preamble: true }`.
+
+fn preamble_rule() -> MD041FirstLineHeading {
+    MD041FirstLineHeading::new(1, false).with_allow_preamble(true)
+}
+
+fn check_lines(rule: &MD041FirstLineHeading, content: &str) -> Vec<usize> {
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    rule.check(&ctx).unwrap().into_iter().map(|w| w.line).collect()
+}
+
+#[test]
+fn test_allow_preamble_flags_a_wrong_level_first_heading_at_its_own_line() {
+    assert_eq!(check_lines(&preamble_rule(), "Text\n\n## Sub\n"), vec![3]);
+}
+
+#[test]
+fn test_allow_preamble_accepts_a_correct_level_heading_after_preamble() {
+    assert_eq!(check_lines(&preamble_rule(), "Text\n\n# Title\n"), Vec::<usize>::new());
+}
+
+#[test]
+fn test_allow_preamble_stops_at_the_first_heading() {
+    // A later level-1 heading does not excuse the first one.
+    assert_eq!(check_lines(&preamble_rule(), "Text\n\n## A\n\n# B\n"), vec![3]);
+    // ...and a correct first heading is not undone by a later one.
+    assert_eq!(
+        check_lines(&preamble_rule(), "Text\n\n# A\n\n## B\n"),
+        Vec::<usize>::new()
+    );
+}
+
+#[test]
+fn test_allow_preamble_ignores_a_document_with_no_heading() {
+    // The subject of the rule is the first heading, so there is nothing to judge.
+    assert_eq!(
+        check_lines(&preamble_rule(), "Text\n\nMore text\n"),
+        Vec::<usize>::new()
+    );
+}
+
+#[test]
+fn test_allow_preamble_skips_headings_inside_containers() {
+    // A heading inside a list or blockquote is that container's content, so the
+    // scan passes over it and finds no top-level heading at all.
+    for content in [
+        "Text\n\n- List item\n\n  # Nested\n\nMore text\n",
+        "Text\n\n> # Quoted\n",
+        "Text\n\n> ## Quoted\n",
+    ] {
+        assert_eq!(
+            check_lines(&preamble_rule(), content),
+            Vec::<usize>::new(),
+            "container-nested heading should not be treated as the document's first heading: {content:?}"
+        );
+    }
+}
+
+#[test]
+fn test_allow_preamble_skips_non_heading_preamble_blocks() {
+    // Code fences, tables, thematic breaks and comments are all preamble.
+    assert_eq!(
+        check_lines(&preamble_rule(), "```text\n# Not a heading\n```\n\n# Real heading\n"),
+        Vec::<usize>::new()
+    );
+    assert_eq!(check_lines(&preamble_rule(), "<!-- comment -->\n\n## After\n"), vec![3]);
+    assert_eq!(check_lines(&preamble_rule(), "***\n\n## After hr\n"), vec![3]);
+    assert_eq!(
+        check_lines(&preamble_rule(), "| a | b |\n| - | - |\n| 1 | 2 |\n\n## After table\n"),
+        vec![5]
+    );
+}
+
+#[test]
+fn test_allow_preamble_reads_html_headings_that_open_their_block() {
+    assert_eq!(
+        check_lines(&preamble_rule(), "Text\n\n<h1>T</h1>\n"),
+        Vec::<usize>::new()
+    );
+    assert_eq!(
+        check_lines(&preamble_rule(), "Text\n\n<p>HTML</p>\n\n<h1>T</h1>\n"),
+        Vec::<usize>::new()
+    );
+    // Multi-line HTML heading: reported at the opening tag.
+    assert_eq!(check_lines(&preamble_rule(), "Text\n\n<h2>\nT\n</h2>\n"), vec![3]);
+    // An `<h2>` nested in a `<div>` belongs to the div, not to the document.
+    assert_eq!(
+        check_lines(
+            &preamble_rule(),
+            "Text\n\n<div align=\"center\">\n  <h2>T</h2>\n</div>\n"
+        ),
+        Vec::<usize>::new()
+    );
+}
+
+#[test]
+fn test_allow_preamble_still_honours_a_front_matter_title() {
+    let rule = MD041FirstLineHeading::new(1, true).with_allow_preamble(true);
+    assert_eq!(
+        check_lines(&rule, "---\ntitle: X\n---\n\nText\n\n## Sub\n"),
+        Vec::<usize>::new()
+    );
+    assert_eq!(check_lines(&rule, "---\nauthor: X\n---\n\nText\n\n## Sub\n"), vec![7]);
+}
+
+#[test]
+fn test_allow_preamble_respects_a_configured_level() {
+    let rule = MD041FirstLineHeading::new(2, false).with_allow_preamble(true);
+    assert_eq!(check_lines(&rule, "Text\n\n## Sub\n"), Vec::<usize>::new());
+    assert_eq!(check_lines(&rule, "Text\n\n# Title\n"), vec![3]);
+}
+
+#[test]
+fn test_allow_preamble_off_keeps_the_first_line_rule() {
+    // The default must not change: the same documents are judged on their first
+    // content line, not on their first heading.
+    let rule = MD041FirstLineHeading::new(1, false);
+    assert_eq!(check_lines(&rule, "Text\n\n# Title\n"), vec![1]);
+    assert_eq!(check_lines(&rule, "Text\n\nMore text\n"), vec![1]);
+    assert_eq!(check_lines(&rule, "Text\n\n## Sub\n"), vec![1]);
+}
+
+#[test]
+fn test_allow_preamble_fix_relevels_the_heading_where_it_stands() {
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
+
+    let content = "Text\n\n## Sub\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(
+        rule.fix(&ctx).unwrap(),
+        "Text\n\n# Sub\n",
+        "the preamble the option exists to permit must survive the fix"
+    );
+
+    // Setext headings are rewritten as ATX, so the underline goes with them.
+    let content = "Intro paragraph.\n\nTitle\n-----\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), "Intro paragraph.\n\n# Title\n");
+}
+
+#[test]
+fn test_allow_preamble_fix_leaves_a_heading_less_document_alone() {
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
+    let content = "Text\n\nMore text\n";
+    let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+    assert_eq!(rule.fix(&ctx).unwrap(), content);
+}
+
+#[test]
+fn test_allow_preamble_fix_is_idempotent() {
+    let rule = MD041FirstLineHeading::with_pattern(1, false, None, true).with_allow_preamble(true);
+    for content in [
+        "Text\n\n## Sub\n",
+        "Intro paragraph.\n\nTitle\n-----\n",
+        "Text\n\n- item\n\n### After list\n",
+        "Text\n\nMore text\n",
+    ] {
+        let ctx = LintContext::new(content, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        let once = rule.fix(&ctx).unwrap();
+        let ctx = LintContext::new(&once, rumdl_lib::config::MarkdownFlavor::Standard, None);
+        assert_eq!(rule.fix(&ctx).unwrap(), once, "fix is not idempotent for {content:?}");
+    }
+}
