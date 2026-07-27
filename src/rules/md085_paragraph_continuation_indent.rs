@@ -67,12 +67,13 @@ impl MD085ParagraphContinuationIndent {
     ///
     /// Only a block that can own a lazy continuation has to outlive its last line: a
     /// lazy line carries no marker of its own, so it reads exactly like top-level
-    /// prose. Everything closed by its own last line is over when that line is, and
-    /// the paragraph after it is a paragraph like any other.
+    /// prose. What a lazy line continues is a paragraph, so a container whose last
+    /// line is one of these has no lazy continuation to expect either.
+    ///
+    /// A heading inside a container is the same case but is invisible here, because
+    /// headings are recorded only at the top level. Prose below one therefore keeps the
+    /// container's benefit of the doubt and goes unchecked.
     fn ends_its_block(line: &LineInfo) -> bool {
-        if Self::in_container(line) {
-            return false;
-        }
         if let Some(heading) = &line.heading {
             // A setext heading's underline is still to come.
             return heading.style == HeadingStyle::ATX;
@@ -91,7 +92,7 @@ impl MD085ParagraphContinuationIndent {
     /// the next line and carries no markers of its own.
     fn opens_setext_heading(line: &LineInfo) -> bool {
         match &line.heading {
-            Some(heading) => heading.style != HeadingStyle::ATX && !Self::in_container(line),
+            Some(heading) => heading.style != HeadingStyle::ATX,
             None => false,
         }
     }
@@ -335,6 +336,20 @@ mod tests {
             "Setext heading\n==============\n",
             "---\ntitle: front matter\n---\n",
         ] {
+            let content = format!("{prefix}para\n  cont\n");
+            assert_eq!(
+                fixed(&content, MarkdownFlavor::Standard),
+                format!("{prefix}para\ncont\n"),
+                "continuation after {prefix:?} was not checked"
+            );
+        }
+    }
+
+    #[test]
+    fn a_paragraph_after_a_closed_block_inside_a_container_is_still_checked() {
+        // A lazy continuation line continues a paragraph. Neither of these is one, so the
+        // blockquote ends with it and the prose below starts a paragraph of its own.
+        for prefix in ["> ---\n", "> ```\n> code\n> ```\n"] {
             let content = format!("{prefix}para\n  cont\n");
             assert_eq!(
                 fixed(&content, MarkdownFlavor::Standard),
