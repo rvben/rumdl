@@ -5256,6 +5256,38 @@ fn test_relaxed_sentences_exclamation_and_question() {
     assert_eq!(result[2], "and another.");
 }
 
+/// Inside a quotation, a question mark can belong to the quoted phrase rather
+/// than to the sentence carrying it. `A "Is this a test?" guide` is one
+/// sentence, and breaking at the quote splits a phrase in half.
+#[test]
+fn test_question_inside_quotation_is_not_a_sentence_boundary() {
+    let options = ReflowOptions {
+        line_length: 0,
+        sentence_per_line: true,
+        require_sentence_capital: true,
+        ..Default::default()
+    };
+
+    let quoted = reflow_line(r#"A "Is this a test?" guide and more. Second here."#, &options);
+    assert_eq!(
+        quoted.len(),
+        2,
+        "the quoted question continues the sentence: {quoted:?}"
+    );
+    assert_eq!(quoted[0], r#"A "Is this a test?" guide and more."#);
+    assert_eq!(quoted[1], "Second here.");
+
+    // A capital after the closing quote still starts a new sentence.
+    let capital = reflow_line(r#"She said "Stop!" Then he left."#, &options);
+    assert_eq!(capital.len(), 2, "a capital after the quote still splits: {capital:?}");
+    assert_eq!(capital[0], r#"She said "Stop!""#);
+    assert_eq!(capital[1], "Then he left.");
+
+    // Without the quotation the terminator is unambiguous, so case is irrelevant.
+    let unquoted = reflow_line("does this work? yes it does!", &options);
+    assert_eq!(unquoted.len(), 2, "an unquoted question still splits: {unquoted:?}");
+}
+
 #[test]
 fn test_relaxed_sentences_initials_not_split() {
     let options = ReflowOptions {

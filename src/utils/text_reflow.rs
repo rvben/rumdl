@@ -471,6 +471,10 @@ fn is_sentence_boundary(
         return false;
     }
 
+    // A terminator immediately followed by a closing quote sits inside the
+    // quotation, not after it.
+    let inside_quotation = is_closing_quote(next_char);
+
     // Must be followed by space, closing quote, or emphasis/strikethrough marker followed by space
     let (_space_pos, after_space_pos) = if next_char == ' ' {
         // Normal case: punctuation followed by space
@@ -549,9 +553,13 @@ fn is_sentence_boundary(
 
     let first_char = chars[first_letter_pos];
 
-    // For ! and ?, sentence boundaries are unambiguous — no uppercase requirement
+    // A bare ! or ? ends a sentence unambiguously, unlike a period, which also
+    // ends abbreviations, decimals and initials. Inside a quotation it is
+    // ambiguous again: the question can belong to the quoted phrase rather than
+    // to the sentence carrying it, as in `A "Is this a test?" guide`. A
+    // lowercase word after the closing quote means that sentence continues.
     if c == '!' || c == '?' {
-        return true;
+        return !inside_quotation || !require_sentence_capital || first_char.is_uppercase() || is_cjk_char(first_char);
     }
 
     // Period-specific checks: periods are ambiguous (abbreviations, decimals, initials)
