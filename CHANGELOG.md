@@ -84,6 +84,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.45](https://github.com/rvben/rumdl/compare/v0.2.44...v0.2.45) - 2026-07-28
+
+### Fixed
+
+- **md013**: keep every word when a sentence boundary falls inside emphasis ([207823b](https://github.com/rvben/rumdl/commit/207823b664ea5ca34c2c7c1ec5b2335366ea5b17))
+- **md037**: don't flag text between emphasis spans when a span wraps ([17db4f9](https://github.com/rvben/rumdl/commit/17db4f9437bd7f63fee5f552712cd6503caa2d48))
+
+### Changed
+
+- **md013**: reflow output changed for emphasis spanning several sentences. In
+  `sentence-per-line` and `semantic-line-breaks` modes, `**First. Second.**` now
+  becomes `**First.\nSecond.**` instead of `**First.**\n**Second.**`. Reopening the
+  markers on each line replaced the sentence-separating space with a marker pair,
+  which deleted the space and, on many inputs, whole words. A line break inside a
+  span is whitespace in CommonMark, so the rendered output is unchanged.
+
 ## [0.2.44](https://github.com/rvben/rumdl/compare/v0.2.43...v0.2.44) - 2026-07-28
 
 ### Added
