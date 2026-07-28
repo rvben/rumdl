@@ -125,6 +125,40 @@ impl MD037NoSpaceInEmphasis {
         // Check reference definitions [ref]: url "title" using pre-computed data (O(1) vs O(n))
         ctx.is_in_reference_def(byte_pos)
     }
+
+    /// Where each emphasis span ends, ascending, paired with where it began.
+    ///
+    /// Ordering by end position is what keeps [`Self::closes_earlier_emphasis`]
+    /// logarithmic: a run only has to consider the spans that close inside it,
+    /// which is a handful, rather than every span in the document.
+    fn emphasis_span_ends(ctx: &crate::lint_context::LintContext) -> Vec<(usize, usize)> {
+        let mut ends: Vec<(usize, usize)> = ctx
+            .emphasis_spans()
+            .iter()
+            .map(|span| (span.byte_end, span.byte_offset))
+            .collect();
+        ends.sort_unstable();
+        ends
+    }
+
+    /// Check whether a flagged run only looks spaced because its opening marker
+    /// is really the closing delimiter of emphasis that began further up.
+    ///
+    /// Markers are paired one line at a time, so on a line that continues a span
+    /// the first marker reads as an opener and every marker after it pairs one
+    /// position off, putting ordinary words between what look like delimiters.
+    /// The document-level parse settles it: a marker already spent closing a
+    /// span cannot also open one.
+    ///
+    /// A span that both starts and ends inside the run is a different thing, and
+    /// stays reported: `* _real_ *` really is emphasis with spaces in it.
+    fn closes_earlier_emphasis(span_ends: &[(usize, usize)], start: usize, end: usize) -> bool {
+        let first_after_start = span_ends.partition_point(|(span_end, _)| *span_end <= start);
+        span_ends[first_after_start..]
+            .iter()
+            .take_while(|(span_end, _)| *span_end < end)
+            .any(|(_, span_start)| *span_start <= start)
+    }
 }
 
 impl Rule for MD037NoSpaceInEmphasis {
@@ -197,6 +231,11 @@ impl Rule for MD037NoSpaceInEmphasis {
         // Filter out warnings for emphasis markers that are inside links, HTML comments, math, or MkDocs markup
         let mut filtered_warnings = Vec::new();
         let lines = ctx.raw_lines();
+        let span_ends = if warnings.is_empty() {
+            Vec::new()
+        } else {
+            Self::emphasis_span_ends(ctx)
+        };
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_num = line_idx + 1;
@@ -221,7 +260,9 @@ impl Rule for MD037NoSpaceInEmphasis {
                     // detector grammar, so MD037's spaced-emphasis warnings can
                     // never land inside one.
                     let in_pandoc_construct = ctx.flavor.is_pandoc_compatible() && ctx.is_in_bracketed_span(byte_pos);
+                    let byte_end = line_start_pos + (warning.end_column - 1);
                     if !in_pandoc_construct
+                        && !Self::closes_earlier_emphasis(&span_ends, byte_pos, byte_end)
                         && !self.is_in_link(ctx, byte_pos)
                         && !ctx.is_in_html_comment(byte_pos)
                         && !is_in_math_context(ctx, byte_pos)
