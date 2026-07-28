@@ -47,7 +47,9 @@ rumdl follows [Semantic Versioning](https://semver.org/).
 
 - **During 0.x:** a minor release (`0.Y.0`) may include breaking changes, always
   documented with migration notes in the changelog. A patch release (`0.x.Z`) is
-  limited to bug fixes and is non-breaking.
+  non-breaking. It carries bug fixes and additive work such as a new rule or a new
+  configuration option, since a new option defaults to the behavior that preceded
+  it and a new rule does not change how the existing ones behave.
 - **After 1.0:** standard SemVer applies. Breaking changes ship only in a major
   release.
 - New or improved rules that surface additional findings are **not** a breaking
