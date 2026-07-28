@@ -1,6 +1,20 @@
 use rumdl_lib::utils::text_reflow::*;
 use std::time::Instant;
 
+/// Assert that reflow only moved line breaks: the joined output must hold the
+/// same non-whitespace characters, in the same order, as the input.
+///
+/// Reflow decides where a paragraph breaks, never which characters it contains,
+/// so any difference here is content loss or invented markup.
+fn assert_whitespace_only(input: &str, result: &[String]) {
+    let visible = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    assert_eq!(
+        visible(input),
+        visible(&result.join("\n")),
+        "reflow changed content, not just line breaks: {result:?}"
+    );
+}
+
 #[test]
 fn test_list_item_trailing_whitespace_removal() {
     // Test for issue #76 - hard breaks (2 trailing spaces) should be preserved
@@ -1843,9 +1857,12 @@ mod issue_170_nested_link_image {
     }
 }
 
-/// Issue #251: Sentence reflow & formatting markers (bold, italic)
-/// When reflowing multi-sentence emphasized text, emphasis markers should
-/// continue across line breaks to maintain formatting on each line.
+/// Sentence reflow inside emphasis (bold, italic, strikethrough).
+///
+/// A multi-sentence emphasized span splits at its sentence boundaries like any
+/// other text. The span itself is left alone: a line break inside emphasis is
+/// whitespace, so the markers stay where the author put them and the rendered
+/// output is unchanged. Reflow moves line breaks and nothing else.
 mod issue_251_emphasis_continuation {
     use super::*;
 
@@ -1922,23 +1939,12 @@ mod issue_251_emphasis_continuation {
         let input = "*Sentence one. Sentence two. Sentence three.*";
         let result = reflow_line(input, &options);
 
-        // Each sentence should have its own italic markers
-        assert_eq!(result.len(), 3, "Should have 3 lines: {result:?}");
-        assert!(
-            result[0].starts_with('*') && result[0].ends_with('*'),
-            "First line should have italic markers: {:?}",
-            result[0]
+        assert_eq!(
+            result,
+            vec!["*Sentence one.", "Sentence two.", "Sentence three.*"],
+            "Should split at sentence boundaries and leave the span intact"
         );
-        assert!(
-            result[1].starts_with('*') && result[1].ends_with('*'),
-            "Second line should have italic markers: {:?}",
-            result[1]
-        );
-        assert!(
-            result[2].starts_with('*') && result[2].ends_with('*'),
-            "Third line should have italic markers: {:?}",
-            result[2]
-        );
+        assert_whitespace_only(input, &result);
     }
 
     #[test]
@@ -1952,23 +1958,12 @@ mod issue_251_emphasis_continuation {
         let input = "_Sentence one. Sentence two. Sentence three._";
         let result = reflow_line(input, &options);
 
-        // Each sentence should have its own italic markers (underscore style)
-        assert_eq!(result.len(), 3, "Should have 3 lines: {result:?}");
-        assert!(
-            result[0].starts_with('_') && result[0].ends_with('_'),
-            "First line should have underscore markers: {:?}",
-            result[0]
+        assert_eq!(
+            result,
+            vec!["_Sentence one.", "Sentence two.", "Sentence three._"],
+            "Should split at sentence boundaries and leave the span intact"
         );
-        assert!(
-            result[1].starts_with('_') && result[1].ends_with('_'),
-            "Second line should have underscore markers: {:?}",
-            result[1]
-        );
-        assert!(
-            result[2].starts_with('_') && result[2].ends_with('_'),
-            "Third line should have underscore markers: {:?}",
-            result[2]
-        );
+        assert_whitespace_only(input, &result);
     }
 
     #[test]
@@ -1982,18 +1977,12 @@ mod issue_251_emphasis_continuation {
         let input = "**Sentence one. Sentence two.**";
         let result = reflow_line(input, &options);
 
-        // Each sentence should have its own bold markers
-        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
-        assert!(
-            result[0].starts_with("**") && result[0].ends_with("**"),
-            "First line should have bold markers: {:?}",
-            result[0]
+        assert_eq!(
+            result,
+            vec!["**Sentence one.", "Sentence two.**"],
+            "Should split at the sentence boundary and leave the span intact"
         );
-        assert!(
-            result[1].starts_with("**") && result[1].ends_with("**"),
-            "Second line should have bold markers: {:?}",
-            result[1]
-        );
+        assert_whitespace_only(input, &result);
     }
 
     #[test]
@@ -2007,18 +1996,12 @@ mod issue_251_emphasis_continuation {
         let input = "__Sentence one. Sentence two.__";
         let result = reflow_line(input, &options);
 
-        // Each sentence should have its own bold markers (underscore style)
-        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
-        assert!(
-            result[0].starts_with("__") && result[0].ends_with("__"),
-            "First line should have underscore bold markers: {:?}",
-            result[0]
+        assert_eq!(
+            result,
+            vec!["__Sentence one.", "Sentence two.__"],
+            "Should split at the sentence boundary and leave the span intact"
         );
-        assert!(
-            result[1].starts_with("__") && result[1].ends_with("__"),
-            "Second line should have underscore bold markers: {:?}",
-            result[1]
-        );
+        assert_whitespace_only(input, &result);
     }
 
     // ============================================================
@@ -2033,41 +2016,22 @@ mod issue_251_emphasis_continuation {
             ..Default::default()
         };
 
-        // The exact pattern from issue #251
+        // A quoted, emphasized citation spanning three sentences
         let input = r#"He said, _"There is this whole spectrum of crazy futures. But the one that I feel we're almost guaranteed to get. It's the same either way"_ [^ref]."#;
         let result = reflow_markdown(input, &options);
 
-        let lines: Vec<&str> = result.lines().collect();
+        let lines: Vec<String> = result.lines().map(str::to_string).collect();
 
-        // Should split into multiple sentences, each with emphasis markers
-        assert!(
-            lines.len() >= 3,
-            "Should have at least 3 lines for 3 sentences: {result:?}"
+        assert_eq!(
+            lines,
+            vec![
+                r#"He said, _"There is this whole spectrum of crazy futures."#,
+                "But the one that I feel we're almost guaranteed to get.",
+                r#"It's the same either way"_ [^ref]."#,
+            ],
+            "Each sentence gets its own line; the emphasis opens once and closes once"
         );
-
-        // First line should start with context and have opening emphasis
-        assert!(
-            lines[0].contains("_\"There is this whole spectrum"),
-            "First line should have opening quote with emphasis: {:?}",
-            lines[0]
-        );
-
-        // Middle lines should have emphasis markers on both ends
-        for line in &lines[1..lines.len() - 1] {
-            if !line.trim().is_empty() && !line.starts_with("He said") {
-                assert!(
-                    line.trim().starts_with('_') || line.contains("_\""),
-                    "Middle line should start with emphasis: {line:?}"
-                );
-            }
-        }
-
-        // Last line should have closing emphasis with quote and footnote
-        let last_line = lines.last().unwrap();
-        assert!(
-            last_line.contains("\"_") || last_line.ends_with('_'),
-            "Last line should have closing emphasis: {last_line:?}"
-        );
+        assert_whitespace_only(input, &lines);
     }
 
     #[test]
@@ -2078,25 +2042,16 @@ mod issue_251_emphasis_continuation {
             ..Default::default()
         };
 
-        // Simplified version of issue #251
+        // A quoted, emphasized pair of sentences
         let input = r#"_"First sentence. Second sentence."_"#;
         let result = reflow_line(input, &options);
 
-        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
-
-        // First sentence should have opening quote inside emphasis
-        assert!(
-            result[0].starts_with("_\"") && result[0].ends_with('_'),
-            "First line: {:?}",
-            result[0]
+        assert_eq!(
+            result,
+            vec![r#"_"First sentence."#, r#"Second sentence."_"#],
+            "The quote and the emphasis each open once and close once"
         );
-
-        // Second sentence should have closing quote inside emphasis
-        assert!(
-            result[1].starts_with('_') && result[1].ends_with("\"_"),
-            "Second line: {:?}",
-            result[1]
-        );
+        assert_whitespace_only(input, &result);
     }
 
     // ============================================================
@@ -2168,19 +2123,12 @@ mod issue_251_emphasis_continuation {
             ..Default::default()
         };
 
-        // Bold text containing sentences - each should get markers
+        // Bold text containing two sentences
         let input = "**First bold sentence. Second bold sentence.**";
         let result = reflow_line(input, &options);
 
-        assert_eq!(result.len(), 2, "Should have 2 lines: {result:?}");
-
-        // Each line should have bold markers
-        for (i, line) in result.iter().enumerate() {
-            assert!(
-                line.starts_with("**") && line.ends_with("**"),
-                "Line {i} should have bold markers: {line:?}"
-            );
-        }
+        assert_eq!(result, vec!["**First bold sentence.", "Second bold sentence.**"]);
+        assert_whitespace_only(input, &result);
     }
 
     #[test]
@@ -2239,15 +2187,13 @@ mod issue_251_emphasis_continuation {
         let input = "*Sentence one. Sentence two.*";
         let result = reflow_line(input, &options);
 
-        // All markers should be asterisks, not underscores
+        // The author's asterisks survive verbatim; none are rewritten or added
+        assert_eq!(result, vec!["*Sentence one.", "Sentence two.*"]);
+        assert_whitespace_only(input, &result);
         for line in &result {
             assert!(
                 !line.contains('_'),
                 "Asterisk emphasis should not become underscore: {line:?}"
-            );
-            assert!(
-                line.starts_with('*') && line.ends_with('*'),
-                "Should use asterisk markers: {line:?}"
             );
         }
     }
@@ -2263,13 +2209,13 @@ mod issue_251_emphasis_continuation {
         let input = "_Sentence one. Sentence two._";
         let result = reflow_line(input, &options);
 
-        // All markers should be underscores, not asterisks
+        // The author's underscores survive verbatim; none are rewritten or added
+        assert_eq!(result, vec!["_Sentence one.", "Sentence two._"]);
+        assert_whitespace_only(input, &result);
         for line in &result {
-            // Check that we don't have asterisks acting as emphasis markers
-            // (asterisks in content are OK, but the wrapper should be underscore)
             assert!(
-                line.starts_with('_') && line.ends_with('_'),
-                "Should use underscore markers: {line:?}"
+                !line.contains('*'),
+                "Underscore emphasis should not become asterisk: {line:?}"
             );
         }
     }
@@ -2691,16 +2637,15 @@ mod issue_251_emphasis_continuation {
         let input = format!("*{long_sentence}*");
         let result = reflow_line(&input, &options);
 
-        // Should split into 50 sentences
+        // Should split into 50 sentences, with the single span still opening on
+        // the first line and closing on the last
         assert_eq!(result.len(), 50, "Should have 50 sentences");
-
-        // Each line should have emphasis markers
-        for line in &result {
-            assert!(
-                line.starts_with('*') && line.ends_with('*'),
-                "Each line should have emphasis: {line}"
-            );
+        assert_eq!(result[0], "*This is a sentence.");
+        assert_eq!(result[49], "This is a sentence.*");
+        for line in &result[1..49] {
+            assert_eq!(line, "This is a sentence.", "Interior lines carry no markers");
         }
+        assert_whitespace_only(&input, &result);
     }
 
     #[test]
@@ -3576,10 +3521,9 @@ fn test_emphasis_multiple_sentences_idempotent() {
     let input = "**First sentence. Second sentence.**";
     let result = reflow_line(input, &options);
 
-    // Should split into two lines, each with its own emphasis markers
-    assert_eq!(result.len(), 2, "Should produce 2 lines: {result:?}");
-    assert_eq!(result[0], "**First sentence.**");
-    assert_eq!(result[1], "**Second sentence.**");
+    // Should split at the sentence boundary, leaving the single span intact
+    assert_eq!(result, vec!["**First sentence.", "Second sentence.**"]);
+    assert_whitespace_only(input, &result);
 
     // Idempotency check: reflowing the result again should produce the same output
     // This was the bug - the second reflow would add a leading space
@@ -3610,11 +3554,11 @@ fn test_emphasis_idempotent_all_types() {
 
     let test_cases = vec![
         // (input, expected_first_line, expected_second_line)
-        ("**Bold one. Bold two.**", "**Bold one.**", "**Bold two.**"),
-        ("*Italic one. Italic two.*", "*Italic one.*", "*Italic two.*"),
-        ("~~Strike one. Strike two.~~", "~~Strike one.~~", "~~Strike two.~~"),
-        ("__Bold underscore. Second.__", "__Bold underscore.__", "__Second.__"),
-        ("_Italic underscore. Second._", "_Italic underscore._", "_Second._"),
+        ("**Bold one. Bold two.**", "**Bold one.", "Bold two.**"),
+        ("*Italic one. Italic two.*", "*Italic one.", "Italic two.*"),
+        ("~~Strike one. Strike two.~~", "~~Strike one.", "Strike two.~~"),
+        ("__Bold underscore. Second.__", "__Bold underscore.", "Second.__"),
+        ("_Italic underscore. Second._", "_Italic underscore.", "Second._"),
     ];
 
     for (input, expected_first, expected_second) in test_cases {
@@ -3622,6 +3566,7 @@ fn test_emphasis_idempotent_all_types() {
         assert_eq!(result.len(), 2, "Input {input:?} should produce 2 lines: {result:?}");
         assert_eq!(result[0], expected_first, "First line mismatch for {input:?}");
         assert_eq!(result[1], expected_second, "Second line mismatch for {input:?}");
+        assert_whitespace_only(input, &result);
 
         // Idempotency: reflow the result and verify it's unchanged
         let joined = result.join("\n");

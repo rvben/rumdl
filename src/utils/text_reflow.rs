@@ -841,7 +841,71 @@ fn parse_elements(text: &str, options: &ReflowOptions) -> Vec<Element> {
     )
 }
 
+/// Reflow a line, falling back to the input when the result would not preserve it.
+///
+/// Reflow redistributes whitespace: it decides where lines break, never which
+/// characters a paragraph contains. So the sequence of non-whitespace characters
+/// is invariant across a correct reflow, and any difference means the reflow
+/// dropped, duplicated, reordered, or invented content. Returning the input
+/// unchanged in that case costs a paragraph that stays unwrapped; the alternative
+/// is writing corrupted prose into the user's file. A caller comparing its
+/// replacement against the original then sees no change and reports nothing.
 pub fn reflow_line(line: &str, options: &ReflowOptions) -> Vec<String> {
+    let reflowed = reflow_line_unchecked(line, options);
+    if preserves_content(line, &reflowed) {
+        reflowed
+    } else {
+        vec![line.to_string()]
+    }
+}
+
+/// Whether `reflowed` still holds `original`'s text: the same non-whitespace
+/// characters in the same order, with every word boundary intact.
+///
+/// Reflow may add a boundary the input did not have, since wrapping a script
+/// that writes without spaces has to break somewhere. Removing one is different:
+/// it glues two words into a word the author never wrote.
+fn preserves_content(original: &str, reflowed: &[String]) -> bool {
+    let (original_text, original_breaks) = visible_text_and_breaks(original.chars());
+    let (reflowed_text, reflowed_breaks) =
+        visible_text_and_breaks(reflowed.iter().flat_map(|line| line.chars().chain(['\n'])));
+
+    original_text == reflowed_text && contains_all(&reflowed_breaks, &original_breaks)
+}
+
+/// The non-whitespace characters of `text`, and for each interior run of
+/// whitespace, how many characters precede it.
+fn visible_text_and_breaks(text: impl Iterator<Item = char>) -> (String, Vec<usize>) {
+    let mut visible = String::new();
+    let mut breaks = Vec::new();
+    let mut count = 0usize;
+    let mut pending_break = false;
+
+    for c in text {
+        if c.is_whitespace() {
+            pending_break = count > 0;
+        } else {
+            if pending_break {
+                breaks.push(count);
+                pending_break = false;
+            }
+            visible.push(c);
+            count += 1;
+        }
+    }
+
+    (visible, breaks)
+}
+
+/// Whether every value in `subset` appears in `superset`. Both are ascending.
+fn contains_all(superset: &[usize], subset: &[usize]) -> bool {
+    let mut candidates = superset.iter();
+    subset
+        .iter()
+        .all(|wanted| candidates.by_ref().any(|found| found == wanted))
+}
+
+fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
     // For sentence-per-line mode, always process regardless of length
     if options.sentence_per_line {
         let elements = parse_elements(line, options);
@@ -1998,47 +2062,59 @@ fn reflow_elements_sentence_per_line(
     let mut current_line = String::new();
 
     for (idx, element) in elements.iter().enumerate() {
-        // For text elements, split into sentences
-        if let Element::Text(text) = element {
-            // Simply append text - it already has correct spacing from tokenization
-            let combined = format!("{current_line}{text}");
+        // Text and emphasis are absorbed the same way. An emphasis span is
+        // rendered back to its source form and then treated as ordinary text,
+        // so a sentence boundary inside it breaks the line without closing and
+        // reopening the markers: a line break inside a span is whitespace, and
+        // whitespace is all a reflow is allowed to change.
+        let piece = match element {
+            // Text already carries its own spacing from tokenization.
+            Element::Text(text) => Some(text.clone()),
+            Element::Italic { content, underscore } => Some(wrap_emphasis(
+                content,
+                if *underscore { "_" } else { "*" },
+                &mut current_line,
+            )),
+            Element::Bold { content, underscore } => Some(wrap_emphasis(
+                content,
+                if *underscore { "__" } else { "**" },
+                &mut current_line,
+            )),
+            Element::Strikethrough { content, double } => Some(wrap_emphasis(
+                content,
+                if *double { "~~" } else { "~" },
+                &mut current_line,
+            )),
+            _ => None,
+        };
+
+        if let Some(piece) = piece {
+            let combined = format!("{current_line}{piece}");
             // Use the pre-computed abbreviations set to avoid redundant computation
             let sentences = split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital);
 
             if sentences.len() > 1 {
-                // We found sentence boundaries
+                // Accumulate rather than emit-and-overwrite: a sentence held
+                // back for the next element must absorb what follows it, or the
+                // text that follows would reach the output ahead of it.
+                let mut pending = String::new();
+                let last = sentences.len() - 1;
                 for (i, sentence) in sentences.iter().enumerate() {
-                    if i == 0 {
-                        // First sentence might continue from previous elements
-                        // But check if it ends with an abbreviation
-                        let trimmed = sentence.trim();
+                    if !pending.is_empty() {
+                        pending.push(' ');
+                    }
+                    pending.push_str(sentence);
 
-                        if text_ends_with_abbreviation(trimmed, &abbreviations) {
-                            // Don't emit yet - this sentence ends with abbreviation, continue accumulating
-                            current_line.clone_from(sentence);
-                        } else {
-                            // Normal case - emit the first sentence
-                            lines.push(sentence.clone());
-                            current_line.clear();
-                        }
-                    } else if i == sentences.len() - 1 {
-                        // Last sentence: check if it's complete or incomplete
-                        let trimmed = sentence.trim();
-                        let ends_with_sentence_punct = ends_with_sentence_punct(trimmed);
-
-                        if ends_with_sentence_punct && !text_ends_with_abbreviation(trimmed, &abbreviations) {
-                            // Complete sentence - emit it immediately
-                            lines.push(sentence.clone());
-                            current_line.clear();
-                        } else {
-                            // Incomplete sentence - save for next iteration
-                            current_line.clone_from(sentence);
-                        }
-                    } else {
-                        // Complete sentences in the middle
-                        lines.push(sentence.clone());
+                    // The splitter already decided every boundary except the
+                    // final one, which is just the leftover tail. Hold a tail
+                    // that no punctuation closed, and hold any piece ending in
+                    // an abbreviation the splitter broke after regardless.
+                    let closed = i < last || ends_with_sentence_punct(&pending);
+                    if closed && !text_ends_with_abbreviation(&pending, &abbreviations) {
+                        lines.push(std::mem::take(&mut pending));
                     }
                 }
+                current_line = pending;
             } else {
                 // Single sentence - check if it's complete
                 let trimmed = combined.trim();
@@ -2062,38 +2138,6 @@ fn reflow_elements_sentence_per_line(
                     current_line = combined;
                 }
             }
-        } else if let Element::Italic { content, underscore } = element {
-            // Handle italic elements - may contain multiple sentences that need continuation
-            let marker = if *underscore { "_" } else { "*" };
-            handle_emphasis_sentence_split(
-                content,
-                marker,
-                &abbreviations,
-                require_sentence_capital,
-                &mut current_line,
-                &mut lines,
-            );
-        } else if let Element::Bold { content, underscore } = element {
-            // Handle bold elements - may contain multiple sentences that need continuation
-            let marker = if *underscore { "__" } else { "**" };
-            handle_emphasis_sentence_split(
-                content,
-                marker,
-                &abbreviations,
-                require_sentence_capital,
-                &mut current_line,
-                &mut lines,
-            );
-        } else if let Element::Strikethrough { content, double } = element {
-            // Handle strikethrough elements - may contain multiple sentences that need continuation
-            handle_emphasis_sentence_split(
-                content,
-                if *double { "~~" } else { "~" },
-                &abbreviations,
-                require_sentence_capital,
-                &mut current_line,
-                &mut lines,
-            );
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
             let element_str = format!("{element}");
@@ -2124,82 +2168,14 @@ fn reflow_elements_sentence_per_line(
     lines
 }
 
-/// Handle splitting emphasis content at sentence boundaries while preserving markers
-fn handle_emphasis_sentence_split(
-    content: &str,
-    marker: &str,
-    abbreviations: &HashSet<String>,
-    require_sentence_capital: bool,
-    current_line: &mut String,
-    lines: &mut Vec<String>,
-) {
-    // Split the emphasis content into sentences
-    let sentences = split_into_sentences_with_set(content, abbreviations, require_sentence_capital);
-
-    if sentences.len() <= 1 {
-        // Single sentence or no boundaries - treat as atomic
-        if should_insert_space_before_join(current_line) {
-            current_line.push(' ');
-        }
-        current_line.push_str(marker);
-        current_line.push_str(content);
-        current_line.push_str(marker);
-
-        // Check if the emphasis content ends with sentence punctuation - if so, emit
-        let trimmed = content.trim();
-        let ends_with_punct = ends_with_sentence_punct(trimmed);
-        if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
-            lines.push(current_line.clone());
-            current_line.clear();
-        }
-    } else {
-        // Multiple sentences - each gets its own emphasis markers
-        for (i, sentence) in sentences.iter().enumerate() {
-            let trimmed = sentence.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            if i == 0 {
-                // First sentence: combine with current_line and emit
-                if should_insert_space_before_join(current_line) {
-                    current_line.push(' ');
-                }
-                current_line.push_str(marker);
-                current_line.push_str(trimmed);
-                current_line.push_str(marker);
-
-                // Check if this is a complete sentence
-                let ends_with_punct = ends_with_sentence_punct(trimmed);
-                if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
-                    lines.push(current_line.clone());
-                    current_line.clear();
-                }
-            } else if i == sentences.len() - 1 {
-                // Last sentence: check if complete
-                let ends_with_punct = ends_with_sentence_punct(trimmed);
-
-                let mut line = String::new();
-                line.push_str(marker);
-                line.push_str(trimmed);
-                line.push_str(marker);
-
-                if ends_with_punct && !text_ends_with_abbreviation(trimmed, abbreviations) {
-                    lines.push(line);
-                } else {
-                    // Incomplete - keep in current_line for potential continuation
-                    *current_line = line;
-                }
-            } else {
-                // Middle sentences: emit with markers
-                let mut line = String::new();
-                line.push_str(marker);
-                line.push_str(trimmed);
-                line.push_str(marker);
-                lines.push(line);
-            }
-        }
+/// Restore an emphasis span to its source form, opening a gap before it when
+/// the line it joins needs one. Unlike text elements, a span carries no
+/// surrounding whitespace of its own.
+fn wrap_emphasis(content: &str, marker: &str, current_line: &mut String) -> String {
+    if should_insert_space_before_join(current_line) {
+        current_line.push(' ');
     }
+    format!("{marker}{content}{marker}")
 }
 
 /// English break-words used for semantic line break splitting.
@@ -4120,6 +4096,66 @@ fn decompose_code_span(raw: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `preserves_content` is the last line of defense against a reflow writing
+    /// corrupted prose into a file, so it has to actually reject the ways a
+    /// reflow can go wrong - not merely accept the ways it can go right.
+    #[test]
+    fn preserves_content_accepts_whitespace_changes_and_rejects_the_rest() {
+        let accepted: &[(&str, &[&str])] = &[
+            ("one two three", &["one two three"]),
+            ("one two three", &["one two", "three"]),
+            ("one two three", &["one", "two", "three"]),
+            // Collapsing runs of whitespace and dropping trailing whitespace
+            ("one   two  ", &["one two"]),
+            // A script written without spaces has to break somewhere
+            ("日本語のテキスト", &["日本語の", "テキスト"]),
+            // Markers move to the line their content moved to
+            ("_First. Second._", &["_First.", "Second._"]),
+        ];
+        for (original, reflowed) in accepted {
+            let reflowed: Vec<String> = reflowed.iter().map(ToString::to_string).collect();
+            assert!(
+                preserves_content(original, &reflowed),
+                "{original:?} -> {reflowed:?} only moves whitespace"
+            );
+        }
+
+        let rejected: &[(&str, &[&str])] = &[
+            // Dropped
+            ("one two three", &["one two"]),
+            // Invented
+            ("one two", &["one two three"]),
+            // Reordered
+            ("one two", &["two one"]),
+            // Duplicated
+            ("_First. Second._", &["_First._", "_Second._"]),
+            // Two words glued into one
+            ("alpha and beta", &["alpha", "andbeta"]),
+            // A space deleted around punctuation
+            ("mot suivant : autre", &["mot suivant: autre"]),
+        ];
+        for (original, reflowed) in rejected {
+            let reflowed: Vec<String> = reflowed.iter().map(ToString::to_string).collect();
+            assert!(
+                !preserves_content(original, &reflowed),
+                "{original:?} -> {reflowed:?} changes the text, not just its line breaks"
+            );
+        }
+    }
+
+    /// A rejected reflow leaves the line alone rather than writing the damage.
+    #[test]
+    fn reflow_line_falls_back_to_the_input_when_content_would_change() {
+        let options = ReflowOptions {
+            line_length: 40,
+            ..Default::default()
+        };
+        let line = "one two three four five six seven eight nine ten";
+
+        assert!(preserves_content(line, &reflow_line(line, &options)));
+        assert_eq!(reflow_line(line, &options), reflow_line_unchecked(line, &options));
+    }
 
     #[test]
     fn cascade_split_line_handles_a_very_long_line_without_overflowing() {
