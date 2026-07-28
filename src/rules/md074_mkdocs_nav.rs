@@ -565,13 +565,24 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn setup_test() {
+    /// Serializes the tests that share the process-global validation cache.
+    ///
+    /// [`MD074MkDocsNav::clear_cache`] wipes state a test depends on for its whole
+    /// body, so two of them running at once in one process reset each other
+    /// mid-test. Each test holds this for its duration.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Takes the lock, then clears the cache. Hold the guard for the whole test:
+    /// dropping it early re-opens the race, which the guard's own `must_use` catches.
+    fn setup_test() -> std::sync::MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         MD074MkDocsNav::clear_cache();
+        guard
     }
 
     #[test]
     fn test_find_mkdocs_yml() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yml");
         fs::write(&mkdocs_path, "site_name: Test").unwrap();
@@ -588,7 +599,7 @@ mod tests {
 
     #[test]
     fn test_find_mkdocs_yaml_extension() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yaml"); // .yaml extension
         fs::write(&mkdocs_path, "site_name: Test").unwrap();
@@ -604,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_parse_simple_nav() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yml");
 
@@ -637,7 +648,7 @@ nav:
 
     #[test]
     fn test_parse_deeply_nested_nav() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yml");
 
@@ -663,7 +674,7 @@ nav:
 
     #[test]
     fn test_parse_nav_with_external_urls() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yml");
 
@@ -693,7 +704,7 @@ nav:
 
     #[test]
     fn test_parse_nav_with_empty_section() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
         let mkdocs_path = temp_dir.path().join("mkdocs.yml");
 
@@ -712,7 +723,7 @@ nav:
 
     #[test]
     fn test_nav_not_found_validation() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         // Create mkdocs.yml
@@ -747,7 +758,7 @@ nav:
 
     #[test]
     fn test_absolute_links_validation() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -781,7 +792,7 @@ nav:
 
     #[test]
     fn test_omitted_files_validation() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -830,7 +841,7 @@ nav:
 
     #[test]
     fn test_omitted_files_with_subdirectories() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -884,7 +895,7 @@ nav:
 
     #[test]
     fn test_skips_non_mkdocs_flavor() {
-        setup_test();
+        let _guard = setup_test();
         let rule = MD074MkDocsNav::new();
         let ctx = crate::lint_context::LintContext::new("# Test", crate::config::MarkdownFlavor::Standard, None);
 
@@ -894,7 +905,7 @@ nav:
 
     #[test]
     fn test_skips_external_urls_in_validation() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -928,7 +939,7 @@ nav:
 
     #[test]
     fn test_cache_prevents_duplicate_validation() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -968,7 +979,7 @@ nav:
 
     #[test]
     fn test_cache_invalidates_when_content_changes() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content_v1 = r#"
@@ -1024,7 +1035,7 @@ nav:
 
     #[test]
     fn test_invalid_mkdocs_yml_returns_warning() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         // Invalid YAML
@@ -1051,7 +1062,7 @@ nav:
 
     #[test]
     fn test_missing_docs_dir_returns_warning() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -1083,7 +1094,7 @@ nav:
 
     #[test]
     fn test_default_docs_dir() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         // mkdocs.yml without docs_dir specified - should default to "docs"
@@ -1112,7 +1123,7 @@ nav:
 
     #[test]
     fn test_skips_hidden_files_and_directories() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         let mkdocs_content = r#"
@@ -1164,7 +1175,7 @@ nav:
 
     #[test]
     fn test_directory_nav_entries() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         // Nav with directory entry (trailing slash)
@@ -1208,7 +1219,7 @@ nav:
 
     #[test]
     fn test_directory_nav_entries_with_index() {
-        setup_test();
+        let _guard = setup_test();
         let temp_dir = tempdir().unwrap();
 
         // Nav with directory entry (trailing slash)
