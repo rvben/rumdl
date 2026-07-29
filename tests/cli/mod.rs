@@ -18,6 +18,7 @@ mod cli_rules_wrapper_test;
 mod cli_show_full_path_test;
 mod cli_statistics_test;
 mod config_shadow_warning_test;
+mod empty_run_diagnostics_test;
 mod exclude_with_explicit_paths_test;
 pub(crate) mod fixtures;
 mod home_path_expansion_test;

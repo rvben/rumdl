@@ -192,12 +192,30 @@ These options are commonly used with `check` and `fmt`:
 !!! note "Failing on configuration problems"
     Configuration problems (an unknown rule or option in a config file or a CLI
     flag, an unknown rule in an inline `rumdl-disable-line` comment, a shadowed
-    config file, or an `.editorconfig` property rumdl cannot apply) are non-fatal
-    warnings by default and do not affect the exit code. Pass
-    `--deny-config-warnings` to make any of them exit with code `2`, so CI
-    catches a typo'd rule name. This is distinct from `--fail-on`, which governs
-    the severity of Markdown violations (exit `1`); a config problem exits `2`
-    and takes precedence over Markdown violations.
+    config file, an `.editorconfig` property rumdl cannot apply, or a run in
+    which every Markdown file found was filtered out) are non-fatal warnings by
+    default and do not affect the exit code. Pass `--deny-config-warnings` to
+    make any of them exit with code `2`, so CI catches a typo'd rule name. This
+    is distinct from `--fail-on`, which governs the severity of Markdown
+    violations (exit `1`); a config problem exits `2` and takes precedence over
+    Markdown violations.
+
+!!! note "When nothing gets checked"
+    Checking zero files and checking every file cleanly both exit `0` with no
+    findings, so rumdl reports which one happened on stderr. A directory holding
+    no Markdown says so plainly; a run whose files were all filtered out instead
+    reports how many were found and which setting removed them:
+
+    ```text
+    No markdown files left to check: 12 files found were filtered out.
+      12 by ignore files (.gitignore, .ignore, .markdownlintignore); pass --respect-gitignore=false to keep them
+    ```
+
+    The notice never shares a stream with the selected output, so it stays out
+    of `--output-format json` and the other machine-readable formats: it goes to
+    stderr, or to stdout when `--stderr` routes diagnostics the other way. It
+    survives `--quiet`; use `--silent` to suppress it, or
+    `--deny-config-warnings` to fail the run instead.
 
 ## Usage Examples
 

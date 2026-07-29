@@ -447,8 +447,12 @@ fn test_cli_filter_behavior() -> Result<(), Box<dyn std::error::Error>> {
     println!("Test Case 6 Stderr:{stderr6}");
     assert!(success6, "Case 6: Command failed"); // Use success6
     assert!(
-        stdout6.contains("No markdown files found to check."),
-        "Case 6: Should find no files"
+        stderr6.contains("No markdown files left to check"),
+        "Case 6: Should report every candidate as filtered out. stderr: {stderr6}"
+    );
+    assert!(
+        !stdout6.contains("No markdown files"),
+        "Case 6: The notice must not reach stdout. stdout: {stdout6}"
     );
     assert!(
         !stdout6.contains("Processing file: subfolder/README.md"),
@@ -883,7 +887,10 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd2.assert()
         .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stderr(predicates::str::contains(
+            "No markdown files left to check: 1 file found was filtered out.",
+        ))
+        .stderr(predicates::str::contains("1 by exclude patterns"))
         .stdout(predicates::str::contains("Processing file:").not());
 
     // Test 3: Excluding both markdown types
@@ -897,7 +904,10 @@ fn test_type_filter_precedence() -> Result<(), Box<dyn std::error::Error>> {
         .current_dir(dir_path);
     cmd3.assert()
         .success()
-        .stdout(predicates::str::contains("No markdown files found to check."))
+        .stderr(predicates::str::contains(
+            "No markdown files left to check: 2 files found were filtered out.",
+        ))
+        .stderr(predicates::str::contains("2 by exclude patterns"))
         .stdout(predicates::str::contains("Processing file:").not());
 
     Ok(())

@@ -136,10 +136,19 @@ force_exclude = true
         "Default run should not emit a per-file exclusion notice. stderr: {stderr}"
     );
 
-    // Should report no files found
+    // A named file that was excluded is a filtered-out file, not an absent one,
+    // and the notice is a diagnostic so it belongs on stderr.
     assert!(
-        stdout.contains("No markdown files found") || stderr.contains("No markdown files found"),
-        "Should report no markdown files found when all are excluded. stdout: {stdout}, stderr: {stderr}"
+        stderr.contains("No markdown files left to check: 1 file found was filtered out."),
+        "Should report the named file as filtered out. stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("1 by exclude patterns"),
+        "Should attribute the emptiness to the exclude pattern. stderr: {stderr}"
+    );
+    assert!(
+        !stdout.contains("No markdown files"),
+        "The notice must not reach stdout, which carries machine-readable output. stdout: {stdout}"
     );
 }
 

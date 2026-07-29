@@ -256,12 +256,420 @@ pub(super) fn strip_base_prefix(file_path: &Path, base: &Path) -> Option<String>
     None
 }
 
+/// Why a discovery walk produced no files to check.
+///
+/// "There is no markdown here" and "every markdown file was filtered out" are
+/// different facts. Reporting both as a bare absence makes a misconfigured run
+/// indistinguishable from a clean one, so each variant names which happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EmptyDiscovery {
+    /// No lintable file was reachable at all, before any filtering.
+    NoMarkdownFiles,
+    /// Lintable files were reachable and every one of them was filtered out.
+    AllFiltered {
+        /// How many files existed but went unchecked. Always at least one, and
+        /// at least the sum of the per-cause counts below.
+        total: usize,
+        /// Removed by an ignore file (the gitignore family).
+        gitignore: usize,
+        /// Removed by an `exclude` pattern.
+        exclude: usize,
+        /// Selected by no active `include` pattern.
+        not_included: usize,
+        /// `include` patterns that no reachable file matches, so they are a
+        /// pattern that names nothing rather than one losing to another filter.
+        unmatched_includes: Vec<String>,
+    },
+}
+
+impl EmptyDiscovery {
+    /// The filtered-out tally, or [`Self::NoMarkdownFiles`] when it is zero.
+    ///
+    /// Keeps the invariant that [`Self::AllFiltered`] always accounts for at
+    /// least one file, so its message can never read "all 0 were filtered out".
+    ///
+    /// `total` counts every file that existed and went unchecked, which is what
+    /// the headline reports. The per-cause counts only cover files a cause was
+    /// positively shown to have removed, so they may sum to less; a cause is
+    /// never asserted by elimination.
+    fn filtered(
+        total: usize,
+        gitignore: usize,
+        exclude: usize,
+        not_included: usize,
+        unmatched_includes: Vec<String>,
+    ) -> Self {
+        if total == 0 {
+            return Self::NoMarkdownFiles;
+        }
+        Self::AllFiltered {
+            total,
+            gitignore,
+            exclude,
+            not_included,
+            unmatched_includes,
+        }
+    }
+
+    /// Whether the emptiness points at a configuration problem rather than a
+    /// directory that simply holds no markdown.
+    pub fn is_misconfiguration(&self) -> bool {
+        matches!(self, Self::AllFiltered { .. })
+    }
+}
+
+impl std::fmt::Display for EmptyDiscovery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMarkdownFiles => write!(f, "No markdown files found to check."),
+            Self::AllFiltered {
+                total,
+                gitignore,
+                exclude,
+                not_included,
+                unmatched_includes,
+            } => {
+                let (noun, verb) = if *total == 1 {
+                    ("file", "was")
+                } else {
+                    ("files", "were")
+                };
+                write!(
+                    f,
+                    "No markdown files left to check: {total} {noun} found {verb} filtered out."
+                )?;
+                if *gitignore > 0 {
+                    write!(
+                        f,
+                        "\n  {gitignore} by ignore files (.gitignore, .ignore, .markdownlintignore); pass --respect-gitignore=false to keep them"
+                    )?;
+                }
+                if *exclude > 0 {
+                    write!(f, "\n  {exclude} by exclude patterns; pass --no-exclude to keep them")?;
+                }
+                if *not_included > 0 {
+                    write!(f, "\n  {not_included} by include patterns")?;
+                }
+                for pattern in unmatched_includes {
+                    write!(f, "\n  include pattern '{pattern}' matches no file")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// The files a discovery walk selected, and why it selected none.
+pub struct Discovered {
+    /// Files to check, canonicalized and deduplicated.
+    pub files: Vec<String>,
+    /// Why `files` is empty; `None` whenever at least one file was found.
+    pub empty_reason: Option<EmptyDiscovery>,
+}
+
+/// Every file reachable from `roots`, streamed in the form the walker produces.
+///
+/// Vendor directories are traversed, because the discovery walk this explains
+/// traverses them too: a markdown file under `node_modules` or `target` is one
+/// rumdl checks, so a filter removing it removed a real file. Skipping them here
+/// would report those files as never having existed, which is the same silent
+/// absence this diagnosis exists to replace.
+///
+/// Paths come out exactly as the `ignore` walker yields them, which is the form
+/// the pattern matchers are fed during the walk being explained. Canonicalizing
+/// here would cost a syscall per file for a comparison almost no caller needs.
+fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Item = std::path::PathBuf> + use<> {
+    let walk = roots.split_first().map(|(first, rest)| {
+        let mut builder = WalkBuilder::new(first);
+        for root in rest {
+            builder.add(root);
+        }
+        apply_markdown_walk_options(
+            &mut builder,
+            &MarkdownWalkOptions {
+                respect_gitignore,
+                skip_vendor_dirs: false,
+            },
+        );
+        builder.build()
+    });
+    walk.into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_some_and(|file_type| file_type.is_file()))
+        .map(ignore::DirEntry::into_path)
+}
+
+/// The `ignore` override rule that excludes `pattern`.
+///
+/// The crate spells exclusion with a leading `!`; a pattern already carrying one
+/// passes through.
+fn exclude_override_rule(pattern: &str) -> String {
+    if pattern.starts_with('!') {
+        pattern.to_string()
+    } else {
+        format!("!{pattern}")
+    }
+}
+
+/// The override set for `rules` anchored at `base`.
+///
+/// Invalid rules are skipped; the discovery walk already warns about them. An
+/// empty set matches nothing either way, which is what an inactive filter means.
+fn overrides_from(base: &Path, rules: impl IntoIterator<Item = String>) -> ignore::overrides::Override {
+    let mut builder = OverrideBuilder::new(base);
+    for rule in rules {
+        let _ = builder.add(&rule);
+    }
+    builder.build().unwrap_or_else(|_| ignore::overrides::Override::empty())
+}
+
+/// The path in the canonical form the walk records, from the raw form the walker
+/// yields.
+///
+/// Costs a syscall, so callers reach for it only where a matcher needs the
+/// canonical shape rather than the walker's.
+fn canonical_walk_path(path: &Path) -> std::path::PathBuf {
+    let raw = path.to_string_lossy();
+    std::path::PathBuf::from(canonicalize_path_safe(raw.strip_prefix("./").unwrap_or(&raw)))
+}
+
+/// Whether a discovery walk keeps a file once its filters have run.
+///
+/// A CLI `--include` replaces the extension gate outright, so the walk keeps
+/// whatever the pattern selected. Config include patterns do not: they widen the
+/// walk, but the gate still applies afterwards, so a pattern pinning no extension
+/// (`docs/**`) admits no new file type. The walk and the diagnosis share this so
+/// the diagnosis cannot report a file as filtered out that the walk would have
+/// dropped for never being lintable.
+#[derive(Clone, Copy)]
+struct LintableFilter<'a> {
+    /// Whether a CLI `--include` is active, which removes the gate entirely.
+    cli_include_active: bool,
+    /// Whether config include patterns are active, which also admit Rust sources.
+    has_config_include: bool,
+    /// Config include patterns naming files beyond the markdown extensions.
+    explicit_includes: &'a ExplicitIncludeMatchers,
+    /// The base those patterns are matched relative to.
+    base: Option<&'a Path>,
+}
+
+impl LintableFilter<'_> {
+    /// Whether `path`, given in the canonical form the walk records, is lintable.
+    fn keeps(&self, path: &Path) -> bool {
+        if self.cli_include_active {
+            return true;
+        }
+        let is_rust = self.has_config_include && path.extension().is_some_and(|ext| ext.to_str() == Some("rs"));
+        if has_markdown_extension(path) || is_rust {
+            return true;
+        }
+        if self.explicit_includes.is_empty() {
+            return false;
+        }
+        match self.base.and_then(|base| path_relative_to(path, base)) {
+            Some(relative) => self.explicit_includes.matches_relative_path(&relative),
+            // Outside the pattern base only unanchored patterns can still apply;
+            // matching the full path covers those.
+            None => self.explicit_includes.matches_relative_path(&path.to_string_lossy()),
+        }
+    }
+}
+
+/// Everything that could have kept a file out of a discovery walk.
+///
+/// Carried as one value so the diagnosis below is built from the same
+/// determination the walk used, rather than from a separately assembled set of
+/// arguments that could describe a different run.
+#[derive(Clone, Copy)]
+struct DiscoveryFilters<'a> {
+    /// The gate the walk applies to everything its filters let through.
+    lintable: LintableFilter<'a>,
+    /// The post-walk exclude matchers, which also carry absolute patterns.
+    exclude_matchers: &'a ExcludeMatchers,
+    /// The exclude patterns as the walker's overrides see them.
+    exclude_patterns: &'a [String],
+    /// The include patterns as the walker's overrides see them.
+    include_patterns: &'a [String],
+    /// Files named on the command line that an exclude pattern already dropped.
+    named_excluded: &'a [std::path::PathBuf],
+    /// The directory the include and exclude patterns are anchored to.
+    pattern_base: &'a Path,
+    /// The project root in canonical form, for relative pattern matching.
+    canonical_project_root: Option<&'a Path>,
+    /// Whether the gitignore family applies.
+    respect_gitignore: bool,
+}
+
+/// Explain why a walk over `roots` under `filters` selected no file.
+///
+/// Each cause is established positively: a file counts against a filter only
+/// because that filter is shown to drop it, never because the other checks
+/// happened not to claim it. A cause asserted by elimination would name the
+/// wrong knob whenever this diagnosis and the real walk differ for a reason not
+/// modelled here, and would do it with full confidence. Every verdict comes from
+/// the matcher the walker itself consults, given the path in the form the walker
+/// gives it, so the two cannot drift apart; a second walk could.
+///
+/// A file no cause claims still counts toward the total, so the headline stays
+/// an accurate tally of what went unchecked while the breakdown stays verified.
+///
+/// Ignore files are what keep a walk small, so walking without them is by far
+/// the expensive step. It runs only when nothing survived ignore handling, which
+/// is the one case its answer can change.
+fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> EmptyDiscovery {
+    let DiscoveryFilters {
+        lintable,
+        exclude_matchers,
+        exclude_patterns,
+        include_patterns,
+        named_excluded,
+        pattern_base,
+        canonical_project_root,
+        respect_gitignore,
+    } = *filters;
+
+    let excluded_by_pattern = overrides_from(pattern_base, exclude_patterns.iter().map(|p| exclude_override_rule(p)));
+    let included_by_pattern = overrides_from(pattern_base, include_patterns.iter().cloned());
+    // Kept apart from the combined set so an unmatched pattern can be named
+    // individually: a pattern that selects nothing is a typo, while a pattern
+    // losing to another filter is not.
+    let per_include: Vec<ignore::overrides::Override> = include_patterns
+        .iter()
+        .map(|pattern| overrides_from(pattern_base, [pattern.clone()]))
+        .collect();
+
+    // A file rumdl would have had to check: markdown by default, plus whatever an
+    // `include` pattern both selects and the walk's own gate then keeps. An
+    // include that widens the walk without admitting a new file type reaches no
+    // further, so a file it merely touches was never a candidate and must not be
+    // reported as one the configuration removed.
+    let is_lintable = |path: &Path| {
+        if has_markdown_extension(path) {
+            return true;
+        }
+        if !included_by_pattern.matched(path, false).is_whitelist() {
+            return false;
+        }
+        lintable.keeps(&canonical_walk_path(path))
+    };
+    // Absolute patterns and paths outside the walk root reach the run only
+    // through the post-walk matchers, which work on canonical paths.
+    let excluded_after_walk = |path: &Path| {
+        if exclude_matchers.is_empty() {
+            return false;
+        }
+        let canonical = canonical_walk_path(path);
+        let relative = canonical_project_root.and_then(|root| path_relative_to(&canonical, root));
+        exclude_matchers.excludes_file(relative.as_deref(), &canonical)
+    };
+    // Overlapping roots (`rumdl check . docs`) hand the walker the same file
+    // once per root, and the walk they explain reduces those to one file.
+    // Recognising a repeat means canonicalizing, which costs a syscall per file,
+    // so it is done only when there is more than one root to overlap.
+    let mut seen_paths: HashSet<std::path::PathBuf> = HashSet::new();
+    let mut is_repeat = move |path: &Path| roots.len() > 1 && !seen_paths.insert(canonical_walk_path(path));
+
+    let named_excluded_paths: HashSet<&Path> = named_excluded.iter().map(std::path::PathBuf::as_path).collect();
+    let already_counted = |path: &Path| {
+        if named_excluded_paths.is_empty() {
+            return false;
+        }
+        named_excluded_paths.contains(canonical_walk_path(path).as_path())
+    };
+
+    let mut matched_includes = vec![false; per_include.len()];
+    let note_include_matches = |path: &Path, matched: &mut Vec<bool>| {
+        for (pattern, seen) in per_include.iter().zip(matched.iter_mut()) {
+            *seen = *seen || pattern.matched(path, false).is_whitelist();
+        }
+    };
+
+    // What the include patterns say about a file. An include outranks the
+    // ignore files, so this decides whether they could have applied at all, and
+    // both walks below ask it first. With no include patterns at all the verdict
+    // is neither, which leaves the ignore files free to act.
+    let include_verdict = |path: &Path| included_by_pattern.matched(path, false);
+
+    // Files that survived ignore handling. Whatever removed these is one of the
+    // user's own patterns, so their causes are decided here.
+    let (mut total, mut gitignore, mut exclude, mut not_included) = (0, 0, 0, 0);
+    for path in reachable_files(roots, respect_gitignore) {
+        if !is_lintable(&path) || is_repeat(&path) {
+            continue;
+        }
+        note_include_matches(&path, &mut matched_includes);
+        // A named file is tallied below from the command line, where its cause
+        // was already established, so meeting it again here is a repeat.
+        if already_counted(&path) {
+            continue;
+        }
+        total += 1;
+        if excluded_by_pattern.matched(&path, false).is_ignore() || excluded_after_walk(&path) {
+            exclude += 1;
+        } else if include_verdict(&path).is_ignore() {
+            not_included += 1;
+        }
+    }
+
+    // No candidate turned up at all, so this walk asks what ignore files hid. A
+    // file named on the command line and excluded is a candidate whose cause is
+    // already established, exactly like one the walk itself found, and either
+    // makes this step redundant: an empty run needs one setting to undo, not a
+    // census of everything else that went unchecked. Whether a file was named
+    // or only walked must not change the diagnosis.
+    //
+    // The include patterns decide what the ignore files were even allowed to
+    // do, so they are asked first. An include that selects nothing is why the
+    // ignore files applied at all. One that selects the file overrides them, so
+    // the real walk did reach it and only an exclude can have dropped it; the
+    // run being empty is what makes that a conclusion rather than a guess.
+    // Without include patterns the ignore files are the only thing left, and
+    // this walk finding a file the first one could not see is the evidence.
+    // Their exclude patterns are never asked: an ignored path never reached
+    // them, and answering for a matcher that never ran would be a guess dressed
+    // as a finding.
+    if total == 0 && named_excluded.is_empty() && respect_gitignore {
+        for path in reachable_files(roots, false) {
+            if !is_lintable(&path) || is_repeat(&path) {
+                continue;
+            }
+            note_include_matches(&path, &mut matched_includes);
+            total += 1;
+            let verdict = include_verdict(&path);
+            if verdict.is_ignore() {
+                not_included += 1;
+            } else if verdict.is_whitelist() {
+                exclude += 1;
+            } else {
+                gitignore += 1;
+            }
+        }
+    }
+
+    let unmatched_includes = include_patterns
+        .iter()
+        .zip(&matched_includes)
+        .filter(|(_, matched)| !**matched)
+        .map(|(pattern, _)| pattern.clone())
+        .collect();
+
+    let named = named_excluded.len();
+    EmptyDiscovery::filtered(
+        total + named,
+        gitignore,
+        exclude + named,
+        not_included,
+        unmatched_includes,
+    )
+}
+
 pub fn find_markdown_files(
     paths: &[String],
     args: &crate::CheckArgs,
     config: &rumdl_config::Config,
     project_root: Option<&std::path::Path>,
-) -> Result<Vec<String>, Box<dyn Error>> {
+) -> Result<Discovered, Box<dyn Error>> {
     let mut file_paths = Vec::new();
 
     // Determine if running in discovery mode (e.g., "rumdl ." or "rumdl check ." or "rumdl check")
@@ -357,6 +765,11 @@ pub fn find_markdown_files(
     // mixed invocation checks the union of both (issue #741).
     let mut explicit_files: Vec<String> = Vec::new();
     let mut explicit_dirs: Vec<&str> = Vec::new();
+    // Named files an exclude pattern dropped, so an emptied explicit run can say
+    // that its arguments were excluded rather than absent. Held as paths, not a
+    // count, because a directory argument can rediscover the same file and the
+    // diagnosis below must not tally it twice.
+    let mut excluded_named_files: Vec<std::path::PathBuf> = Vec::new();
 
     if !is_discovery_mode {
         for path_str in paths {
@@ -413,6 +826,7 @@ pub fn find_markdown_files(
                     // under --verbose. This keeps explicit-path mode as quiet as discovery
                     // mode (which excludes silently) while still letting `--verbose` explain
                     // why a named file was skipped. --silent suppresses it entirely.
+                    excluded_named_files.push(std::path::PathBuf::from(canonicalize_path_safe(&cleaned_path)));
                     if args.verbose && !args.silent {
                         let display_path = normalize_separators(cleaned_path.clone());
                         eprintln!(
@@ -427,24 +841,41 @@ pub fn find_markdown_files(
             }
         }
 
+        // One file can be named several times, or under spellings that resolve
+        // to the same path. It is still one file, and a count of what an exclude
+        // pattern removed has to say so.
+        excluded_named_files.sort();
+        excluded_named_files.dedup();
+
         // Nothing to walk when every argument is a file. Returns the explicit
         // set even if exclusions emptied it, so the caller reports "no files"
         // instead of silently falling back to a cwd walk.
         if explicit_dirs.is_empty() {
             explicit_files.sort();
             explicit_files.dedup();
-            return Ok(explicit_files);
+            let excluded = excluded_named_files.len();
+            let empty_reason = explicit_files
+                .is_empty()
+                .then(|| EmptyDiscovery::filtered(excluded, 0, excluded, 0, Vec::new()));
+            return Ok(Discovered {
+                files: explicit_files,
+                empty_reason,
+            });
         }
     }
 
     // --- Configure ignore::WalkBuilder over the directory roots ---
     // Discovery mode walks the cwd (`.`); explicit mode walks only the
     // directory arguments (named files were collected above).
-    let mut walk_builder = if is_discovery_mode {
-        WalkBuilder::new(paths.first().map(String::as_str).unwrap_or("."))
+    let walk_roots: Vec<&str> = if is_discovery_mode {
+        vec![paths.first().map(String::as_str).unwrap_or(".")]
     } else {
-        let mut builder = WalkBuilder::new(explicit_dirs[0]);
-        for dir in &explicit_dirs[1..] {
+        explicit_dirs.clone()
+    };
+    let mut walk_builder = {
+        let (first, rest) = walk_roots.split_first().expect("a walk always has at least one root");
+        let mut builder = WalkBuilder::new(first);
+        for dir in rest {
             builder.add(dir);
         }
         builder
@@ -502,12 +933,7 @@ pub fn find_markdown_files(
 
         // Add excludes (these filter *out* files) - MUST start with '!'
         for pattern in &final_exclude_patterns {
-            // Ensure exclude patterns start with '!' for ignore crate overrides
-            let exclude_rule = if pattern.starts_with('!') {
-                pattern.clone() // Already formatted
-            } else {
-                format!("!{pattern}")
-            };
+            let exclude_rule = exclude_override_rule(pattern);
             if let Err(e) = override_builder.add(&exclude_rule) {
                 eprintln!("Warning: Invalid exclude pattern '{pattern}': {e}");
             }
@@ -587,35 +1013,18 @@ pub fn find_markdown_files(
     }
 
     // --- Final Lintable File Filter ---
-    // CLI --include: no extension filter (user controls which files to process)
-    // Config include: allow markdown + rust extensions + explicitly named files
-    // Default: markdown-only extensions
-    if args.include.is_none() {
-        // Explicit include patterns are matched against the same base the
-        // walker overrides use, so the full pattern path applies: a broad
-        // sibling pattern must not inherit another pattern's allowance for
-        // files that merely share its name.
-        let explicit_include_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
-        file_paths.retain(|path_str| {
-            let path = Path::new(path_str);
-            let is_rust = has_config_include && path.extension().is_some_and(|ext| ext.to_str() == Some("rs"));
-            if has_markdown_extension(path) || is_rust {
-                return true;
-            }
-            if explicit_includes.is_empty() {
-                return false;
-            }
-            match explicit_include_base
-                .as_deref()
-                .and_then(|base| path_relative_to(path, base))
-            {
-                Some(relative) => explicit_includes.matches_relative_path(&relative),
-                // Outside the pattern base only unanchored patterns can
-                // still apply; matching the full path covers those.
-                None => explicit_includes.matches_relative_path(path_str),
-            }
-        });
-    }
+    // Explicit include patterns are matched against the same base the walker
+    // overrides use, so the full pattern path applies: a broad sibling pattern
+    // must not inherit another pattern's allowance for files that merely share
+    // its name.
+    let explicit_include_base = canonical_project_root.clone().or_else(|| std::env::current_dir().ok());
+    let lintable = LintableFilter {
+        cli_include_active: args.include.is_some(),
+        has_config_include,
+        explicit_includes: &explicit_includes,
+        base: explicit_include_base.as_deref(),
+    };
+    file_paths.retain(|path_str| lintable.keeps(Path::new(path_str)));
     // -------------------------------------
 
     // Union with the explicitly named files. Both sides hold canonicalized
@@ -625,5 +1034,25 @@ pub fn find_markdown_files(
     file_paths.sort();
     file_paths.dedup();
 
-    Ok(file_paths)
+    // Only an empty result pays for the diagnosis, and only it needs one.
+    let empty_reason = file_paths.is_empty().then(|| {
+        diagnose_empty_discovery(
+            &walk_roots,
+            &DiscoveryFilters {
+                lintable,
+                exclude_matchers: &exclude_matchers,
+                exclude_patterns: &final_exclude_patterns,
+                include_patterns: &final_include_patterns,
+                named_excluded: &excluded_named_files,
+                pattern_base: project_root.unwrap_or(Path::new(".")),
+                canonical_project_root: canonical_project_root.as_deref(),
+                respect_gitignore: config.global.respect_gitignore,
+            },
+        )
+    });
+
+    Ok(Discovered {
+        files: file_paths,
+        empty_reason,
+    })
 }

@@ -135,11 +135,11 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     }
 
     // Find all markdown files to check
-    let file_paths = match rumdl_lib::time_function!(
+    let discovered = match rumdl_lib::time_function!(
         "check: discover markdown files",
         crate::file_processor::find_markdown_files(&args.paths, args, config, project_root)
     ) {
-        Ok(paths) => paths,
+        Ok(discovered) => discovered,
         Err(e) => {
             if !args.silent {
                 eprintln!("{}: Failed to find markdown files: {}", "Error".red().bold(), e);
@@ -150,11 +150,43 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
             return CheckRunOutcome::tool_error();
         }
     };
+    let file_paths = discovered.files;
     if file_paths.is_empty() {
-        if !quiet {
-            println!("No markdown files found to check.");
+        // A run that checked nothing must not read as a clean one. This is a
+        // diagnostic about the run rather than a summary of findings, so it
+        // survives --quiet and only --silent suppresses it.
+        //
+        // It goes to whichever stream the selected output is not using. Sharing
+        // one would put a human sentence in front of a machine-readable
+        // document and leave an empty run unparseable, which is the failure this
+        // notice exists to prevent, so --stderr moves the notice rather than
+        // stacking it on top of the output.
+        let reason = discovered
+            .empty_reason
+            .unwrap_or(crate::file_processor::EmptyDiscovery::NoMarkdownFiles);
+        if !args.silent {
+            if args.stderr {
+                println!("{reason}");
+            } else {
+                eprintln!("{reason}");
+            }
         }
-        return CheckRunOutcome::empty();
+        // A machine-readable consumer still gets a valid, empty document. Left
+        // bare, stdout carries either nothing or a human sentence, and both make
+        // an empty run unparseable rather than simply empty. No file was
+        // processed, so the reported duration is zero.
+        if let Some(output) = output_format.format_batch(&[], &[], 0) {
+            output_writer.writeln(&output).unwrap_or_else(|e| {
+                eprintln!("Error writing output: {e}");
+            });
+        }
+        return CheckRunOutcome {
+            // Files that exist but are all filtered away is a configuration
+            // problem, so --deny-config-warnings can fail the run. A directory
+            // that simply holds no markdown is not.
+            config_warning: reason.is_misconfiguration(),
+            ..CheckRunOutcome::empty()
+        };
     }
 
     // Resolve files into config groups (per-directory config discovery)
