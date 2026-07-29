@@ -464,7 +464,7 @@ impl RumdlLanguageServer {
                 .git_global(true)
                 .git_exclude(true)
                 .parents(true)
-                .require_git(false)
+                .require_git(crate::discovery::stops_at_repository_root(&[&base]))
                 .build();
 
             for entry in walker.flatten() {

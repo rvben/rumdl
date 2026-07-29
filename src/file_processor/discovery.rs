@@ -380,6 +380,17 @@ pub struct Discovered {
 /// the pattern matchers are fed during the walk being explained. Canonicalizing
 /// here would cost a syscall per file for a comparison almost no caller needs.
 fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Item = std::path::PathBuf> + use<> {
+    reachable_entries(roots, respect_gitignore)
+        .filter(|entry| entry.file_type().is_some_and(|file_type| file_type.is_file()))
+        .map(ignore::DirEntry::into_path)
+}
+
+/// Every entry the walk reaches, directories included.
+///
+/// A directory an ignore file hid is pruned before the walk descends, so which
+/// directories were reached is what separates a file the walk declined from one
+/// it never saw.
+fn reachable_entries(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Item = ignore::DirEntry> + use<> {
     let walk = roots.split_first().map(|(first, rest)| {
         let mut builder = WalkBuilder::new(first);
         for root in rest {
@@ -387,6 +398,7 @@ fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Ite
         }
         apply_markdown_walk_options(
             &mut builder,
+            roots,
             &MarkdownWalkOptions {
                 respect_gitignore,
                 skip_vendor_dirs: false,
@@ -394,11 +406,7 @@ fn reachable_files(roots: &[&str], respect_gitignore: bool) -> impl Iterator<Ite
         );
         builder.build()
     });
-    walk.into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_some_and(|file_type| file_type.is_file()))
-        .map(ignore::DirEntry::into_path)
+    walk.into_iter().flatten().filter_map(Result::ok)
 }
 
 /// The `ignore` override rule that excludes `pattern`.
@@ -593,9 +601,19 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     let include_verdict = |path: &Path| included_by_pattern.matched(path, false);
 
     // Files that survived ignore handling. Whatever removed these is one of the
-    // user's own patterns, so their causes are decided here.
+    // user's own patterns, so their causes are decided here. The directories
+    // reached along the way are kept for the second walk.
     let (mut total, mut gitignore, mut exclude, mut not_included) = (0, 0, 0, 0);
-    for path in reachable_files(roots, respect_gitignore) {
+    let mut reached_dirs: HashSet<std::path::PathBuf> = HashSet::new();
+    for entry in reachable_entries(roots, respect_gitignore) {
+        if entry.file_type().is_some_and(|file_type| file_type.is_dir()) {
+            reached_dirs.insert(canonical_walk_path(entry.path()));
+            continue;
+        }
+        if !entry.file_type().is_some_and(|file_type| file_type.is_file()) {
+            continue;
+        }
+        let path = entry.into_path();
         if !is_lintable(&path) || is_repeat(&path) {
             continue;
         }
@@ -622,15 +640,21 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
     //
     // The include patterns decide what the ignore files were even allowed to
     // do, so they are asked first. An include that selects nothing is why the
-    // ignore files applied at all. One that selects the file overrides them, so
-    // the real walk did reach it and only an exclude can have dropped it; the
-    // run being empty is what makes that a conclusion rather than a guess.
-    // Without include patterns the ignore files are the only thing left, and
-    // this walk finding a file the first one could not see is the evidence.
-    // Their exclude patterns are never asked: an ignored path never reached
-    // them, and answering for a matcher that never ran would be a guess dressed
-    // as a finding.
+    // ignore files applied at all. One that selects a file the walk reached
+    // overrides them, so the real walk did reach it too and only an exclude can
+    // have dropped it; the run being empty is what makes that a conclusion
+    // rather than a guess. An include cannot reach into a directory the walk
+    // never entered, so a file whose directory an ignore file pruned is the
+    // ignore file's doing however plainly an include names it. Without include
+    // patterns the ignore files are the only thing left, and this walk finding a
+    // file the first one could not see is the evidence. Their exclude patterns
+    // are never asked: an ignored path never reached them, and answering for a
+    // matcher that never ran would be a guess dressed as a finding.
     if total == 0 && named_excluded.is_empty() && respect_gitignore {
+        let reached = |path: &Path| {
+            path.parent()
+                .is_some_and(|dir| reached_dirs.contains(&canonical_walk_path(dir)))
+        };
         for path in reachable_files(roots, false) {
             if !is_lintable(&path) || is_repeat(&path) {
                 continue;
@@ -640,7 +664,7 @@ fn diagnose_empty_discovery(roots: &[&str], filters: &DiscoveryFilters<'_>) -> E
             let verdict = include_verdict(&path);
             if verdict.is_ignore() {
                 not_included += 1;
-            } else if verdict.is_whitelist() {
+            } else if verdict.is_whitelist() && reached(&path) {
                 exclude += 1;
             } else {
                 gitignore += 1;
@@ -953,6 +977,7 @@ pub fn find_markdown_files(
     // LSP workspace scan so both walk the same files.
     apply_markdown_walk_options(
         &mut walk_builder,
+        &walk_roots,
         &MarkdownWalkOptions {
             respect_gitignore: config.global.respect_gitignore,
             skip_vendor_dirs: false,

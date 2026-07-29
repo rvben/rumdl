@@ -545,6 +545,53 @@ fn an_include_reaching_past_an_ignore_file_hands_the_blame_to_the_exclude() {
 }
 
 #[test]
+fn an_include_cannot_reach_into_a_directory_the_ignore_file_pruned() {
+    // An include outranks the ignore files for a file, but not for the directory
+    // holding it: a directory they hid is pruned before the walk descends, so
+    // nothing inside it was ever offered to the include. Handing the blame to the
+    // exclude patterns here would name a knob the run does not even have set.
+    let temp_dir = TempDir::new().unwrap();
+    fs::create_dir(temp_dir.path().join("docs")).unwrap();
+    fs::write(temp_dir.path().join("docs/guide.md"), "#  Guide\n").unwrap();
+    fs::write(temp_dir.path().join(".gitignore"), "docs/\n").unwrap();
+
+    let output = check(temp_dir.path(), &[".", "--include", "docs/**/*.md"]);
+    let stderr = stderr_of(&output);
+    assert!(
+        stderr.contains("1 by ignore files"),
+        "the pruned directory is the ignore file's doing. stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("by exclude patterns"),
+        "no exclude pattern was involved. stderr: {stderr}"
+    );
+
+    // The remedy has to end the emptiness on its own.
+    let remedied = check(
+        temp_dir.path(),
+        &[".", "--include", "docs/**/*.md", "--respect-gitignore=false"],
+    );
+    assert!(
+        stdout_of(&remedied).contains("in 1 file"),
+        "stdout: {}",
+        stdout_of(&remedied)
+    );
+
+    // Control: the include still outranks an ignore file that names the file
+    // itself, since the walk reaches the directory holding it.
+    let file_pattern = TempDir::new().unwrap();
+    fs::create_dir(file_pattern.path().join("docs")).unwrap();
+    fs::write(file_pattern.path().join("docs/guide.md"), "#  Guide\n").unwrap();
+    fs::write(file_pattern.path().join(".gitignore"), "*.md\n").unwrap();
+    let rescued = check(file_pattern.path(), &[".", "--include", "docs/**/*.md"]);
+    assert!(
+        stdout_of(&rescued).contains("in 1 file"),
+        "stdout: {}",
+        stdout_of(&rescued)
+    );
+}
+
+#[test]
 fn a_capitalized_extension_is_checked_rather_than_declared_filtered() {
     // A walk that drops a file the linter would otherwise accept leaves the
     // notice with a file to report and no setting to blame for it, which reads

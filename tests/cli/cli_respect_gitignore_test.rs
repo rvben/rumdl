@@ -264,6 +264,80 @@ fn test_respect_gitignore_default_value() {
     );
 }
 
+/// Build a repository under a directory whose own `.gitignore` holds `pattern`.
+///
+/// The repository is marked by a `.git` directory rather than `git init`, which is
+/// all the walker looks for and keeps the test from depending on a git binary.
+fn setup_nested_repository(pattern: &str) -> tempfile::TempDir {
+    let temp_dir = tempdir().unwrap();
+    fs::write(temp_dir.path().join(".gitignore"), format!("{pattern}\n")).unwrap();
+
+    let repo = temp_dir.path().join("repo");
+    fs::create_dir_all(repo.join("docs")).unwrap();
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    fs::write(repo.join(".gitignore"), "/.rumdl_cache\n").unwrap();
+    fs::write(
+        repo.join(".rumdl.toml"),
+        "[global]\ninclude = [\n  \"docs/**/*.md\",\n]\n",
+    )
+    .unwrap();
+    fs::write(repo.join("docs/guide.md"), "Body without a heading.\n").unwrap();
+    temp_dir
+}
+
+fn check_repo(temp_dir: &tempfile::TempDir, args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_rumdl"))
+        .current_dir(temp_dir.path().join("repo"))
+        .arg("check")
+        .arg("--no-cache")
+        .args(args)
+        .output()
+        .expect("Failed to execute command")
+}
+
+#[test]
+fn gitignore_above_the_repository_root_does_not_hide_files_inside_it() {
+    // Git stops reading gitignores at the repository root, so a file above it
+    // says nothing about what is inside. A directory hidden that way is pruned
+    // before the walk descends, which is why an include pattern naming a file
+    // underneath cannot rescue it and the run comes back empty instead.
+    for pattern in ["docs/", "*.md", "*"] {
+        let temp_dir = setup_nested_repository(pattern);
+        for args in [vec!["."], vec!["docs/"]] {
+            let output = check_repo(&temp_dir, &args);
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                combined.contains("guide.md"),
+                "'{pattern}' above the repository root hid guide.md from `check {}`:\n{combined}",
+                args.join(" ")
+            );
+        }
+    }
+
+    // Control: with no repository to bound it, the walk keeps reading upward,
+    // which is all it has to go on out there.
+    let temp_dir = setup_nested_repository("docs/");
+    fs::remove_dir(temp_dir.path().join("repo/.git")).unwrap();
+    let stderr = String::from_utf8_lossy(&check_repo(&temp_dir, &["."]).stderr).to_string();
+    assert!(
+        stderr.contains("by ignore files"),
+        "outside a repository the ignore file above still applies:\n{stderr}"
+    );
+
+    // Control: the repository's own .gitignore keeps deciding what is checked.
+    let temp_dir = setup_nested_repository("");
+    fs::write(temp_dir.path().join("repo/.gitignore"), "docs/\n").unwrap();
+    let stderr = String::from_utf8_lossy(&check_repo(&temp_dir, &["."]).stderr).to_string();
+    assert!(
+        stderr.contains("by ignore files"),
+        "a gitignore inside the repository still applies:\n{stderr}"
+    );
+}
+
 #[test]
 fn test_config_file_respect_gitignore_false() {
     // Config file with respect-gitignore = false should lint gitignored files

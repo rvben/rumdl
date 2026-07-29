@@ -188,13 +188,49 @@ impl Default for MarkdownWalkOptions {
     }
 }
 
-/// Apply the shared ignore-handling configuration to a walker.
+/// Whether a walk over `roots` stops reading gitignores at the repository root.
+///
+/// Git reads no `.gitignore` above the repository root, so a walk that does hides
+/// files `git check-ignore` reports as visible. Worse, such a file can hide a
+/// whole directory, and a pruned directory is never descended into, so no include
+/// pattern gets the chance to name anything inside it.
+///
+/// Outside a repository there is no root to stop at, and ignore files are all a
+/// walk has to go on, so there they keep applying upward. One walk has one
+/// setting for all of its roots, so the boundary is only applied when every root
+/// has a repository to bound it.
+pub fn stops_at_repository_root<P: AsRef<Path>>(roots: &[P]) -> bool {
+    !roots.is_empty() && roots.iter().all(|root| in_repository(root.as_ref()))
+}
+
+/// Whether `path` sits inside a git or jujutsu repository.
+///
+/// A `.git` entry is a directory in an ordinary clone and a file in a worktree or
+/// submodule, so existence alone is the marker. This recognizes a repository the
+/// same way the walker does, which is what puts the boundary in the same place.
+fn in_repository(path: &Path) -> bool {
+    let Ok(absolute) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    absolute
+        .ancestors()
+        .any(|dir| dir.join(".git").exists() || dir.join(".jj").exists())
+}
+
+/// Apply the shared ignore-handling configuration to a walker over `roots`.
 ///
 /// Hidden entries are always walked (a hidden `docs/.pages.md` lints the
 /// same as a visible one); generated content is kept out by gitignore
 /// semantics and, for callers that opt in, the vendor-directory skip.
 /// `.markdownlintignore` is honored for markdownlint compatibility.
-pub fn apply_markdown_walk_options(builder: &mut ignore::WalkBuilder, options: &MarkdownWalkOptions) {
+///
+/// The roots decide where gitignore reading stops, so a caller passes the same
+/// ones it walks.
+pub fn apply_markdown_walk_options<P: AsRef<Path>>(
+    builder: &mut ignore::WalkBuilder,
+    roots: &[P],
+    options: &MarkdownWalkOptions,
+) {
     let gitignore = options.respect_gitignore;
     builder
         .ignore(gitignore)
@@ -203,8 +239,12 @@ pub fn apply_markdown_walk_options(builder: &mut ignore::WalkBuilder, options: &
         .git_exclude(gitignore)
         .parents(gitignore)
         .hidden(false)
-        // Honor ignore files even outside a git repository.
-        .require_git(false)
+        // This setting does double duty in the walker: it gates gitignore
+        // handling on a repository being present, and it is what stops the walk
+        // reading gitignores above the repository root. Inside a repository both
+        // are wanted. Outside one, requiring a repository would drop `.gitignore`
+        // handling entirely, and there is no root to stop at in any case.
+        .require_git(stops_at_repository_root(roots))
         .add_custom_ignore_filename(".markdownlintignore");
 
     if options.skip_vendor_dirs {
@@ -218,7 +258,7 @@ pub fn apply_markdown_walk_options(builder: &mut ignore::WalkBuilder, options: &
 /// Build a walker over `root` configured with the shared options.
 pub fn markdown_walk_builder(root: &Path, options: &MarkdownWalkOptions) -> ignore::WalkBuilder {
     let mut builder = ignore::WalkBuilder::new(root);
-    apply_markdown_walk_options(&mut builder, options);
+    apply_markdown_walk_options(&mut builder, &[root], options);
     builder
 }
 
@@ -630,6 +670,63 @@ mod tests {
 
         let unrespected = walk(false);
         assert!(unrespected.iter().any(|p| p.ends_with("ignored.md")));
+    }
+
+    #[test]
+    fn a_gitignore_above_the_repository_root_stays_outside_it() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join(".gitignore"), "*.md\n").unwrap();
+        let repo = temp.path().join("repo");
+        fs::create_dir_all(repo.join(".git")).unwrap();
+        fs::write(repo.join("kept.md"), "# hi").unwrap();
+
+        let walk = |root: &Path| -> Vec<std::path::PathBuf> {
+            markdown_walk_builder(root, &MarkdownWalkOptions::default())
+                .build()
+                .flatten()
+                .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+                .map(|e| e.path().to_path_buf())
+                .collect()
+        };
+
+        assert!(
+            walk(&repo).iter().any(|p| p.ends_with("kept.md")),
+            "git reads no gitignore above the repository root, so neither does the walk"
+        );
+
+        // Control: outside a repository there is no root to stop at, and the
+        // ignore files above are all the walk has to go on.
+        fs::remove_dir(repo.join(".git")).unwrap();
+        assert!(
+            !walk(&repo).iter().any(|p| p.ends_with("kept.md")),
+            "with no repository to bound it, the walk keeps reading upward"
+        );
+    }
+
+    #[test]
+    fn the_repository_boundary_needs_every_root_to_have_one() {
+        let temp = tempdir().unwrap();
+        let inside = temp.path().join("repo/docs");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(temp.path().join("repo/.git")).unwrap();
+        let outside = temp.path().join("plain");
+        fs::create_dir_all(&outside).unwrap();
+
+        assert!(stops_at_repository_root(&[&inside]), "a root under a repository root");
+        assert!(!stops_at_repository_root(&[&outside]), "a root under no repository");
+
+        // A walk has one setting for all of its roots. Bounding this one would
+        // strip the outside root of gitignore handling altogether, which is a
+        // worse answer than reading one file too many.
+        assert!(!stops_at_repository_root(&[inside.as_path(), outside.as_path()]));
+        assert!(!stops_at_repository_root(&[] as &[&Path]), "no root is no repository");
+
+        // A worktree and a submodule mark their root with a `.git` file rather
+        // than a directory, and both are still repository roots.
+        let worktree = temp.path().join("worktree");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::write(worktree.join(".git"), "gitdir: /elsewhere/.git/worktrees/x\n").unwrap();
+        assert!(stops_at_repository_root(&[&worktree]));
     }
 
     #[test]
