@@ -145,6 +145,29 @@ pub fn has_markdown_extension(path: &Path) -> bool {
     path.extension().is_some_and(is_markdown_extension)
 }
 
+/// A glob selecting `ext` in any letter case, as `*.[mM][dD]` for `md`.
+///
+/// Walk type globs match case-sensitively, so a plain `*.md` hides `README.MD`
+/// from a directory scan even though [`is_markdown_extension`] calls it
+/// markdown and naming the file on the command line lints it. Deriving the glob
+/// from the same extension keeps the walk's filter from being narrower than the
+/// definition it stands in for.
+pub fn any_case_extension_glob(ext: &str) -> String {
+    let mut glob = String::with_capacity(2 + ext.len() * 4);
+    glob.push_str("*.");
+    for ch in ext.chars() {
+        if ch.is_ascii_alphabetic() {
+            glob.push('[');
+            glob.push(ch.to_ascii_lowercase());
+            glob.push(ch.to_ascii_uppercase());
+            glob.push(']');
+        } else {
+            glob.push(ch);
+        }
+    }
+    glob
+}
+
 /// Ignore-handling options applied to a markdown discovery walk.
 #[derive(Debug, Clone)]
 pub struct MarkdownWalkOptions {
@@ -518,6 +541,48 @@ mod tests {
         assert!(has_markdown_extension(Path::new("notebook.Rmd")));
         assert!(!has_markdown_extension(Path::new("no_extension")));
         assert!(!has_markdown_extension(Path::new("lib.rs")));
+    }
+
+    #[test]
+    fn the_type_glob_selects_exactly_what_counts_as_markdown() {
+        assert_eq!(any_case_extension_glob("md"), "*.[mM][dD]");
+
+        // The glob stands in for `is_markdown_extension` inside a walk, so the
+        // two have to agree on every spelling, not just the lowercase one.
+        let mut builder = globset::GlobSetBuilder::new();
+        for ext in MARKDOWN_EXTENSIONS {
+            builder.add(
+                globset::GlobBuilder::new(&any_case_extension_glob(ext))
+                    .literal_separator(true)
+                    .build()
+                    .unwrap(),
+            );
+        }
+        let globs = builder.build().unwrap();
+
+        for ext in MARKDOWN_EXTENSIONS {
+            for spelling in [ext.to_ascii_lowercase(), ext.to_ascii_uppercase(), capitalize(ext)] {
+                let name = format!("README.{spelling}");
+                assert!(
+                    globs.is_match(&name),
+                    "{name} is markdown by extension but no type glob selects it"
+                );
+                assert!(is_markdown_extension(OsStr::new(&spelling)), "{spelling} should match");
+            }
+        }
+
+        // Control: the glob widens case, not the extension set.
+        for name in ["lib.rs", "notes.txt", "README.mdq", "README.m"] {
+            assert!(!globs.is_match(name), "{name} should not be selected");
+        }
+    }
+
+    fn capitalize(ext: &str) -> String {
+        let mut chars = ext.chars();
+        match chars.next() {
+            Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+            None => String::new(),
+        }
     }
 
     #[test]

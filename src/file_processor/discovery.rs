@@ -6,8 +6,9 @@ use ignore::overrides::OverrideBuilder;
 use rumdl_config::resolve_rule_names;
 use rumdl_lib::config as rumdl_config;
 use rumdl_lib::discovery::{
-    ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, apply_markdown_walk_options,
-    expand_directory_pattern, has_markdown_extension, normalize_pattern_for_base, path_relative_to,
+    ExcludeMatchers, ExplicitIncludeMatchers, MARKDOWN_EXTENSIONS, MarkdownWalkOptions, any_case_extension_glob,
+    apply_markdown_walk_options, expand_directory_pattern, has_markdown_extension, normalize_pattern_for_base,
+    path_relative_to,
 };
 use rumdl_lib::rule::Rule;
 use std::collections::HashSet;
@@ -890,11 +891,8 @@ pub fn find_markdown_files(
         let mut types_builder = ignore::types::TypesBuilder::new();
         types_builder.add_defaults();
         for ext in MARKDOWN_EXTENSIONS {
-            types_builder.add("markdown", &format!("*.{ext}"))?;
+            types_builder.add("markdown", &any_case_extension_glob(ext))?;
         }
-        // Type globs match case-sensitively; cover the conventional
-        // capitalized R Markdown extension explicitly.
-        types_builder.add("markdown", "*.Rmd")?;
         types_builder.select("markdown");
         if has_config_include {
             // Config include is active: also allow Rust files for doc comment linting

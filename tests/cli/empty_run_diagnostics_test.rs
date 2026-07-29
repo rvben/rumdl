@@ -545,6 +545,42 @@ fn an_include_reaching_past_an_ignore_file_hands_the_blame_to_the_exclude() {
 }
 
 #[test]
+fn a_capitalized_extension_is_checked_rather_than_declared_filtered() {
+    // A walk that drops a file the linter would otherwise accept leaves the
+    // notice with a file to report and no setting to blame for it, which reads
+    // as a configuration problem the user cannot act on.
+    let temp_dir = TempDir::new().unwrap();
+    fs::write(temp_dir.path().join("README.MD"), "#  Shouting\n").unwrap();
+
+    let output = check(temp_dir.path(), &[".", "--deny-config-warnings"]);
+    let stderr = stderr_of(&output);
+    assert!(
+        !stderr.contains("filtered out"),
+        "nothing filtered this file. stderr: {stderr}"
+    );
+    assert_eq!(output.status.code(), Some(1), "stderr: {stderr}");
+    assert!(
+        stdout_of(&output).contains("README.MD"),
+        "the file should be linted. stdout: {}",
+        stdout_of(&output)
+    );
+
+    // Control: naming the file already linted it, so a walk that skips it is
+    // rumdl disagreeing with itself rather than a rule about capitalization.
+    let named = check(temp_dir.path(), &["README.MD"]);
+    assert_eq!(named.status.code(), Some(1), "stderr: {}", stderr_of(&named));
+
+    // Control: widening case does not widen the extension set.
+    let other = TempDir::new().unwrap();
+    fs::write(other.path().join("README.MDX.txt"), "#  Shouting\n").unwrap();
+    assert!(
+        stderr_of(&check(other.path(), &["."])).contains("No markdown files found to check."),
+        "stderr: {}",
+        stderr_of(&check(other.path(), &["."]))
+    );
+}
+
+#[test]
 fn a_hidden_file_is_not_blamed_on_a_filter_that_never_saw_it() {
     // Ignore files hide a path from the walk, so its exclude patterns never get
     // to judge it. Reporting an exclude here would answer for a matcher that
