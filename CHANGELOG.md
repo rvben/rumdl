@@ -85,6 +85,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.46](https://github.com/rvben/rumdl/compare/v0.2.45...v0.2.46) - 2026-07-29
+
+### Fixed
+
+- **discovery**: stop reading gitignores above the repository root ([2ff6e98](https://github.com/rvben/rumdl/commit/2ff6e98189a70937e924f92b3111c0c38d7041ae))
+- **cli**: lint markdown files whose extension is capitalized ([baece97](https://github.com/rvben/rumdl/commit/baece97c34fdbdfb26b4b5f59f52ee678d62a0de))
+- **cli**: report why a run checked no markdown files ([f0a0c61](https://github.com/rvben/rumdl/commit/f0a0c61b7946720bbe5c66c582975944cf260628))
+- **md013**: keep a quoted question inside its sentence when splitting ([2cef5ec](https://github.com/rvben/rumdl/commit/2cef5ece7c8a554ee1a44542a07a00d635b89ec8))
+
 ## [0.2.45](https://github.com/rvben/rumdl/compare/v0.2.44...v0.2.45) - 2026-07-28
 
 ### Fixed
