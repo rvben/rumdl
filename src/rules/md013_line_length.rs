@@ -75,6 +75,7 @@ impl MD013LineLength {
                 require_sentence_capital: true,
                 ignore_link_urls: true,
                 atomic_spans: true,
+                reflow_length_exemptions: false,
             },
             list_spacing: MD030Config::default(),
         }
@@ -137,6 +138,7 @@ impl MD013LineLength {
             },
             defined_references: Some(Self::defined_reference_labels(ctx)),
             atomic_spans: config.atomic_spans,
+            length_exemptions: config.length_exemptions_for_reflow(),
         }
     }
 

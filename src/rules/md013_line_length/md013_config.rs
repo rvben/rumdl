@@ -185,6 +185,19 @@ pub struct MD013Config {
     /// When false, they can be wrapped word-by-word like normal text.
     #[serde(default = "default_atomic_spans", alias = "atomic_spans")]
     pub atomic_spans: bool,
+
+    /// Whether reflow measures a line with the same length exemptions the check
+    /// applies (default: false).
+    ///
+    /// Off, reflow measures the markdown as written, so a paragraph whose only
+    /// excess is an inline link destination is wrapped even though the check
+    /// forgives it. On, reflow consults `ignore_link_urls` (an inline
+    /// `[text](url)` costs `[text]`, `![alt](url)` costs `![alt]`) and
+    /// `code_spans` (a code span costs nothing), and leaves such a paragraph
+    /// alone. Reading the same options both sides read is what keeps the
+    /// formatter from producing a line the check then reports.
+    #[serde(default)]
+    pub reflow_length_exemptions: bool,
 }
 
 fn default_line_length() -> LineLength {
@@ -253,6 +266,7 @@ impl Default for MD013Config {
             abbreviations: Vec::new(),
             require_sentence_capital: default_require_sentence_capital(),
             atomic_spans: default_atomic_spans(),
+            reflow_length_exemptions: false,
         }
     }
 }
@@ -296,6 +310,20 @@ impl MD013Config {
         }
     }
 
+    /// The checker's length exemptions, in the form reflow mirrors them.
+    ///
+    /// Empty unless `reflow_length_exemptions` opts in, and then derived from the
+    /// very options the check path reads, so the two measures cannot drift.
+    pub(crate) fn length_exemptions_for_reflow(&self) -> crate::utils::text_reflow::LengthExemptions {
+        if !self.reflow_length_exemptions {
+            return crate::utils::text_reflow::LengthExemptions::default();
+        }
+        crate::utils::text_reflow::LengthExemptions {
+            link_urls: !self.strict && self.ignore_link_urls,
+            code_spans: !self.code_spans,
+        }
+    }
+
     /// Map the configured length mode to the reflow engine's length mode.
     pub(crate) fn reflow_length_mode(&self) -> crate::utils::text_reflow::ReflowLengthMode {
         match self.length_mode {
@@ -326,6 +354,7 @@ impl MD013Config {
             // stay atomic. The rule's fix path supplies the defined labels.
             defined_references: None,
             atomic_spans: self.atomic_spans,
+            length_exemptions: self.length_exemptions_for_reflow(),
         }
     }
 }

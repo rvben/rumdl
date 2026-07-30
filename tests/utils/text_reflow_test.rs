@@ -35,6 +35,7 @@ fn test_list_item_trailing_whitespace_removal() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        length_exemptions: Default::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -423,6 +424,7 @@ fn test_sentence_per_line_reflow() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        length_exemptions: Default::default(),
     };
 
     let input = "First sentence. Second sentence. Third sentence.";
@@ -757,6 +759,7 @@ fn test_ie_abbreviation_split_debug() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        length_exemptions: Default::default(),
     };
 
     let result = reflow_line(input, &options);
@@ -784,6 +787,7 @@ fn test_ie_abbreviation_paragraph() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        length_exemptions: Default::default(),
     };
 
     let result = reflow_markdown(input, &options);
@@ -866,6 +870,7 @@ fn test_definition_list_with_paragraphs() {
         max_list_continuation_indent: None,
         defined_references: None,
         atomic_spans: true,
+        length_exemptions: Default::default(),
     };
 
     let content = "Regular paragraph. With multiple sentences.\n\nTerm\n: Definition.\n\nAnother paragraph.";
