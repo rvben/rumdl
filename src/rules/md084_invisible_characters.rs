@@ -81,7 +81,7 @@ impl MD084InvisibleCharacters {
                 | 0xFE00..=0xFE0F // Variation Selectors (VS1..VS16)
                 | 0xFEFF // ZERO WIDTH NO-BREAK SPACE (BOM)
                 | 0xFFA0 // HALFWIDTH HANGUL FILLER
-                | 0xFFF0..=0xFFF8 // Interlinear annotation and reserved non-rendering specials
+                | 0xFFF0..=0xFFFB // Interlinear annotation and reserved non-rendering specials
                 | 0x1BCA0..=0x1BCA3 // Shorthand format controls
                 | 0x1D173..=0x1D17A // Musical symbol format controls
                 | 0xE0000..=0xE0FFF // Tags block + Variation Selectors Supplement
@@ -96,13 +96,25 @@ impl MD084InvisibleCharacters {
             0x0340 // COMBINING GRAVE TONE MARK
                 | 0x0341 // COMBINING ACUTE TONE MARK
                 | 0xFFFC // OBJECT REPLACEMENT CHARACTER
+                | 0x0149 // LATIN SMALL LETTER N PRECEDED BY APOSTROPHE
+                | 0x0673 // ARABIC LETTER ALEF WITH WAVY HAMZA ABOVE
+                | 0x0F77 // TIBETAN VOWEL SIGN VOCALIC LL
+                | 0x0F79 // TIBETAN VOWEL SIGN VOCALIC LR
+                | 0x17A3..=0x17A4 // KHMER INHERENT VOWEL SIGN AA..KHMER INHERENT VOWEL SIGN AE
+                | 0x206A..=0x206F // INHIBIT SYMMETRIC SWAPPING..NOMINAL DIGIT SHAPES
+                | 0x2329 // LEFT-POINTING ANGLE BRACKET
+                | 0x232A // RIGHT-POINTING ANGLE BRACKET
+                | 0xE0001 // LANGUAGE TAG
         )
     }
 
-    /// Whether `c` is a codepoint this rule cares about: invisible and not allow-listed.
     #[inline]
-    fn is_flaggable(&self, c: char) -> bool {
-        Self::is_invisible_char(c) && !self.is_allowed(c)
+    fn replacement_for(c: char) -> Option<String> {
+        match c as u32 {
+            0x0340 => Some("\u{0300}".to_string()), // COMBINING GRAVE ACCENT
+            0x0341 => Some("\u{0301}".to_string()), // COMBINING ACUTE ACCENT
+            _ => None,
+        }
     }
 
     /// Variation selectors modify the *preceding* base character: `U+26A0 U+FE0F`
@@ -176,26 +188,28 @@ impl MD084InvisibleCharacters {
         }
     }
 
+    #[inline]
     /// Build a single-character-run warning, optionally with a removal fix.
     fn build_warning(
-        rule_name: &str,
+        &self,
         ctx: &LintContext,
         line: usize,
         start_col: usize,
         len_chars: usize,
         message: String,
-        fixable: bool,
+        replacement: Option<String>
     ) -> LintWarning {
-        let fix = fixable.then(|| {
-            Fix::new(
+        let fix = match replacement {
+            Some(replacement) => Some(Fix::new(
                 ctx.line_index
                     .line_col_to_byte_range_with_length(line, start_col, len_chars),
-                String::new(),
-            )
-        });
+                replacement,
+            )),
+            None => None,
+        };
 
         LintWarning {
-            rule_name: Some(rule_name.to_string()),
+            rule_name: Some(self.name().to_string()),
             line,
             column: start_col,
             end_line: line,
@@ -213,7 +227,7 @@ impl Rule for MD084InvisibleCharacters {
     }
 
     fn description(&self) -> &'static str {
-        "Invisible Unicode characters should be intentional"
+        "Invisible or Deprecated Unicode characters are present"
     }
 
     fn category(&self) -> RuleCategory {
@@ -229,7 +243,7 @@ impl Rule for MD084InvisibleCharacters {
             || !ctx
                 .content
                 .chars()
-                .any(|c| Self::is_invisible_char(c) && !self.is_allowed(c))
+                .any(|c| (Self::is_invisible_char(c) || Self::is_deprecated_char(c)) && !self.is_allowed(c))
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
@@ -249,8 +263,7 @@ impl Rule for MD084InvisibleCharacters {
                     if self.is_allowed(c) {
                         None
                     } else if Self::is_invisible_char(c) {
-                        Some(Self::build_warning(
-                            self.name(),
+                        Some(self.build_warning(
                             ctx,
                             line_num,
                             i + 1,
@@ -259,17 +272,16 @@ impl Rule for MD084InvisibleCharacters {
                                 "Invisible character {} detected (strict mode)",
                                 Self::format_codepoint(c)
                             ),
-                            true,
+                            Some(String::new()),
                         ))
                     } else if Self::is_deprecated_char(c) {
-                        Some(Self::build_warning(
-                            self.name(),
+                        Some(self.build_warning(
                             ctx,
                             line_num,
                             i + 1,
                             1,
                             format!("Deprecated Unicode code point {} detected", Self::format_codepoint(c)),
-                            false,
+                            Self::replacement_for(c),
                         ))
                     } else {
                         None
@@ -283,7 +295,7 @@ impl Rule for MD084InvisibleCharacters {
             // they stay invisible characters for the purpose of detecting a cluster,
             // so nothing can hide behind an emoji.
             let mut flagged = vec![false; chars.len()];
-            let flaggable: Vec<bool> = chars.iter().map(|&c| self.is_flaggable(c)).collect();
+            let flaggable: Vec<bool> = chars.iter().map(|&c| Self::is_invisible_char(c) && !self.is_allowed(c)).collect();
             let exempt: Vec<bool> = (0..chars.len()).map(|i| Self::is_presentation(&chars, i)).collect();
             let is_target: Vec<bool> = (0..chars.len()).map(|i| flaggable[i] && !exempt[i]).collect();
 
@@ -299,14 +311,13 @@ impl Rule for MD084InvisibleCharacters {
                         let stretch_len = stretch.len();
                         if !stretch[0] {
                             flagged[start..start + stretch_len].fill(true);
-                            warnings.push(Self::build_warning(
-                                self.name(),
+                            warnings.push(self.build_warning(
                                 ctx,
                                 line_num,
                                 start + 1,
                                 stretch_len,
                                 Self::cluster_message(stretch_len, chars[start]),
-                                true,
+                                Some(String::new()),
                             ));
                         }
                         start += stretch_len;
@@ -317,21 +328,22 @@ impl Rule for MD084InvisibleCharacters {
 
             // Triggers 2, 3 and 4 need to inspect each remaining candidate's neighbors.
             for (i, &c) in chars.iter().enumerate() {
-                // Trigger 4: deprecated Unicode code points. These are never fixable,
-                // because they are not invisible characters, and removing them can break content.
+                // Trigger 4: deprecated Unicode code points.
+                // Some deprecated code points have recommended replacements, so they have a fix.
+                // Other do not, so they are reported but not fixable.
                 if Self::is_deprecated_char(c) && !self.is_allowed(c) {
                     flagged[i] = true;
-                    warnings.push(Self::build_warning(
-                        self.name(),
+                    warnings.push(self.build_warning(
                         ctx,
                         line_num,
                         i + 1,
                         1,
                         format!("Deprecated Unicode code point {} detected", Self::format_codepoint(c)),
-                        false,
+                        Self::replacement_for(c) 
                     ));
                 }
 
+                // For triggers 2 and 3, skip any character that is not a target or has already been flagged.
                 if !is_target[i] || flagged[i] {
                     continue;
                 }
@@ -339,8 +351,7 @@ impl Rule for MD084InvisibleCharacters {
                 // Trigger 2: any invisible character at line boundaries.
                 if i == 0 || i == chars.len() - 1 {
                     flagged[i] = true;
-                    warnings.push(Self::build_warning(
-                        self.name(),
+                    warnings.push(self.build_warning(
                         ctx,
                         line_num,
                         i + 1,
@@ -349,7 +360,7 @@ impl Rule for MD084InvisibleCharacters {
                             "Invisible character {} detected at line boundary",
                             Self::format_codepoint(c)
                         ),
-                        true,
+                        Some(String::new()),
                     ));
                     continue;
                 }
@@ -359,8 +370,7 @@ impl Rule for MD084InvisibleCharacters {
                 // so both neighbors can be indexed directly.
                 if chars[i - 1].is_whitespace() || chars[i + 1].is_whitespace() {
                     flagged[i] = true;
-                    warnings.push(Self::build_warning(
-                        self.name(),
+                    warnings.push(self.build_warning(
                         ctx,
                         line_num,
                         i + 1,
@@ -369,7 +379,7 @@ impl Rule for MD084InvisibleCharacters {
                             "Invisible character {} detected adjacent to visible whitespace",
                             Self::format_codepoint(c)
                         ),
-                        true,
+                        Some(String::new()),
                     ));
                 }
             }
@@ -686,9 +696,11 @@ mod tests {
         let findings = check("\u{0340}deprecated\u{0341}\u{FFFC}");
         assert_eq!(findings.len(), 3, "Got {findings:?}");
         assert!(findings[0].message.contains("U+0340"));
+        assert!(findings[0].fix.is_some() && findings[0].fix.as_ref().unwrap().replacement == "\u{0300}"); // U+0340 has a recommended replacement
         assert!(findings[1].message.contains("U+0341"));
+        assert!(findings[1].fix.is_some() && findings[1].fix.as_ref().unwrap().replacement == "\u{0301}"); // U+0341 has a recommended replacement
         assert!(findings[2].message.contains("U+FFFC"));
-        assert!(findings.iter().all(|w| w.fix.is_none()));
+        assert!(findings[2].fix.is_none()); // U+FFFC has no recommended replacement
     }
 
     #[test]
@@ -696,10 +708,11 @@ mod tests {
         // Check that the deprecated characters are flagged and not fixable, even in strict mode.
         let findings = check_with_config("\u{0340}deprecated\u{0341}\u{FFFC}", true, &vec![]);
         assert_eq!(findings.len(), 3, "Got {findings:?}");
-        assert!(findings[0].message.contains("U+0340"));
+        assert!(findings[0].fix.is_some() && findings[0].fix.as_ref().unwrap().replacement == "\u{0300}"); // U+0340 has a recommended replacement
         assert!(findings[1].message.contains("U+0341"));
+        assert!(findings[1].fix.is_some() && findings[1].fix.as_ref().unwrap().replacement == "\u{0301}"); // U+0341 has a recommended replacement
         assert!(findings[2].message.contains("U+FFFC"));
-        assert!(findings.iter().all(|w| w.fix.is_none()));
+        assert!(findings[2].fix.is_none()); // U+FFFC has no recommended replacement
     }
 
     #[test]
