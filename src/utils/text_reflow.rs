@@ -3117,15 +3117,19 @@ struct Attached<'a> {
 /// Break `current_line` one word earlier so `attach` never starts a wrapped
 /// line: everything before the line's last safe space is emitted as a
 /// finished line, and the carried word plus the separator plus the attached
-/// text becomes the new current line. Element spans are cleared; the returned
-/// byte length of the carried word lets callers re-record a span for the
-/// attached text. Returns `None` (line untouched) when the line has no safe
-/// break point.
+/// text becomes the new current line. The returned byte length of the carried
+/// word lets callers re-record a span for the attached text. Returns `None`
+/// (line untouched) when the line has no safe break point.
 ///
 /// The new width is the carried text measured through the spans it came with,
 /// plus the attached width, so an exemption the carried text or the attached
 /// token earns is preserved across the break instead of being re-derived from a
 /// bare string.
+///
+/// The carried text keeps the element spans that fell inside it, rebased to the
+/// new line. Dropping them would leave a later break blind to an element the
+/// carried text still holds, and so free to split a link or a code span down
+/// the middle.
 fn break_before_attached(
     lines: &mut Vec<String>,
     current_line: &mut String,
@@ -3145,8 +3149,24 @@ fn break_before_attached(
     let Attached { text, width, separator } = attach;
     *current_line = format!("{after}{separator}{text}");
     *current_width = after_width + LineWidth::plain(display_len(separator, length_mode)) + width;
-    element_spans.clear();
+    rebase_spans_after_break(element_spans, last_space + 1);
     Some(carried)
+}
+
+/// Keep the spans that reach into the text starting at `carried_start` and move
+/// them into that text's coordinates, discarding the ones that belong to the
+/// line just emitted.
+///
+/// A span that starts before `carried_start` is clamped to 0 rather than
+/// dropped. `rfind_safe_space` never breaks inside a span, so this cannot
+/// normally happen; clamping keeps the whole prefix protected if it ever does,
+/// where dropping the span would license a break inside an element.
+fn rebase_spans_after_break(element_spans: &mut Vec<ElementSpan>, carried_start: usize) {
+    element_spans.retain(|span| span.end > carried_start);
+    for span in element_spans.iter_mut() {
+        span.start = span.start.saturating_sub(carried_start);
+        span.end -= carried_start;
+    }
 }
 
 /// Reflow elements into lines that fit within the line length

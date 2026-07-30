@@ -373,6 +373,36 @@ fn enabling_the_option_never_creates_a_violation() {
     }
 }
 
+/// Breaking a line one word early to keep an attached token off a line start
+/// carries the last word forward. The elements inside that carried word travel
+/// with it, so a later break in the same line must still see them; losing them
+/// lets the next break land inside a link.
+///
+/// Here `<tag>` overflows first and carries the whole link onto the new line,
+/// then `superlongword` overflows against that line. The only spaces available
+/// are the ones inside the link title, which is not a legal break point.
+#[test]
+fn a_break_carrying_a_link_still_protects_it() {
+    let dir = TempDir::new().unwrap();
+    let content =
+        "alpha beta [long label](https://example.com/very/long/url \"title words\")<tag>superlongword gamma delta.\n";
+
+    for exemptions in ["true", "false"] {
+        let settings = [
+            "reflow = true".to_string(),
+            "line-length = 25".to_string(),
+            format!("reflow-length-exemptions = {exemptions}"),
+        ];
+        let refs: Vec<&str> = settings.iter().map(String::as_str).collect();
+        let formatted = fmt(dir.path(), content, &refs);
+
+        assert!(
+            formatted.contains("[long label](https://example.com/very/long/url \"title words\")"),
+            "reflow split the link with reflow-length-exemptions = {exemptions}:\n{formatted}"
+        );
+    }
+}
+
 /// A second pass must find nothing left to do.
 #[test]
 fn formatting_is_idempotent_under_the_exemption() {
