@@ -1,14 +1,16 @@
-//! Rule MD084: Invisible and deprecated Unicode characters.
+//! Rule MD084: Invisible and discouraged Unicode characters.
 //!
 //! This rule detects hidden Unicode code points that can create confusing text,
-//! copy/paste bugs, or rendering differences across tools.
-//! It also flags deprecated Unicode code points that are no longer recommended for use.
+//! copy/paste bugs, or rendering differences across tools. It also flags code points
+//! Unicode itself steers authors away from: those carrying the `Deprecated` property,
+//! and those UTR#20 lists as unsuitable for use with markup.
 //!
 //! By default, it tries to avoid false positives by only flagging:
 //! 1. Multiple consecutive invisible characters,
 //! 2. Invisible characters at the start or end of a line,
-//! 3. Invisible characters adjacent to any visible whitespace.
-//! 4. Deprecated Unicode code points (never fixable).
+//! 3. Invisible characters adjacent to any visible whitespace,
+//! 4. Deprecated and markup-unsuitable code points, fixable only where a substitution
+//!    preserves the text exactly.
 //!
 //! In strict mode, it flags any invisible character that is not explicitly allowed in the configuration.
 
@@ -81,22 +83,22 @@ impl MD084InvisibleCharacters {
                 | 0xFE00..=0xFE0F // Variation Selectors (VS1..VS16)
                 | 0xFEFF // ZERO WIDTH NO-BREAK SPACE (BOM)
                 | 0xFFA0 // HALFWIDTH HANGUL FILLER
-                | 0xFFF0..=0xFFFB // Interlinear annotation and reserved non-rendering specials
+                | 0xFFF0..=0xFFF8 // Reserved non-rendering specials
                 | 0x1BCA0..=0x1BCA3 // Shorthand format controls
                 | 0x1D173..=0x1D17A // Musical symbol format controls
                 | 0xE0000..=0xE0FFF // Tags block + Variation Selectors Supplement
         )
     }
 
+    /// The code points carrying the UCD `Deprecated` property, in full. Unicode
+    /// discourages their use but they still render, so they are reported without a
+    /// removal fix: only the author knows what the text should say instead.
     #[inline]
     fn is_deprecated_char(c: char) -> bool {
         let cp = c as u32;
         matches!(
             cp,
-            0x0340 // COMBINING GRAVE TONE MARK
-                | 0x0341 // COMBINING ACUTE TONE MARK
-                | 0xFFFC // OBJECT REPLACEMENT CHARACTER
-                | 0x0149 // LATIN SMALL LETTER N PRECEDED BY APOSTROPHE
+            0x0149 // LATIN SMALL LETTER N PRECEDED BY APOSTROPHE
                 | 0x0673 // ARABIC LETTER ALEF WITH WAVY HAMZA ABOVE
                 | 0x0F77 // TIBETAN VOWEL SIGN VOCALIC LL
                 | 0x0F79 // TIBETAN VOWEL SIGN VOCALIC LR
@@ -108,13 +110,49 @@ impl MD084InvisibleCharacters {
         )
     }
 
+    /// The rows of UTR#20 table 3.1 that neither of the sets above already covers:
+    /// visible or structural code points a markup document is meant to express with
+    /// markup instead. They are not default-ignorable, so removing one would drop
+    /// content or leave a paired construct half-open, and only the two tone marks
+    /// have a replacement that preserves the text exactly.
     #[inline]
-    fn replacement_for(c: char) -> Option<String> {
-        match c as u32 {
+    fn is_unsuitable_for_markup_char(c: char) -> bool {
+        let cp = c as u32;
+        matches!(
+            cp,
+            0x0340 // COMBINING GRAVE TONE MARK
+                | 0x0341 // COMBINING ACUTE TONE MARK
+                | 0xFFF9..=0xFFFC // Interlinear annotation delimiters + OBJECT REPLACEMENT CHARACTER
+        )
+    }
+
+    /// Whether either set above claims this code point.
+    #[inline]
+    fn is_markup_char(c: char) -> bool {
+        Self::is_deprecated_char(c) || Self::is_unsuitable_for_markup_char(c)
+    }
+
+    /// A code point flagged by one of the two sets above, with the message that is
+    /// true of it and the replacement that preserves the text, if one exists.
+    fn markup_finding(c: char) -> Option<(String, Option<String>)> {
+        let codepoint = Self::format_codepoint(c);
+        if Self::is_deprecated_char(c) {
+            return Some((format!("Deprecated Unicode code point {codepoint} detected"), None));
+        }
+        if !Self::is_unsuitable_for_markup_char(c) {
+            return None;
+        }
+        // The tone marks are canonical singletons: every normalization form already
+        // rewrites them this way, so the substitution cannot change what renders.
+        let replacement = match c as u32 {
             0x0340 => Some("\u{0300}".to_string()), // COMBINING GRAVE ACCENT
             0x0341 => Some("\u{0301}".to_string()), // COMBINING ACUTE ACCENT
             _ => None,
-        }
+        };
+        Some((
+            format!("Unicode code point {codepoint} is not suitable for use with markup"),
+            replacement,
+        ))
     }
 
     /// Variation selectors modify the *preceding* base character: `U+26A0 U+FE0F`
@@ -188,8 +226,9 @@ impl MD084InvisibleCharacters {
         }
     }
 
+    /// Build a warning covering `len_chars` characters, with a fix rewriting them to
+    /// `replacement` when one is given. An empty replacement deletes the run.
     #[inline]
-    /// Build a single-character-run warning, optionally with a removal fix.
     fn build_warning(
         &self,
         ctx: &LintContext,
@@ -226,7 +265,7 @@ impl Rule for MD084InvisibleCharacters {
     }
 
     fn description(&self) -> &'static str {
-        "Invisible or Deprecated Unicode characters are present"
+        "Invisible or discouraged Unicode characters should be intentional"
     }
 
     fn category(&self) -> RuleCategory {
@@ -242,7 +281,7 @@ impl Rule for MD084InvisibleCharacters {
             || !ctx
                 .content
                 .chars()
-                .any(|c| (Self::is_invisible_char(c) || Self::is_deprecated_char(c)) && !self.is_allowed(c))
+                .any(|c| (Self::is_invisible_char(c) || Self::is_markup_char(c)) && !self.is_allowed(c))
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
@@ -273,17 +312,10 @@ impl Rule for MD084InvisibleCharacters {
                             ),
                             Some(String::new()),
                         ))
-                    } else if Self::is_deprecated_char(c) {
-                        Some(self.build_warning(
-                            ctx,
-                            line_num,
-                            i + 1,
-                            1,
-                            format!("Deprecated Unicode code point {} detected", Self::format_codepoint(c)),
-                            Self::replacement_for(c),
-                        ))
                     } else {
-                        None
+                        Self::markup_finding(c).map(|(message, replacement)| {
+                            self.build_warning(ctx, line_num, i + 1, 1, message, replacement)
+                        })
                     }
                 }));
                 continue;
@@ -328,24 +360,8 @@ impl Rule for MD084InvisibleCharacters {
                 offset += len;
             }
 
-            // Triggers 2, 3 and 4 need to inspect each remaining candidate's neighbors.
+            // Triggers 2 and 3 need to inspect each remaining candidate's neighbors.
             for (i, &c) in chars.iter().enumerate() {
-                // Trigger 4: deprecated Unicode code points.
-                // Some deprecated code points have recommended replacements, so they have a fix.
-                // Other do not, so they are reported but not fixable.
-                if Self::is_deprecated_char(c) && !self.is_allowed(c) {
-                    flagged[i] = true;
-                    warnings.push(self.build_warning(
-                        ctx,
-                        line_num,
-                        i + 1,
-                        1,
-                        format!("Deprecated Unicode code point {} detected", Self::format_codepoint(c)),
-                        Self::replacement_for(c),
-                    ));
-                }
-
-                // For triggers 2 and 3, skip any character that is not a target or has already been flagged.
                 if !is_target[i] || flagged[i] {
                     continue;
                 }
@@ -384,6 +400,22 @@ impl Rule for MD084InvisibleCharacters {
                         Some(String::new()),
                     ));
                 }
+            }
+
+            // Trigger 4: code points Unicode itself steers authors away from, reported
+            // wherever no invisible-character trigger already spoke. Several of them are
+            // invisible too, and the invisible triggers carry a removal fix this one
+            // cannot offer, so running last keeps the more actionable diagnostic and
+            // reports each character once.
+            for (i, &c) in chars.iter().enumerate() {
+                if flagged[i] || self.is_allowed(c) {
+                    continue;
+                }
+                let Some((message, replacement)) = Self::markup_finding(c) else {
+                    continue;
+                };
+                flagged[i] = true;
+                warnings.push(self.build_warning(ctx, line_num, i + 1, 1, message, replacement));
             }
         }
 
@@ -693,35 +725,124 @@ mod tests {
     }
 
     #[test]
-    fn test_default_deprecated_characters_are_flagged_and_not_fixable() {
-        // Check that the deprecated characters are flagged and not fixable, even in default mode.
+    fn test_default_markup_unsuitable_characters_are_flagged() {
+        // Only a substitution that preserves the text comes with a fix: the tone marks
+        // have canonical equivalents, the object replacement character does not.
         let findings = check("\u{0340}deprecated\u{0341}\u{FFFC}");
         assert_eq!(findings.len(), 3, "Got {findings:?}");
-        assert!(findings[0].message.contains("U+0340"));
-        assert!(findings[0].fix.is_some() && findings[0].fix.as_ref().unwrap().replacement == "\u{0300}"); // U+0340 has a recommended replacement
-        assert!(findings[1].message.contains("U+0341"));
-        assert!(findings[1].fix.is_some() && findings[1].fix.as_ref().unwrap().replacement == "\u{0301}"); // U+0341 has a recommended replacement
-        assert!(findings[2].message.contains("U+FFFC"));
-        assert!(findings[2].fix.is_none()); // U+FFFC has no recommended replacement
+        assert!(
+            findings[0]
+                .message
+                .contains("U+0340 is not suitable for use with markup")
+        );
+        assert_eq!(findings[0].fix.as_ref().unwrap().replacement, "\u{0300}");
+        assert!(
+            findings[1]
+                .message
+                .contains("U+0341 is not suitable for use with markup")
+        );
+        assert_eq!(findings[1].fix.as_ref().unwrap().replacement, "\u{0301}");
+        assert!(
+            findings[2]
+                .message
+                .contains("U+FFFC is not suitable for use with markup")
+        );
+        assert!(findings[2].fix.is_none());
     }
 
     #[test]
-    fn test_strict_deprecated_characters_are_flagged_and_not_fixable() {
-        // Check that the deprecated characters are flagged and not fixable, even in strict mode.
+    fn test_strict_markup_unsuitable_characters_are_flagged() {
         let findings = check_with_config("\u{0340}deprecated\u{0341}\u{FFFC}", true, &vec![]);
         assert_eq!(findings.len(), 3, "Got {findings:?}");
-        assert!(findings[0].fix.is_some() && findings[0].fix.as_ref().unwrap().replacement == "\u{0300}"); // U+0340 has a recommended replacement
+        assert_eq!(findings[0].fix.as_ref().unwrap().replacement, "\u{0300}");
         assert!(findings[1].message.contains("U+0341"));
-        assert!(findings[1].fix.is_some() && findings[1].fix.as_ref().unwrap().replacement == "\u{0301}"); // U+0341 has a recommended replacement
+        assert_eq!(findings[1].fix.as_ref().unwrap().replacement, "\u{0301}");
         assert!(findings[2].message.contains("U+FFFC"));
-        assert!(findings[2].fix.is_none()); // U+FFFC has no recommended replacement
+        assert!(findings[2].fix.is_none());
     }
 
     #[test]
-    fn test_allowed_deprecated_characters_are_not_flagged() {
-        // Check that the deprecated characters are not flagged if they are allow-listed.
+    fn test_allowed_markup_unsuitable_characters_are_not_flagged() {
         let allow = vec!["U+0340", "U+0341", "U+FFFC"];
         let findings = check_with_config("\u{0340}deprecated\u{0341}\u{FFFC}", false, &allow);
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn test_default_deprecated_visible_character_is_flagged_without_a_fix() {
+        // U+0149 renders, so only the author knows what it should say instead.
+        let findings = check("Cote d\u{0149}Ivoire");
+        assert_eq!(findings.len(), 1, "Got {findings:?}");
+        assert!(
+            findings[0]
+                .message
+                .contains("Deprecated Unicode code point U+0149 detected")
+        );
+        assert!(findings[0].fix.is_none());
+        assert_eq!(fix("Cote d\u{0149}Ivoire"), "Cote d\u{0149}Ivoire");
+    }
+
+    #[test]
+    fn test_deprecated_and_invisible_keeps_the_removal_fix() {
+        // U+206A is both invisible and deprecated. The invisible triggers carry a
+        // removal fix, so they must win over the unfixable deprecated diagnostic.
+        for (content, expected_fix) in [
+            ("\u{206A}x", "x"),
+            ("x\u{206A}", "x"),
+            ("x \u{206A}y", "x y"),
+            ("x\u{206A}\u{206B}y", "xy"),
+        ] {
+            let findings = check(content);
+            assert_eq!(findings.len(), 1, "{content:?} gave {findings:?}");
+            assert!(
+                findings[0].message.starts_with("Invisible character")
+                    || findings[0].message.contains("consecutive invisible characters"),
+                "{content:?} gave {:?}",
+                findings[0].message
+            );
+            assert_eq!(fix(content), expected_fix, "fixing {content:?}");
+        }
+    }
+
+    #[test]
+    fn test_deprecated_and_invisible_is_reported_once() {
+        // Interior, non-adjacent to whitespace: no invisible trigger applies, so the
+        // deprecated diagnostic is the only one, and it carries no fix.
+        let findings = check("x\u{206A}y");
+        assert_eq!(findings.len(), 1, "Got {findings:?}");
+        assert!(
+            findings[0]
+                .message
+                .contains("Deprecated Unicode code point U+206A detected")
+        );
+        assert!(findings[0].fix.is_none());
+        assert_eq!(fix("x\u{206A}y"), "x\u{206A}y");
+    }
+
+    #[test]
+    fn test_interlinear_annotation_is_reported_but_never_stripped() {
+        // U+FFF9..U+FFFB delimit ruby text. They are not default-ignorable, and deleting
+        // one would leave the annotation half-open, so they are reported without a fix.
+        let content = "\u{FFF9}base\u{FFFA}gloss\u{FFFB}";
+        let findings = check(content);
+        assert_eq!(findings.len(), 3, "Got {findings:?}");
+        for finding in &findings {
+            assert!(finding.message.contains("is not suitable for use with markup"));
+            assert!(finding.fix.is_none());
+        }
+        assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn test_reserved_specials_below_the_annotation_block_stay_invisible() {
+        // U+FFF0..U+FFF8 are default-ignorable, so they keep the removal fix.
+        let findings = check("\u{FFF8}x");
+        assert_eq!(findings.len(), 1, "Got {findings:?}");
+        assert!(
+            findings[0]
+                .message
+                .contains("Invisible character U+FFF8 detected at line boundary")
+        );
+        assert_eq!(fix("\u{FFF8}x"), "x");
     }
 }
