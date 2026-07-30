@@ -351,6 +351,33 @@ pub struct ReflowOptions {
     /// When true (default), these spans are treated as atomic units.
     /// When false, they can be wrapped word-by-word like normal text.
     pub atomic_spans: bool,
+    /// Which of the checker's line-length exemptions reflow mirrors when it
+    /// measures a line. Empty measures the markdown as written.
+    pub length_exemptions: LengthExemptions,
+}
+
+/// The line-length exemptions MD013's check applies, as far as reflow can mirror
+/// them.
+///
+/// The checker tests each one against the budget separately, so a line is
+/// forgiven when either reduced length fits, never when the two savings together
+/// would fit. Reflow therefore has to keep them apart too: see
+/// [`LineWidth`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LengthExemptions {
+    /// An inline `[text](url)` costs `[text]` and an inline `![alt](url)` costs
+    /// `![alt]`. Reference, collapsed and shortcut forms are never exempt.
+    pub link_urls: bool,
+    /// An inline code span costs nothing, because it cannot be wrapped.
+    pub code_spans: bool,
+}
+
+impl LengthExemptions {
+    /// Whether any exemption is active. When none is, every width below reduces
+    /// to the plain source width and the whole mechanism is inert.
+    fn any(&self) -> bool {
+        self.link_urls || self.code_spans
+    }
 }
 
 impl Default for ReflowOptions {
@@ -369,7 +396,67 @@ impl Default for ReflowOptions {
             max_list_continuation_indent: None,
             defined_references: None,
             atomic_spans: true,
+            length_exemptions: LengthExemptions::default(),
         }
+    }
+}
+
+/// A line's width under each exemption the checker applies independently.
+///
+/// The checker forgives a line when the link-exempt length fits *or* the
+/// code-exempt length fits, so the width that decides whether reflow may stop is
+/// the smaller of the two, never one total with both savings taken out. Adding
+/// widths is component-wise, which is what makes it usable as a running total.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LineWidth {
+    /// Width with inline link and image destinations discounted.
+    link_exempt: usize,
+    /// Width with inline code spans discounted.
+    code_exempt: usize,
+}
+
+impl LineWidth {
+    /// A span of text that no exemption touches, so both components are its
+    /// full width.
+    fn plain(width: usize) -> Self {
+        Self {
+            link_exempt: width,
+            code_exempt: width,
+        }
+    }
+
+    /// The width the checker measures this line at: whichever exemption helps
+    /// more.
+    fn effective(self) -> usize {
+        self.link_exempt.min(self.code_exempt)
+    }
+
+    fn fits(self, line_length: usize) -> bool {
+        self.effective() <= line_length
+    }
+
+    /// Whether nothing has been accumulated. Only an empty string measures zero
+    /// under both exemptions: the cheapest an exempt link can be is `[]`, and a
+    /// code span still costs its full width against the link exemption.
+    fn is_empty(self) -> bool {
+        self.link_exempt == 0 && self.code_exempt == 0
+    }
+}
+
+impl std::ops::Add for LineWidth {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            link_exempt: self.link_exempt + other.link_exempt,
+            code_exempt: self.code_exempt + other.code_exempt,
+        }
+    }
+}
+
+impl std::ops::AddAssign for LineWidth {
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
     }
 }
 
@@ -932,7 +1019,7 @@ fn reflow_line_unchecked(line: &str, options: &ReflowOptions) -> Vec<String> {
 
     // Quick check: if line is already short enough or no wrapping requested, return as-is
     // line_length = 0 means no wrapping (unlimited line length)
-    if options.line_length == 0 || display_len(line, options.length_mode) <= options.line_length {
+    if options.line_length == 0 || line_fits(line, options) {
         return vec![line.to_string()];
     }
 
@@ -1085,6 +1172,69 @@ impl Element {
             Element::Italic { content, .. } => display_len(content, mode) + 2,
         }
     }
+
+    /// The width the checker measures this element at, under each exemption.
+    ///
+    /// An inline link costs `[text]` and an inline image `![alt]`, exactly as
+    /// `MD013`'s check computes them; a code span costs nothing. Every other
+    /// element, reference and shortcut link forms included, costs its full
+    /// width, because the check does not exempt those either.
+    ///
+    /// An element whose text cannot be delimited is charged in full. Charging
+    /// too much only makes reflow wrap a line the check would have forgiven;
+    /// charging too little would leave a line the check reports.
+    fn exempt_width(&self, mode: ReflowLengthMode, exemptions: LengthExemptions) -> LineWidth {
+        let full = self.display_len(mode);
+        let mut width = LineWidth::plain(full);
+        match self {
+            Element::Link(s) | Element::LinkedImage(s) if exemptions.link_urls => {
+                if let Some(text) = bracketed_text(s, 0) {
+                    width.link_exempt = (2 + display_len(text, mode)).min(full);
+                }
+            }
+            Element::InlineImage(s) if exemptions.link_urls => {
+                if let Some(alt) = bracketed_text(s, 1) {
+                    width.link_exempt = (3 + display_len(alt, mode)).min(full);
+                }
+            }
+            Element::Code { .. } if exemptions.code_spans => width.code_exempt = 0,
+            _ => {}
+        }
+        width
+    }
+}
+
+/// The source between the `[` at byte `open` and its matching `]`.
+///
+/// Bracket matching follows the document parser: a nested `[` raises the depth,
+/// a backslash-escaped bracket is literal, and a bracket inside a code span is
+/// literal too, so `[a \] b](url)` and ``[a `]` b](url)`` are each one link.
+/// Returns `None` when `open` is not a `[` or the bracket never closes.
+fn bracketed_text(s: &str, open: usize) -> Option<&str> {
+    let bytes = s.as_bytes();
+    if bytes.get(open) != Some(&b'[') {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut in_code_span = false;
+    let mut escaped = false;
+    for (i, &byte) in bytes.iter().enumerate().skip(open + 1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match byte {
+            b'\\' => escaped = true,
+            b'`' => in_code_span = !in_code_span,
+            b'[' if !in_code_span => depth += 1,
+            b']' if !in_code_span => match depth.checked_sub(1) {
+                Some(next) => depth = next,
+                None => return s.get(open + 1..i),
+            },
+            _ => {}
+        }
+    }
+    None
 }
 
 /// An emphasis or formatting span parsed by pulldown-cmark
@@ -2256,7 +2406,7 @@ fn clause_break_allowed_after(chars: &[char], i: usize) -> bool {
 /// Returns `(end_local, inner)` where `end_local` is the byte offset within
 /// `slice` just past the closing `)`, and `inner` is the content between the
 /// outermost `(` and `)`.
-fn paren_group_end<'a>(slice: &'a str, element_spans: &[(usize, usize)], offset: usize) -> Option<(usize, &'a str)> {
+fn paren_group_end<'a>(slice: &'a str, element_spans: &[ElementSpan], offset: usize) -> Option<(usize, &'a str)> {
     debug_assert!(slice.starts_with('('));
     let mut depth: i32 = 0;
     for (local_byte, c) in slice.char_indices() {
@@ -2303,7 +2453,7 @@ fn paren_group_end<'a>(slice: &'a str, element_spans: &[(usize, usize)], offset:
 fn split_at_parenthetical(
     text: &str,
     line_length: usize,
-    element_spans: &[(usize, usize)],
+    element_spans: &[ElementSpan],
     length_mode: ReflowLengthMode,
 ) -> Option<(String, String)> {
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
@@ -2327,16 +2477,15 @@ fn split_at_parenthetical(
                 .last()
                 .map_or(0, |(idx, c)| idx + c.len_utf8());
             match element_containing(first_end, element_spans) {
-                Some((_, end)) => first_end = end,
+                Some(span) => first_end = span.end,
                 None => break,
             }
         }
         let rest_start = first_end;
         let first = &text[..first_end];
-        let first_len = display_len(first, length_mode);
         // No MIN_SPLIT_RATIO check: a parenthetical unit is always a valid
         // semantic line regardless of its length.
-        if first_len <= line_length {
+        if measure(first, 0, element_spans, length_mode).fits(line_length) {
             let rest = text[rest_start..].trim_start();
             if !rest.is_empty() {
                 return Some((first.to_string(), rest.to_string()));
@@ -2361,7 +2510,7 @@ fn split_at_parenthetical(
         }
         if let Some((end_local, inner)) = paren_group_end(&text[pos..], element_spans, pos) {
             let first = text[..pos].trim_end_matches(is_breakable_whitespace);
-            let first_len = display_len(first, length_mode);
+            let first_len = measure(first, 0, element_spans, length_mode).effective();
             // The '(' must follow breakable whitespace: splitting `f(a b)` into
             // `f` and `(a b)` would render as `f (a b)`.
             if first.len() < pos
@@ -2388,29 +2537,127 @@ fn split_at_parenthetical(
     Some((first, rest))
 }
 
+/// A non-Text element's byte span in a flat text representation, with the
+/// columns each of the checker's exemptions forgives it.
+///
+/// The offsets exist so a split position can be kept out of an element; the
+/// savings exist so a substring can be measured the way the checker measures it.
+/// Both are computed from the same walk over the same elements, which is what
+/// keeps them consistent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ElementSpan {
+    start: usize,
+    end: usize,
+    /// Columns the link/image URL exemption forgives, zero when it is off or
+    /// does not apply to this element.
+    link_saving: usize,
+    /// Columns the code-span exemption forgives, on the same terms.
+    code_saving: usize,
+}
+
+impl ElementSpan {
+    /// A span covering `len` bytes from `start`, for an element whose full
+    /// width is `full` and whose exempt widths are `width`.
+    fn new(start: usize, len: usize, full: usize, width: LineWidth) -> Self {
+        Self {
+            start,
+            end: start + len,
+            link_saving: full - width.link_exempt,
+            code_saving: full - width.code_exempt,
+        }
+    }
+
+    fn contains(&self, pos: usize) -> bool {
+        pos > self.start && pos < self.end
+    }
+
+    fn within(&self, start: usize, end: usize) -> bool {
+        self.start >= start && self.end <= end
+    }
+}
+
 /// Compute element spans for a flat text representation of elements.
-/// Returns Vec of (start, end) byte offsets for non-Text elements,
-/// so we can check that a split position doesn't fall inside them.
-fn compute_element_spans(elements: &[Element]) -> Vec<(usize, usize)> {
+///
+/// The offsets are byte positions, so they are always measured in
+/// [`ReflowLengthMode::Bytes`] regardless of how lines are measured; only the
+/// savings depend on `mode` and the active exemptions.
+fn compute_element_spans(
+    elements: &[Element],
+    mode: ReflowLengthMode,
+    exemptions: LengthExemptions,
+) -> Vec<ElementSpan> {
     let mut spans = Vec::new();
     let mut offset = 0;
     for element in elements {
         let len = element.display_len(ReflowLengthMode::Bytes);
         if !matches!(element, Element::Text(_)) {
-            spans.push((offset, offset + len));
+            let full = element.display_len(mode);
+            let width = element.exempt_width(mode, exemptions);
+            spans.push(ElementSpan::new(offset, len, full, width));
         }
         offset += len;
     }
     spans
 }
 
+/// Width of `text`, which sits at `[offset, offset + text.len())` of the line the
+/// spans were computed for, under each exemption separately.
+///
+/// Only elements lying wholly inside the range are discounted. A split never
+/// lands inside an element, so a partially covered element means the caller is
+/// measuring something that is not a candidate line, and charging it in full is
+/// the safe reading.
+fn measure(text: &str, offset: usize, spans: &[ElementSpan], mode: ReflowLengthMode) -> LineWidth {
+    let full = display_len(text, mode);
+    let end = offset + text.len();
+    let mut width = LineWidth::plain(full);
+    for span in spans.iter().filter(|span| span.within(offset, end)) {
+        width.link_exempt -= span.link_saving;
+        width.code_exempt -= span.code_saving;
+    }
+    width
+}
+
+/// Width of a standalone line under each exemption.
+///
+/// Callers that already hold the line's element spans should use [`measure`];
+/// this is for the sites that see only the finished line and so have to parse it.
+fn line_width_components(line: &str, options: &ReflowOptions) -> LineWidth {
+    let raw = display_len(line, options.length_mode);
+    if !options.length_exemptions.any() {
+        return LineWidth::plain(raw);
+    }
+    let elements = parse_markdown_elements_inner(
+        line,
+        options.attr_lists,
+        options.myst_roles,
+        options.defined_references.as_ref(),
+    );
+    let spans = compute_element_spans(&elements, options.length_mode, options.length_exemptions);
+    measure(line, 0, &spans, options.length_mode)
+}
+
+/// Width of a standalone line as the checker measures it.
+fn line_width(line: &str, options: &ReflowOptions) -> usize {
+    line_width_components(line, options).effective()
+}
+
+/// Whether a standalone line fits the budget as the checker measures it.
+///
+/// A saving is never negative, so the exempt width never exceeds the raw width:
+/// a line that already fits as written fits under any exemption too, and needs
+/// no parse. That keeps the parse off the path most lines take.
+fn line_fits(line: &str, options: &ReflowOptions) -> bool {
+    display_len(line, options.length_mode) <= options.line_length || line_width(line, options) <= options.line_length
+}
+
 /// The non-Text element span that strictly contains `pos`, if any.
-fn element_containing(pos: usize, spans: &[(usize, usize)]) -> Option<(usize, usize)> {
-    spans.iter().copied().find(|(start, end)| pos > *start && pos < *end)
+fn element_containing(pos: usize, spans: &[ElementSpan]) -> Option<ElementSpan> {
+    spans.iter().copied().find(|span| span.contains(pos))
 }
 
 /// Check if a byte position falls inside any non-Text element span
-fn is_inside_element(pos: usize, spans: &[(usize, usize)]) -> bool {
+fn is_inside_element(pos: usize, spans: &[ElementSpan]) -> bool {
     element_containing(pos, spans).is_some()
 }
 
@@ -2424,22 +2671,47 @@ const MIN_SPLIT_RATIO: f64 = 0.3;
 fn split_at_clause_punctuation(
     text: &str,
     line_length: usize,
-    element_spans: &[(usize, usize)],
+    element_spans: &[ElementSpan],
     length_mode: ReflowLengthMode,
 ) -> Option<(String, String)> {
     let chars: Vec<char> = text.chars().collect();
     let min_first_len = ((line_length as f64) * MIN_SPLIT_RATIO) as usize;
 
-    // Find the char index where accumulated display width exceeds line_length
-    let mut width_acc = 0;
+    // Find the char index where accumulated display width exceeds line_length.
+    // An element the checker discounts is charged its reduced width and stepped
+    // over whole, so the search window reaches as far as the exempt measure of a
+    // prefix allows; scanning char by char through a discounted URL would stop
+    // short of break points that are legal under it.
+    let mut width_acc = LineWidth::default();
     let mut search_end_char = 0;
-    for (idx, &c) in chars.iter().enumerate() {
-        let c_width = display_len(&c.to_string(), length_mode);
-        if width_acc + c_width > line_length {
+    let mut byte = 0usize;
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        let (advance_chars, advance_bytes, width) = match element_spans.iter().find(|s| s.start == byte) {
+            Some(span) => {
+                let source = &text[span.start..span.end];
+                (
+                    source.chars().count(),
+                    source.len(),
+                    measure(source, span.start, element_spans, length_mode),
+                )
+            }
+            None => {
+                let c = chars[idx];
+                (
+                    1,
+                    c.len_utf8(),
+                    LineWidth::plain(display_len(&c.to_string(), length_mode)),
+                )
+            }
+        };
+        if !(width_acc + width).fits(line_length) {
             break;
         }
-        width_acc += c_width;
-        search_end_char = idx + 1;
+        width_acc += width;
+        byte += advance_bytes;
+        idx += advance_chars;
+        search_end_char = idx;
     }
 
     // Scan backwards tracking parenthesis depth to skip clause punctuation
@@ -2478,8 +2750,7 @@ fn split_at_clause_punctuation(
 
     // Reject splits that create very short first lines
     let first: String = chars[..=pos].iter().collect();
-    let first_display_len = display_len(&first, length_mode);
-    if first_display_len < min_first_len {
+    if measure(&first, 0, element_spans, length_mode).effective() < min_first_len {
         return None;
     }
 
@@ -2500,7 +2771,7 @@ fn split_at_clause_punctuation(
 /// nesting depth at byte `i` — counting only `(` and `)` that fall
 /// outside markdown element spans.  This lets callers quickly check
 /// whether a byte position lies inside a plain-text parenthetical group.
-fn paren_depth_map(text: &str, element_spans: &[(usize, usize)]) -> Vec<i32> {
+fn paren_depth_map(text: &str, element_spans: &[ElementSpan]) -> Vec<i32> {
     let mut map = vec![0i32; text.len()];
     let mut depth = 0i32;
     for (byte, c) in text.char_indices() {
@@ -2568,7 +2839,7 @@ fn is_standalone_parenthetical(line: &str) -> bool {
 fn split_at_break_word(
     text: &str,
     line_length: usize,
-    element_spans: &[(usize, usize)],
+    element_spans: &[ElementSpan],
     length_mode: ReflowLengthMode,
 ) -> Option<(String, String)> {
     let lower = text.to_lowercase();
@@ -2591,7 +2862,7 @@ fn split_at_break_word(
             if preceded_by_space && followed_by_space {
                 // The break goes BEFORE the word, so first part ends at abs_pos - 1
                 let first_part = text[..abs_pos].trim_end();
-                let first_part_len = display_len(first_part, length_mode);
+                let first_part_len = measure(first_part, 0, element_spans, length_mode).effective();
 
                 // Skip break-words inside plain-text parenthetical groups.
                 let inside_paren = depth_map.get(abs_pos).is_some_and(|&d| d > 0);
@@ -2634,7 +2905,7 @@ fn split_at_break_word(
 /// write, and a gap holding anything else drops content. Whitespace inside an
 /// inline element belongs to that element, where it is literal (a code span) or
 /// structural (a link destination), never a place a line may break.
-fn replaces_whitespace(text: &str, first: &str, rest: &str, element_spans: &[(usize, usize)]) -> bool {
+fn replaces_whitespace(text: &str, first: &str, rest: &str, element_spans: &[ElementSpan]) -> bool {
     if !text.starts_with(first) || !text.ends_with(rest) {
         return false;
     }
@@ -2643,7 +2914,7 @@ fn replaces_whitespace(text: &str, first: &str, rest: &str, element_spans: &[(us
         && text[first.len()..gap_end].chars().all(is_breakable_whitespace)
         && !element_spans
             .iter()
-            .any(|(start, end)| first.len() < *end && *start < gap_end)
+            .any(|span| first.len() < span.end && span.start < gap_end)
 }
 
 /// Cascade-split a line that exceeds line_length.
@@ -2667,19 +2938,29 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
     }
 
     let elements = parse_markdown_elements_inner(text, attr_lists, myst_roles, defined_references);
-    let element_spans = compute_element_spans(&elements);
+    let element_spans = compute_element_spans(&elements, length_mode, options.length_exemptions);
+
+    // The raw width is over budget, but an exemption may still bring the line
+    // under it, in which case the checker accepts it as written.
+    if measure(text, 0, &element_spans, length_mode).fits(line_length) {
+        return vec![text.to_string()];
+    }
 
     // Element spans of the remaining suffix `text[start..]`, re-based so their
     // offsets are relative to the suffix. Split points never fall inside an
     // element, so every span lies wholly before or wholly at/after `start`.
-    let rebased_spans = |start: usize| -> Vec<(usize, usize)> {
+    let rebased_spans = |start: usize| -> Vec<ElementSpan> {
         if start == 0 {
             return element_spans.clone();
         }
         element_spans
             .iter()
-            .filter(|&&(_, end)| end > start)
-            .map(|&(s, e)| (s.saturating_sub(start), e.saturating_sub(start)))
+            .filter(|span| span.end > start)
+            .map(|span| ElementSpan {
+                start: span.start.saturating_sub(start),
+                end: span.end.saturating_sub(start),
+                ..*span
+            })
             .collect()
     };
 
@@ -2688,12 +2969,11 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
 
     loop {
         let remaining = &text[start..];
-        if display_len(remaining, length_mode) <= line_length {
+        let spans = rebased_spans(start);
+        if measure(remaining, 0, &spans, length_mode).fits(line_length) {
             result.push(remaining.to_string());
             return result;
         }
-
-        let spans = rebased_spans(start);
 
         // `rest` is always a suffix of `remaining` (the splitters only trim its
         // leading whitespace), so `remaining.len() - rest.len()` is the number of
@@ -2759,10 +3039,9 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
         return sentence_lines;
     }
 
-    let length_mode = options.length_mode;
     let mut result = Vec::new();
     for line in sentence_lines {
-        if display_len(&line, length_mode) <= options.line_length {
+        if line_fits(&line, options) {
             result.push(line);
         } else {
             result.extend(cascade_split_line(&line, options));
@@ -2774,7 +3053,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
     let min_line_len = ((options.line_length as f64) * MIN_SPLIT_RATIO) as usize;
     let mut merged: Vec<String> = Vec::with_capacity(result.len());
     for line in result {
-        if !merged.is_empty() && display_len(&line, length_mode) < min_line_len && !line.trim().is_empty() {
+        if !merged.is_empty() && line_width(&line, options) < min_line_len && !line.trim().is_empty() {
             // Don't merge a line that is itself a standalone parenthetical group —
             // it was placed on its own line intentionally by split_at_parenthetical.
             if is_standalone_parenthetical(&line) {
@@ -2796,7 +3075,7 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
                 let prev = merged.last_mut().unwrap();
                 let combined = format!("{prev} {line}");
                 // Only merge if the combined line fits within the limit
-                if display_len(&combined, length_mode) <= options.line_length {
+                if line_fits(&combined, options) {
                     *prev = combined;
                     continue;
                 }
@@ -2810,33 +3089,53 @@ fn reflow_elements_semantic(elements: &[Element], options: &ReflowOptions) -> Ve
 /// Find the last space in `line` that is safe to split at.
 /// Safe spaces are those NOT inside rendered non-Text elements and whose
 /// suffix would not open a block construct when placed at line start.
-/// `element_spans` contains (start, end) byte ranges of non-Text elements in
-/// the line. Spans use exclusive bounds (pos > start && pos < end) because
-/// element delimiters (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never
-/// spaces, so only interior positions need protection. The scan keeps looking
-/// left past construct-leading suffixes (e.g. a trailing `- `), so a usable
-/// earlier break point is found instead of forcing an overlong line.
-fn rfind_safe_space(line: &str, element_spans: &[(usize, usize)]) -> Option<usize> {
+/// `element_spans` locates the non-Text elements in the line. Spans use
+/// exclusive bounds (pos > start && pos < end) because element delimiters
+/// (e.g., `[`, `]`, `(`, `)`, `<`, `>`, `` ` ``) are never spaces, so only
+/// interior positions need protection. The scan keeps looking left past
+/// construct-leading suffixes (e.g. a trailing `- `), so a usable earlier break
+/// point is found instead of forcing an overlong line.
+fn rfind_safe_space(line: &str, element_spans: &[ElementSpan]) -> Option<usize> {
     line.char_indices().rev().map(|(pos, _)| pos).find(|&pos| {
         line.as_bytes()[pos] == b' '
-            && !element_spans.iter().any(|(s, e)| pos > *s && pos < *e)
+            && !is_inside_element(pos, element_spans)
             && !starts_block_construct(&line[pos + 1..])
     })
 }
 
+/// A token that must not start a wrapped line, together with the width it
+/// contributes and the separator that precedes it. The width travels with the
+/// text because only the caller knows which construct produced it, and so which
+/// exemption it earns.
+#[derive(Clone, Copy)]
+struct Attached<'a> {
+    text: &'a str,
+    width: LineWidth,
+    separator: &'a str,
+}
+
 /// Break `current_line` one word earlier so `attach` never starts a wrapped
 /// line: everything before the line's last safe space is emitted as a
-/// finished line, and the carried word plus `separator` plus `attach` becomes
-/// the new current line. Element spans are cleared; the returned byte length
-/// of the carried word lets callers re-record a span for `attach`. Returns
-/// `None` (line untouched) when the line has no safe break point.
+/// finished line, and the carried word plus the separator plus the attached
+/// text becomes the new current line. The returned byte length of the carried
+/// word lets callers re-record a span for the attached text. Returns `None`
+/// (line untouched) when the line has no safe break point.
+///
+/// The new width is the carried text measured through the spans it came with,
+/// plus the attached width, so an exemption the carried text or the attached
+/// token earns is preserved across the break instead of being re-derived from a
+/// bare string.
+///
+/// The carried text keeps the element spans that fell inside it, rebased to the
+/// new line. Dropping them would leave a later break blind to an element the
+/// carried text still holds, and so free to split a link or a code span down
+/// the middle.
 fn break_before_attached(
     lines: &mut Vec<String>,
     current_line: &mut String,
-    current_length: &mut usize,
-    element_spans: &mut Vec<(usize, usize)>,
-    attach: &str,
-    separator: &str,
+    current_width: &mut LineWidth,
+    element_spans: &mut Vec<ElementSpan>,
+    attach: Attached<'_>,
     length_mode: ReflowLengthMode,
 ) -> Option<usize> {
     let last_space = rfind_safe_space(current_line, element_spans)?;
@@ -2844,25 +3143,47 @@ fn break_before_attached(
         .trim_end_matches(is_breakable_whitespace)
         .to_string();
     let after = current_line[last_space + 1..].to_string();
+    let after_width = measure(&after, last_space + 1, element_spans, length_mode);
     lines.push(before);
     let carried = after.len();
-    *current_line = format!("{after}{separator}{attach}");
-    *current_length = display_len(current_line, length_mode);
-    element_spans.clear();
+    let Attached { text, width, separator } = attach;
+    *current_line = format!("{after}{separator}{text}");
+    *current_width = after_width + LineWidth::plain(display_len(separator, length_mode)) + width;
+    rebase_spans_after_break(element_spans, last_space + 1);
     Some(carried)
+}
+
+/// Keep the spans that reach into the text starting at `carried_start` and move
+/// them into that text's coordinates, discarding the ones that belong to the
+/// line just emitted.
+///
+/// A span that starts before `carried_start` is clamped to 0 rather than
+/// dropped. `rfind_safe_space` never breaks inside a span, so this cannot
+/// normally happen; clamping keeps the whole prefix protected if it ever does,
+/// where dropping the span would license a break inside an element.
+fn rebase_spans_after_break(element_spans: &mut Vec<ElementSpan>, carried_start: usize) {
+    element_spans.retain(|span| span.end > carried_start);
+    for span in element_spans.iter_mut() {
+        span.start = span.start.saturating_sub(carried_start);
+        span.end -= carried_start;
+    }
 }
 
 /// Reflow elements into lines that fit within the line length
 fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current_line = String::new();
-    let mut current_length = 0;
+    // The line's width under each exemption the checker applies. With no
+    // exemption active both components are the plain display width.
+    let mut current_width = LineWidth::default();
     // Track byte spans of non-Text elements in current_line for safe splitting
-    let mut current_line_element_spans: Vec<(usize, usize)> = Vec::new();
+    let mut current_line_element_spans: Vec<ElementSpan> = Vec::new();
     let length_mode = options.length_mode;
+    let exemptions = options.length_exemptions;
 
     for (idx, element) in elements.iter().enumerate() {
         let element_len = element.display_len(length_mode);
+        let element_width = element.exempt_width(length_mode, exemptions);
 
         // Determine adjacency from the original elements, not from current_line.
         // Elements are adjacent when there's no breakable whitespace between them
@@ -2890,7 +3211,8 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
             let words: Vec<&str> = split_breakable_words(text).collect();
 
             for (i, word) in words.iter().enumerate() {
-                let word_len = display_len(word, length_mode);
+                // A bare word carries no construct the checker exempts.
+                let word_width = LineWidth::plain(display_len(word, length_mode));
                 // A token that is only punctuation (optionally led by a
                 // non-breaking space, e.g. French "\u{00A0}:") must never be
                 // hoisted to the start of a line. Tokens are never empty
@@ -2906,15 +3228,18 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
                 if is_first_adjacent {
                     // Attach directly without space, preventing line break
-                    if current_length + word_len > options.line_length
-                        && current_length > 0
+                    if !(current_width + word_width).fits(options.line_length)
+                        && !current_width.is_empty()
                         && break_before_attached(
                             &mut lines,
                             &mut current_line,
-                            &mut current_length,
+                            &mut current_width,
                             &mut current_line_element_spans,
-                            word,
-                            "",
+                            Attached {
+                                text: word,
+                                width: word_width,
+                                separator: "",
+                            },
                             length_mode,
                         )
                         .is_some()
@@ -2925,9 +3250,11 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         // attached and the long line accepted.
                     } else {
                         current_line.push_str(word);
-                        current_length += word_len;
+                        current_width += word_width;
                     }
-                } else if current_length > 0 && current_length + 1 + word_len > options.line_length {
+                } else if !current_width.is_empty()
+                    && !(current_width + LineWidth::plain(1) + word_width).fits(options.line_length)
+                {
                     if is_trailing_punct {
                         // The overflowing token is bare punctuation, which must
                         // not start a line. Break one word earlier so the mark
@@ -2938,31 +3265,37 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         if break_before_attached(
                             &mut lines,
                             &mut current_line,
-                            &mut current_length,
+                            &mut current_width,
                             &mut current_line_element_spans,
-                            word,
-                            " ",
+                            Attached {
+                                text: word,
+                                width: word_width,
+                                separator: " ",
+                            },
                             length_mode,
                         )
                         .is_none()
                         {
                             current_line.push(' ');
                             current_line.push_str(word);
-                            current_length += 1 + word_len;
+                            current_width += LineWidth::plain(1) + word_width;
                         }
                     } else if !starts_block_construct(word) {
                         // Start a new line
                         lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                         current_line = word.to_string();
-                        current_length = word_len;
+                        current_width = word_width;
                         current_line_element_spans.clear();
                     } else if break_before_attached(
                         &mut lines,
                         &mut current_line,
-                        &mut current_length,
+                        &mut current_width,
                         &mut current_line_element_spans,
-                        word,
-                        " ",
+                        Attached {
+                            text: word,
+                            width: word_width,
+                            separator: " ",
+                        },
                         length_mode,
                     )
                     .is_some()
@@ -2976,10 +3309,10 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                         // accept the long line rather than corrupt the structure.
                         if i > 0 || has_leading_space {
                             current_line.push(' ');
-                            current_length += 1;
+                            current_width += LineWidth::plain(1);
                         }
                         current_line.push_str(word);
-                        current_length += word_len;
+                        current_width += word_width;
                     }
                 } else {
                     // Add a space wherever the source had breakable whitespace at
@@ -2993,13 +3326,13 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                     // orthographic space): reflow moves line breaks, it does not
                     // rewrite characters. The no-space (adjacent) case is
                     // handled above by `is_first_adjacent`.
-                    let add_space = current_length > 0 && (i > 0 || has_leading_space);
+                    let add_space = !current_width.is_empty() && (i > 0 || has_leading_space);
                     if add_space {
                         current_line.push(' ');
-                        current_length += 1;
+                        current_width += LineWidth::plain(1);
                     }
                     current_line.push_str(word);
-                    current_length += word_len;
+                    current_width += word_width;
                 }
             }
         } else {
@@ -3040,13 +3373,13 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                 if n == 0 {
                     // Empty span — treat as atomic
                     let full = format!("{marker}{marker}");
-                    let full_len = display_len(&full, length_mode);
-                    if !is_adjacent_to_prev && current_length > 0 {
+                    let full_width = LineWidth::plain(display_len(&full, length_mode));
+                    if !is_adjacent_to_prev && !current_width.is_empty() {
                         current_line.push(' ');
-                        current_length += 1;
+                        current_width += LineWidth::plain(1);
                     }
                     current_line.push_str(&full);
-                    current_length += full_len;
+                    current_width += full_width;
                 } else {
                     for (i, word) in words.iter().enumerate() {
                         let is_first = i == 0;
@@ -3069,29 +3402,31 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             (false, true) => format!("{word}{space_end}{marker}"),
                             (false, false) => word.to_string(),
                         };
-                        let word_len = display_len(&word_str, length_mode);
+                        // A piece of a split span is no longer the construct the
+                        // checker exempts, so it is charged in full.
+                        let word_width = LineWidth::plain(display_len(&word_str, length_mode));
 
                         let needs_space = if is_first {
-                            !is_adjacent_to_prev && current_length > 0
+                            !is_adjacent_to_prev && !current_width.is_empty()
                         } else {
-                            current_length > 0
+                            !current_width.is_empty()
                         };
 
                         if needs_space
-                            && current_length + 1 + word_len > options.line_length
+                            && !(current_width + LineWidth::plain(1) + word_width).fits(options.line_length)
                             && !starts_block_construct(&word_str)
                         {
                             lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                             current_line = word_str;
-                            current_length = word_len;
+                            current_width = word_width;
                             current_line_element_spans.clear();
                         } else {
                             if needs_space {
                                 current_line.push(' ');
-                                current_length += 1;
+                                current_width += LineWidth::plain(1);
                             }
                             current_line.push_str(&word_str);
-                            current_length += word_len;
+                            current_width += word_width;
                         }
                     }
                 }
@@ -3102,49 +3437,77 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
 
                 if is_adjacent_to_prev {
                     // Adjacent to preceding text — attach directly without space
-                    if current_length + element_len > options.line_length
+                    if !(current_width + element_width).fits(options.line_length)
                         && let Some(carried) = break_before_attached(
                             &mut lines,
                             &mut current_line,
-                            &mut current_length,
+                            &mut current_width,
                             &mut current_line_element_spans,
-                            &element_str,
-                            "",
+                            Attached {
+                                text: &element_str,
+                                width: element_width,
+                                separator: "",
+                            },
                             length_mode,
                         )
                     {
                         // Would exceed limit — broke before the adjacent word group
                         // at the last safe space (element-aware, so links/code stay
                         // intact). Record the element span in the new current_line.
-                        current_line_element_spans.push((carried, carried + element_str.len()));
+                        current_line_element_spans.push(ElementSpan::new(
+                            carried,
+                            element_str.len(),
+                            element_len,
+                            element_width,
+                        ));
                     } else {
                         let start = current_line.len();
                         current_line.push_str(&element_str);
-                        current_length += element_len;
-                        current_line_element_spans.push((start, current_line.len()));
+                        current_width += element_width;
+                        current_line_element_spans.push(ElementSpan::new(
+                            start,
+                            element_str.len(),
+                            element_len,
+                            element_width,
+                        ));
                     }
-                } else if current_length > 0 && current_length + 1 + element_len > options.line_length {
+                } else if !current_width.is_empty()
+                    && !(current_width + LineWidth::plain(1) + element_width).fits(options.line_length)
+                {
                     if !starts_block_construct(&element_str) {
                         // Not adjacent, would exceed — start new line
                         lines.push(current_line.trim_matches(is_breakable_whitespace).to_string());
                         current_line.clone_from(&element_str);
-                        current_length = element_len;
+                        current_width = element_width;
                         current_line_element_spans.clear();
-                        current_line_element_spans.push((0, element_str.len()));
+                        current_line_element_spans.push(ElementSpan::new(
+                            0,
+                            element_str.len(),
+                            element_len,
+                            element_width,
+                        ));
                     } else if let Some(carried) = break_before_attached(
                         &mut lines,
                         &mut current_line,
-                        &mut current_length,
+                        &mut current_width,
                         &mut current_line_element_spans,
-                        &element_str,
-                        " ",
+                        Attached {
+                            text: &element_str,
+                            width: element_width,
+                            separator: " ",
+                        },
                         length_mode,
                     ) {
                         // The overflowing element would open a block construct at
                         // line start (e.g. an HtmlTag like `<div>`). Broke one word
                         // earlier instead so the element stays mid-line.
                         let start = carried + 1;
-                        current_line_element_spans.push((start, start + element_str.len()));
+                        current_line_element_spans.push(ElementSpan::new(
+                            start,
+                            element_str.len(),
+                            element_len,
+                            element_width,
+                        ));
                     } else {
                         // No safe earlier break point — keep the element attached
                         // and accept the long line rather than corrupt the structure.
@@ -3152,25 +3515,35 @@ fn reflow_elements(elements: &[Element], options: &ReflowOptions) -> Vec<String>
                             current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
                         if !ends_with_opener {
                             current_line.push(' ');
-                            current_length += 1;
+                            current_width += LineWidth::plain(1);
                         }
                         let start = current_line.len();
                         current_line.push_str(&element_str);
-                        current_length += element_len;
-                        current_line_element_spans.push((start, current_line.len()));
+                        current_width += element_width;
+                        current_line_element_spans.push(ElementSpan::new(
+                            start,
+                            element_str.len(),
+                            element_len,
+                            element_width,
+                        ));
                     }
                 } else {
                     // Not adjacent, fits — add with space
                     let ends_with_opener =
                         current_line.ends_with('(') || current_line.ends_with('[') || current_line.ends_with('{');
-                    if current_length > 0 && !ends_with_opener {
+                    if !current_width.is_empty() && !ends_with_opener {
                         current_line.push(' ');
-                        current_length += 1;
+                        current_width += LineWidth::plain(1);
                     }
                     let start = current_line.len();
                     current_line.push_str(&element_str);
-                    current_length += element_len;
-                    current_line_element_spans.push((start, current_line.len()));
+                    current_width += element_width;
+                    current_line_element_spans.push(ElementSpan::new(
+                        start,
+                        element_str.len(),
+                        element_len,
+                        element_width,
+                    ));
                 }
             }
         }
@@ -3431,7 +3804,7 @@ pub fn reflow_markdown(content: &str, options: &ReflowOptions) -> String {
         }
 
         // If it's a single line that fits, just add it as-is
-        if is_single_line_paragraph && display_len(line, options.length_mode) <= options.line_length {
+        if is_single_line_paragraph && line_fits(line, options) {
             result.push(line.to_string());
             i += 1;
             continue;
