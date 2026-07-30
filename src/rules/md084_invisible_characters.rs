@@ -170,12 +170,15 @@ impl MD084InvisibleCharacters {
     /// ZERO WIDTH JOINER, which fuses adjacent characters into one glyph.
     const ZWJ: char = '\u{200D}';
 
-    /// Whether the character at `index` is visible content: present, not whitespace,
-    /// and not one of the invisible code points this rule tracks.
+    /// Whether the character at `index` renders a glyph a variation selector can pick
+    /// a form of, or a joiner can fuse: present, not whitespace, and not one of the
+    /// code points this rule knows draws nothing. The interlinear annotation
+    /// delimiters draw nothing either, even though they are kept out of the deletable
+    /// invisible set, so a selector or joiner beside one is still orphaned.
     fn is_visible_base(chars: &[char], index: usize) -> bool {
         chars
             .get(index)
-            .is_some_and(|&c| !c.is_whitespace() && !Self::is_invisible_char(c))
+            .is_some_and(|&c| !c.is_whitespace() && !Self::is_invisible_char(c) && !matches!(c as u32, 0xFFF9..=0xFFFB))
     }
 
     /// Whether the character before `index` resolves to visible content, looking past
@@ -831,6 +834,27 @@ mod tests {
             assert!(finding.fix.is_none());
         }
         assert_eq!(fix(content), content);
+    }
+
+    #[test]
+    fn test_annotation_delimiter_is_not_a_presentation_base() {
+        // An annotation delimiter draws no glyph, so a selector or joiner beside one
+        // has nothing to modify and stays reportable. The fix removes only the
+        // orphan: the delimiter itself is never stripped.
+        for (content, expected_fix) in [
+            ("\u{FFF9}\u{FE0F}", "\u{FFF9}"),
+            ("\u{FFF9}\u{200D}", "\u{FFF9}"),
+            ("base\u{FFF9}\u{FE0F}", "base\u{FFF9}"),
+        ] {
+            let findings = check(content);
+            assert_eq!(findings.len(), 2, "{content:?} gave {findings:?}");
+            assert!(
+                findings.iter().any(|f| f.message.contains("Invisible character")
+                    || f.message.contains("consecutive invisible characters")),
+                "{content:?} gave {findings:?}"
+            );
+            assert_eq!(fix(content), expected_fix, "fixing {content:?}");
+        }
     }
 
     #[test]
