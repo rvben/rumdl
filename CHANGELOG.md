@@ -86,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 
+
+## [0.2.47](https://github.com/rvben/rumdl/compare/v0.2.46...v0.2.47) - 2026-07-31
+
+### Added
+
+- **md084**: flag deprecated and markup-unsuitable Unicode code points ([bac271b](https://github.com/rvben/rumdl/commit/bac271b8afc1c965bfdc86985853645532e7325a))
+- **md013**: measure reflowed lines with the check's length exemptions ([2063a81](https://github.com/rvben/rumdl/commit/2063a8163b684375771080924b95b061c0e11c67))
+
+### Fixed
+
+- **md013**: take the space before an inline span from the source ([038dc39](https://github.com/rvben/rumdl/commit/038dc398bf807d612d6aa965b353177d1d29b886))
+- **md084**: report invisible characters orphaned mid-line by an annotation delimiter ([a3e6152](https://github.com/rvben/rumdl/commit/a3e6152bade0f901dcdb726632a161b8ed42502c))
+- **md084**: keep orphaned selectors visible beside an annotation delimiter ([4a2dec0](https://github.com/rvben/rumdl/commit/4a2dec02509322cd9060e802df9f2dff75e36d73))
+- **md084**: keep the removal fix for invisible deprecated code points ([ab37e5d](https://github.com/rvben/rumdl/commit/ab37e5d360d7a6eb03698dc429bfa29a0f9c850f))
+- **md013**: keep protecting an element a reflow break carried forward ([d86470b](https://github.com/rvben/rumdl/commit/d86470ba71a7b2deb834ec8d8879680f22b97f52))
+- **md013**: break semantic lines only where the source has whitespace ([3fd88b7](https://github.com/rvben/rumdl/commit/3fd88b7900413e70ce8bc79fae4d61ecc98efb92))
+
 ## [0.2.46](https://github.com/rvben/rumdl/compare/v0.2.45...v0.2.46) - 2026-07-29
 
 ### Fixed
