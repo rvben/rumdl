@@ -197,16 +197,15 @@ impl MD084InvisibleCharacters {
         start_col: usize,
         len_chars: usize,
         message: String,
-        replacement: Option<String>
+        replacement: Option<String>,
     ) -> LintWarning {
-        let fix = match replacement {
-            Some(replacement) => Some(Fix::new(
+        let fix = replacement.map(|replacement| {
+            Fix::new(
                 ctx.line_index
                     .line_col_to_byte_range_with_length(line, start_col, len_chars),
                 replacement,
-            )),
-            None => None,
-        };
+            )
+        });
 
         LintWarning {
             rule_name: Some(self.name().to_string()),
@@ -295,7 +294,10 @@ impl Rule for MD084InvisibleCharacters {
             // they stay invisible characters for the purpose of detecting a cluster,
             // so nothing can hide behind an emoji.
             let mut flagged = vec![false; chars.len()];
-            let flaggable: Vec<bool> = chars.iter().map(|&c| Self::is_invisible_char(c) && !self.is_allowed(c)).collect();
+            let flaggable: Vec<bool> = chars
+                .iter()
+                .map(|&c| Self::is_invisible_char(c) && !self.is_allowed(c))
+                .collect();
             let exempt: Vec<bool> = (0..chars.len()).map(|i| Self::is_presentation(&chars, i)).collect();
             let is_target: Vec<bool> = (0..chars.len()).map(|i| flaggable[i] && !exempt[i]).collect();
 
@@ -339,7 +341,7 @@ impl Rule for MD084InvisibleCharacters {
                         i + 1,
                         1,
                         format!("Deprecated Unicode code point {} detected", Self::format_codepoint(c)),
-                        Self::replacement_for(c) 
+                        Self::replacement_for(c),
                     ));
                 }
 
