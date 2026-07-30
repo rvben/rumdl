@@ -688,15 +688,23 @@ pub fn split_into_sentences(text: &str) -> Vec<String> {
 /// Split text into sentences with custom abbreviations
 pub fn split_into_sentences_custom(text: &str, custom_abbreviations: &Option<Vec<String>>) -> Vec<String> {
     let abbreviations = get_abbreviations(custom_abbreviations);
-    split_into_sentences_with_set(text, &abbreviations, true)
+    split_into_sentences_with_set(text, &abbreviations, true, None)
 }
 
 /// Internal function to split text into sentences with a pre-computed abbreviations set
 /// Use this when calling multiple times in a loop to avoid repeatedly computing the set
+///
+/// `appended_span_start` is the byte offset at which an inline span the caller has
+/// just appended begins, for callers that assemble a line one element at a time. A
+/// sentence ending inside a span takes the closing marker with it, so a delimiter
+/// run right after the punctuation joins the sentence that ends there. At that one
+/// offset the run is the appended span's opening marker instead, and carrying it
+/// back would leave the span with nothing to open it.
 fn split_into_sentences_with_set(
     text: &str,
     abbreviations: &HashSet<String>,
     require_sentence_capital: bool,
+    appended_span_start: Option<usize>,
 ) -> Vec<String> {
     let char_vec: Vec<char> = text.chars().collect();
 
@@ -762,6 +770,9 @@ fn split_into_sentences_with_set(
             // Consume any trailing emphasis/strikethrough markers and quotes
             while pos + 1 < char_vec.len() {
                 let next = char_vec[pos + 1];
+                if matches!(next, '*' | '_' | '~') && Some(char_offsets[pos + 1]) == appended_span_start {
+                    break;
+                }
                 if next == '*' || next == '_' || next == '~' || is_closing_quote(next) {
                     pos += 1;
                     current_sentence.push(char_vec[pos]);
@@ -2071,12 +2082,40 @@ fn parse_markdown_elements_inner(
     merged_elements
 }
 
-fn should_insert_space_before_join(current: &str) -> bool {
-    !current.is_empty()
-        && !current.ends_with(' ')
-        && !current.ends_with('(')
-        && !current.ends_with('[')
-        && !current.ends_with('-')
+/// The whitespace the source put in front of the element at `idx`, as reflow
+/// should re-emit it.
+///
+/// A span carries no whitespace of its own, so the gap before it lives at the
+/// end of the text element preceding it, which the sentence and clause paths
+/// trim away as they accumulate. Reading the gap back from the source is what
+/// keeps a standalone `-` from being glued onto the span after it: the
+/// characters a line happens to end with cannot tell a dash that closes a word
+/// from one that stands alone, and the same holds for a bracket or paren.
+///
+/// A run of breakable whitespace renders as one space and comes back as one. A
+/// non-breaking space is a character the reader sees, so a gap containing one
+/// is carried through exactly as written.
+fn source_gap_before(elements: &[Element], idx: usize) -> &str {
+    let Some(Element::Text(previous)) = idx.checked_sub(1).map(|prev| &elements[prev]) else {
+        return "";
+    };
+
+    let gap = &previous[previous.trim_end_matches(char::is_whitespace).len()..];
+    if gap.is_empty() {
+        ""
+    } else if gap.contains(is_non_breaking_space) {
+        gap
+    } else {
+        " "
+    }
+}
+
+/// Open `gap` before the element about to be appended, unless the line has
+/// nothing for it to follow or already ends with whitespace of its own.
+fn push_source_gap(current_line: &mut String, gap: &str) {
+    if !gap.is_empty() && !current_line.is_empty() && !current_line.ends_with(char::is_whitespace) {
+        current_line.push_str(gap);
+    }
 }
 
 /// True when `text` consists solely of setext-underline or thematic-break
@@ -2225,6 +2264,10 @@ fn reflow_elements_sentence_per_line(
         // so a sentence boundary inside it breaks the line without closing and
         // reopening the markers: a line break inside a span is whitespace, and
         // whitespace is all a reflow is allowed to change.
+        let is_span = matches!(
+            element,
+            Element::Italic { .. } | Element::Bold { .. } | Element::Strikethrough { .. }
+        );
         let piece = match element {
             // Text already carries its own spacing from tokenization.
             Element::Text(text) => Some(text.clone()),
@@ -2232,24 +2275,32 @@ fn reflow_elements_sentence_per_line(
                 content,
                 if *underscore { "_" } else { "*" },
                 &mut current_line,
+                source_gap_before(elements, idx),
             )),
             Element::Bold { content, underscore } => Some(wrap_emphasis(
                 content,
                 if *underscore { "__" } else { "**" },
                 &mut current_line,
+                source_gap_before(elements, idx),
             )),
             Element::Strikethrough { content, double } => Some(wrap_emphasis(
                 content,
                 if *double { "~~" } else { "~" },
                 &mut current_line,
+                source_gap_before(elements, idx),
             )),
             _ => None,
         };
 
         if let Some(piece) = piece {
+            // Where the piece lands in the combined line. A span begins with its
+            // own opening marker, which the splitter must not read as the marker
+            // closing the sentence in front of it.
+            let appended_span_start = is_span.then_some(current_line.len());
             let combined = format!("{current_line}{piece}");
             // Use the pre-computed abbreviations set to avoid redundant computation
-            let sentences = split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital);
+            let sentences =
+                split_into_sentences_with_set(&combined, &abbreviations, require_sentence_capital, appended_span_start);
 
             if sentences.len() > 1 {
                 // Accumulate rather than emit-and-overwrite: a sentence held
@@ -2299,22 +2350,7 @@ fn reflow_elements_sentence_per_line(
         } else {
             // Non-text, non-emphasis elements (Code, Links, etc.)
             let element_str = format!("{element}");
-            // Check if this element is adjacent to the preceding text (no
-            // breakable space between; a non-breaking space keeps the pair
-            // attached and must not have an ASCII space appended after it)
-            let is_adjacent = if idx > 0 {
-                match &elements[idx - 1] {
-                    Element::Text(t) => !t.is_empty() && !t.ends_with(is_breakable_whitespace),
-                    _ => true,
-                }
-            } else {
-                false
-            };
-
-            // Add space before element if needed, but not for adjacent elements
-            if !is_adjacent && should_insert_space_before_join(&current_line) {
-                current_line.push(' ');
-            }
+            push_source_gap(&mut current_line, source_gap_before(elements, idx));
             current_line.push_str(&element_str);
         }
     }
@@ -2326,13 +2362,11 @@ fn reflow_elements_sentence_per_line(
     lines
 }
 
-/// Restore an emphasis span to its source form, opening a gap before it when
-/// the line it joins needs one. Unlike text elements, a span carries no
-/// surrounding whitespace of its own.
-fn wrap_emphasis(content: &str, marker: &str, current_line: &mut String) -> String {
-    if should_insert_space_before_join(current_line) {
-        current_line.push(' ');
-    }
+/// Restore an emphasis span to its source form, opening the gap the source had
+/// in front of it. Unlike text elements, a span carries no surrounding
+/// whitespace of its own.
+fn wrap_emphasis(content: &str, marker: &str, current_line: &mut String, gap: &str) -> String {
+    push_source_gap(current_line, gap);
     format!("{marker}{content}{marker}")
 }
 

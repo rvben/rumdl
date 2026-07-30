@@ -20,6 +20,7 @@ mod md013_reflow_french_punctuation_issue_740_test;
 mod md013_reflow_length_exemptions_test;
 mod md013_reflow_math_blocks_issue_762_test;
 mod md013_reflow_ordered_lookalike_issue_760_test;
+mod md013_reflow_span_spacing_issue_767_test;
 mod md030_grid_cards_issue_583_test;
 mod md032_edge_cases_test;
 mod md032_ordered_list_bug_test;
