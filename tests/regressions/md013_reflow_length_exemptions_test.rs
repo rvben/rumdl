@@ -267,10 +267,10 @@ fn link_inside_emphasis_is_measured_in_full() {
 }
 
 /// Every reflow mode routes through a different set of length gates. All four
-/// have to honour the exemption, or the option would silently do nothing in the
+/// have to honor the exemption, or the option would silently do nothing in the
 /// mode a user happens to have configured.
 #[test]
-fn every_reflow_mode_honours_the_exemption() {
+fn every_reflow_mode_honors_the_exemption() {
     let dir = TempDir::new().unwrap();
     for mode in ["default", "normalize", "sentence-per-line", "semantic-line-breaks"] {
         let settings = [
