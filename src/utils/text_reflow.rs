@@ -2229,18 +2229,17 @@ fn is_clause_punctuation(c: char) -> bool {
 
 /// Whether a clause-punctuation char at `chars[i]` is a legitimate break point.
 ///
-/// A real clause boundary is followed by whitespace (or ends the text): `,;:`
-/// with no following space sit *inside* a token (`16:9`, `key:value`, a MyST role
-/// like `{cite:p}`) and must not be split there. The em dash (`—`) is exempt:
-/// it commonly joins words with no surrounding spaces and breaking after it reads
-/// naturally.
+/// A real clause boundary is followed by breakable whitespace (or ends the
+/// text). Two reasons, and they agree: `,;:` with no following space sit
+/// *inside* a token (`16:9`, `key:value`, a MyST role like `{cite:p}`), and a
+/// line break renders as a space, so breaking where the source has none inserts
+/// one. That holds for the em dash too: `cost—benefit` renders as one word,
+/// `cost—\nbenefit` as two. A non-breaking space is not a boundary either: it
+/// exists to forbid the break, so the scan keeps looking for an earlier one.
 fn clause_break_allowed_after(chars: &[char], i: usize) -> bool {
-    if chars[i] == '\u{2014}' {
-        return true;
-    }
     match chars.get(i + 1) {
         None => true,
-        Some(next) => next.is_whitespace(),
+        Some(next) => is_breakable_whitespace(*next),
     }
 }
 
@@ -2314,16 +2313,24 @@ fn split_at_parenthetical(
         && let Some((end_local, inner)) = paren_group_end(text, element_spans, 0)
         && inner.contains(' ')
     {
-        // If closing quotes or clause punctuation immediately follow the closing
-        // ')', attach them to the parenthetical so the continuation line does
-        // not start with a bare quote, comma, or semicolon.
-        let tail = &text[end_local..];
-        let attached_len = tail
-            .char_indices()
-            .take_while(|(_, c)| is_closing_quote(*c) || is_clause_punctuation(*c))
-            .last()
-            .map_or(0, |(idx, c)| idx + c.len_utf8());
-        let first_end = end_local + attached_len;
+        // Whatever follows the closing ')' up to the next breakable whitespace
+        // belongs to the parenthetical: a break there would render as a space the
+        // text does not have, and it would orphan the punctuation (`).`, `),`,
+        // `)"`) at the head of the continuation line. Whitespace inside an inline
+        // element is that element's own content, so a boundary landing there is
+        // no boundary at all and the scan resumes past the element.
+        let mut first_end = end_local;
+        loop {
+            first_end += text[first_end..]
+                .char_indices()
+                .take_while(|(_, c)| !is_breakable_whitespace(*c))
+                .last()
+                .map_or(0, |(idx, c)| idx + c.len_utf8());
+            match element_containing(first_end, element_spans) {
+                Some((_, end)) => first_end = end,
+                None => break,
+            }
+        }
         let rest_start = first_end;
         let first = &text[..first_end];
         let first_len = display_len(first, length_mode);
@@ -2353,9 +2360,12 @@ fn split_at_parenthetical(
             continue;
         }
         if let Some((end_local, inner)) = paren_group_end(&text[pos..], element_spans, pos) {
-            let first = text[..pos].trim_end();
+            let first = text[..pos].trim_end_matches(is_breakable_whitespace);
             let first_len = display_len(first, length_mode);
-            if !first.is_empty()
+            // The '(' must follow breakable whitespace: splitting `f(a b)` into
+            // `f` and `(a b)` would render as `f (a b)`.
+            if first.len() < pos
+                && !first.is_empty()
                 && first_len >= min_first_len
                 && first_len <= line_length
                 && inner.contains(' ')
@@ -2370,7 +2380,7 @@ fn split_at_parenthetical(
     }
 
     let open_byte = best_open_byte?;
-    let first = text[..open_byte].trim_end().to_string();
+    let first = text[..open_byte].trim_end_matches(is_breakable_whitespace).to_string();
     let rest = text[open_byte..].to_string();
     if first.is_empty() || rest.trim().is_empty() {
         return None;
@@ -2394,9 +2404,14 @@ fn compute_element_spans(elements: &[Element]) -> Vec<(usize, usize)> {
     spans
 }
 
+/// The non-Text element span that strictly contains `pos`, if any.
+fn element_containing(pos: usize, spans: &[(usize, usize)]) -> Option<(usize, usize)> {
+    spans.iter().copied().find(|(start, end)| pos > *start && pos < *end)
+}
+
 /// Check if a byte position falls inside any non-Text element span
 fn is_inside_element(pos: usize, spans: &[(usize, usize)]) -> bool {
-    spans.iter().any(|(start, end)| pos > *start && pos < *end)
+    element_containing(pos, spans).is_some()
 }
 
 /// Minimum fraction of line_length that the first part of a split must occupy.
@@ -2506,10 +2521,10 @@ fn paren_depth_map(text: &str, element_spans: &[(usize, usize)]) -> Vec<i32> {
 }
 
 /// Return `true` if `line` is a complete, balanced, multi-word parenthetical
-/// group — i.e. it starts with `(`, ends with `)` (possibly followed by
-/// clause punctuation), has balanced parens throughout, and the inner content
-/// contains at least one space (matching the ≥2-word threshold used by
-/// `split_at_parenthetical` when deciding to split).
+/// group — i.e. it starts with `(`, ends with `)` (possibly followed by the
+/// punctuation `split_at_parenthetical` attaches to it), has balanced parens
+/// throughout, and the inner content contains at least one space (matching the
+/// ≥2-word threshold used by `split_at_parenthetical` when deciding to split).
 ///
 /// Used to prevent the short-line merge step from collapsing intentional
 /// parenthetical splits back into the previous line.
@@ -2518,11 +2533,15 @@ fn is_standalone_parenthetical(line: &str) -> bool {
     if !trimmed.starts_with('(') {
         return false;
     }
-    // Strip optional trailing clause punctuation to find the real end.
-    let core = trimmed.trim_end_matches(|c: char| is_clause_punctuation(c));
-    if !core.ends_with(')') {
+    // Strip the attached tail to find the real end: everything after the last
+    // ')' belongs to the group only when no whitespace separates it.
+    let Some(close) = trimmed.rfind(')') else {
+        return false;
+    };
+    if trimmed[close + 1..].contains(char::is_whitespace) {
         return false;
     }
+    let core = &trimmed[..=close];
     // Inner content must span multiple words (same threshold as split_at_parenthetical).
     let inner = &core[1..core.len() - 1];
     if !inner.contains(' ') {
@@ -2605,6 +2624,28 @@ fn split_at_break_word(
     Some((first, rest))
 }
 
+/// Whether a proposed split takes the place of whitespace that `text` already has.
+///
+/// `first` is a prefix of `text` with its trailing whitespace removed and `rest`
+/// a suffix with its leading whitespace removed, so the bytes between them are
+/// exactly what the split consumed. That gap must be non-empty and hold nothing
+/// but breakable whitespace the paragraph owns: the newline replacing it renders
+/// as a single space, so an empty gap inserts a word boundary the author did not
+/// write, and a gap holding anything else drops content. Whitespace inside an
+/// inline element belongs to that element, where it is literal (a code span) or
+/// structural (a link destination), never a place a line may break.
+fn replaces_whitespace(text: &str, first: &str, rest: &str, element_spans: &[(usize, usize)]) -> bool {
+    if !text.starts_with(first) || !text.ends_with(rest) {
+        return false;
+    }
+    let gap_end = text.len() - rest.len();
+    gap_end > first.len()
+        && text[first.len()..gap_end].chars().all(is_breakable_whitespace)
+        && !element_spans
+            .iter()
+            .any(|(start, end)| first.len() < *end && *start < gap_end)
+}
+
 /// Cascade-split a line that exceeds line_length.
 /// Tries parenthetical boundaries, then clause punctuation, then break-words,
 /// then word wrap.
@@ -2657,9 +2698,17 @@ fn cascade_split_line(text: &str, options: &ReflowOptions) -> Vec<String> {
         // `rest` is always a suffix of `remaining` (the splitters only trim its
         // leading whitespace), so `remaining.len() - rest.len()` is the number of
         // bytes consumed, and the new absolute offset is `start + consumed`.
-        let split = split_at_parenthetical(remaining, line_length, &spans, length_mode)
-            .or_else(|| split_at_clause_punctuation(remaining, line_length, &spans, length_mode))
-            .or_else(|| split_at_break_word(remaining, line_length, &spans, length_mode));
+        //
+        // Every candidate must stand in for whitespace the text already has: a
+        // line break renders as a space, so one placed between two characters
+        // that were adjacent changes the rendered paragraph. A strategy that
+        // proposes such a split is skipped and the next one gets a turn.
+        let at_whitespace = |candidate: Option<(String, String)>| {
+            candidate.filter(|(first, rest)| replaces_whitespace(remaining, first, rest, &spans))
+        };
+        let split = at_whitespace(split_at_parenthetical(remaining, line_length, &spans, length_mode))
+            .or_else(|| at_whitespace(split_at_clause_punctuation(remaining, line_length, &spans, length_mode)))
+            .or_else(|| at_whitespace(split_at_break_word(remaining, line_length, &spans, length_mode)));
 
         if let Some((first, rest)) = split {
             let consumed = remaining.len().saturating_sub(rest.len());
