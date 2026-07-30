@@ -132,6 +132,22 @@ impl MD084InvisibleCharacters {
         Self::is_deprecated_char(c) || Self::is_unsuitable_for_markup_char(c)
     }
 
+    /// The interlinear annotation delimiters, which draw no glyph of their own but
+    /// bracket the text between them, so they are kept out of the deletable invisible
+    /// set: removing one would leave the annotation half-open.
+    #[inline]
+    fn is_annotation_delimiter(c: char) -> bool {
+        matches!(c as u32, 0xFFF9..=0xFFFB)
+    }
+
+    /// Whether this code point puts no glyph on the page, whether or not the rule is
+    /// willing to delete it. This is what a variation selector or joiner needs beside
+    /// it to be doing its job, and what makes a stretch of characters a cluster.
+    #[inline]
+    fn draws_no_glyph(c: char) -> bool {
+        Self::is_invisible_char(c) || Self::is_annotation_delimiter(c)
+    }
+
     /// A code point flagged by one of the two sets above, with the message that is
     /// true of it and the replacement that preserves the text, if one exists.
     fn markup_finding(c: char) -> Option<(String, Option<String>)> {
@@ -172,13 +188,11 @@ impl MD084InvisibleCharacters {
 
     /// Whether the character at `index` renders a glyph a variation selector can pick
     /// a form of, or a joiner can fuse: present, not whitespace, and not one of the
-    /// code points this rule knows draws nothing. The interlinear annotation
-    /// delimiters draw nothing either, even though they are kept out of the deletable
-    /// invisible set, so a selector or joiner beside one is still orphaned.
+    /// code points this rule knows draws nothing.
     fn is_visible_base(chars: &[char], index: usize) -> bool {
         chars
             .get(index)
-            .is_some_and(|&c| !c.is_whitespace() && !Self::is_invisible_char(c) && !matches!(c as u32, 0xFFF9..=0xFFFB))
+            .is_some_and(|&c| !c.is_whitespace() && !Self::draws_no_glyph(c))
     }
 
     /// Whether the character before `index` resolves to visible content, looking past
@@ -200,9 +214,9 @@ impl MD084InvisibleCharacters {
     /// Both forms below are part of the grapheme cluster a reader sees, so removing
     /// one changes the rendered text: a variation selector picks the glyph form of the
     /// character before it, and a joiner fuses the characters on either side of it.
-    /// Orphaned - at the start or end of a line, next to whitespace, or with another
-    /// invisible character where its base should be - neither is doing that job, and
-    /// stays reportable.
+    /// Orphaned - at the start or end of a line, next to whitespace, or with a
+    /// character that draws no glyph where its base should be - neither is doing that
+    /// job, and stays reportable.
     fn is_presentation(chars: &[char], index: usize) -> bool {
         let c = chars[index];
 
@@ -325,20 +339,22 @@ impl Rule for MD084InvisibleCharacters {
             }
 
             // In non-strict mode, we only flag the three triggers defined in the rule
-            // description. Presentation characters are never reported or removed, but
-            // they stay invisible characters for the purpose of detecting a cluster,
-            // so nothing can hide behind an emoji.
+            // description. Presentation characters and annotation delimiters are never
+            // reported or removed by those triggers, but they still draw no glyph, so
+            // they count toward a cluster and nothing can hide behind one.
             let mut flagged = vec![false; chars.len()];
             let flaggable: Vec<bool> = chars
                 .iter()
-                .map(|&c| Self::is_invisible_char(c) && !self.is_allowed(c))
+                .map(|&c| Self::draws_no_glyph(c) && !self.is_allowed(c))
                 .collect();
-            let exempt: Vec<bool> = (0..chars.len()).map(|i| Self::is_presentation(&chars, i)).collect();
+            let exempt: Vec<bool> = (0..chars.len())
+                .map(|i| Self::is_annotation_delimiter(chars[i]) || Self::is_presentation(&chars, i))
+                .collect();
             let is_target: Vec<bool> = (0..chars.len()).map(|i| flaggable[i] && !exempt[i]).collect();
 
-            // Trigger 1: runs of two or more consecutive invisible characters. The run
-            // is measured over every invisible character, then reported one reportable
-            // stretch at a time so presentation inside it is left intact.
+            // Trigger 1: runs of two or more consecutive characters that draw nothing.
+            // The run is measured over all of them, then reported one reportable stretch
+            // at a time so exempt characters inside it are left intact.
             let mut offset = 0;
             for group in flaggable.chunk_by(|a, b| a == b) {
                 let len = group.len();
@@ -839,12 +855,15 @@ mod tests {
     #[test]
     fn test_annotation_delimiter_is_not_a_presentation_base() {
         // An annotation delimiter draws no glyph, so a selector or joiner beside one
-        // has nothing to modify and stays reportable. The fix removes only the
-        // orphan: the delimiter itself is never stripped.
+        // has nothing to modify and stays reportable, mid-line as much as at a line
+        // boundary: the pair is a cluster of characters that draw nothing. The fix
+        // removes only the orphan; the delimiter itself is never stripped.
         for (content, expected_fix) in [
             ("\u{FFF9}\u{FE0F}", "\u{FFF9}"),
             ("\u{FFF9}\u{200D}", "\u{FFF9}"),
             ("base\u{FFF9}\u{FE0F}", "base\u{FFF9}"),
+            ("x\u{FFF9}\u{FE0F}y", "x\u{FFF9}y"),
+            ("x\u{FFF9}\u{200D}y", "x\u{FFF9}y"),
         ] {
             let findings = check(content);
             assert_eq!(findings.len(), 2, "{content:?} gave {findings:?}");
