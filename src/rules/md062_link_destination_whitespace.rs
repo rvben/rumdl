@@ -48,6 +48,16 @@ impl MD062LinkDestinationWhitespace {
         Self
     }
 
+    fn is_escaped(text: &str, byte_index: usize) -> bool {
+        text.as_bytes()[..byte_index]
+            .iter()
+            .rev()
+            .take_while(|&&byte| byte == b'\\')
+            .count()
+            % 2
+            != 0
+    }
+
     /// Extract the destination portion from a link's raw text
     /// Returns (dest_start_offset, dest_end_offset, raw_dest) relative to link start
     fn extract_destination_info<'a>(&self, raw_link: &'a str) -> Option<(usize, usize, &'a str)> {
@@ -57,6 +67,10 @@ impl MD062LinkDestinationWhitespace {
         let mut paren_start = None;
 
         for (i, c) in raw_link.char_indices() {
+            if Self::is_escaped(raw_link, i) {
+                continue;
+            }
+
             match c {
                 '[' => bracket_depth += 1,
                 ']' => {
@@ -76,39 +90,36 @@ impl MD062LinkDestinationWhitespace {
 
         let paren_start = paren_start?;
 
-        // Find matching closing parenthesis
         let dest_content_start = paren_start + 1; // After '('
-        let rest = &raw_link[dest_content_start..];
+        let dest_content_end = raw_link.len().checked_sub(1)?;
+        if raw_link.as_bytes().get(dest_content_end) != Some(&b')')
+            || Self::is_escaped(raw_link, dest_content_end)
+            || dest_content_end < dest_content_start
+        {
+            return None;
+        }
 
-        // Find the closing paren, handling nested parens and angle brackets
-        let mut depth = 1;
+        // The parser already bounded raw_link at the matching closing
+        // parenthesis. Only retain the conservative unmatched-angle check that
+        // prevents fixes when the destination itself is not safe to interpret.
+        let dest_content = &raw_link[dest_content_start..dest_content_end];
+        let (url, _) = Self::split_url_and_title(dest_content);
         let mut in_angle_brackets = false;
-        let mut dest_content_end = None;
-
-        for (i, c) in rest.char_indices() {
+        for (i, c) in url.char_indices() {
+            if Self::is_escaped(url, i) {
+                continue;
+            }
             match c {
                 '<' if !in_angle_brackets => in_angle_brackets = true,
                 '>' if in_angle_brackets => in_angle_brackets = false,
-                '(' if !in_angle_brackets => depth += 1,
-                ')' if !in_angle_brackets => {
-                    depth -= 1;
-                    if depth == 0 {
-                        dest_content_end = Some(i);
-                        break;
-                    }
-                }
                 _ => {}
             }
         }
+        if in_angle_brackets {
+            return None;
+        }
 
-        // If we couldn't find the matching closing paren, the link structure
-        // is too complex to parse (e.g., unmatched angle brackets masking the
-        // closing paren). Bail out rather than producing a broken fix.
-        let dest_content_end = dest_content_end?;
-
-        let dest_content = &rest[..dest_content_end];
-
-        Some((dest_content_start, dest_content_start + dest_content_end, dest_content))
+        Some((dest_content_start, dest_content_end, dest_content))
     }
 
     /// Split destination content into (url, optional title).
@@ -430,6 +441,28 @@ mod tests {
         let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
         let fixed = rule.fix(&ctx).unwrap();
         assert_eq!(fixed, "[link](https://example.com) and ![img](/path/to/img.png)");
+    }
+
+    #[test]
+    fn test_fix_preserves_parentheses_inside_destination_and_title() {
+        let rule = MD062LinkDestinationWhitespace::new();
+        let cases = [
+            (r"[link]( path\)suffix )", r"[link](path\)suffix)"),
+            (r"[link]( path\(suffix )", r"[link](path\(suffix)"),
+            (r#"[link]( path "title) rest" )"#, r#"[link](path "title) rest")"#),
+            (r"[link]( path 'title) rest' )", r"[link](path 'title) rest')"),
+            (r"![alt]( path\)suffix )", r"![alt](path\)suffix)"),
+            (r"[a \] b]( path )", r"[a \] b](path)"),
+        ];
+
+        for (content, expected) in cases {
+            let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+            let fixed = rule.fix(&ctx).unwrap();
+            assert_eq!(fixed, expected, "unexpected fix for {content:?}");
+
+            let fixed_ctx = LintContext::new(&fixed, MarkdownFlavor::Standard, None);
+            assert_eq!(rule.fix(&fixed_ctx).unwrap(), fixed, "second fix changed {content:?}");
+        }
     }
 
     #[test]
