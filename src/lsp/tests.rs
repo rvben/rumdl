@@ -99,6 +99,85 @@ async fn test_lint_document_disabled() {
     assert!(diagnostics.is_empty());
 }
 
+/// An inline directive naming a rule rumdl does not know silently does nothing.
+/// The CLI prints that on stderr; an editor only shows diagnostics, so the server
+/// reports it as one on the line that holds the comment.
+#[tokio::test]
+async fn test_inline_config_typo_is_a_diagnostic() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Title\n\nSome text.<!-- rumdl-disable-line asdf -->\n";
+
+    let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
+
+    let inline: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("inline-config".to_string())))
+        .collect();
+    assert_eq!(
+        inline.len(),
+        1,
+        "the unknown rule name should raise exactly one diagnostic, got: {diagnostics:?}"
+    );
+
+    let diagnostic = inline[0];
+    assert!(
+        diagnostic
+            .message
+            .contains("Unknown rule in inline disable-line comment: asdf"),
+        "the diagnostic should name the directive and the unknown rule, got: {}",
+        diagnostic.message
+    );
+    assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
+    assert_eq!(diagnostic.source.as_deref(), Some("rumdl"));
+    // Third line of the document (0-indexed 2), spanning its full width.
+    assert_eq!(diagnostic.range.start, Position { line: 2, character: 0 });
+    assert_eq!(
+        diagnostic.range.end,
+        Position {
+            line: 2,
+            character: "Some text.<!-- rumdl-disable-line asdf -->".chars().count() as u32,
+        }
+    );
+}
+
+/// The same document with the rule name spelled correctly raises nothing, so the
+/// diagnostic above cannot be an artifact of having an inline comment at all.
+#[tokio::test]
+async fn test_valid_inline_config_is_not_a_diagnostic() {
+    let server = create_test_server();
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Title\n\nSome text.<!-- rumdl-disable-line MD009 -->\n";
+
+    let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("inline-config".to_string()))),
+        "a correctly spelled directive should raise no inline-config diagnostic, got: {diagnostics:?}"
+    );
+}
+
+/// Configuration decides the rule set, and an inline enable cannot bring back a
+/// rule it disabled. The server reports that no-op the way the CLI does.
+#[tokio::test]
+async fn test_inline_enable_of_a_disabled_rule_is_a_diagnostic() {
+    let server = create_test_server();
+    server.rumdl_config.write().await.global.disable = vec!["MD009".to_string()];
+    let uri = Url::parse("file:///test.md").unwrap();
+    let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText.  \n";
+
+    let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("MD009") && d.message.contains("has no effect")),
+        "an inline enable of a config-disabled rule should say it has no effect, got: {diagnostics:?}"
+    );
+}
+
 #[tokio::test]
 async fn test_get_code_actions() {
     let server = create_test_server();

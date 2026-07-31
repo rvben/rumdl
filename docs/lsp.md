@@ -29,6 +29,25 @@ The rumdl LSP server provides:
 - **Completion**: Language suggestions for fenced code blocks, plus file paths and heading anchors inside link targets
 - **Link navigation**: Hover preview, go-to-definition, find-references, and rename for Markdown links
 
+### Inline config diagnostics
+
+An inline directive that names a rule rumdl does not know does nothing, and neither
+does an inline `enable` for a rule your configuration disabled. Both are reported as
+warnings on the line holding the comment, under the diagnostic code `inline-config`:
+
+```markdown
+Some text.<!-- rumdl-disable-line asdf -->
+```
+
+> Unknown rule in inline disable-line comment: asdf
+
+These are the same problems `rumdl check` prints as `[inline config warning]`, and
+[`--deny-config-warnings`](usage/cli.md#exit-codes) makes them fail a run.
+
+Problems in a config *file* (an unknown rule or option, a config that could not be
+loaded) are not attached to a document, so they go to the server log instead. Start
+the server with `--verbose` to see them.
+
 ### Code block language completion
 
 When typing a fenced code block, rumdl provides intelligent completions for language labels.

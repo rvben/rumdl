@@ -741,7 +741,37 @@ impl InlineConfigWarning {
             self.format_message()
         );
     }
+
+    /// The warning as a lint diagnostic anchored to the comment that raised it.
+    ///
+    /// A directive naming a rule that does not exist silently does nothing, and on
+    /// the CLI that is a line of stderr next to the findings. Editors show
+    /// diagnostics, so the language server reports it as one and the mistake is
+    /// visible where it was written. The span covers the whole line: the validator
+    /// locates the comment, not the rule name inside it.
+    pub fn to_lint_warning(&self, content: &str) -> crate::rule::LintWarning {
+        let line_width = content
+            .lines()
+            .nth(self.line_number.saturating_sub(1))
+            .map_or(0, |line| line.chars().count());
+        crate::rule::LintWarning {
+            message: self.format_message(),
+            line: self.line_number,
+            column: 1,
+            end_line: self.line_number,
+            end_column: line_width + 1,
+            severity: crate::rule::Severity::Warning,
+            fix: None,
+            rule_name: Some(INLINE_CONFIG_DIAGNOSTIC_NAME.to_string()),
+        }
+    }
 }
+
+/// The diagnostic code inline config warnings carry.
+///
+/// Not a rule name: it names the class of problem so an editor can tell these
+/// apart from rule violations, and so nothing looks it up in the rule registry.
+pub const INLINE_CONFIG_DIAGNOSTIC_NAME: &str = "inline-config";
 
 /// Validate all inline config comments in content and return warnings for unknown rules.
 ///
