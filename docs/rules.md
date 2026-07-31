@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->80<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->81<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -43,6 +43,7 @@ The following rules are **disabled by default** because they enforce opinionated
 | [MD083](md083.md) | Detect Mojibake               | Turn it on once you encounter encoding issues                     |
 | [MD084](md084.md) | Invisible characters          | May trigger false positives in languages that use direction marks |
 | [MD085](md085.md) | Paragraph continuation indent | Some authors indent continuation lines deliberately               |
+| [MD087](md087.md) | Unused disable comment        | Reports on the comments a project wrote, which is a review choice |
 
 ### Enabling Opt-in Rules
 
@@ -203,6 +204,7 @@ Severity affects:
 | [MD065](md065.md) | Blanks around HR               | Horizontal rules should be surrounded by blank lines              |
 | [MD084](md084.md) | Invisible characters           | Invisible or discouraged Unicode characters should be intentional |
 | [MD085](md085.md) | Paragraph continuation indent  | Paragraph continuation lines should not be indented               |
+| [MD087](md087.md) | Unused disable comment         | Inline disable comments should suppress something                 |
 
 ## Formatting Rules
 
@@ -281,6 +283,7 @@ Severity affects:
 | [MD074](md074.md) | MkDocs nav validation  | Nav entries should point to existing files |
 | [MD083](md083.md) | Mojibake               | Detect mojibake due to encoding issues     |
 | [MD086](md086.md) | No unclosed comments   | Comment openers should have a closer       |
+| [MD087](md087.md) | Unused disable comment | Disable comments should suppress something |
 
 ## Using Rules
 

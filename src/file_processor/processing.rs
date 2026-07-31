@@ -4,7 +4,6 @@ use crate::cache::LintCache;
 use crate::formatter;
 use colored::*;
 use rumdl_lib::config as rumdl_config;
-use rumdl_lib::lint_context::LintContext;
 use rumdl_lib::rule::{FixCapability, LintWarning, Rule};
 use rumdl_lib::utils::code_block_utils::CodeBlockUtils;
 use std::borrow::Cow;
@@ -354,7 +353,7 @@ pub fn process_file_with_formatter(
         }
 
         let summary_issues_fixed = if total_warnings > 0 {
-            let remaining_warnings = relint_fixed_file_content(&content, file_path, rules, config);
+            let remaining_warnings = relint_fixed_file_content(&content, file_path, &filtered_rules, config);
             count_actually_fixed_warnings(rules, &document_rules, config, &all_warnings, &remaining_warnings)
         } else {
             warnings_fixed
@@ -468,7 +467,7 @@ pub fn process_file_with_formatter(
         }
 
         // Re-lint the fixed content to see which warnings remain.
-        let remaining_warnings = relint_fixed_file_content(&content, file_path, rules, config);
+        let remaining_warnings = relint_fixed_file_content(&content, file_path, &filtered_rules, config);
 
         // Compute per-warning fixed status by comparing pre-fix warnings
         // against post-fix remaining warnings
@@ -573,42 +572,28 @@ pub fn process_file_with_formatter(
     }
 }
 
+/// Lint the fixed content to see which warnings remain.
+///
+/// `rules` are the ones the fix pass ran, already filtered by per-file ignores.
+/// Going through the same entry point the pre-fix pass uses keeps the two sets of
+/// warnings comparable: inline config, kramdown blocks, severity overrides and the
+/// rules that report on a whole document are all handled identically.
 fn relint_fixed_file_content(
     content: &str,
     file_path: &str,
     rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
 ) -> Vec<rumdl_lib::rule::LintWarning> {
-    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
-    let filtered_rules: Vec<_> = if !ignored_rules_for_file.is_empty() {
-        rules
-            .iter()
-            .filter(|rule| !ignored_rules_for_file.contains(rule.name()))
-            .collect()
-    } else {
-        rules.iter().collect()
-    };
-
     let flavor = config.get_flavor_for_file(Path::new(file_path));
-    let fixed_ctx = LintContext::new(content, flavor, Some(PathBuf::from(file_path)));
-    let mut remaining_warnings = Vec::new();
-
-    for rule in &filtered_rules {
-        if let Ok(rule_warnings) = rule.check(&fixed_ctx) {
-            let filtered_warnings = rule_warnings.into_iter().filter(|warning| {
-                let rule_name = warning.rule_name.as_deref().unwrap_or(rule.name());
-                let base_rule_name = if let Some(dash_pos) = rule_name.find('-') {
-                    &rule_name[..dash_pos]
-                } else {
-                    rule_name
-                };
-                !fixed_ctx.inline_config().is_rule_disabled(base_rule_name, warning.line)
-            });
-            remaining_warnings.extend(filtered_warnings);
-        }
-    }
-
-    remaining_warnings
+    rumdl_lib::lint(
+        content,
+        rules,
+        false,
+        flavor,
+        Some(PathBuf::from(file_path)),
+        Some(config),
+    )
+    .unwrap_or_default()
 }
 
 pub(crate) fn count_actually_fixed_warnings(

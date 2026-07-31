@@ -80,6 +80,7 @@ mod md057_test;
 mod md058_kramdown_test;
 mod md058_test;
 mod md060_test;
+mod md087_test;
 
 // Unicode-specific test modules
 mod md001_unicode_test;

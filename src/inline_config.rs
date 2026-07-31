@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Normalize a rule name to its canonical form (e.g., "line-length" -> "MD013").
 /// If the rule name is not recognized, returns it uppercase (for forward compatibility).
-fn normalize_rule_name(rule: &str) -> String {
+pub(crate) fn normalize_rule_name(rule: &str) -> String {
     markdownlint_to_rumdl_rule_key(rule).map_or_else(|| rule.to_uppercase(), std::string::ToString::to_string)
 }
 
@@ -60,6 +60,20 @@ struct StateTransition {
     disabled: HashSet<String>,
     /// The set of explicitly enabled rules (only meaningful when disabled contains "*")
     enabled: HashSet<String>,
+}
+
+/// The kind of directive a rule's disabled state at a line comes from.
+///
+/// The three layers are resolved independently of each other, so removing a
+/// comment from one of them leaves the other two answering exactly as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisableLayer {
+    /// `disable-file`, or a `configure-file` entry set to `false`
+    File,
+    /// `disable`, up to the `enable` that closes it
+    Block,
+    /// `disable-line`, `disable-next-line` or `prettier-ignore`
+    Line,
 }
 
 #[derive(Debug, Clone)]
@@ -344,31 +358,43 @@ impl InlineConfig {
 
     /// Check if a rule is disabled at a specific line
     pub fn is_rule_disabled(&self, rule_name: &str, line_number: usize) -> bool {
-        // Check file-wide disables first (highest priority)
+        self.disabling_layer(rule_name, line_number).is_some()
+    }
+
+    /// Which kind of directive keeps `rule_name` off at `line_number`, if any.
+    ///
+    /// A file-wide disable answers first: it decides on its own, so a rule enabled
+    /// for the file stays enabled however the line below is written. The remaining
+    /// two layers both merely disable, so the wider one answers, naming the
+    /// directive a caller would have to remove to see the rule report again.
+    pub fn disabling_layer(&self, rule_name: &str, line_number: usize) -> Option<DisableLayer> {
         if self.file_disabled_rules.contains("*") {
             // All rules are disabled for the file, check if this rule is explicitly enabled
-            return !self.file_enabled_rules.contains(rule_name);
+            return (!self.file_enabled_rules.contains(rule_name)).then_some(DisableLayer::File);
         } else if self.file_disabled_rules.contains(rule_name) {
-            return true;
+            return Some(DisableLayer::File);
         }
 
-        // Check line-specific disables (disable-line, disable-next-line)
-        if let Some(line_rules) = self.line_disabled_rules.get(&line_number)
-            && (line_rules.contains("*") || line_rules.contains(rule_name))
-        {
-            return true;
-        }
-
-        // Check persistent disables via state transitions (binary search)
+        // Persistent disables via state transitions (binary search)
         if let Some(transition) = self.find_transition(line_number) {
-            if transition.disabled.contains("*") {
-                return !transition.enabled.contains(rule_name);
+            let disabled = if transition.disabled.contains("*") {
+                !transition.enabled.contains(rule_name)
             } else {
-                return transition.disabled.contains(rule_name);
+                transition.disabled.contains(rule_name)
+            };
+            if disabled {
+                return Some(DisableLayer::Block);
             }
         }
 
-        false
+        // Line-specific disables (disable-line, disable-next-line, prettier-ignore)
+        if let Some(line_rules) = self.line_disabled_rules.get(&line_number)
+            && (line_rules.contains("*") || line_rules.contains(rule_name))
+        {
+            return Some(DisableLayer::Line);
+        }
+
+        None
     }
 
     /// Get all disabled rules at a specific line
@@ -451,6 +477,8 @@ pub enum DirectiveKind {
 pub struct InlineDirective<'a> {
     pub kind: DirectiveKind,
     pub rules: Vec<&'a str>,
+    /// Byte range of the whole comment, `<!--` through `-->`, within its line
+    pub span: std::ops::Range<usize>,
 }
 
 /// Tool prefixes recognized in inline config comments.
@@ -472,9 +500,9 @@ const DIRECTIVE_KEYWORDS: &[(DirectiveKind, &str)] = &[
 ];
 
 /// Try to parse a single directive from text immediately after `<!-- `.
-/// Returns the directive and the number of bytes consumed (from `s` onward)
-/// so the caller can advance past `-->`.
-fn try_parse_directive(s: &str) -> Option<(InlineDirective<'_>, usize)> {
+/// Returns the kind, its rule list, and the number of bytes consumed (from `s`
+/// onward) so the caller can advance past `-->` and place the comment's span.
+fn try_parse_directive(s: &str) -> Option<(DirectiveKind, Vec<&str>, usize)> {
     for tool in TOOL_PREFIXES {
         if !s.starts_with(tool) {
             continue;
@@ -504,7 +532,7 @@ fn try_parse_directive(s: &str) -> Option<(InlineDirective<'_>, usize)> {
             };
 
             let consumed = tool.len() + keyword.len() + close_offset + 3; // 3 for "-->"
-            return Some((InlineDirective { kind, rules }, consumed));
+            return Some((kind, rules, consumed));
         }
 
         // Tool prefix matched but no keyword — not a directive we recognize.
@@ -530,9 +558,14 @@ pub fn parse_inline_directives(line: &str) -> Vec<InlineDirective<'_>> {
         let comment_start = pos + open_offset;
         let after_open = &line[comment_start + 5..]; // skip "<!-- "
 
-        if let Some((directive, consumed)) = try_parse_directive(after_open) {
-            results.push(directive);
-            pos = comment_start + 5 + consumed;
+        if let Some((kind, rules, consumed)) = try_parse_directive(after_open) {
+            let comment_end = comment_start + 5 + consumed;
+            results.push(InlineDirective {
+                kind,
+                rules,
+                span: comment_start..comment_end,
+            });
+            pos = comment_end;
         } else {
             pos = comment_start + 5;
         }
@@ -714,6 +747,148 @@ fn scan_configure_file_comments(text: &str) -> Vec<(usize, JsonValue)> {
 /// Returns the first payload found. The text may span lines.
 pub fn parse_configure_file_comment(line: &str) -> Option<JsonValue> {
     scan_configure_file_comments(line).into_iter().next().map(|(_, v)| v)
+}
+
+// ── Disable-comment inventory ────────────────────────────────────────────────
+
+/// The lines an inline disable comment can suppress a finding on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisableScope {
+    /// Exactly this 1-indexed line
+    Line(usize),
+    /// The lines below this 1-indexed one, up to the end of the document
+    Block(usize),
+    /// Every line of the document
+    File,
+}
+
+impl DisableScope {
+    /// Whether this comment is one of those keeping a rule off at `line`, given the
+    /// layer that answered for it there.
+    ///
+    /// Answering for a line credits every comment of that layer reaching it, so no
+    /// comment loses its credit to another. A comment left uncredited is one whose
+    /// every line is spoken for by a layer it is not in, and removing it therefore
+    /// changes nothing the run reports.
+    ///
+    /// A block `disable` is treated as reaching the end of the document even when a
+    /// later `enable` closes it. Crediting a comment for more than it holds can only
+    /// leave a stale comment unreported.
+    pub fn carries(self, layer: DisableLayer, line: usize) -> bool {
+        match (self, layer) {
+            (Self::Line(target), DisableLayer::Line) => target == line,
+            // A block disable takes effect on the line after the comment.
+            (Self::Block(start), DisableLayer::Block) => start < line,
+            (Self::File, DisableLayer::File) => true,
+            _ => false,
+        }
+    }
+}
+
+/// An inline comment that disables rules, and the lines it can act on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DisableSite {
+    /// 1-indexed line the comment opens on
+    pub line: usize,
+    /// Byte range of the comment within that line, clipped to the line's end
+    pub span: std::ops::Range<usize>,
+    /// The directive as written, e.g. `disable-line`
+    pub kind: &'static str,
+    /// The rule names the comment carries, as written; empty means every rule
+    pub rules: Vec<String>,
+    /// The lines the comment can suppress a finding on
+    pub scope: DisableScope,
+}
+
+/// Every inline comment that disables rules, in document order.
+///
+/// Comments inside code blocks configure nothing, so they are left out, matching
+/// what `InlineConfig` applies. `prettier-ignore` belongs to another formatter
+/// and is left out as well.
+pub fn collect_disable_sites(content: &str) -> Vec<DisableSite> {
+    if !has_inline_config_markers(content) {
+        return Vec::new();
+    }
+
+    let code_blocks = CodeBlockUtils::detect_code_blocks(content);
+
+    // Lines measured over `split('\n')`, whose pieces keep any `\r`, so a CRLF
+    // document's offsets match the code block ranges.
+    let line_spans: Vec<(usize, &str)> = {
+        let mut spans = Vec::new();
+        let mut start = 0;
+        for line in content.split('\n') {
+            spans.push((start, line));
+            start += line.len() + 1;
+        }
+        spans
+    };
+
+    let mut sites = Vec::new();
+
+    for (idx, &(line_start, line)) in line_spans.iter().enumerate() {
+        if line_in_code_block(line_start, line, &code_blocks) {
+            continue;
+        }
+        let line_num = idx + 1;
+        for directive in parse_inline_directives(line) {
+            let (kind, scope) = match directive.kind {
+                DirectiveKind::Disable => ("disable", DisableScope::Block(line_num)),
+                DirectiveKind::DisableLine => ("disable-line", DisableScope::Line(line_num)),
+                DirectiveKind::DisableNextLine => ("disable-next-line", DisableScope::Line(line_num + 1)),
+                DirectiveKind::DisableFile => ("disable-file", DisableScope::File),
+                DirectiveKind::Enable
+                | DirectiveKind::EnableFile
+                | DirectiveKind::Capture
+                | DirectiveKind::Restore
+                | DirectiveKind::ConfigureFile => continue,
+            };
+            sites.push(DisableSite {
+                line: line_num,
+                span: directive.span,
+                kind,
+                rules: directive.rules.iter().map(|rule| (*rule).to_string()).collect(),
+                scope,
+            });
+        }
+    }
+
+    // A configure-file entry given `false` turns its rule off for the whole file,
+    // exactly as disable-file does. The comment may span lines, so it is scanned
+    // over the document and its span is clipped to the line it opens on.
+    for (offset, json_config) in scan_configure_file_comments(content) {
+        if offset_in_code_block(offset, &code_blocks) {
+            continue;
+        }
+        let Some(obj) = json_config.as_object() else {
+            continue;
+        };
+        let rules: Vec<String> = obj
+            .iter()
+            .filter(|(_, value)| value.as_bool() == Some(false))
+            .map(|(name, _)| name.clone())
+            .collect();
+        if rules.is_empty() {
+            continue;
+        }
+        let line_num = line_of_offset(content, offset);
+        let Some(&(line_start, line)) = line_spans.get(line_num - 1) else {
+            continue;
+        };
+        let comment_end = content[offset..]
+            .find("-->")
+            .map_or(content.len(), |close| offset + close + 3);
+        sites.push(DisableSite {
+            line: line_num,
+            span: (offset - line_start)..(comment_end - line_start).min(line.len()),
+            kind: "configure-file",
+            rules,
+            scope: DisableScope::File,
+        });
+    }
+
+    sites.sort_by_key(|site| (site.line, site.span.start));
+    sites
 }
 
 /// What is wrong with an inline config comment.

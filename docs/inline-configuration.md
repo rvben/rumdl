@@ -269,6 +269,30 @@ docker run -d --name myapp -p 8080:8080 -e DATABASE_URL=postgresql://user:pass@l
 Regular content continues here.
 ````
 
+### Finding comments that no longer suppress anything
+
+A disable comment is written for one line at one moment, and nothing points it
+out once the line changes and the comment stops mattering. The rule it names
+stays off, so a finding that appears there later goes unreported.
+
+[MD087](md087.md) reports a disable comment that removed no finding from the
+run. It is off by default:
+
+```toml
+[global]
+extend-enable = ["MD087"]
+```
+
+```text
+file.md:1:15: [MD087] Unused disable-line comment: MD013
+```
+
+It judges only the rules the run actually carries, and stays quiet about a
+comment that names no rule, since such a comment covers rules the run may not
+have. A comment sitting inside the reach of a wider one is reported as well: with
+the rule already off for the file, a `disable-line` naming it silences nothing of
+its own.
+
 ## Troubleshooting
 
 ### Comments Not Working

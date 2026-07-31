@@ -300,6 +300,7 @@ fn get_test_content_for_rule(rule_name: &str) -> Option<&'static str> {
         "MD084" => Some("left \u{2060} right"),
         "MD085" => Some("A paragraph\n  with an indented continuation"),
         "MD086" => Some("<!-- a comment that is never closed"),
+        "MD087" => Some("Short line <!-- rumdl-disable-line MD013 -->"),
         _ => None,
     }
 }

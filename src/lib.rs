@@ -303,6 +303,80 @@ pub fn build_file_index_only(
     file_index
 }
 
+/// Drop the warnings a document silences, and apply any configured severity override
+/// to the rest.
+///
+/// A warning is dropped when it sits in a kramdown extension block or when an inline
+/// comment disables its rule somewhere in its range. `suppressed`, when given,
+/// collects what the inline comments removed, for the rules that report on them. A
+/// kramdown extension block is not an inline comment, so what it drops is left out.
+fn retain_reportable_warnings(
+    lint_ctx: &crate::lint_context::LintContext,
+    config: Option<&crate::config::Config>,
+    rule_name: &str,
+    rule_warnings: Vec<crate::rule::LintWarning>,
+    mut suppressed: Option<&mut Vec<crate::rule::SuppressedWarning>>,
+) -> Vec<crate::rule::LintWarning> {
+    let inline_config = lint_ctx.inline_config();
+    let mut kept = Vec::with_capacity(rule_warnings.len());
+
+    for mut warning in rule_warnings {
+        if lint_ctx
+            .line_info(warning.line)
+            .is_some_and(|info| info.in_kramdown_extension_block)
+        {
+            continue;
+        }
+
+        // Use the warning's rule_name if available, otherwise use the rule's name
+        let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule_name);
+
+        // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
+        let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
+            &rule_name_to_check[..dash_pos]
+        } else {
+            rule_name_to_check
+        };
+
+        // Check if the rule is disabled at any line in the warning's range.
+        // Multi-line warnings (e.g., reflow) report on the first line,
+        // but inline disable comments may appear later in the range.
+        // Guard: if end_line < line (e.g., end_line=0), fall back to
+        // checking only the warning's line to match original behavior.
+        let end = if warning.end_line >= warning.line {
+            warning.end_line
+        } else {
+            warning.line
+        };
+        let disabled_at = (warning.line..=end).find_map(|line| {
+            inline_config
+                .disabling_layer(base_rule_name, line)
+                .map(|layer| (line, layer))
+        });
+        if let Some((line, layer)) = disabled_at {
+            if let Some(record) = suppressed.as_deref_mut() {
+                record.push(crate::rule::SuppressedWarning {
+                    rule_name: base_rule_name.to_string(),
+                    line,
+                    layer,
+                });
+            }
+            continue;
+        }
+
+        // Apply severity override from config if present
+        if let Some(cfg) = config
+            && let Some(override_severity) = cfg.get_rule_severity(rule_name_to_check)
+        {
+            warning.severity = override_severity;
+        }
+
+        kept.push(warning);
+    }
+
+    kept
+}
+
 /// Lint a file and contribute to workspace index for cross-file analysis
 ///
 /// This variant performs linting and optionally populates a `FileIndex` with data
@@ -386,6 +460,15 @@ pub fn lint_and_index(
         }
     }
 
+    // A rule reporting on the run's inline disable comments needs to know what they
+    // removed, which costs a record per suppressed warning, so it is only kept when
+    // such a rule is going to read it.
+    let suppression_observers: Vec<_> = applicable_rules
+        .iter()
+        .filter(|rule| rule.observes_suppressions() && !rule.should_skip(&lint_ctx))
+        .collect();
+    let mut suppressed = Vec::new();
+
     {
         let _timer = profiling::ScopedTimer::new("lint: run single-file rules");
         for rule in &applicable_rules {
@@ -407,54 +490,13 @@ pub fn lint_and_index(
 
             match result {
                 Ok(rule_warnings) => {
-                    // Filter out warnings inside kramdown extension blocks (Layer 3 safety net)
-                    // and warnings for rules disabled via inline comments
-                    let filtered_warnings: Vec<_> = rule_warnings
-                        .into_iter()
-                        .filter(|warning| {
-                            // Layer 3: Suppress warnings inside kramdown extension blocks
-                            if lint_ctx
-                                .line_info(warning.line)
-                                .is_some_and(|info| info.in_kramdown_extension_block)
-                            {
-                                return false;
-                            }
-
-                            // Use the warning's rule_name if available, otherwise use the rule's name
-                            let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-
-                            // Extract the base rule name for sub-rules like "MD029-style" -> "MD029"
-                            let base_rule_name = if let Some(dash_pos) = rule_name_to_check.find('-') {
-                                &rule_name_to_check[..dash_pos]
-                            } else {
-                                rule_name_to_check
-                            };
-
-                            // Check if the rule is disabled at any line in the warning's range.
-                            // Multi-line warnings (e.g., reflow) report on the first line,
-                            // but inline disable comments may appear later in the range.
-                            // Guard: if end_line < line (e.g., end_line=0), fall back to
-                            // checking only the warning's line to match original behavior.
-                            {
-                                let end = if warning.end_line >= warning.line {
-                                    warning.end_line
-                                } else {
-                                    warning.line
-                                };
-                                !(warning.line..=end).any(|line| inline_config.is_rule_disabled(base_rule_name, line))
-                            }
-                        })
-                        .map(|mut warning| {
-                            // Apply severity override from config if present
-                            if let Some(cfg) = config {
-                                let rule_name_to_check = warning.rule_name.as_deref().unwrap_or(rule.name());
-                                if let Some(override_severity) = cfg.get_rule_severity(rule_name_to_check) {
-                                    warning.severity = override_severity;
-                                }
-                            }
-                            warning
-                        })
-                        .collect();
+                    let record = if suppression_observers.is_empty() {
+                        None
+                    } else {
+                        Some(&mut suppressed)
+                    };
+                    let filtered_warnings =
+                        retain_reportable_warnings(&lint_ctx, config, rule.name(), rule_warnings, record);
                     warnings.extend(filtered_warnings);
                 }
                 Err(e) => {
@@ -473,6 +515,38 @@ pub fn lint_and_index(
                 #[cfg(not(test))]
                 if verbose && rule_duration.as_millis() > 500 {
                     log::debug!("Rule {} took {:?}", rule.name(), rule_duration);
+                }
+            }
+        }
+    }
+
+    // Report on the inline disable comments, now that every single-file rule has run
+    // and the suppressions are complete.
+    if !suppression_observers.is_empty() {
+        let _timer = profiling::ScopedTimer::new("lint: run suppression rules");
+
+        // A workspace-scope rule has its warnings filtered after this point, and for a
+        // single-file run not at all, so its findings never reach the report and
+        // nothing can be concluded about a comment naming it.
+        let report = crate::rule::SuppressionReport {
+            suppressed,
+            judged_rules: rules
+                .iter()
+                .filter(|rule| rule.cross_file_scope() != crate::rule::CrossFileScope::Workspace)
+                .map(|rule| rule.name().to_string())
+                .collect(),
+        };
+
+        for rule in &suppression_observers {
+            match rule.check_suppressions(&lint_ctx, &report) {
+                Ok(rule_warnings) => {
+                    let filtered_warnings =
+                        retain_reportable_warnings(&lint_ctx, config, rule.name(), rule_warnings, None);
+                    warnings.extend(filtered_warnings);
+                }
+                Err(e) => {
+                    log::error!("Error checking rule {}: {}", rule.name(), e);
+                    return (Err(e), file_index);
                 }
             }
         }
