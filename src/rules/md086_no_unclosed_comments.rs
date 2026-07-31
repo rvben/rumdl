@@ -7,9 +7,9 @@
 //! renders the unmatched `<!--` as literal text, so the note the author meant to
 //! hide is published instead.
 //!
-//! Either way the document lints clean without this rule: rumdl skips commented
-//! text, so the swallowed content is never checked, and `rumdl fmt` will not
-//! touch it. The only visible symptom is content that silently stops appearing.
+//! Either way no other rule reports the missing closer, and `rumdl fmt` will
+//! not add one, so the document lints clean without this rule. The only visible
+//! symptom is content that stops appearing on the rendered page.
 //!
 //! In the Obsidian flavor the same applies to `%%`, whose closer is another
 //! `%%`. Other flavors treat `%%` as ordinary text and are not checked for it.
@@ -86,13 +86,16 @@ impl Rule for MD086NoUnclosedComments {
         // Both scanners run during context construction and each reports its
         // first unclosed opener.
         //
-        // An opener the other syntax hides is already gone by this point: the
-        // HTML scan is re-resolved against the Obsidian comments when the
+        // An `<!--` that an Obsidian comment hides is already gone by this
+        // point: the HTML scan is re-resolved against those comments when the
         // context is built, and Obsidian hides everything from an unclosed `%%`
-        // to the end of the note. Nothing is dropped in the other direction,
-        // because an unclosed `<!--` only swallows what follows when it starts a
-        // line - mid-paragraph CommonMark renders it as literal text, leaving a
-        // `%%` below it an independent problem.
+        // to the end of the note.
+        //
+        // The reverse is deliberately not suppressed. A `%%` below an unclosed
+        // `<!--` is still a closer the author has to add, and the document
+        // already fails on the opener above it, so listing it costs one line on
+        // a file that is failing either way - while dropping it would lose a
+        // real missing closer.
         let html = ctx.unterminated_html_comment().map(|offset| UnclosedComment {
             offset,
             opener: "<!--",
@@ -279,6 +282,21 @@ mod tests {
         let warnings = check_with(content, MarkdownFlavor::Obsidian);
         assert_eq!(warnings.len(), 2, "got: {warnings:?}");
         assert_eq!((warnings[0].line, warnings[0].column), (1, 12));
+        assert!(warnings[0].message.contains("HTML"));
+        assert_eq!((warnings[1].line, warnings[1].column), (3, 1));
+        assert!(warnings[1].message.contains("Obsidian"));
+    }
+
+    #[test]
+    fn reports_an_obsidian_opener_below_an_unclosed_html_block() {
+        // A line-start `<!--` opens an HTML block that runs to the end of the
+        // document, so the `%%` below it renders as nothing. It is still a
+        // closer the author has to add once the block above it is closed, and
+        // the file already fails on that opener, so both are listed.
+        let content = "<!-- an aside\n\n%% an Obsidian note\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+        assert_eq!((warnings[0].line, warnings[0].column), (1, 1));
         assert!(warnings[0].message.contains("HTML"));
         assert_eq!((warnings[1].line, warnings[1].column), (3, 1));
         assert!(warnings[1].message.contains("Obsidian"));
