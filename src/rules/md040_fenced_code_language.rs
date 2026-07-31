@@ -1,4 +1,4 @@
-use crate::linguist_data::{default_alias, get_aliases, is_valid_alias, resolve_canonical};
+use crate::linguist_data::{default_alias, resolve_canonical};
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::rule_config_serde::{RuleConfig, load_rule_config};
 use crate::utils::range_utils::calculate_line_range;
@@ -54,34 +54,11 @@ impl MD040FencedCodeLanguage {
 
     /// Validate the configuration and return any errors
     fn validate_config(&self) -> Vec<String> {
-        let mut errors = Vec::new();
-
-        // Validate preferred-aliases: check that each alias is valid for its language
-        for (canonical, alias) in &self.config.preferred_aliases {
-            // Find the actual canonical name (case-insensitive)
-            if let Some(actual_canonical) = resolve_canonical(canonical) {
-                if !is_valid_alias(actual_canonical, alias)
-                    && let Some(valid_aliases) = get_aliases(actual_canonical)
-                {
-                    let valid_list: Vec<_> = valid_aliases.iter().take(5).collect();
-                    let valid_str = valid_list
-                        .iter()
-                        .map(|s| format!("'{s}'"))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let suffix = if valid_aliases.len() > 5 { ", ..." } else { "" };
-                    errors.push(format!(
-                        "Invalid alias '{alias}' for language '{actual_canonical}'. Valid aliases include: {valid_str}{suffix}"
-                    ));
-                }
-            } else {
-                errors.push(format!(
-                    "Unknown language '{canonical}' in preferred-aliases. Use GitHub Linguist canonical names."
-                ));
-            }
-        }
-
-        errors
+        self.config
+            .preferred_aliases
+            .iter()
+            .filter_map(|(language, alias)| self.config.preferred_alias_problem(language, alias))
+            .collect()
     }
 
     /// Determine the preferred label for each canonical language in the document
@@ -113,14 +90,8 @@ impl MD040FencedCodeLanguage {
 
         for (canonical, labels) in by_canonical {
             // Check for user override first (case-insensitive lookup)
-            let winner = if let Some(preferred) = self
-                .config
-                .preferred_aliases
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(&canonical))
-                .map(|(_, v)| v.clone())
-            {
-                preferred
+            let winner = if let Some(preferred) = self.config.preferred_label(&canonical) {
+                preferred.to_string()
             } else {
                 // Find most prevalent label
                 let mut counts: HashMap<&str, usize> = HashMap::new();
@@ -1108,6 +1079,43 @@ echo again
     }
 
     #[test]
+    fn test_invalid_preferred_alias_is_not_normalized_to() {
+        // An alias the language does not have is a configuration error, so
+        // fixing to it would rewrite valid labels into an invalid one.
+        let content = "```sh\necho one\n```\n\n```bash\necho two\n```\n";
+        let ctx = LintContext::new(content, crate::config::MarkdownFlavor::Standard, None);
+
+        let rule = MD040FencedCodeLanguage::with_config(MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: HashMap::from([("Shell".to_string(), "invalid_alias".to_string())]),
+            ..Default::default()
+        });
+        let fixed = rule.fix(&ctx).unwrap();
+        assert!(
+            !fixed.contains("invalid_alias"),
+            "an invalid alias must not reach the document, got:\n{fixed}"
+        );
+        assert!(
+            rule.check(&ctx)
+                .unwrap()
+                .iter()
+                .any(|w| w.message.contains("Invalid alias")),
+            "the invalid alias is still reported"
+        );
+
+        // Control: a valid alias for the same language is still normalized to.
+        let rule = MD040FencedCodeLanguage::with_config(MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: HashMap::from([("Shell".to_string(), "zsh".to_string())]),
+            ..Default::default()
+        });
+        assert_eq!(
+            rule.fix(&ctx).unwrap(),
+            "```zsh\necho one\n```\n\n```zsh\necho two\n```\n"
+        );
+    }
+
+    #[test]
     fn test_unknown_language_in_preferred_aliases_detected() {
         let mut preferred = HashMap::new();
         preferred.insert("NotARealLanguage".to_string(), "nope".to_string());
@@ -1197,6 +1205,8 @@ echo again
 
     #[test]
     fn test_alias_validation() {
+        use crate::linguist_data::is_valid_alias;
+
         assert!(is_valid_alias("Shell", "bash"));
         assert!(is_valid_alias("Shell", "sh"));
         assert!(is_valid_alias("Shell", "zsh"));

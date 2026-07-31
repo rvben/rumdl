@@ -1,3 +1,4 @@
+use crate::linguist_data::{get_aliases, is_valid_alias, resolve_canonical};
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,6 +53,44 @@ pub struct MD040Config {
     /// Action for unknown language labels not in Linguist
     #[serde(default, alias = "unknown_language_action")]
     pub unknown_language_action: UnknownLanguageAction,
+}
+
+impl MD040Config {
+    /// Why `preferred-aliases` cannot make `alias` stand for `language`, when it cannot.
+    ///
+    /// This is the single definition of a usable entry: it both phrases the
+    /// configuration error and decides whether the entry is honored, so a label
+    /// the user is told is invalid is never one that gets suggested or written.
+    pub fn preferred_alias_problem(&self, language: &str, alias: &str) -> Option<String> {
+        let Some(canonical) = resolve_canonical(language) else {
+            return Some(format!(
+                "Unknown language '{language}' in preferred-aliases. Use GitHub Linguist canonical names."
+            ));
+        };
+        if is_valid_alias(canonical, alias) {
+            return None;
+        }
+        let examples = get_aliases(canonical).map_or_else(String::new, |valid_aliases| {
+            let valid_str = valid_aliases
+                .iter()
+                .take(5)
+                .map(|s| format!("'{s}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suffix = if valid_aliases.len() > 5 { ", ..." } else { "" };
+            format!(" Valid aliases include: {valid_str}{suffix}")
+        });
+        Some(format!("Invalid alias '{alias}' for language '{canonical}'.{examples}"))
+    }
+
+    /// The label `preferred-aliases` sets for `language`, when it sets a usable one.
+    pub fn preferred_label(&self, language: &str) -> Option<&str> {
+        self.preferred_aliases
+            .iter()
+            .find(|(configured, _)| configured.eq_ignore_ascii_case(language))
+            .map(|(_, alias)| alias.as_str())
+            .filter(|alias| self.preferred_alias_problem(language, alias).is_none())
+    }
 }
 
 impl RuleConfig for MD040Config {

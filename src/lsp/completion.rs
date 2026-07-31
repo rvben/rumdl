@@ -205,12 +205,10 @@ impl RumdlLanguageServer {
 
             // Get preferred alias from config, or use default
             let preferred = md040_config
-                .preferred_aliases
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(canonical))
-                .map(|(_, v)| v.clone())
-                .or_else(|| default_alias(canonical).map(std::string::ToString::to_string))
-                .unwrap_or_else(|| (*canonical).to_string());
+                .preferred_label(canonical)
+                .or_else(|| default_alias(canonical))
+                .unwrap_or(canonical)
+                .to_string();
 
             // Add the preferred alias as primary completion
             language_entries.push(((*canonical).to_string(), preferred.clone(), true));

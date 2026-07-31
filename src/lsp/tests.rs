@@ -10114,3 +10114,45 @@ async fn test_a_secondary_workspace_root_with_a_broken_config_falls_back_to_defa
         "an unresolvable scope must fall back to defaults, not to another root's config"
     );
 }
+
+/// A server whose config discovery sees `config` in a temp workspace, plus the
+/// URI of a markdown file in it.
+async fn server_with_md040_config(config: &str) -> (RumdlLanguageServer, Url, tempfile::TempDir) {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    std::fs::write(&test_file, "```\ncode\n```").unwrap();
+    std::fs::write(temp_dir.path().join(".rumdl.toml"), config).unwrap();
+
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(temp_dir.path().to_path_buf());
+    let uri = Url::from_file_path(&test_file).unwrap();
+    (server, uri, temp_dir)
+}
+
+#[tokio::test]
+async fn test_completion_ignores_an_invalid_preferred_alias() {
+    // A preferred alias the language does not have is a configuration error, so
+    // completing to it would insert a label the linter rejects.
+    let (server, uri, _dir) =
+        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"invalid_alias\" }\n").await;
+    let items = server
+        .get_language_completions(&uri, "invalid", 3, Position { line: 0, character: 10 })
+        .await;
+    assert!(
+        !items.iter().any(|item| item.label == "invalid_alias"),
+        "an invalid alias must not be offered"
+    );
+
+    // Control: a valid preference is offered as the label for its language.
+    let (valid, valid_uri, _valid_dir) =
+        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"zsh\" }\n").await;
+    let items = valid
+        .get_language_completions(&valid_uri, "zsh", 3, Position { line: 0, character: 6 })
+        .await;
+    assert!(
+        items
+            .iter()
+            .any(|item| item.label == "zsh" && item.detail.as_deref() == Some("Shell (GitHub Linguist)")),
+        "a valid preference is offered"
+    );
+}
