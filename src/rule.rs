@@ -190,6 +190,17 @@ pub trait Rule: DynClone + Send + Sync {
         RuleCategory::Other // Default implementation returns Other
     }
 
+    /// Whether the content-category prefilter may skip this rule.
+    ///
+    /// The prefilter reads the document's shape alone: a `Link` rule is skipped
+    /// for a document holding no links. A rule whose configuration widens what
+    /// it reads answers `false` for that configuration, so that `should_skip`
+    /// and `check` decide instead. MD051 and MD057 read frontmatter values on
+    /// request, and a document can carry those with no link syntax at all.
+    fn skippable_by_category(&self) -> bool {
+        true
+    }
+
     fn as_any(&self) -> &dyn std::any::Any;
 
     // DocumentStructure has been merged into LintContext - this method is no longer used

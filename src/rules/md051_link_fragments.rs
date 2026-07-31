@@ -900,6 +900,12 @@ impl Rule for MD051LinkFragments {
         RuleCategory::Link
     }
 
+    fn skippable_by_category(&self) -> bool {
+        // A frontmatter fragment is a link this rule resolves, and the document
+        // holding it needs no link syntax anywhere else.
+        !self.config.check_frontmatter
+    }
+
     fn cross_file_scope(&self) -> CrossFileScope {
         CrossFileScope::Workspace
     }
@@ -1110,11 +1116,19 @@ impl Rule for MD051LinkFragments {
                 continue;
             }
 
+            // A query string is not part of the file name: `other.md?raw=true`
+            // names `other.md`. The message keeps the destination as written.
+            let target_path = cross_link
+                .target_path
+                .split('?')
+                .next()
+                .unwrap_or(&cross_link.target_path);
+
             // Resolve the target file path relative to the current file
             let base_target_path = if let Some(parent) = file_path.parent() {
-                parent.join(&cross_link.target_path)
+                parent.join(target_path)
             } else {
-                Path::new(&cross_link.target_path).to_path_buf()
+                Path::new(target_path).to_path_buf()
             };
 
             // Normalize the path (remove . and ..)
@@ -1755,6 +1769,52 @@ See [link](#nonexistent) for details."#;
         assert_eq!(warnings[0].message, "Link fragment 'missing' not found in 'other.md'");
         assert_eq!(warnings[0].line, 2);
         assert_eq!(warnings[0].column, 11);
+    }
+
+    #[test]
+    fn a_query_string_does_not_hide_the_target_file() {
+        let rule = MD051LinkFragments::new();
+        let source = "# Source\n\n- [a](other.md?raw=true#missing)\n- [b](other.md?raw=true#target)\n";
+
+        let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let mut source_index = FileIndex::default();
+        rule.contribute_to_index(&source_ctx, &mut source_index);
+
+        let target_ctx = LintContext::new("# Target\n", crate::config::MarkdownFlavor::Standard, None);
+        let mut target_index = FileIndex::default();
+        rule.contribute_to_index(&target_ctx, &mut target_index);
+
+        let source_path = PathBuf::from("docs/source.md");
+        let mut workspace = crate::workspace_index::WorkspaceIndex::new();
+        workspace.insert_file(source_path.clone(), source_index.clone());
+        workspace.insert_file(PathBuf::from("docs/other.md"), target_index);
+
+        let warnings = rule.cross_file_check(&source_path, &source_index, &workspace).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "The query is stripped to find the file, so both fragments resolve against it. Got: {warnings:?}"
+        );
+        assert_eq!(
+            warnings[0].message,
+            "Link fragment 'missing' not found in 'other.md?raw=true'"
+        );
+        assert_eq!(warnings[0].line, 3);
+    }
+
+    #[test]
+    fn a_frontmatter_path_carrying_a_query_is_indexed() {
+        let rule = MD051LinkFragments::from_config_struct(front_matter_checked());
+        let source = "---\ntemplate: docs/other.md?raw=true#missing\n---\n\n# Source\n";
+
+        let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let mut source_index = FileIndex::default();
+        rule.contribute_to_index(&source_ctx, &mut source_index);
+
+        assert_eq!(source_index.cross_file_links.len(), 1);
+        assert_eq!(source_index.cross_file_links[0].target_path, "docs/other.md?raw=true");
+        assert_eq!(source_index.cross_file_links[0].fragment, "missing");
     }
 
     #[test]

@@ -3129,6 +3129,72 @@ fn test_lint_api_compact_paths_with_source_file() {
     );
 }
 
+/// A document whose only destinations sit in its frontmatter carries no link
+/// syntax, so the content-category prefilter in `lint()` would skip both link
+/// rules before either could read the frontmatter.
+#[test]
+fn test_lint_api_checks_frontmatter_in_a_document_without_body_links() {
+    let temp_dir = tempdir().unwrap();
+    let docs_dir = temp_dir.path().join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+
+    let page_path = docs_dir.join("page.md");
+    let content = "---\ntemplate: ./missing.md\nanchor: '#absent'\n---\n\n# Page\n";
+    std::fs::write(&page_path, content).unwrap();
+
+    let mut config = rumdl_lib::config::Config::default();
+    config.global.enable = vec!["MD051".to_string(), "MD057".to_string()];
+    let json = serde_json::json!({ "check-frontmatter": true });
+    for rule_name in ["MD051", "MD057"] {
+        if let Some(rule_config) = rumdl_lib::rule_config_serde::json_to_rule_config(&json) {
+            config.rules.insert(rule_name.to_string(), rule_config);
+        }
+    }
+
+    let rules = rumdl_lib::rules::all_rules(&config);
+    let filtered = rumdl_lib::rules::filter_rules(&rules, &config.global);
+    let warnings = rumdl_lib::lint(
+        content,
+        &filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(page_path.clone()),
+        Some(&config),
+    )
+    .unwrap();
+
+    // `lint()` returns warnings in rule order; the file processor sorts them.
+    let mut reported: Vec<_> = warnings
+        .iter()
+        .map(|w| (w.rule_name.as_deref().unwrap_or(""), w.line))
+        .collect();
+    reported.sort_by_key(|(_, line)| *line);
+    assert_eq!(
+        reported,
+        vec![("MD057", 2), ("MD051", 3)],
+        "Both frontmatter destinations are reported. Got: {warnings:?}"
+    );
+
+    // The same document is untouched with the option left at its default.
+    let mut default_config = rumdl_lib::config::Config::default();
+    default_config.global.enable = vec!["MD051".to_string(), "MD057".to_string()];
+    let default_rules = rumdl_lib::rules::all_rules(&default_config);
+    let default_filtered = rumdl_lib::rules::filter_rules(&default_rules, &default_config.global);
+    let default_warnings = rumdl_lib::lint(
+        content,
+        &default_filtered,
+        false,
+        rumdl_lib::config::MarkdownFlavor::Standard,
+        Some(page_path),
+        Some(&default_config),
+    )
+    .unwrap();
+    assert!(
+        default_warnings.is_empty(),
+        "Frontmatter is only checked on request. Got: {default_warnings:?}"
+    );
+}
+
 // =============================================================================
 // Tests for AbsoluteLinksOption::RelativeToRoots
 // =============================================================================

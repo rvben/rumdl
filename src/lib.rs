@@ -351,7 +351,7 @@ pub fn lint_and_index(
     // Filter rules based on content characteristics
     let applicable_rules: Vec<_> = rules
         .iter()
-        .filter(|rule| !characteristics.should_skip_rule(rule.as_ref()))
+        .filter(|rule| !(rule.skippable_by_category() && characteristics.should_skip_rule(rule.as_ref())))
         .collect();
 
     // Calculate skipped rules count before consuming applicable_rules

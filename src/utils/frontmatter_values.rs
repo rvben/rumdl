@@ -507,6 +507,9 @@ pub fn is_link_destination(value: &str) -> bool {
         Some(i) => &value[..i],
         None => value,
     };
+    // A query string belongs to the destination, not to the path it names, so
+    // `page.md?raw=true` names `page.md`. Body links are resolved the same way.
+    let path = path.split('?').next().unwrap_or(path);
 
     let last_segment = path.rsplit('/').next().unwrap_or(path);
     if has_markdown_extension(last_segment) {
@@ -577,6 +580,15 @@ mod tests {
         assert!(is_link_destination("#installation"));
         assert!(is_link_destination("other.md#installation"));
         assert!(is_link_destination("docs/other.md#installation"));
+    }
+
+    #[test]
+    fn a_query_string_is_not_part_of_the_path() {
+        assert!(is_link_destination("docs/other.md?raw=true"));
+        assert!(is_link_destination("other.md?raw=true"));
+        assert!(is_link_destination("docs/other.md?raw=true#installation"));
+        // The query is what makes this path-shaped, so it stays prose.
+        assert!(!is_link_destination("what?about/this"));
     }
 
     #[test]

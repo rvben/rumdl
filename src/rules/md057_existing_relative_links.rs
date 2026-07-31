@@ -846,6 +846,12 @@ impl Rule for MD057ExistingRelativeLinks {
         RuleCategory::Link
     }
 
+    fn skippable_by_category(&self) -> bool {
+        // A frontmatter path is a link this rule resolves, and the document
+        // holding it needs no link syntax anywhere else.
+        !self.config.check_frontmatter
+    }
+
     fn should_skip(&self, ctx: &crate::lint_context::LintContext) -> bool {
         ctx.content.is_empty() || (!ctx.likely_has_links_or_images() && !self.checks_front_matter_of(ctx))
     }
@@ -4403,6 +4409,25 @@ mod self_referential_links_tests {
         assert_eq!(
             warned[0].message,
             "Absolute link '/docs/guide.md' cannot be validated locally"
+        );
+    }
+
+    #[test]
+    fn test_a_frontmatter_path_carrying_a_query_is_checked() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("guide.md"), "# Guide\n").unwrap();
+        let content = "---\ntemplate: docs/missing.md?raw=true\nfallback: guide.md?raw=true\n---\n\n# Title\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, front_matter_checked());
+
+        assert_eq!(
+            result.len(),
+            1,
+            "A query names no file, so only the missing target is reported. Got: {result:?}"
+        );
+        assert_eq!(result[0].line, 2);
+        assert_eq!(
+            result[0].message,
+            "Relative link 'docs/missing.md?raw=true' does not exist"
         );
     }
 
