@@ -415,8 +415,10 @@ impl MD057ExistingRelativeLinks {
     /// never reach here: they are already the form this reports towards.
     ///
     /// The link is resolved against the file's own directory first and then
-    /// against each search path, matching how the existence check resolves it,
-    /// so a link that MD057 accepts is recognized here as well.
+    /// against each search path, matching how the existence check resolves it:
+    /// a link that MD057 accepts through a search path is recognized here as
+    /// well, and one that already resolves next to the document is judged
+    /// against that target alone.
     fn self_referential_link(
         &self,
         url: &str,
@@ -436,10 +438,13 @@ impl MD057ExistingRelativeLinks {
         let suffix = &url[path_part.len()..];
 
         let decoded_path = Self::url_decode(path_part);
-        let resolves_to_self = std::iter::once(base_path)
+        // First hit wins, as it does for the existence check: a target next to
+        // the document is the one the link addresses, and a search path only
+        // answers for a link that resolves nowhere else.
+        let resolved = std::iter::once(base_path)
             .chain(search_paths.iter().map(PathBuf::as_path))
-            .any(|dir| Self::is_same_file(&Self::resolve_link_path_with_base(&decoded_path, dir), source_file));
-        if !resolves_to_self {
+            .find_map(|dir| resolve_existing_target(&Self::resolve_link_path_with_base(&decoded_path, dir)))?;
+        if !Self::is_same_file(&resolved, source_file) {
             return None;
         }
 
@@ -505,24 +510,19 @@ impl MD057ExistingRelativeLinks {
         }
     }
 
-    /// Whether a link path resolves to `source_file`.
+    /// Whether two existing paths are the same file.
     ///
-    /// The link is resolved the way the existence check resolves it, so an
-    /// extensionless `[x](page)` is compared as `page.md`. Both sides are then
-    /// canonicalized, which settles symlinks and the platform's path
-    /// representation; the lexical form is the fallback for a path the
+    /// Both sides are canonicalized, which settles symlinks and the platform's
+    /// path representation; the lexical form is the fallback for a path the
     /// filesystem cannot answer for.
-    fn is_same_file(link_target: &Path, source_file: &Path) -> bool {
-        let Some(resolved) = resolve_existing_target(link_target) else {
-            return false;
-        };
+    fn is_same_file(resolved: &Path, source_file: &Path) -> bool {
         // Cheap reject before the syscall: a different name is a different file.
         if resolved.file_name() != source_file.file_name() {
             return false;
         }
         match (resolved.canonicalize(), source_file.canonicalize()) {
             (Ok(link), Ok(source)) => link == source,
-            _ => normalize_path(&resolved) == normalize_path(source_file),
+            _ => normalize_path(resolved) == normalize_path(source_file),
         }
     }
 
@@ -4288,6 +4288,25 @@ mod self_referential_links_tests {
             result[0].fix.as_ref().map(|f| f.replacement.as_str()),
             Some("#title"),
             "Got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_a_target_next_to_the_document_outranks_a_search_path() {
+        let temp_dir = tempdir().unwrap();
+        let guide_dir = temp_dir.path().join("docs/guide");
+        std::fs::create_dir_all(guide_dir.join("guide")).unwrap();
+        std::fs::write(guide_dir.join("guide/test.md"), "# Other\n\n## Title\n").unwrap();
+        let config = MD057Config {
+            search_paths: vec![temp_dir.path().join("docs").to_string_lossy().into_owned()],
+            ..enabled()
+        };
+        let content = "# Title\n\nSee [another file](guide/test.md#title).\n";
+        let result = check_as_file(&guide_dir, "test.md", content, config);
+
+        assert!(
+            result.is_empty(),
+            "The link resolves to guide/guide/test.md, so the search path never answers for it. Got: {result:?}"
         );
     }
 
