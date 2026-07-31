@@ -1,4 +1,4 @@
-.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc fuzz-all audit msrv-check smoke-wasi parity
+.PHONY: build test clean fmt check doc build-python build-wheel dev-install setup-mise dev-setup dev-verify update-dependencies update-rust-version build-static-linux-x64 build-static-linux-arm64 build-static-all docker-binaries docker-binaries-release docker-binfmt docker-builder docker-build docker-verify docker-push schema check-schema sync-code-block-tools check-code-block-tools test-code-block-tools check-versions benchmark benchmark-run benchmark-chart lint-actions lint-actions-all fuzz fuzz-long check-links docs-check docs-smoke sync-rule-docs check-rule-docs release-patch release-minor release-major test-idempotency test-doc test-doc-completeness fuzz-all audit msrv-check smoke-wasi parity
 
 # Development environment setup
 setup-mise:
@@ -585,9 +585,11 @@ check-links:
 	@echo "Checking links in markdown files..."
 	$(LYCHEE) --no-progress --config .lychee.toml --remap 'https://rumdl.dev/([^/]+)/? file://$(CURDIR)/docs/$$1.md' 'README.md' 'docs/**/*.md'
 
-# Documentation validation
+# Documentation validation. The integration tests build as a single `lib`
+# harness, so the module is selected by name filter rather than by --test.
+# `make test` covers this too; this target runs it alone with output shown.
 test-doc-completeness:
-	cargo test --test config_documentation_completeness -- --nocapture
+	cargo test --test lib config::config_documentation_completeness -- --nocapture
 
 # Assert the `docs/` tree is fmt-clean with the current rumdl code.
 # Catches cases where someone hand-edits a docs file without running fmt,

@@ -154,17 +154,46 @@ impl<'a> LintContext<'a> {
         let list_start_values = parse_result.list_start_values;
         let html_blocks = parse_result.html_blocks;
 
+        // Container structure the parser cannot see. Computed from the line text
+        // alone, so it is available here, before the line info it corrects.
+        let containers = profile_section!(
+            "Container lines",
+            profile,
+            flavor_detection::detect_container_lines(&content_lines, flavor)
+        );
+
         // Pre-compute HTML comment ranges ONCE for all operations.
-        // Code-span and fenced-code-block ranges are passed so `<!--`/`-->`
-        // inside code are treated as literal text, not comment delimiters that
-        // could pair across code regions on different lines. Only *fenced* blocks
-        // are used: pulldown-cmark misclassifies 4-space-indented content inside
-        // containers (MkDocs admonitions, etc.) as indented code blocks, and a
-        // real comment indented there must still be recognized as a comment.
-        let fenced_code_block_ranges: Vec<(usize, usize)> = code_block_details
+        // Code-span and code-block ranges are passed so `<!--`/`-->` inside code
+        // are treated as literal text, not comment delimiters that could pair
+        // across code regions on different lines. An indented block over
+        // container content is the parser reading a MkDocs admonition or a
+        // `<div markdown>` body as code, and a comment written there is a real
+        // comment, so only the parts of such a block that a fence really does
+        // hold as code are kept.
+        let comment_code_block_ranges: Vec<(usize, usize)> = code_block_details
             .iter()
-            .filter(|detail| detail.is_fenced)
-            .map(|detail| (detail.start, detail.end))
+            .flat_map(|detail| {
+                if detail.is_fenced {
+                    return vec![(detail.start, detail.end)];
+                }
+                let start_line = line_offsets
+                    .partition_point(|&offset| offset <= detail.start)
+                    .saturating_sub(1);
+                let end_line = line_offsets.partition_point(|&offset| offset < detail.end);
+                containers
+                    .code_line_spans_in(start_line..end_line)
+                    .into_iter()
+                    .map(|span| {
+                        let start = line_offsets[span.start].max(detail.start);
+                        let end = line_offsets
+                            .get(span.end)
+                            .copied()
+                            .unwrap_or(content.len())
+                            .min(detail.end);
+                        (start, end)
+                    })
+                    .collect()
+            })
             .collect();
         // Front matter is data, not markdown: a `<!--` in a YAML value would
         // otherwise pair with a `-->` in the body and hide everything between
@@ -178,7 +207,7 @@ impl<'a> LintContext<'a> {
             crate::utils::skip_context::scan_html_comments(
                 content,
                 &code_span_ranges,
-                &fenced_code_block_ranges,
+                &comment_code_block_ranges,
                 body_start
             )
         );
@@ -271,14 +300,14 @@ impl<'a> LintContext<'a> {
         profile_section!(
             "Markdown-in-HTML blocks",
             profile,
-            flavor_detection::detect_markdown_html_blocks(&content_lines, &mut lines)
+            flavor_detection::detect_markdown_html_blocks(&mut lines, &containers)
         );
 
         // Detect MkDocs-specific constructs (admonitions, tabs, definition lists)
         profile_section!(
             "MkDocs constructs",
             profile,
-            flavor_detection::detect_mkdocs_line_info(&content_lines, &mut lines, flavor)
+            flavor_detection::detect_mkdocs_line_info(&content_lines, &mut lines, flavor, &containers)
         );
 
         // Detect footnote definitions and correct false code block detection.
@@ -540,7 +569,7 @@ impl<'a> LintContext<'a> {
             &obsidian_comment_ranges,
             content,
             &code_span_ranges,
-            &fenced_code_block_ranges,
+            &comment_code_block_ranges,
             body_start,
         );
 
@@ -556,9 +585,10 @@ impl<'a> LintContext<'a> {
         // It waits for the re-resolution above because an opener a `%%` pair
         // hides is not an opener, and giving that one a range would hide the
         // rest of the note from every rule.
-        if let Some(range) = unterminated_html_comment
-            .and_then(|opener| crate::utils::skip_context::unterminated_comment_range(opener, &html_blocks))
-        {
+        if let Some(range) = unterminated_html_comment.and_then(|opener| {
+            crate::utils::skip_context::unterminated_comment_range(opener, &html_blocks)
+                .or_else(|| container_comment_range(opener, &containers, &lines, content))
+        }) {
             // Every complete comment starts before the unclosed opener, so this
             // keeps the ranges sorted for the binary searches over them.
             html_comment_ranges.push(range);
@@ -1841,6 +1871,40 @@ impl<'a> LintContext<'a> {
             .iter()
             .any(|line| line.heading.as_ref().is_some_and(|h| h.is_valid))
     }
+}
+
+/// The range an unclosed `<!--` hides when it opens a block the parser missed.
+///
+/// A MkDocs admonition or a `<div markdown>` body is rendered as markdown in its
+/// own right, so a `<!--` starting one of its lines opens an HTML block there
+/// just as it would at the top level. The parser has no notion of either
+/// container, reads the body as indented code or as a lazy paragraph
+/// continuation, and so reports no block for the opener to run to the end of.
+///
+/// The block ends where the container's body ends, which is what CommonMark
+/// gives an unclosed comment in any other container. An opener that is not the
+/// first thing on its line is inline HTML and opens nothing, here as anywhere.
+fn container_comment_range(
+    opener: usize,
+    containers: &flavor_detection::ContainerLines,
+    lines: &[types::LineInfo],
+    content: &str,
+) -> Option<crate::utils::skip_context::ByteRange> {
+    let line_index = lines
+        .partition_point(|line| line.byte_offset <= opener)
+        .checked_sub(1)?;
+    let line = lines.get(line_index)?;
+    if line.byte_offset + line.indent != opener {
+        return None;
+    }
+    if !containers.is_container_body(line_index) {
+        return None;
+    }
+    let end_line = lines.get(containers.body_end_line(line_index)?)?;
+    Some(crate::utils::skip_context::ByteRange {
+        start: opener,
+        end: (end_line.byte_offset + end_line.byte_len).min(content.len()),
+    })
 }
 
 /// Detect footnote definitions and mark their continuation lines.

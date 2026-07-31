@@ -2133,3 +2133,100 @@ fn test_obsidian_comment_in_the_body_is_found_after_front_matter() {
     assert!(ctx.is_in_obsidian_comment(content.find("a note").unwrap()));
     assert!(!ctx.is_in_obsidian_comment(content.find("more").unwrap()));
 }
+
+#[test]
+fn test_delimiters_in_an_indented_code_block_are_not_comment_delimiters() {
+    // The parser reports a real indented code block here, so both delimiters are
+    // sample text. Pairing them would hide the paragraph between them from every
+    // rule while the page shows it.
+    let content = "Intro text.\n\n    <!-- open\n\nMiddle text.\n\n    --> close\n\nEnd.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(
+        ctx.html_comment_ranges().is_empty(),
+        "got: {:?}",
+        ctx.html_comment_ranges()
+    );
+    assert!(!ctx.is_in_html_comment(content.find("Middle").unwrap()));
+    assert_eq!(ctx.unterminated_html_comment(), None);
+}
+
+#[test]
+fn test_unclosed_comment_in_an_admonition_hides_the_rest_of_its_body() {
+    // The admonition body is markdown in its own right, so the `<!--` opens a
+    // block there. The parser has no admonitions and reports none, which left
+    // the line below the opener visible to every rule.
+    let content = "!!! note\n    <!-- hidden\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
+    assert!(ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}
+
+#[test]
+fn test_unclosed_comment_in_an_admonition_stops_at_the_next_admonition() {
+    // A marker at the same indent opens a sibling container, so it is not part
+    // of the body the comment hides.
+    let content = "!!! note\n    <!-- hidden\n    hidden text\n\n!!! warning\n    visible text\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert!(ctx.is_in_html_comment(content.find("hidden text").unwrap()));
+    assert!(!ctx.is_in_html_comment(content.find("visible text").unwrap()));
+}
+
+#[test]
+fn test_unclosed_comment_in_a_markdown_html_block_hides_the_rest_of_it() {
+    // The `markdown` attribute makes the body markdown in every flavor, so the
+    // opener behaves the same as it does in an admonition.
+    let content = "<div markdown>\n\n    <!-- hidden\n    visit https://example.com\n\n</div>\n\nAfter.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert!(ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+    assert!(!ctx.is_in_html_comment(content.find("After.").unwrap()));
+}
+
+#[test]
+fn test_an_admonition_comment_is_read_across_a_blank_line_after_the_marker() {
+    // With a blank line after the marker the parser calls the body an indented
+    // code block, which is the same container content by another misreading.
+    let content = "!!! note\n\n    <!-- hidden\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert!(ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}
+
+#[test]
+fn test_a_comment_indented_inside_an_admonition_is_still_a_comment() {
+    // The exemption the container gets is what keeps a closed comment written
+    // at the body indent from being read as code.
+    let content = "!!! note\n\n    <!-- a note -->\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert!(ctx.is_in_html_comment(content.find("a note").unwrap()));
+    assert!(!ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}
+
+#[test]
+fn test_an_opener_partway_through_an_admonition_line_opens_nothing() {
+    // Inline HTML renders literally, in a container as anywhere else, so the
+    // text after it is published rather than hidden.
+    let content = "!!! note\n    Some text <!-- never closed\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
+    assert!(!ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}
+
+#[test]
+fn test_delimiters_in_a_fence_inside_an_admonition_are_not_comment_delimiters() {
+    // The body is markdown, but a fence written in it is a real code block, so
+    // the sample opener it holds neither opens a comment nor is left dangling.
+    let content = "!!! note\n\n    ```\n    <!-- a sample opener\n    ```\n\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert_eq!(ctx.unterminated_html_comment(), None);
+    assert!(!ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}
+
+#[test]
+fn test_an_unclosed_comment_in_an_admonition_hides_a_fence_below_it() {
+    // Once the comment opens, the fence markers are raw HTML rather than a code
+    // block, so the block runs on to the end of the body as it does at the top
+    // level.
+    let content = "!!! note\n    <!-- hidden\n    ```\n    code\n    ```\n    visit https://example.com\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::MkDocs, None);
+    assert!(ctx.is_in_html_comment(content.find("code").unwrap()));
+    assert!(ctx.is_in_html_comment(content.find("https://example.com").unwrap()));
+}

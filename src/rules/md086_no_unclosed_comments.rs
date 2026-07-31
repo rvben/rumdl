@@ -415,6 +415,24 @@ mod tests {
     }
 
     #[test]
+    fn ignores_an_opener_inside_an_indented_code_block() {
+        // The parser reports a real indented code block, so the `<!--` is sample
+        // text that opens nothing and closes nothing.
+        let content = "Intro text.\n\n    <!-- a sample opener\n\nAfter.\n";
+        assert!(check(content).is_empty(), "got: {:?}", check(content));
+    }
+
+    #[test]
+    fn reports_an_opener_in_an_admonition_body() {
+        // The body is markdown at a 4-space indent, not code, so the missing
+        // closer is a real one.
+        let content = "!!! note\n    <!-- a note that never ends\n    more text\n";
+        let warnings = check_with(content, MarkdownFlavor::MkDocs);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!((warnings[0].line, warnings[0].column), (2, 5));
+    }
+
+    #[test]
     fn accepts_a_document_with_no_comments() {
         assert!(check("# Title\n\nJust prose.\n").is_empty());
     }
