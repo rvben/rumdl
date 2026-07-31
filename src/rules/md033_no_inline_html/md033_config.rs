@@ -1,3 +1,4 @@
+use crate::config::MarkdownFlavor;
 use crate::rule_config_serde::RuleConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -34,6 +35,99 @@ pub(super) const SAFE_FIXABLE_TAGS: &[&str] = &[
 /// These tags are fixable only when they have the required attributes.
 pub(super) const ATTRIBUTE_FIXABLE_TAGS: &[&str] = &["a", "img"];
 
+/// Value accepted inside `allowed-elements` and `table-allowed-elements` that permits
+/// every element Markdown has no syntax for.
+pub(super) const NO_MARKDOWN_EQUIVALENT: &str = "no-markdown-equivalent";
+
+/// Elements HTML gives no closing tag, so they hold no content.
+///
+/// Sorted for binary search - must remain sorted when adding elements.
+pub(super) const VOID_ELEMENTS: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+];
+
+/// Elements CommonMark and GFM express with their own syntax, so writing them as HTML
+/// is the very thing this rule is about.
+///
+/// Sorted for binary search - must remain sorted when adding elements.
+const MARKDOWN_EQUIVALENT_TAGS: &[&str] = &[
+    "a",          // link: [text](url)
+    "b",          // bold: **text**
+    "blockquote", // > quote
+    "br",         // hard break: two trailing spaces
+    "code",       // inline code: `text`
+    "del",        // strikethrough: ~~text~~
+    "em",         // italic: *text*
+    "h1",         // heading: # text
+    "h2",         // heading: ## text
+    "h3",         // heading: ### text
+    "h4",         // heading: #### text
+    "h5",         // heading: ##### text
+    "h6",         // heading: ###### text
+    "hr",         // thematic break: ---
+    "i",          // italic: *text*
+    "img",        // image: ![alt](src)
+    "li",         // list item: - text
+    "ol",         // ordered list: 1. text
+    "p",          // paragraph: a blank line between blocks
+    "pre",        // code block: a fence or an indent
+    "s",          // strikethrough: ~~text~~
+    "strike",     // strikethrough: ~~text~~
+    "strong",     // bold: **text**
+    "table",      // GFM table
+    "tbody",      // GFM table
+    "td",         // GFM table cell
+    "th",         // GFM table header cell
+    "thead",      // GFM table header row
+    "tr",         // GFM table row
+    "ul",         // unordered list: - text
+];
+
+/// Elements a flavor's own syntax expresses beyond `MARKDOWN_EQUIVALENT_TAGS`.
+///
+/// Only syntax the flavor enables by itself counts. Flavors whose sub/sup/highlight
+/// syntax comes from an optional extension the reader has to switch on are absent.
+fn flavor_equivalent_tags(flavor: MarkdownFlavor) -> &'static [&'static str] {
+    match flavor {
+        // Pandoc writes subscript as `~text~`, superscript as `^text^`, and has
+        // definition lists. Quarto is Pandoc-based and shares all four.
+        MarkdownFlavor::Pandoc | MarkdownFlavor::Quarto => &["dd", "dl", "dt", "sub", "sup"],
+        // Obsidian writes a highlight as `==text==`.
+        MarkdownFlavor::Obsidian => &["mark"],
+        _ => &[],
+    }
+}
+
+/// Whether Markdown can express this element, so it keeps being reported under
+/// `"no-markdown-equivalent"`.
+///
+/// A hard break is the one element whose answer depends on where it sits: two
+/// trailing spaces do not survive inside a GFM table cell, so `<br>` has no
+/// equivalent there.
+fn has_markdown_equivalent(tag_name: &str, flavor: MarkdownFlavor, in_table: bool) -> bool {
+    if in_table && tag_name == "br" {
+        return false;
+    }
+    MARKDOWN_EQUIVALENT_TAGS.binary_search(&tag_name).is_ok() || flavor_equivalent_tags(flavor).contains(&tag_name)
+}
+
+/// Whether `"no-markdown-equivalent"` permits this element.
+///
+/// The tags GFM strips from rendered Markdown are never permitted: no reader shows
+/// them, so writing them is not the expressiveness this option is about.
+pub(super) fn is_permitted_without_markdown_equivalent(tag_name: &str, flavor: MarkdownFlavor, in_table: bool) -> bool {
+    let lower = tag_name.to_ascii_lowercase();
+    !GFM_DISALLOWED_TAGS.contains(&lower.as_str()) && !has_markdown_equivalent(&lower, flavor, in_table)
+}
+
+/// Whether a configured value is the `no-markdown-equivalent` sentinel.
+///
+/// Config *values* are not normalized on the way in, so the snake_case spelling a
+/// user may reach for is recognized here.
+fn is_no_markdown_equivalent(value: &str) -> bool {
+    value.to_lowercase().replace('_', "-") == NO_MARKDOWN_EQUIVALENT
+}
+
 /// URL schemes that are safe to convert to Markdown links.
 /// Dangerous schemes like javascript: or data: are rejected.
 pub(super) const SAFE_URL_SCHEMES: &[&str] = &["http://", "https://", "mailto:", "tel:", "ftp://", "ftps://"];
@@ -68,6 +162,15 @@ pub enum MD033FixMode {
 pub struct MD033Config {
     #[serde(default, rename = "allowed-elements", alias = "allowed_elements", alias = "allowed")]
     pub allowed: Vec<String>,
+
+    /// Elements whose contents are permitted whatever tags appear inside them.
+    ///
+    /// Everything from an element's opening tag through its matching closing tag is
+    /// left alone, the tags of the element itself included. An element that cannot
+    /// hold content (`<br>`, `<img>`, and the other void elements) holds nothing, so
+    /// naming one here permits nothing; name it in `allowed` instead.
+    #[serde(default, rename = "allowed-inside", alias = "allowed_inside")]
+    pub allowed_inside: Vec<String>,
 
     /// List of HTML tags that are explicitly disallowed.
     /// When set, only these tags will trigger warnings (allowlist mode is disabled).
@@ -146,6 +249,7 @@ impl Default for MD033Config {
     fn default() -> Self {
         Self {
             allowed: Vec::new(),
+            allowed_inside: Vec::new(),
             disallowed: Vec::new(),
             fix: false,
             fix_mode: MD033FixMode::default(),
@@ -169,9 +273,15 @@ fn default_strip_wrapper_elements() -> Vec<String> {
 }
 
 impl MD033Config {
-    /// Convert allowed elements to HashSet for efficient lookup
+    /// Convert allowed elements to HashSet for efficient lookup.
+    /// The `no-markdown-equivalent` sentinel names no element, so it is not a member.
     pub fn allowed_set(&self) -> HashSet<String> {
-        self.allowed.iter().map(|s| s.to_lowercase()).collect()
+        Self::element_set(&self.allowed)
+    }
+
+    /// Convert the elements whose contents are permitted to a HashSet.
+    pub fn allowed_inside_set(&self) -> HashSet<String> {
+        Self::element_set(&self.allowed_inside)
     }
 
     /// Resolve the effective allowlist for tags inside GFM table cells.
@@ -181,9 +291,33 @@ impl MD033Config {
     /// precedence). When set (even to an empty vec), takes precedence inside tables.
     pub fn table_allowed_set(&self) -> HashSet<String> {
         match &self.table_allowed_elements {
-            Some(list) => list.iter().map(|s| s.to_lowercase()).collect(),
+            Some(list) => Self::element_set(list),
             None => self.allowed_set(),
         }
+    }
+
+    /// Whether `allowed_elements` permits every element Markdown has no syntax for.
+    pub fn allows_no_markdown_equivalent(&self) -> bool {
+        self.allowed.iter().any(|value| is_no_markdown_equivalent(value))
+    }
+
+    /// Whether the allowlist that governs GFM table cells permits every element
+    /// Markdown has no syntax for, following the same fallback as `table_allowed_set`.
+    pub fn table_allows_no_markdown_equivalent(&self) -> bool {
+        match &self.table_allowed_elements {
+            Some(list) => list.iter().any(|value| is_no_markdown_equivalent(value)),
+            None => self.allows_no_markdown_equivalent(),
+        }
+    }
+
+    /// Lowercase the element names in a configured list, leaving out the sentinel
+    /// values that stand for a set of elements rather than one.
+    fn element_set(values: &[String]) -> HashSet<String> {
+        values
+            .iter()
+            .filter(|value| !is_no_markdown_equivalent(value))
+            .map(|value| value.to_lowercase())
+            .collect()
     }
 
     /// Convert disallowed elements to HashSet for efficient lookup.
@@ -346,4 +480,96 @@ impl MD033Config {
 
 impl RuleConfig for MD033Config {
     const RULE_NAME: &'static str = "MD033";
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_lists_searched_by_binary_search_are_sorted() {
+        assert!(MARKDOWN_EQUIVALENT_TAGS.is_sorted(), "{MARKDOWN_EQUIVALENT_TAGS:?}");
+        assert!(VOID_ELEMENTS.is_sorted(), "{VOID_ELEMENTS:?}");
+    }
+
+    #[test]
+    fn no_markdown_equivalent_accepts_the_spellings_a_user_reaches_for() {
+        // Config values are not normalized on the way in, unlike config keys.
+        for spelling in [
+            "no-markdown-equivalent",
+            "no_markdown_equivalent",
+            "No-Markdown-Equivalent",
+        ] {
+            assert!(is_no_markdown_equivalent(spelling), "{spelling}");
+        }
+        assert!(!is_no_markdown_equivalent("nomarkdownequivalent"));
+        assert!(!is_no_markdown_equivalent("kbd"));
+    }
+
+    #[test]
+    fn the_sentinel_names_no_element_of_its_own() {
+        let config = MD033Config {
+            allowed: vec!["no-markdown-equivalent".to_string(), "kbd".to_string()],
+            ..MD033Config::default()
+        };
+        assert!(config.allows_no_markdown_equivalent());
+        assert_eq!(config.allowed_set(), HashSet::from(["kbd".to_string()]));
+    }
+
+    #[test]
+    fn a_table_allowlist_decides_the_sentinel_for_table_cells() {
+        let sentinel_everywhere = MD033Config {
+            allowed: vec!["no-markdown-equivalent".to_string()],
+            ..MD033Config::default()
+        };
+        assert!(
+            sentinel_everywhere.table_allows_no_markdown_equivalent(),
+            "an unset table allowlist falls back to allowed-elements"
+        );
+
+        let table_overrides = MD033Config {
+            allowed: vec!["no-markdown-equivalent".to_string()],
+            table_allowed_elements: Some(vec!["br".to_string()]),
+            ..MD033Config::default()
+        };
+        assert!(
+            !table_overrides.table_allows_no_markdown_equivalent(),
+            "an explicit table allowlist is the whole answer for a table cell"
+        );
+    }
+
+    #[test]
+    fn a_hard_break_has_no_equivalent_inside_a_table_cell() {
+        let flavor = MarkdownFlavor::Standard;
+        assert!(!is_permitted_without_markdown_equivalent("br", flavor, false));
+        assert!(is_permitted_without_markdown_equivalent("br", flavor, true));
+        // Every other element answers the same in both places.
+        for tag in ["b", "em", "table", "kbd", "details"] {
+            assert_eq!(
+                is_permitted_without_markdown_equivalent(tag, flavor, false),
+                is_permitted_without_markdown_equivalent(tag, flavor, true),
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn tags_no_reader_renders_are_never_permitted() {
+        for flavor in [
+            MarkdownFlavor::Standard,
+            MarkdownFlavor::Pandoc,
+            MarkdownFlavor::Obsidian,
+        ] {
+            for tag in GFM_DISALLOWED_TAGS {
+                assert!(
+                    !is_permitted_without_markdown_equivalent(tag, flavor, false),
+                    "{tag} under {flavor:?}"
+                );
+                assert!(
+                    !is_permitted_without_markdown_equivalent(tag, flavor, true),
+                    "{tag} under {flavor:?} in a table"
+                );
+            }
+        }
+    }
 }

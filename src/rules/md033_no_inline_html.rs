@@ -3,21 +3,27 @@
 //!
 //! See [docs/md033.md](../../docs/md033.md) for full documentation, configuration, and examples.
 
+use crate::config::MarkdownFlavor;
+use crate::lint_context::HtmlTag;
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
 use crate::utils::regex_cache::*;
 use std::collections::HashSet;
+use std::ops::Range;
 
 mod md033_config;
-use md033_config::{MD033Config, MD033FixMode};
+use md033_config::{MD033Config, MD033FixMode, VOID_ELEMENTS, is_permitted_without_markdown_equivalent};
 
 #[derive(Clone)]
 pub struct MD033NoInlineHtml {
     config: MD033Config,
     allowed: HashSet<String>,
+    allowed_inside: HashSet<String>,
     table_allowed: HashSet<String>,
     disallowed: HashSet<String>,
     drop_attributes: HashSet<String>,
     strip_wrapper_elements: HashSet<String>,
+    allows_no_markdown_equivalent: bool,
+    table_allows_no_markdown_equivalent: bool,
 }
 
 impl Default for MD033NoInlineHtml {
@@ -57,17 +63,23 @@ impl MD033NoInlineHtml {
     /// Pre-computes all lowercase HashSets so per-line lookups are O(1).
     pub fn from_config_struct(config: MD033Config) -> Self {
         let allowed = config.allowed_set();
+        let allowed_inside = config.allowed_inside_set();
         let table_allowed = config.table_allowed_set();
         let disallowed = config.disallowed_set();
         let drop_attributes = config.drop_attributes_set();
         let strip_wrapper_elements = config.strip_wrapper_elements_set();
+        let allows_no_markdown_equivalent = config.allows_no_markdown_equivalent();
+        let table_allows_no_markdown_equivalent = config.table_allows_no_markdown_equivalent();
         Self {
             config,
             allowed,
+            allowed_inside,
             table_allowed,
             disallowed,
             drop_attributes,
             strip_wrapper_elements,
+            allows_no_markdown_equivalent,
+            table_allows_no_markdown_equivalent,
         }
     }
 
@@ -94,17 +106,86 @@ impl MD033NoInlineHtml {
         set.contains(&Self::extract_tag_name(tag))
     }
 
-    /// Check whether the tag is in the general `allowed_elements` list.
+    /// Check whether the tag is permitted by the general `allowed_elements` list.
     #[inline]
-    fn is_tag_allowed(&self, tag: &str) -> bool {
-        Self::tag_in_set(&self.allowed, tag)
+    fn is_tag_allowed(&self, tag: &str, flavor: MarkdownFlavor) -> bool {
+        if !self.allows_no_markdown_equivalent {
+            return Self::tag_in_set(&self.allowed, tag);
+        }
+        let name = Self::extract_tag_name(tag);
+        self.allowed.contains(&name) || is_permitted_without_markdown_equivalent(&name, flavor, false)
     }
 
     /// Check whether the tag is permitted inside a GFM table cell.
     /// Uses `table_allowed_elements` if configured, falling back to `allowed`.
     #[inline]
-    fn is_tag_allowed_in_table(&self, tag: &str) -> bool {
-        Self::tag_in_set(&self.table_allowed, tag)
+    fn is_tag_allowed_in_table(&self, tag: &str, flavor: MarkdownFlavor) -> bool {
+        if !self.table_allows_no_markdown_equivalent {
+            return Self::tag_in_set(&self.table_allowed, tag);
+        }
+        let name = Self::extract_tag_name(tag);
+        self.table_allowed.contains(&name) || is_permitted_without_markdown_equivalent(&name, flavor, true)
+    }
+
+    /// Whether an element holds no content, so naming it in `allowed_inside`
+    /// describes nothing.
+    #[inline]
+    fn is_void_element(tag_name: &str) -> bool {
+        VOID_ELEMENTS.binary_search(&tag_name).is_ok()
+    }
+
+    /// Whether this tag sits where its text is not markup: a code or math block,
+    /// front matter, a comment, or a link title.
+    fn is_inert_markup(ctx: &crate::lint_context::LintContext, html_tag: &HtmlTag) -> bool {
+        ctx.line_info(html_tag.line).is_some_and(|info| {
+            info.in_code_block
+                || info.in_pymdown_block
+                || info.is_kramdown_block_ial
+                || info.in_front_matter
+                || info.in_math_block
+        }) || ctx.is_in_html_comment(html_tag.byte_offset)
+            || ctx.is_in_mdx_comment(html_tag.byte_offset)
+            || ctx.is_in_link_title(html_tag.byte_offset)
+            || ctx.is_byte_offset_in_code_span(html_tag.byte_offset)
+    }
+
+    /// Byte ranges spanned by the elements named in `allowed_inside`, each running
+    /// from its opening tag through its matching closing tag.
+    ///
+    /// An element left unclosed reaches the end of the document, which is where a
+    /// reader ends its content too.
+    fn allowed_inside_ranges(&self, ctx: &crate::lint_context::LintContext) -> Vec<Range<usize>> {
+        if self.allowed_inside.is_empty() {
+            return Vec::new();
+        }
+
+        let html_tags = ctx.html_tags();
+        let mut ranges = Vec::new();
+        let mut open: Vec<(&str, usize)> = Vec::new();
+
+        for html_tag in html_tags.iter() {
+            if !self.allowed_inside.contains(&html_tag.tag_name) || Self::is_inert_markup(ctx, html_tag) {
+                continue;
+            }
+            if html_tag.is_closing {
+                // A closing tag ends the innermost element of that name, and with it
+                // any element left open inside that one.
+                if let Some(index) = open.iter().rposition(|(name, _)| *name == html_tag.tag_name) {
+                    ranges.extend(open.drain(index..).map(|(_, start)| start..html_tag.byte_end));
+                }
+            } else if !html_tag.is_self_closing && !Self::is_void_element(&html_tag.tag_name) {
+                open.push((html_tag.tag_name.as_str(), html_tag.byte_offset));
+            }
+        }
+
+        ranges.extend(open.into_iter().map(|(_, start)| start..ctx.content.len()));
+        ranges
+    }
+
+    /// Whether a byte offset falls in one of the ranges `allowed_inside` covers.
+    #[inline]
+    fn is_inside_allowed_element(ranges: &[Range<usize>], byte_offset: usize) -> bool {
+        ranges.iter().any(|range| range.contains(&byte_offset))
     }
 
     /// Check if a tag is in the disallowed set (for disallowed-only mode).
@@ -998,6 +1079,13 @@ impl Rule for MD033NoInlineHtml {
         // Use centralized HTML parser to get all HTML tags (including multiline)
         let html_tags = ctx.html_tags();
 
+        // Disallowed-only mode is a denylist, which the allowlists take no part in.
+        let allowed_inside_ranges = if self.is_disallowed_mode() {
+            Vec::new()
+        } else {
+            self.allowed_inside_ranges(ctx)
+        };
+
         for html_tag in html_tags.iter() {
             // Skip closing tags (only warn on opening tags)
             if html_tag.is_closing {
@@ -1010,30 +1098,15 @@ impl Rule for MD033NoInlineHtml {
             // Reconstruct tag string from byte offsets
             let tag = &content[html_tag.byte_offset..html_tag.byte_end];
 
-            // Skip tags in code blocks, PyMdown blocks, block IALs, front-matter, and math blocks
-            if ctx.line_info(line_num).is_some_and(|info| {
-                info.in_code_block
-                    || info.in_pymdown_block
-                    || info.is_kramdown_block_ial
-                    || info.in_front_matter
-                    || info.in_math_block
-            }) {
-                continue;
-            }
-
-            // Skip HTML tags inside HTML comments
-            if ctx.is_in_html_comment(tag_byte_start) || ctx.is_in_mdx_comment(tag_byte_start) {
+            // Skip tags whose text is not markup: code and math blocks, PyMdown
+            // blocks, block IALs, front matter, comments, code spans, and the titles
+            // of link reference definitions.
+            if Self::is_inert_markup(ctx, html_tag) {
                 continue;
             }
 
             // Skip HTML comments themselves
             if self.is_html_comment(tag) {
-                continue;
-            }
-
-            // Skip angle brackets inside link reference definition titles
-            // e.g., [ref]: url "Title with <angle brackets>"
-            if ctx.is_in_link_title(tag_byte_start) {
                 continue;
             }
 
@@ -1073,24 +1146,26 @@ impl Rule for MD033NoInlineHtml {
                 continue;
             }
 
-            // Skip tags inside code spans (use byte offset for reliable multi-line span detection)
-            if ctx.is_byte_offset_in_code_span(tag_byte_start) {
-                continue;
-            }
-
             // Determine whether to report this tag based on mode:
             // - Disallowed mode: only report tags in the disallowed list
-            // - Default mode: report all tags except those in the allowed list,
-            //   with `table_allowed` taking precedence inside GFM table cells.
+            // - Default mode: report all tags except those in the allowed list or
+            //   inside an element named by `allowed_inside`, with `table_allowed`
+            //   taking precedence inside GFM table cells.
             if self.is_disallowed_mode() {
                 if !self.is_tag_disallowed(tag) {
                     continue;
                 }
             } else if ctx.is_in_table_block(line_num) {
-                if self.is_tag_allowed_in_table(tag) {
+                // An explicit table allowlist is the whole answer for a table cell,
+                // so it decides there instead of the surrounding element.
+                let inside_allowed_element = self.config.table_allowed_elements.is_none()
+                    && Self::is_inside_allowed_element(&allowed_inside_ranges, tag_byte_start);
+                if self.is_tag_allowed_in_table(tag, ctx.flavor) || inside_allowed_element {
                     continue;
                 }
-            } else if self.is_tag_allowed(tag) {
+            } else if self.is_tag_allowed(tag, ctx.flavor)
+                || Self::is_inside_allowed_element(&allowed_inside_ranges, tag_byte_start)
+            {
                 continue;
             }
 
@@ -3042,6 +3117,244 @@ tR += `# ${file}\n\nCreated: ${date}\nIn: ${folder}`;
         assert!(
             result.is_empty(),
             "table_allowed should be case-insensitive, got {result:?}"
+        );
+    }
+
+    // =========================================================================
+    // allowed_inside config option tests
+    //
+    // An element named here is permitted, and so is everything between its
+    // opening and closing tag.
+    // =========================================================================
+
+    /// The raw tags MD033 reports, in document order.
+    fn reported_tags_in(rule: &MD033NoInlineHtml, content: &str, flavor: crate::config::MarkdownFlavor) -> Vec<String> {
+        let ctx = LintContext::new(content, flavor, None);
+        rule.check(&ctx)
+            .unwrap()
+            .into_iter()
+            .map(|warning| {
+                warning
+                    .message
+                    .strip_prefix("Inline HTML found: ")
+                    .expect("MD033 reports the tag it found")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn reported_tags(rule: &MD033NoInlineHtml, content: &str) -> Vec<String> {
+        reported_tags_in(rule, content, crate::config::MarkdownFlavor::Standard)
+    }
+
+    fn rule_allowing_inside(elements: &[&str]) -> MD033NoInlineHtml {
+        MD033NoInlineHtml::from_config_struct(MD033Config {
+            allowed_inside: elements.iter().map(ToString::to_string).collect(),
+            ..MD033Config::default()
+        })
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_permits_the_element_and_its_contents() {
+        let content = "<details>\n<summary>\n<a href=\"./other.md\">Go there</a>\n</summary>\n<b>bold</b>\n</details>\n\nOutside <b>bold</b>.\n";
+
+        let without = reported_tags(&MD033NoInlineHtml::default(), content);
+        assert_eq!(
+            without,
+            vec!["<details>", "<summary>", "<a href=\"./other.md\">", "<b>", "<b>"],
+            "control: every tag is reported without the option"
+        );
+
+        let with = reported_tags(&rule_allowing_inside(&["details"]), content);
+        assert_eq!(
+            with,
+            vec!["<b>"],
+            "only the tag outside the details element is left, got {with:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_ends_at_the_matching_closing_tag() {
+        // The closing tag of the inner element does not end the outer one.
+        let content = "<details>\n<details>\n<b>x</b>\n</details>\n<i>y</i>\n</details>\n<b>z</b>\n";
+        let reported = reported_tags(&rule_allowing_inside(&["details"]), content);
+        assert_eq!(reported, vec!["<b>"], "got {reported:?}");
+
+        // An element left open covers the rest of the document.
+        let unclosed = "<details>\n\n<b>x</b>\n\n<i>y</i>\n";
+        assert!(
+            reported_tags(&rule_allowing_inside(&["details"]), unclosed).is_empty(),
+            "an unclosed element reaches the end of the document"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_ignores_an_element_quoted_in_a_code_block() {
+        let content = "```html\n<details>\n```\n\n<b>x</b>\n";
+        let reported = reported_tags(&rule_allowing_inside(&["details"]), content);
+        assert_eq!(
+            reported,
+            vec!["<b>"],
+            "a code block quotes the element, it does not open one: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_a_void_element_holds_nothing() {
+        // <br> has no contents, so naming it permits the <br> itself and nothing else.
+        let content = "a<br>b <b>x</b>\n";
+        let reported = reported_tags(&rule_allowing_inside(&["br"]), content);
+        assert_eq!(
+            reported,
+            vec!["<br>", "<b>"],
+            "a void element must not swallow the rest of the document: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_is_case_insensitive() {
+        let content = "<DETAILS>\n<b>x</b>\n</DETAILS>\n<i>y</i>\n";
+        let reported = reported_tags(&rule_allowing_inside(&["Details"]), content);
+        assert_eq!(reported, vec!["<i>"], "got {reported:?}");
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_takes_no_part_in_disallowed_mode() {
+        let config = MD033Config {
+            allowed_inside: vec!["details".to_string()],
+            disallowed: vec!["b".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let content = "<details>\n<b>x</b>\n<kbd>k</kbd>\n</details>\n";
+        let reported = reported_tags(&rule, content);
+        assert_eq!(
+            reported,
+            vec!["<b>"],
+            "a denylist names what is wrong wherever it appears: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_allowed_inside_yields_to_an_explicit_table_allowlist() {
+        let content = "| col |\n|-----|\n| <details><b>x</b></details> |\n";
+
+        let unset = reported_tags(&rule_allowing_inside(&["details"]), content);
+        assert!(
+            unset.is_empty(),
+            "without a table allowlist the element applies inside a cell too: {unset:?}"
+        );
+
+        let config = MD033Config {
+            allowed_inside: vec!["details".to_string()],
+            table_allowed_elements: Some(Vec::new()),
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let reported = reported_tags(&rule, content);
+        assert_eq!(
+            reported,
+            vec!["<details>", "<b>"],
+            "an explicit table allowlist decides inside a cell: {reported:?}"
+        );
+    }
+
+    // =========================================================================
+    // no-markdown-equivalent sentinel tests
+    //
+    // Permits every element Markdown has no syntax for, so only elements a
+    // reader could have written in Markdown are reported.
+    // =========================================================================
+
+    fn rule_allowing(elements: &[&str]) -> MD033NoInlineHtml {
+        MD033NoInlineHtml::with_allowed(elements.iter().map(ToString::to_string).collect())
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_reports_only_what_markdown_can_write() {
+        let content = "Press <kbd>Ctrl</kbd>, <b>bold</b>, <mark>hi</mark>, <abbr title=\"x\">A</abbr>, <em>i</em>, <details>d</details>\n";
+
+        let control = reported_tags(&MD033NoInlineHtml::default(), content);
+        assert_eq!(control.len(), 6, "control: every tag is reported: {control:?}");
+
+        let reported = reported_tags(&rule_allowing(&["no-markdown-equivalent"]), content);
+        assert_eq!(
+            reported,
+            vec!["<b>", "<em>"],
+            "only the elements with Markdown syntax are left: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_keeps_reporting_gfm_filtered_tags() {
+        // Nothing renders these, so permitting them is never about expressiveness.
+        let content = "<kbd>k</kbd>\n\n<script>alert(1)</script>\n\n<iframe src=\"x\"></iframe>\n";
+        let reported = reported_tags(&rule_allowing(&["no-markdown-equivalent"]), content);
+        assert_eq!(reported, vec!["<script>", "<iframe src=\"x\">"], "got {reported:?}");
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_follows_the_flavor() {
+        let content = "H<sub>2</sub>O, x<sup>2</sup>, <mark>hi</mark>, <kbd>k</kbd>\n";
+        let rule = rule_allowing(&["no-markdown-equivalent"]);
+
+        assert!(
+            reported_tags_in(&rule, content, crate::config::MarkdownFlavor::Standard).is_empty(),
+            "standard Markdown writes none of these"
+        );
+        assert_eq!(
+            reported_tags_in(&rule, content, crate::config::MarkdownFlavor::Pandoc),
+            vec!["<sub>", "<sup>"],
+            "Pandoc writes ~sub~ and ^sup^"
+        );
+        assert_eq!(
+            reported_tags_in(&rule, content, crate::config::MarkdownFlavor::Obsidian),
+            vec!["<mark>"],
+            "Obsidian writes ==highlight=="
+        );
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_permits_a_line_break_inside_a_table_cell() {
+        // Two trailing spaces do not survive inside a cell, so <br> has no
+        // equivalent there and every other one it does.
+        let content = "| col |\n|-----|\n| a<br>b |\n\nOutside a<br>b.\n";
+        let reported = reported_tags(&rule_allowing(&["no-markdown-equivalent"]), content);
+        assert_eq!(reported, vec!["<br>"], "got {reported:?}");
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_composes_with_named_elements() {
+        let content = "<kbd>k</kbd> <b>bold</b> <em>italic</em>\n";
+        let reported = reported_tags(&rule_allowing(&["no-markdown-equivalent", "b"]), content);
+        assert_eq!(
+            reported,
+            vec!["<em>"],
+            "a named element joins the ones the sentinel permits: {reported:?}"
+        );
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_reads_the_snake_case_spelling() {
+        // Config values are not normalized on the way in, unlike config keys.
+        let content = "<kbd>k</kbd> <b>bold</b>\n";
+        let reported = reported_tags(&rule_allowing(&["no_markdown_equivalent"]), content);
+        assert_eq!(reported, vec!["<b>"], "got {reported:?}");
+    }
+
+    #[test]
+    fn test_md033_no_markdown_equivalent_takes_no_part_in_disallowed_mode() {
+        let config = MD033Config {
+            allowed: vec!["no-markdown-equivalent".to_string()],
+            disallowed: vec!["kbd".to_string()],
+            ..MD033Config::default()
+        };
+        let rule = MD033NoInlineHtml::from_config_struct(config);
+        let reported = reported_tags(&rule, "<kbd>k</kbd> <b>bold</b>\n");
+        assert_eq!(
+            reported,
+            vec!["<kbd>"],
+            "a denylist names what is wrong wherever it appears: {reported:?}"
         );
     }
 }
