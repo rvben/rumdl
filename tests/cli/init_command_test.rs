@@ -12,18 +12,14 @@ mod init_command_tests {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
 
-        // Change to the temporary directory
-        std::env::set_current_dir(temp_path).expect("Failed to change to temporary directory");
-
-        // Ensure the config file doesn't exist
+        // `init` writes into the working directory, so the directory under test is the
+        // subprocess's own. Changing this process's working directory would leak into
+        // every test sharing the binary.
         let config_path = temp_path.join(".rumdl.toml");
-        if config_path.exists() {
-            fs::remove_file(&config_path).expect("Failed to remove existing config file");
-        }
 
         // Run the init command
         let mut cmd = cargo_bin_cmd!("rumdl");
-        let assert = cmd.arg("init").assert();
+        let assert = cmd.current_dir(temp_path).arg("init").assert();
 
         // Check that the command succeeded
         assert

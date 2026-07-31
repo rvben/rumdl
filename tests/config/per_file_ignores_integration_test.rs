@@ -1,6 +1,5 @@
 use rumdl_lib::config::Config;
 use rumdl_lib::rules;
-use serial_test::serial;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -364,127 +363,125 @@ fn test_per_file_ignores_config_in_subdirectory() {
     );
 }
 
-/// Test for issue #246: Verify relative path handling in find_project_root_from
-/// This test changes the current directory to exercise the relative path code path
+/// Run `rumdl check` in `dir` and return its normalized stdout.
+///
+/// The working directory belongs to the subprocess, which is the only way to
+/// exercise a relative `--config` path: changing this process's directory would
+/// leak into every other test sharing the binary.
+fn run_check(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new(rumdl_bin())
+        .current_dir(dir)
+        .arg("check")
+        .arg("--no-cache")
+        .args(args)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+}
+
+/// Whether any reported issue names both this file and this rule.
+fn reports(stdout: &str, file: &str, rule: &str) -> bool {
+    stdout
+        .lines()
+        .any(|line| line.starts_with(file) && line.contains(&format!("[{rule}]")))
+}
+
+/// A relative `--config` path resolves against the working directory, and the
+/// project root derived from it is what per-file-ignores patterns are matched
+/// against. A root that came out empty silently matched nothing.
 #[test]
-#[serial]
 fn test_per_file_ignores_with_actual_relative_path() {
     let temp_dir = tempdir().unwrap();
 
     // Create .config subdirectory with config file
     let config_dir = temp_dir.path().join(".config");
     fs::create_dir(&config_dir).unwrap();
-    let config_path = config_dir.join("rumdl.toml");
-    let config_content = r#"
+    fs::write(
+        config_dir.join("rumdl.toml"),
+        r#"
 [per-file-ignores]
 "CHANGELOG.md" = ["MD024"]
-"#;
-    fs::write(&config_path, config_content).unwrap();
+"#,
+    )
+    .unwrap();
 
     // Create .git directory to mark project root
-    let git_dir = temp_dir.path().join(".git");
-    fs::create_dir(&git_dir).unwrap();
+    fs::create_dir(temp_dir.path().join(".git")).unwrap();
 
-    // Create a markdown file
-    let changelog_path = temp_dir.path().join("CHANGELOG.md");
-    fs::write(&changelog_path, "# Changelog\n").unwrap();
+    // Both files repeat a heading, so MD024 has something to report in each
+    let duplicate_headings = "# Release\n\ntext\n\n## Notes\n\ntext\n\n## Notes\n\ntext\n";
+    fs::write(temp_dir.path().join("CHANGELOG.md"), duplicate_headings).unwrap();
+    fs::write(temp_dir.path().join("NOTES.md"), duplicate_headings).unwrap();
 
-    // Save original directory
-    let original_dir = std::env::current_dir().unwrap();
-
-    // Change to temp directory and use RELATIVE path
-    std::env::set_current_dir(temp_dir.path()).unwrap();
-
-    // Use relative path ".config/rumdl.toml" - this exercises the bug fix
-    let relative_config_path = ".config/rumdl.toml";
-    let load_result = rumdl_lib::config::SourcedConfig::load(Some(relative_config_path), None);
-
-    // Restore original directory before any assertions (cleanup on panic)
-    std::env::set_current_dir(&original_dir).unwrap();
-
-    // Now check results
-    let sourced = load_result.expect("Should load config from relative path");
-    let config: Config = sourced.into_validated_unchecked().into();
-
-    // Verify project_root is set and points to the temp dir (not empty string!)
-    assert!(
-        config.project_root.is_some(),
-        "project_root should be set when loading from relative path"
-    );
-    let project_root = config.project_root.as_ref().unwrap();
-    assert!(
-        !project_root.as_os_str().is_empty(),
-        "project_root should NOT be empty string (this was the bug)"
-    );
-    assert!(
-        project_root.join(".git").exists() || project_root == temp_dir.path(),
-        "project_root should be the directory containing .git"
+    let stdout = run_check(
+        temp_dir.path(),
+        &["--config", ".config/rumdl.toml", "CHANGELOG.md", "NOTES.md"],
     );
 
-    // Verify per-file-ignores works with the correctly resolved project_root
     assert!(
-        config.per_file_ignores.contains_key("CHANGELOG.md"),
-        "per_file_ignores should contain CHANGELOG.md"
+        reports(&stdout, "NOTES.md", "MD024"),
+        "MD024 must fire on the file the pattern does not cover. stdout={stdout}"
     );
-
-    // Test pattern matching works (this failed with empty project_root)
-    let ignored_rules = config.get_ignored_rules_for_file(&changelog_path);
     assert!(
-        ignored_rules.contains("MD024"),
-        "MD024 should be ignored for CHANGELOG.md, but ignored_rules = {ignored_rules:?}"
+        !reports(&stdout, "CHANGELOG.md", "MD024"),
+        "MD024 must be ignored for CHANGELOG.md. stdout={stdout}"
     );
 }
 
-/// Test the edge case where relative path parent is empty string
-/// This directly tests the scenario that caused issue #246
+/// The same resolution with a single-component config directory, where the
+/// parent of the relative path is one bare name: walking up from it used to run
+/// out at the empty path instead of reaching the project root.
 #[test]
-#[serial]
 fn test_relative_path_with_single_component() {
     let temp_dir = tempdir().unwrap();
 
     // Create config directly in a subdirectory (simulating ".config" as the parent)
     let config_dir = temp_dir.path().join("configs");
     fs::create_dir(&config_dir).unwrap();
-    let config_path = config_dir.join("lint.toml");
-    let config_content = r#"
+    fs::write(
+        config_dir.join("lint.toml"),
+        r#"
 [per-file-ignores]
 "docs/*.md" = ["MD013"]
-"#;
-    fs::write(&config_path, config_content).unwrap();
+"#,
+    )
+    .unwrap();
 
     // Create .git in temp_dir
     fs::create_dir(temp_dir.path().join(".git")).unwrap();
 
-    // Create a docs directory with a markdown file
+    // Both files have an over-long line; only the one under docs/ is covered by
+    // the pattern. The duplicate heading is a control: it proves the covered
+    // file was linted rather than skipped.
+    let long_line = "This paragraph is deliberately far longer than the eighty character default so MD013 reports it.";
     let docs_dir = temp_dir.path().join("docs");
     fs::create_dir(&docs_dir).unwrap();
-    let readme_path = docs_dir.join("README.md");
-    fs::write(&readme_path, "# Docs\n").unwrap();
+    fs::write(
+        docs_dir.join("README.md"),
+        format!("# Docs\n\n{long_line}\n\n## Notes\n\ntext\n\n## Notes\n\ntext\n"),
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join("TOPLEVEL.md"),
+        format!("# Top level\n\n{long_line}\n"),
+    )
+    .unwrap();
 
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(temp_dir.path()).unwrap();
-
-    // Load with relative path "configs/lint.toml"
-    // Before the fix: Path::new("configs/lint.toml").parent() = "configs"
-    // find_project_root_from("configs") would traverse: "configs" -> "" -> panic/wrong behavior
-    let load_result = rumdl_lib::config::SourcedConfig::load(Some("configs/lint.toml"), None);
-
-    std::env::set_current_dir(&original_dir).unwrap();
-
-    let sourced = load_result.expect("Should load config");
-    let config: Config = sourced.into_validated_unchecked().into();
-
-    // The critical assertion: project_root should be valid, not empty
-    let project_root = config.project_root.as_ref().expect("project_root should be set");
-    assert!(
-        !project_root.as_os_str().is_empty(),
-        "project_root must not be empty string"
+    let stdout = run_check(
+        temp_dir.path(),
+        &["--config", "configs/lint.toml", "docs/README.md", "TOPLEVEL.md"],
     );
 
-    // Glob pattern matching should work
-    let ignored = config.get_ignored_rules_for_file(&readme_path);
     assert!(
-        ignored.contains("MD013"),
-        "MD013 should be ignored for docs/README.md via glob pattern"
+        reports(&stdout, "TOPLEVEL.md", "MD013"),
+        "MD013 must fire on the file the pattern does not cover. stdout={stdout}"
+    );
+    assert!(
+        reports(&stdout, "docs/README.md", "MD024"),
+        "the covered file must still be linted. stdout={stdout}"
+    );
+    assert!(
+        !reports(&stdout, "docs/README.md", "MD013"),
+        "MD013 must be ignored for docs/README.md via the glob pattern. stdout={stdout}"
     );
 }

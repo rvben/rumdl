@@ -3,7 +3,6 @@ use rumdl_lib::config::DiscoveredConfigError;
 use rumdl_lib::config::RuleRegistry;
 use rumdl_lib::config::SourcedConfig;
 use rumdl_lib::rules::*;
-use serial_test::serial;
 use std::collections::HashSet;
 use std::fs;
 use tempfile::tempdir; // For temporary directory
@@ -905,17 +904,17 @@ line-length:
     #[test]
     fn test_auto_discovery_vs_explicit_config() {
         let temp_dir = tempdir().unwrap();
-        let original_dir = std::env::current_dir().unwrap();
-
-        // Change to temp directory for auto-discovery test
-        std::env::set_current_dir(&temp_dir).unwrap();
+        let project_dir = temp_dir.path().join("project");
+        fs::create_dir(&project_dir).unwrap();
+        let empty_user_config_dir = temp_dir.path().join("no-user-config");
 
         // Create a .markdownlint.json file for auto-discovery
         let auto_config_content = r#"{ "MD004": { "style": "asterisk" } }"#;
-        fs::write(".markdownlint.json", auto_config_content).unwrap();
+        fs::write(project_dir.join(".markdownlint.json"), auto_config_content).unwrap();
 
         // Test auto-discovery (should find .markdownlint.json)
-        let auto_result = SourcedConfig::load_with_discovery(None, None, false);
+        let auto_result =
+            SourcedConfig::load_for_workspace(&project_dir, None, Some(&empty_user_config_dir), Some(temp_dir.path()));
         assert!(auto_result.is_ok(), "Auto-discovery should find .markdownlint.json");
 
         let auto_config: rumdl_lib::config::Config = auto_result.unwrap().into_validated_unchecked().into();
@@ -928,7 +927,12 @@ line-length:
         fs::write(&explicit_path, explicit_config_content).unwrap();
 
         // Test explicit config (should override auto-discovery)
-        let explicit_result = SourcedConfig::load_with_discovery(Some(explicit_path.to_str().unwrap()), None, false);
+        let explicit_result = SourcedConfig::load_for_workspace(
+            &project_dir,
+            Some(explicit_path.to_str().unwrap()),
+            Some(&empty_user_config_dir),
+            Some(temp_dir.path()),
+        );
         assert!(explicit_result.is_ok(), "Explicit config should load successfully");
 
         let explicit_config: rumdl_lib::config::Config = explicit_result.unwrap().into_validated_unchecked().into();
@@ -942,19 +946,11 @@ line-length:
         let skip_config: rumdl_lib::config::Config = skip_result.unwrap().into_validated_unchecked().into();
         let skip_style = rumdl_lib::config::get_rule_config_value::<String>(&skip_config, "MD004", "style");
         assert_eq!(skip_style, None, "Skip auto-discovery should not load any config");
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).unwrap();
     }
 }
 
 #[test]
-#[serial(cwd)]
 fn test_user_configuration_discovery() {
-    use std::env;
-
-    let original_dir = env::current_dir().unwrap();
-
     // Create temporary directories
     let temp_dir = tempdir().unwrap();
     let project_dir = temp_dir.path().join("project");
@@ -976,14 +972,16 @@ indent = 4
 "#;
     fs::write(&user_config_path, user_config_content).unwrap();
 
-    // Change to project directory (which has no config)
-    env::set_current_dir(&project_dir).unwrap();
-
-    // Test that user config is loaded when no project config exists
-    // Pass the config_dir directly instead of setting XDG_CONFIG_HOME
-    let sourced =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
-            .expect("Should load user config");
+    // Resolve as if the CLI had run in the project directory, which has no config.
+    // The user config directory is passed directly instead of setting XDG_CONFIG_HOME,
+    // and the home boundary keeps the upward walk inside the fixture.
+    let sourced = rumdl_lib::config::SourcedConfig::load_for_workspace(
+        &project_dir,
+        None,
+        Some(&config_dir),
+        Some(temp_dir.path()),
+    )
+    .expect("Should load user config");
 
     let config: Config = sourced.into_validated_unchecked().into();
 
@@ -1015,9 +1013,13 @@ indent = 2
     fs::write(&project_config_path, project_config_content).unwrap();
 
     // Test that project config takes precedence over user config
-    let sourced_with_project =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
-            .expect("Should load project config");
+    let sourced_with_project = rumdl_lib::config::SourcedConfig::load_for_workspace(
+        &project_dir,
+        None,
+        Some(&config_dir),
+        Some(temp_dir.path()),
+    )
+    .expect("Should load project config");
 
     let config_with_project: Config = sourced_with_project.into_validated_unchecked().into();
 
@@ -1033,18 +1035,10 @@ indent = 2
         Some(2),
         "Project MD007 config should override user config"
     );
-
-    // Restore original environment
-    env::set_current_dir(original_dir).unwrap();
 }
 
 #[test]
-#[serial(cwd)]
 fn test_user_configuration_file_precedence() {
-    use std::env;
-
-    let original_dir = env::current_dir().unwrap();
-
     // Create temporary directories
     let temp_dir = tempdir().unwrap();
     let project_dir = temp_dir.path().join("project");
@@ -1082,13 +1076,15 @@ line-length = 99"#,
     )
     .unwrap();
 
-    // Change to project directory (which has no config)
-    env::set_current_dir(&project_dir).unwrap();
-
+    // Resolve as if the CLI had run in the project directory, which has no config.
     // Test that .rumdl.toml is loaded first - pass config_dir directly
-    let sourced =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
-            .expect("Should load user config");
+    let sourced = rumdl_lib::config::SourcedConfig::load_for_workspace(
+        &project_dir,
+        None,
+        Some(&config_dir),
+        Some(temp_dir.path()),
+    )
+    .expect("Should load user config");
 
     let config: Config = sourced.into_validated_unchecked().into();
     assert_eq!(
@@ -1100,9 +1096,13 @@ line-length = 99"#,
     // Remove .rumdl.toml and test again
     fs::remove_file(&dot_rumdl_path).unwrap();
 
-    let sourced2 =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
-            .expect("Should load user config");
+    let sourced2 = rumdl_lib::config::SourcedConfig::load_for_workspace(
+        &project_dir,
+        None,
+        Some(&config_dir),
+        Some(temp_dir.path()),
+    )
+    .expect("Should load user config");
 
     let config2: Config = sourced2.into_validated_unchecked().into();
     assert_eq!(
@@ -1114,9 +1114,13 @@ line-length = 99"#,
     // Remove rumdl.toml and test again
     fs::remove_file(&rumdl_path).unwrap();
 
-    let sourced3 =
-        rumdl_lib::config::SourcedConfig::load_with_discovery_impl(None, None, false, Some(&config_dir), None)
-            .expect("Should load user config");
+    let sourced3 = rumdl_lib::config::SourcedConfig::load_for_workspace(
+        &project_dir,
+        None,
+        Some(&config_dir),
+        Some(temp_dir.path()),
+    )
+    .expect("Should load user config");
 
     let config3: Config = sourced3.into_validated_unchecked().into();
     assert_eq!(
@@ -1124,9 +1128,6 @@ line-length = 99"#,
         99,
         "pyproject.toml should be loaded when other configs are absent"
     );
-
-    // Restore original environment
-    env::set_current_dir(original_dir).unwrap();
 }
 
 #[test]
@@ -1351,15 +1352,14 @@ mod project_root_tests {
         fs::create_dir_all(temp_path.join("docs/deep/nested")).expect("Failed to create nested dirs");
         fs::write(temp_path.join("docs/deep/nested/test.md"), "# Test").expect("Failed to write test.md");
 
-        // Change to nested directory and load config with auto-discovery
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_path.join("docs/deep/nested")).expect("Failed to change dir");
-
-        let sourced =
-            rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should discover config");
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+        // Resolve as if the CLI had run in the nested directory
+        let sourced = rumdl_lib::config::SourcedConfig::load_for_workspace(
+            &temp_path.join("docs/deep/nested"),
+            None,
+            None,
+            temp_path.parent(),
+        )
+        .expect("Should discover config");
 
         // Project root should be temp_path (where .git is), even when running from nested dir
         assert!(
@@ -1431,15 +1431,9 @@ line-length = 42
         )
         .expect("Failed to write config");
 
-        // Change to the temp directory and test auto-discovery
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_path).expect("Failed to change dir");
-
-        let sourced = rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false)
+        // Resolve as if the CLI had run in the temp directory
+        let sourced = rumdl_lib::config::SourcedConfig::load_for_workspace(temp_path, None, None, temp_path.parent())
             .expect("Should discover .config/rumdl.toml");
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
 
         let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
         assert_eq!(
@@ -1476,15 +1470,9 @@ line-length = 42
         )
         .expect("Failed to write .config config");
 
-        // Change to the temp directory and test auto-discovery
-        let original_dir = std::env::current_dir().expect("Failed to get current dir");
-        std::env::set_current_dir(temp_path).expect("Failed to change dir");
-
-        let sourced =
-            rumdl_lib::config::SourcedConfig::load_with_discovery(None, None, false).expect("Should discover config");
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("Failed to restore dir");
+        // Resolve as if the CLI had run in the temp directory
+        let sourced = rumdl_lib::config::SourcedConfig::load_for_workspace(temp_path, None, None, temp_path.parent())
+            .expect("Should discover config");
 
         let config: rumdl_lib::config::Config = sourced.into_validated_unchecked().into();
         assert_eq!(
@@ -3672,7 +3660,6 @@ fn discovered_rumdl_config_is_unaffected_by_a_broken_user_config() {
 /// The CLI treats the same broken user config as fatal rather than falling back to
 /// defaults, which is the behavior the LSP's `UserConfig` arm mirrors.
 #[test]
-#[serial(cwd)]
 fn cli_discovery_fails_on_a_broken_user_config_under_a_markdownlint_config() {
     let (temp_dir, user_config_dir, project_dir) = discovered_config_fixture();
     fs::write(
@@ -3688,11 +3675,7 @@ fn cli_discovery_fails_on_a_broken_user_config_under_a_markdownlint_config() {
     )
     .unwrap();
 
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&project_dir).unwrap();
-    let result =
-        SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(temp_dir.path()));
-    std::env::set_current_dir(original_dir).unwrap();
+    let result = SourcedConfig::load_for_workspace(&project_dir, None, Some(&user_config_dir), Some(temp_dir.path()));
 
     assert!(
         result.is_err(),

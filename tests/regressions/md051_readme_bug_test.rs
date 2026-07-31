@@ -6,8 +6,10 @@ use std::fs;
 
 #[test]
 fn test_md051_readme_headings() {
-    // Read the actual README
-    let content = fs::read_to_string("README.md").expect("Failed to read README.md");
+    // Read the actual README, anchored to the crate rather than to the working
+    // directory, which the test binary shares with every other test
+    let readme = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
+    let content = fs::read_to_string(&readme).expect("Failed to read README.md");
 
     let config = Config::default();
     let all_rules = rules::all_rules(&config);
