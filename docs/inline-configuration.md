@@ -217,7 +217,7 @@ Continue with regular Markdown content.
 ## Important Notes
 
 1. **Comment Placement**: Comments must be on their own line (except for `disable-line`)
-2. **Code Blocks**: Comments inside code blocks are ignored and won't affect configuration
+2. **Code Blocks**: Comments inside code blocks are ignored and won't affect configuration, whether the block is fenced or indented
 3. **Case Insensitive**: Rule names are case-insensitive (MD013, md013, Md013 all work)
 4. **Specificity**: More specific configurations override general ones
 5. **Compatibility**: Both `rumdl` (primary) and `markdownlint` (for compatibility) prefixes work identically
