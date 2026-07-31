@@ -333,6 +333,101 @@ fn violations_without_config_problem_exit_one() {
     );
 }
 
+/// Build a project whose subdirectory carries its own config, and return the
+/// directory to run in. `subdir_config` is written verbatim, so a caller can make
+/// it unparseable.
+fn project_with_subdir_config(subdir_config: &str) -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    // Bound config discovery here, so nothing above the temp directory is read.
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    std::fs::write(dir.path().join(".rumdl.toml"), "[MD013]\nline-length = 200\n").unwrap();
+    std::fs::write(dir.path().join("sub/.rumdl.toml"), subdir_config).unwrap();
+    std::fs::write(dir.path().join("sub/doc.md"), "# Title\n\nText.\n").unwrap();
+    dir
+}
+
+/// An unparseable TOML table header, so the subdirectory config cannot load.
+const BROKEN_SUBDIR_CONFIG: &str = "[MD013\nline-length = 100\n";
+
+/// A subdirectory config that fails to load is a config problem: its files get
+/// linted under the root config instead of the settings their author wrote. The
+/// flag has to fail the run on it, the way it does for every other config problem.
+#[test]
+fn deny_config_warnings_flags_unloadable_subdirectory_config() {
+    let dir = project_with_subdir_config(BROKEN_SUBDIR_CONFIG);
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "."])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(TOOL_ERROR),
+        "a subdirectory config that could not be loaded must exit 2 under the flag"
+    );
+}
+
+/// Without the flag the same run stays non-fatal, and says on stderr which config
+/// it could not load.
+#[test]
+fn unloadable_subdirectory_config_is_non_fatal_by_default() {
+    let dir = project_with_subdir_config(BROKEN_SUBDIR_CONFIG);
+
+    let output = rumdl()
+        .args(["check", "--no-cache", "."])
+        .current_dir(dir.path())
+        .output()
+        .expect("run rumdl check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "an unloadable subdirectory config must not affect the exit code by default. stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Failed to load config"),
+        "the run must still report which config it could not load, got: {stderr}"
+    );
+}
+
+/// --silent suppresses the notice; the flag still fails the run on it.
+#[test]
+fn unloadable_subdirectory_config_counts_while_silenced() {
+    let dir = project_with_subdir_config(BROKEN_SUBDIR_CONFIG);
+
+    let output = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "--silent", "."])
+        .current_dir(dir.path())
+        .output()
+        .expect("run rumdl check");
+    assert_eq!(output.status.code(), Some(TOOL_ERROR));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).is_empty(),
+        "--silent must suppress the printed warning even while the flag makes it fatal. stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The same arrangement with a subdirectory config that loads exits 0, so the
+/// test above cannot pass for merely having a subdirectory config.
+#[test]
+fn loadable_subdirectory_config_exits_zero() {
+    let dir = project_with_subdir_config("[MD013]\nline-length = 100\n");
+
+    let status = rumdl()
+        .args(["check", "--no-cache", "--deny-config-warnings", "."])
+        .current_dir(dir.path())
+        .status()
+        .expect("run rumdl check");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a subdirectory config that loads is not a config problem"
+    );
+}
+
 /// `fmt` shares config loading and the flag; it also exits 2 on a config problem.
 #[test]
 fn deny_config_warnings_applies_to_fmt() {

@@ -192,10 +192,11 @@ These options are commonly used with `check` and `fmt`:
 !!! note "Failing on configuration problems"
     Configuration problems (an unknown rule or option in a config file or a CLI
     flag, an unknown rule in an inline `rumdl-disable-line` comment, a shadowed
-    config file, an `.editorconfig` property rumdl cannot apply, or a run in
-    which every Markdown file found was filtered out) are non-fatal warnings by
-    default and do not affect the exit code. Pass `--deny-config-warnings` to
-    make any of them exit with code `2`, so CI catches a typo'd rule name. This
+    config file, a subdirectory config that could not be loaded, an
+    `.editorconfig` property rumdl cannot apply, or a run in which every Markdown
+    file found was filtered out) are non-fatal warnings by default and do not
+    affect the exit code. Pass `--deny-config-warnings` to make any of them exit
+    with code `2`, so CI catches a typo'd rule name. This
     is distinct from `--fail-on`, which governs the severity of Markdown
     violations (exit `1`); a config problem exits `2` and takes precedence over
     Markdown violations.

@@ -174,12 +174,18 @@ pub fn resolve_config_groups(
                         grouping.push_groups(&sourced, subdir_config, files, args, cache);
                     }
                     Err(e) => {
-                        // Config validation error in subdirectory: fall back to root config
-                        eprintln!(
-                            "\x1b[33m[config warning]\x1b[0m Failed to load config {}: {}. Using root config for affected files.",
-                            path.display(),
-                            e
-                        );
+                        // A subdirectory config that cannot be loaded is a configuration
+                        // problem, so it counts whether or not it is printed: the files it
+                        // governs are linted under settings their author did not write.
+                        // Suppressed by --silent like every other config warning.
+                        grouping.config_warning = true;
+                        if !args.silent {
+                            eprintln!(
+                                "\x1b[33m[config warning]\x1b[0m Failed to load config {}: {}. Using root config for affected files.",
+                                path.display(),
+                                e
+                            );
+                        }
 
                         grouping.push_groups(root.sourced, root.config.clone(), files, args, cache);
                     }
@@ -195,9 +201,9 @@ pub fn resolve_config_groups(
 /// configuration problem.
 pub struct ResolvedGroups {
     pub groups: Vec<ConfigGroup>,
-    /// Set when an `.editorconfig` property was read but could not be applied.
-    /// Reported like rumdl's own config warnings, and counted the same way by
-    /// `--deny-config-warnings`.
+    /// Set when a subdirectory config failed to load, or an `.editorconfig`
+    /// property was read but could not be applied. Reported like rumdl's own
+    /// config warnings, and counted the same way by `--deny-config-warnings`.
     pub config_warning: bool,
 }
 
@@ -208,6 +214,8 @@ struct Grouping {
     /// The `.editorconfig` messages already printed, so one covering many files
     /// is reported once for the run rather than once per group.
     reported: BTreeSet<String>,
+    /// Whether resolving the groups turned up a configuration problem, which
+    /// `--deny-config-warnings` fails the run on.
     config_warning: bool,
 }
 

@@ -207,7 +207,7 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     );
     let crate::resolution::ResolvedGroups {
         groups: config_groups,
-        config_warning: editorconfig_warning,
+        config_warning: resolution_config_warning,
     } = resolved;
 
     // A subdirectory config can opt in on its own, so the answer is only known
@@ -300,10 +300,10 @@ pub fn perform_check_run(ctx: &CheckRunContext<'_>) -> CheckRunOutcome {
     let mut had_tool_error = false;
 
     // Set when any processed file had an inline disable comment naming an unknown
-    // rule, or when config resolution read an `.editorconfig` property it could
-    // not apply. OR-aggregated across files and reported so run_check can honor
-    // --deny-config-warnings.
-    let mut config_warning = editorconfig_warning;
+    // rule, or when config resolution failed to load a subdirectory config or read
+    // an `.editorconfig` property it could not apply. OR-aggregated across files
+    // and reported so run_check can honor --deny-config-warnings.
+    let mut config_warning = resolution_config_warning;
 
     let (
         mut has_issues,
