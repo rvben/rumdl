@@ -7,8 +7,8 @@
 
 use tower_lsp::lsp_types::{DocumentSymbol, Location, Position, Range, SymbolInformation, SymbolKind, Url};
 
-use super::completion::byte_to_utf16_offset;
 use super::navigation::heading_text_byte_range;
+use super::position::{byte_to_utf16_offset, utf16_len};
 use crate::lint_context::LintContext;
 use crate::workspace_index::{HeadingIndex, WorkspaceIndex};
 
@@ -47,11 +47,7 @@ pub(super) struct HeadingSymbol {
 /// Positions are converted to UTF-16 for LSP.
 pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
     let line_texts: Vec<&str> = ctx.lines.iter().map(|li| li.content(ctx.content)).collect();
-    let utf16_len = |line: u32| -> u32 {
-        line_texts
-            .get(line as usize)
-            .map_or(0, |t| byte_to_utf16_offset(t, t.len()))
-    };
+    let end_of_line = |line: u32| -> u32 { line_texts.get(line as usize).copied().map_or(0, utf16_len) };
 
     // First pass: one entry per heading, with its UTF-16 name range.
     let mut headings: Vec<HeadingSymbol> = Vec::new();
@@ -95,7 +91,7 @@ pub(super) fn extract_heading_symbols(ctx: &LintContext) -> Vec<HeadingSymbol> {
             .map_or(last_line, |h| h.line.saturating_sub(1))
             .max(headings[i].line);
         headings[i].section_end_line = end_line;
-        headings[i].section_end_char = utf16_len(end_line);
+        headings[i].section_end_char = end_of_line(end_line);
     }
 
     headings

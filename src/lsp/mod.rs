@@ -11,6 +11,7 @@ mod configuration;
 pub mod index_worker;
 mod linting;
 mod navigation;
+mod position;
 pub mod server;
 mod symbols;
 pub mod types;
@@ -70,7 +71,7 @@ mod tests {
             // These should compile without errors
             let _server_type: RumdlLanguageServer;
             let _config_type: RumdlLspConfig;
-            let _func1: fn(&crate::rule::LintWarning) -> tower_lsp::lsp_types::Diagnostic = warning_to_diagnostic;
+            let _func1: fn(&crate::rule::LintWarning, &str) -> tower_lsp::lsp_types::Diagnostic = warning_to_diagnostic;
             let _func2: fn(
                 &crate::rule::LintWarning,
                 &tower_lsp::lsp_types::Url,

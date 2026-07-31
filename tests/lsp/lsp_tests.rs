@@ -63,7 +63,7 @@ fn test_warning_to_diagnostic_conversion() {
         rule_name: Some("MD001".to_string()),
     };
 
-    let diagnostic = warning_to_diagnostic(&warning);
+    let diagnostic = warning_to_diagnostic(&warning, "one\ntwo\nthree\nfour\nfive: a longer line\n");
 
     // Check basic properties
     assert_eq!(diagnostic.message, "Test warning message");
@@ -98,7 +98,7 @@ fn test_warning_to_diagnostic_error_severity() {
         rule_name: Some("MD999".to_string()),
     };
 
-    let diagnostic = warning_to_diagnostic(&warning);
+    let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
 }
 
@@ -640,7 +640,7 @@ mod edge_cases {
             rule_name: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
         assert_eq!(diagnostic.code, None);
     }
 
@@ -658,7 +658,7 @@ mod edge_cases {
             rule_name: Some("MD001".to_string()),
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
         // Should handle edge case gracefully
         assert_eq!(diagnostic.range.start.line, 0);
         assert_eq!(diagnostic.range.start.character, 0);

@@ -13,7 +13,7 @@ use crate::rule::FixCapability;
 use crate::rules;
 
 use super::server::RumdlLanguageServer;
-use super::types::{IndexState, warning_to_code_actions_with_md013_config, warning_to_diagnostic};
+use super::types::{IndexState, warning_to_code_actions_with_md013_config, warnings_to_diagnostics};
 use crate::rules::md013_line_length::MD013Config;
 
 impl RumdlLanguageServer {
@@ -219,8 +219,7 @@ impl RumdlLanguageServer {
             }
         }
 
-        let diagnostics = all_warnings.iter().map(warning_to_diagnostic).collect();
-        Ok(diagnostics)
+        Ok(warnings_to_diagnostics(&all_warnings, text))
     }
 
     /// Update diagnostics for a document
@@ -320,19 +319,7 @@ impl RumdlLanguageServer {
 
     /// Get the end position of a document
     pub(super) fn get_end_position(&self, text: &str) -> Position {
-        let mut line = 0u32;
-        let mut character = 0u32;
-
-        for ch in text.chars() {
-            if ch == '\n' {
-                line += 1;
-                character = 0;
-            } else {
-                character += 1;
-            }
-        }
-
-        Position { line, character }
+        super::position::end_of_text(text)
     }
 
     /// Apply LSP FormattingOptions to content
@@ -483,17 +470,7 @@ impl RumdlLanguageServer {
                     if let Ok(fixed_content) = crate::utils::fix_utils::apply_warning_fixes(text, &fixable_warnings)
                         && fixed_content != text
                     {
-                        // Calculate proper end position
-                        let mut line = 0u32;
-                        let mut character = 0u32;
-                        for ch in text.chars() {
-                            if ch == '\n' {
-                                line += 1;
-                                character = 0;
-                            } else {
-                                character += 1;
-                            }
-                        }
+                        let document_end = self.get_end_position(text);
 
                         let fix_all_action = CodeAction {
                             title: format!("Fix all rumdl issues ({total_fixable} fixable)"),
@@ -506,7 +483,7 @@ impl RumdlLanguageServer {
                                         vec![TextEdit {
                                             range: Range {
                                                 start: Position { line: 0, character: 0 },
-                                                end: Position { line, character },
+                                                end: document_end,
                                             },
                                             new_text: fixed_content,
                                         }],

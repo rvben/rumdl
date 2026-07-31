@@ -353,7 +353,7 @@ async fn test_warning_conversion() {
     };
 
     // Test diagnostic conversion
-    let diagnostic = warning_to_diagnostic(&warning);
+    let diagnostic = warning_to_diagnostic(&warning, "Test content");
     assert_eq!(diagnostic.message, "Test warning");
     assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::WARNING));
     assert_eq!(diagnostic.code, Some(NumberOrString::String("MD001".to_string())));

@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 
 use tower_lsp::lsp_types::*;
 
-use super::completion::{byte_to_utf16_offset, normalize_path, utf16_to_byte_offset};
+use super::completion::normalize_path;
+use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 use crate::utils::anchor_styles::AnchorStyle;
 use crate::workspace_index::PROTOCOL_DOMAIN_REGEX;

@@ -3,6 +3,7 @@
 //! This module contains LSP-specific types and utilities for rumdl,
 //! following the Language Server Protocol specification.
 
+use super::position::{byte_range_to_lsp_range, char_column_to_utf16, utf16_len};
 use crate::rules::md013_line_length::MD013Config;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -141,17 +142,37 @@ impl Default for RumdlLspConfig {
     }
 }
 
-/// Convert rumdl warnings to LSP diagnostics
-pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
+/// Convert rumdl warnings to LSP diagnostics.
+///
+/// The document text is needed to place the columns: a warning column counts
+/// characters and an LSP position counts UTF-16 code units.
+pub fn warnings_to_diagnostics(warnings: &[crate::rule::LintWarning], document_text: &str) -> Vec<Diagnostic> {
+    let lines: Vec<&str> = document_text.lines().collect();
+    warnings.iter().map(|warning| diagnostic_in(warning, &lines)).collect()
+}
+
+/// Convert a single rumdl warning to an LSP diagnostic.
+///
+/// [`warnings_to_diagnostics`] splits the document once for a whole batch;
+/// prefer it when converting more than one warning.
+pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning, document_text: &str) -> Diagnostic {
+    let lines: Vec<&str> = document_text.lines().collect();
+    diagnostic_in(warning, &lines)
+}
+
+fn diagnostic_in(warning: &crate::rule::LintWarning, lines: &[&str]) -> Diagnostic {
+    let start_line = warning.line.saturating_sub(1);
+    let end_line = warning.end_line.saturating_sub(1);
+
     let start_position = Position {
-        line: (warning.line.saturating_sub(1)) as u32,
-        character: (warning.column.saturating_sub(1)) as u32,
+        line: start_line as u32,
+        character: char_column_to_utf16(lines.get(start_line).copied(), warning.column),
     };
 
     // Use proper range from warning
     let end_position = Position {
-        line: (warning.end_line.saturating_sub(1)) as u32,
-        character: (warning.end_column.saturating_sub(1)) as u32,
+        line: end_line as u32,
+        character: char_column_to_utf16(lines.get(end_line).copied(), warning.end_column),
     };
 
     let severity = match warning.severity {
@@ -188,64 +209,6 @@ pub fn warning_to_diagnostic(warning: &crate::rule::LintWarning) -> Diagnostic {
         tags: None,
         code_description,
         data: None,
-    }
-}
-
-/// Convert a byte range into an LSP `Range`.
-///
-/// LSP positions are measured in *UTF-16 code units* by default (LSP 3.17
-/// `PositionEncodingKind::UTF16`), and rumdl does not negotiate an
-/// alternative encoding at initialize time. Each non-BMP codepoint
-/// (emoji, supplementary CJK, etc.) is therefore two units, not one.
-/// Use `char::len_utf16()` rather than incrementing by 1 per `char`.
-fn byte_range_to_lsp_range(text: &str, byte_range: std::ops::Range<usize>) -> Option<Range> {
-    let mut line = 0u32;
-    let mut character = 0u32;
-    let mut byte_pos = 0;
-
-    let mut start_pos = None;
-    let mut end_pos = None;
-
-    for ch in text.chars() {
-        if byte_pos == byte_range.start {
-            start_pos = Some(Position { line, character });
-        }
-        if byte_pos == byte_range.end {
-            end_pos = Some(Position { line, character });
-            break;
-        }
-
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += ch.len_utf16() as u32;
-        }
-
-        byte_pos += ch.len_utf8();
-    }
-
-    // Handle positions at or beyond EOF
-    // This is crucial for fixes that delete trailing content (like MD012 EOF blanks)
-    if start_pos.is_none() && byte_pos >= byte_range.start {
-        start_pos = Some(Position { line, character });
-    }
-    if end_pos.is_none() && byte_pos >= byte_range.end {
-        end_pos = Some(Position { line, character });
-    }
-
-    match (start_pos, end_pos) {
-        (Some(start), Some(end)) => Some(Range { start, end }),
-        _ => {
-            // If we still don't have valid positions, log for debugging
-            // This shouldn't happen with proper fix ranges
-            log::warn!(
-                "Failed to convert byte range {:?} to LSP range for text of length {}",
-                byte_range,
-                text.len()
-            );
-            None
-        }
     }
 }
 
@@ -329,7 +292,7 @@ fn create_fix_action(warning: &crate::rule::LintWarning, uri: &Url, document_tex
         Some(CodeAction {
             title: format!("Fix: {}", warning.message),
             kind: Some(CodeActionKind::QUICKFIX),
-            diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+            diagnostics: Some(vec![warning_to_diagnostic(warning, document_text)]),
             edit: Some(workspace_edit),
             command: None,
             is_preferred: Some(true),
@@ -385,7 +348,7 @@ fn create_reflow_action(
     Some(CodeAction {
         title: "Reflow paragraph".to_string(),
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        diagnostics: Some(vec![warning_to_diagnostic(warning, document_text)]),
         edit: Some(workspace_edit),
         command: None,
         is_preferred: Some(false), // Not preferred - manual action only
@@ -446,7 +409,7 @@ fn create_convert_to_link_action(
     Some(CodeAction {
         title: "Convert to markdown link".to_string(),
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        diagnostics: Some(vec![warning_to_diagnostic(warning, document_text)]),
         edit: Some(workspace_edit),
         command: None,
         is_preferred: Some(false), // Not preferred - user explicitly chooses this
@@ -498,7 +461,7 @@ fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, docu
     // Calculate position at end of line
     let line_end = Position {
         line: warning_line as u32,
-        character: line_content.len() as u32,
+        character: utf16_len(line_content),
     };
 
     // Use rumdl-disable-line syntax
@@ -518,7 +481,7 @@ fn create_ignore_line_action(warning: &crate::rule::LintWarning, uri: &Url, docu
     Some(CodeAction {
         title: format!("Ignore {rule_id} for this line"),
         kind: Some(CodeActionKind::QUICKFIX),
-        diagnostics: Some(vec![warning_to_diagnostic(warning)]),
+        diagnostics: Some(vec![warning_to_diagnostic(warning, document_text)]),
         edit: Some(WorkspaceEdit {
             changes: Some(changes),
             document_changes: None,
@@ -599,7 +562,7 @@ mod tests {
             fix: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "one\ntwo\nthree\nfour\nfive: a longer line\n");
 
         assert_eq!(diagnostic.range.start.line, 4); // 0-indexed
         assert_eq!(diagnostic.range.start.character, 9); // 0-indexed
@@ -624,7 +587,7 @@ mod tests {
             fix: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
         assert_eq!(diagnostic.severity, Some(DiagnosticSeverity::ERROR));
     }
 
@@ -641,7 +604,7 @@ mod tests {
             fix: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
         assert_eq!(diagnostic.code, None);
         assert!(diagnostic.code_description.is_none());
     }
@@ -660,110 +623,75 @@ mod tests {
             fix: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "a line of text\n");
         assert_eq!(diagnostic.range.start.line, 0);
         assert_eq!(diagnostic.range.start.character, 0);
     }
 
     #[test]
-    fn test_byte_range_to_lsp_range_simple() {
-        let text = "Hello\nWorld";
-        let range = byte_range_to_lsp_range(text, 0..5).unwrap();
+    fn a_diagnostic_column_after_a_non_bmp_codepoint_counts_both_code_units() {
+        // U+1F389 PARTY POPPER is one character to the linter and two UTF-16
+        // code units to the client, so the word behind it sits one position
+        // further right than its column.
+        let text = "🎉 badword here\n";
+        let warning = LintWarning {
+            line: 1,
+            column: 3,
+            end_line: 1,
+            end_column: 10,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
 
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 5);
+        let diagnostic = warning_to_diagnostic(&warning, text);
+        assert_eq!(diagnostic.range.start.character, 3);
+        assert_eq!(diagnostic.range.end.character, 10);
     }
 
     #[test]
-    fn test_byte_range_to_lsp_range_multiline() {
-        let text = "Hello\nWorld\nTest";
-        let range = byte_range_to_lsp_range(text, 6..11).unwrap(); // "World"
+    fn a_batch_of_diagnostics_places_each_column_on_its_own_line() {
+        let text = "🎉 first\nplain second\n";
+        let warning_of = |line: usize, column: usize| LintWarning {
+            line,
+            column,
+            end_line: line,
+            end_column: column + 1,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
 
-        assert_eq!(range.start.line, 1);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 1);
-        assert_eq!(range.end.character, 5);
+        let diagnostics = warnings_to_diagnostics(&[warning_of(1, 3), warning_of(2, 3)], text);
+        assert_eq!(diagnostics[0].range.start.character, 3);
+        assert_eq!(diagnostics[1].range.start.character, 2);
     }
 
     #[test]
-    fn test_byte_range_to_lsp_range_unicode() {
-        let text = "Hello 世界\nTest";
-        // "世界" starts at byte 6 and each character is 3 bytes
-        let range = byte_range_to_lsp_range(text, 6..12).unwrap();
+    fn an_ignore_line_action_appends_after_the_last_code_unit_of_the_line() {
+        let text = "🎉 needs an ignore\n";
+        let warning = LintWarning {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 2,
+            rule_name: Some("MD001".to_string()),
+            message: "Test".to_string(),
+            severity: Severity::Warning,
+            fix: None,
+        };
 
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 6);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 8); // 2 unicode characters
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_non_bmp_counts_as_surrogate_pair() {
-        // Non-BMP codepoints (emoji, supplementary planes) are two UTF-16
-        // code units. LSP positions are measured in UTF-16 by default, so the
-        // range covering text *after* such a codepoint must reflect both
-        // surrogates — counting it as one "character" would shift every
-        // subsequent edit position by one.
-        //
-        // "🎉" is U+1F389, a non-BMP codepoint encoded as 4 UTF-8 bytes and
-        // 2 UTF-16 code units (a surrogate pair).
-        let text = "a🎉b"; // bytes: 'a'(1) + 🎉(4) + 'b'(1) = 6 bytes total
-        // Range covering only 'b' starts at byte 5.
-        let range = byte_range_to_lsp_range(text, 5..6).unwrap();
-        assert_eq!(range.start.line, 0);
-        // 'a' = 1 UTF-16 unit, '🎉' = 2 UTF-16 units → 'b' is at character 3
-        assert_eq!(range.start.character, 3);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 4);
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_eof() {
-        let text = "Hello";
-        let range = byte_range_to_lsp_range(text, 0..5).unwrap();
-
-        assert_eq!(range.start.line, 0);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 0);
-        assert_eq!(range.end.character, 5);
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_invalid() {
-        let text = "Hello";
-        // Out of bounds range
-        let range = byte_range_to_lsp_range(text, 10..15);
-        assert!(range.is_none());
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_insertion_at_eof() {
-        // Test insertion point at EOF (like MD047 adds trailing newline)
-        let text = "Hello\nWorld";
-        let text_len = text.len(); // 11 bytes
-        let range = byte_range_to_lsp_range(text, text_len..text_len).unwrap();
-
-        // Should create a zero-width range at EOF position
-        assert_eq!(range.start.line, 1);
-        assert_eq!(range.start.character, 5); // After "World"
-        assert_eq!(range.end.line, 1);
-        assert_eq!(range.end.character, 5);
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_insertion_at_eof_with_trailing_newline() {
-        // Test when file already ends with newline
-        let text = "Hello\nWorld\n";
-        let text_len = text.len(); // 12 bytes
-        let range = byte_range_to_lsp_range(text, text_len..text_len).unwrap();
-
-        // Should create a zero-width range at EOF (after the newline)
-        assert_eq!(range.start.line, 2);
-        assert_eq!(range.start.character, 0); // Beginning of line after newline
-        assert_eq!(range.end.line, 2);
-        assert_eq!(range.end.character, 0);
+        let uri = Url::parse("file:///test.md").unwrap();
+        let action = warning_to_code_actions(&warning, &uri, text)
+            .into_iter()
+            .find(|action| action.title.contains("Ignore"))
+            .expect("an ignore-line action");
+        let edits = action.edit.unwrap().changes.unwrap().remove(&uri).unwrap();
+        // 17 characters, of which the emoji contributes two code units and
+        // four bytes.
+        assert_eq!(edits[0].range.start, Position { line: 0, character: 18 });
     }
 
     #[test]
@@ -951,7 +879,7 @@ mod tests {
             fix: None,
         };
 
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, "Line too long\n");
         assert!(diagnostic.code_description.is_some());
 
         let url = diagnostic.code_description.unwrap().href;
@@ -974,7 +902,7 @@ mod tests {
                 fix: None,
             };
 
-            let diagnostic = warning_to_diagnostic(&warning);
+            let diagnostic = warning_to_diagnostic(&warning, "some tool output\n");
             assert!(
                 diagnostic.code_description.is_none(),
                 "Expected no URL for tool name '{tool_name}', but got one",
@@ -1383,38 +1311,5 @@ mod tests {
             extract_domain_for_placeholder("ftp://files.example.com"),
             "files.example.com"
         );
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_trailing_newlines() {
-        // Test converting byte ranges for MD012 trailing blank line fixes
-        let text = "line1\nline2\n\n"; // 13 bytes: "line1\n" (6) + "line2\n" (6) + "\n" (1)
-
-        // Remove the last blank line (byte 12..13)
-        let range = byte_range_to_lsp_range(text, 12..13);
-        assert!(range.is_some());
-        let range = range.unwrap();
-
-        // Should be on line 2 (0-indexed), at position 0 for start
-        // End should be on line 3 (after the newline at byte 12)
-        assert_eq!(range.start.line, 2);
-        assert_eq!(range.start.character, 0);
-        assert_eq!(range.end.line, 3);
-        assert_eq!(range.end.character, 0);
-    }
-
-    #[test]
-    fn test_byte_range_to_lsp_range_at_eof() {
-        // Test a range that starts at EOF (empty range)
-        let text = "test\n"; // 5 bytes
-
-        // Try to convert a range starting at EOF (should handle gracefully)
-        let range = byte_range_to_lsp_range(text, 5..5);
-        assert!(range.is_some());
-        let range = range.unwrap();
-
-        // Should be at line 1 (after newline), position 0
-        assert_eq!(range.start.line, 1);
-        assert_eq!(range.start.character, 0);
     }
 }

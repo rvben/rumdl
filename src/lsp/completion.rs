@@ -16,6 +16,7 @@ use crate::linguist_data::{CANONICAL_TO_ALIASES, default_alias};
 use crate::rule_config_serde::load_rule_config;
 use crate::rules::md040_fenced_code_language::md040_config::MD040Config;
 
+use super::position::{byte_to_utf16_offset, utf16_to_byte_offset};
 use super::server::RumdlLanguageServer;
 
 /// Position detected for link target completion
@@ -726,36 +727,4 @@ pub(super) fn normalize_path(path: &std::path::Path) -> PathBuf {
         }
     }
     result
-}
-
-// =============================================================================
-// UTF-16 / UTF-8 offset helpers
-// =============================================================================
-
-/// Convert a UTF-16 code unit offset to the corresponding byte offset in a UTF-8 string.
-///
-/// Returns `None` if `utf16_offset` is beyond the end of the string.
-pub(super) fn utf16_to_byte_offset(s: &str, utf16_offset: usize) -> Option<usize> {
-    let mut byte_pos = 0;
-    let mut utf16_pos = 0;
-    for ch in s.chars() {
-        if utf16_pos >= utf16_offset {
-            return Some(byte_pos);
-        }
-        byte_pos += ch.len_utf8();
-        utf16_pos += ch.len_utf16();
-    }
-    // Cursor at the very end of the string is valid.
-    if utf16_pos >= utf16_offset {
-        Some(byte_pos)
-    } else {
-        None
-    }
-}
-
-/// Convert a byte offset to the corresponding UTF-16 code unit offset in a UTF-8 string.
-///
-/// Panics if `byte_offset` is not on a character boundary.
-pub(super) fn byte_to_utf16_offset(s: &str, byte_offset: usize) -> u32 {
-    s[..byte_offset].chars().map(|c| c.len_utf16() as u32).sum()
 }

@@ -53,7 +53,7 @@ Here's some `inline code` and a [link](https://example.com).
 
     // Test converting warnings to LSP diagnostics
     for warning in &warnings {
-        let diagnostic = warning_to_diagnostic(warning);
+        let diagnostic = warning_to_diagnostic(warning, content);
         assert!(!diagnostic.message.is_empty());
         assert!(diagnostic.range.start.line < 100); // Reasonable upper bound
         assert!(diagnostic.range.start.character < 1000); // Reasonable upper bound
@@ -84,7 +84,7 @@ async fn test_multiple_file_scenarios() {
 
         // Each file should be processable
         for warning in &warnings {
-            let diagnostic = warning_to_diagnostic(warning);
+            let diagnostic = warning_to_diagnostic(warning, content);
 
             // Basic validation of diagnostic
             assert!(!diagnostic.message.is_empty());
@@ -211,7 +211,7 @@ async fn test_rapid_editing_simulation() {
 
         // Convert to diagnostics (simulating LSP diagnostic updates)
         for warning in &warnings {
-            let _diagnostic = warning_to_diagnostic(warning);
+            let _diagnostic = warning_to_diagnostic(warning, &content);
         }
     }
 
@@ -267,7 +267,7 @@ async fn test_workspace_scenarios() {
 
         // Verify each file processes correctly
         for warning in &warnings {
-            let diagnostic = warning_to_diagnostic(warning);
+            let diagnostic = warning_to_diagnostic(warning, content);
             assert!(!diagnostic.message.is_empty());
             assert!(diagnostic.source == Some("rumdl".to_string()));
         }
@@ -395,7 +395,7 @@ async fn test_diagnostic_conversion_completeness() {
     .unwrap();
 
     for warning in warnings {
-        let diagnostic = warning_to_diagnostic(&warning);
+        let diagnostic = warning_to_diagnostic(&warning, content);
 
         // Verify all important fields are set
         assert!(!diagnostic.message.is_empty());
