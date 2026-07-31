@@ -413,10 +413,15 @@ impl MD057ExistingRelativeLinks {
     /// Returns `None` when the option is off, when the file under check is
     /// unknown, or when the link addresses anything else. Fragment-only links
     /// never reach here: they are already the form this reports towards.
+    ///
+    /// The link is resolved against the file's own directory first and then
+    /// against each search path, matching how the existence check resolves it,
+    /// so a link that MD057 accepts is recognized here as well.
     fn self_referential_link(
         &self,
         url: &str,
         base_path: &Path,
+        search_paths: &[PathBuf],
         source_file: Option<&Path>,
     ) -> Option<SelfReferentialLink> {
         if !self.config.self_referential_links {
@@ -431,8 +436,10 @@ impl MD057ExistingRelativeLinks {
         let suffix = &url[path_part.len()..];
 
         let decoded_path = Self::url_decode(path_part);
-        let resolved = Self::resolve_link_path_with_base(&decoded_path, base_path);
-        if !Self::is_same_file(&resolved, source_file) {
+        let resolves_to_self = std::iter::once(base_path)
+            .chain(search_paths.iter().map(PathBuf::as_path))
+            .any(|dir| Self::is_same_file(&Self::resolve_link_path_with_base(&decoded_path, dir), source_file));
+        if !resolves_to_self {
             return None;
         }
 
@@ -443,6 +450,40 @@ impl MD057ExistingRelativeLinks {
             Some(fragment) if !fragment.is_empty() => Some(SelfReferentialLink::Fragment(suffix.to_string())),
             _ => Some(SelfReferentialLink::WholeFile),
         }
+    }
+
+    /// Byte range of a reference definition's destination in the document.
+    ///
+    /// Both the label and the title can repeat the destination text, so the
+    /// search is bounded to what sits between the label's closing bracket and
+    /// the title. Anchoring anywhere else risks a fix rewriting the label,
+    /// which would leave every usage of the reference dangling.
+    fn ref_def_url_range(content: &str, ref_def: &crate::lint_context::ReferenceDef) -> Option<std::ops::Range<usize>> {
+        let def = content.get(ref_def.byte_offset..ref_def.byte_end)?;
+        let label_end = Self::label_end(def)?;
+        let search_end = ref_def.title_byte_start.map_or(def.len(), |title| {
+            title.saturating_sub(ref_def.byte_offset).min(def.len())
+        });
+        let offset = def.get(label_end..search_end)?.find(ref_def.url.as_str())? + label_end;
+        let start = ref_def.byte_offset + offset;
+        Some(start..start + ref_def.url.len())
+    }
+
+    /// Offset just past the `]:` that closes a reference definition's label.
+    ///
+    /// A label may itself contain a bracket when the bracket is escaped, so
+    /// escapes are skipped rather than matched.
+    fn label_end(def: &str) -> Option<usize> {
+        let bytes = def.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => i += 2,
+                b']' if bytes.get(i + 1) == Some(&b':') => return Some(i + 2),
+                _ => i += 1,
+            }
+        }
+        None
     }
 
     /// Whether any enabled check can offer a fix. Broken links and absolute
@@ -923,9 +964,12 @@ impl Rule for MD057ExistingRelativeLinks {
                         // the compaction below, whose shorter path would still
                         // be a link the reader should not follow, and instead
                         // of the existence check, which this target passes.
-                        if let Some(self_link) =
-                            self.self_referential_link(&full_url_for_compact, &base_path, self_path.as_deref())
-                        {
+                        if let Some(self_link) = self.self_referential_link(
+                            &full_url_for_compact,
+                            &base_path,
+                            &extra_search_paths,
+                            self_path.as_deref(),
+                        ) {
                             let url_start = url_group.start();
                             let url_end = caps.get(2).map_or(url_group.end(), |frag| frag.end());
                             let fix_byte_start = line_start_byte + url_start;
@@ -1190,22 +1234,25 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
+            // Where this definition's destination sits, shared by every report
+            // on it. Without a located destination a warning falls back to the
+            // start of the definition's line and offers no fix.
+            let url_range = Self::ref_def_url_range(ctx.content, ref_def);
+            let (line, col) = url_range
+                .as_ref()
+                .map_or((ref_def.line, 1), |range| ctx.offset_to_line_col(range.start));
+            let end_col = col + url.chars().count();
+
             // Handle absolute paths based on config
             if Self::is_absolute_path(url) {
                 match self.config.absolute_links {
                     AbsoluteLinksOption::Warn => {
-                        let line_idx = ref_def.line - 1;
-                        let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                            line_content
-                                .find(url.as_str())
-                                .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
-                        });
                         warnings.push(LintWarning {
                             rule_name: Some(self.name().to_string()),
-                            line: ref_def.line,
-                            column,
-                            end_line: ref_def.line,
-                            end_column: column + url.chars().count(),
+                            line,
+                            column: col,
+                            end_line: line,
+                            end_column: end_col,
                             message: format!("Absolute link '{url}' cannot be validated locally"),
                             severity: Severity::Warning,
                             fix: None,
@@ -1213,18 +1260,12 @@ impl Rule for MD057ExistingRelativeLinks {
                     }
                     AbsoluteLinksOption::RelativeToDocs => {
                         if let Some(msg) = Self::validate_absolute_link_via_docs_dir(url, &base_path) {
-                            let line_idx = ref_def.line - 1;
-                            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                                line_content
-                                    .find(url.as_str())
-                                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
-                            });
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
-                                line: ref_def.line,
-                                column,
-                                end_line: ref_def.line,
-                                end_column: column + url.chars().count(),
+                                line,
+                                column: col,
+                                end_line: line,
+                                end_column: end_col,
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -1235,18 +1276,12 @@ impl Rule for MD057ExistingRelativeLinks {
                         if let Some(msg) =
                             Self::validate_absolute_link_via_roots(url, &self.config.roots, &project_root)
                         {
-                            let line_idx = ref_def.line - 1;
-                            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                                line_content
-                                    .find(url.as_str())
-                                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
-                            });
                             warnings.push(LintWarning {
                                 rule_name: Some(self.name().to_string()),
-                                line: ref_def.line,
-                                column,
-                                end_line: ref_def.line,
-                                end_column: column + url.chars().count(),
+                                line,
+                                column: col,
+                                end_line: line,
+                                end_column: end_col,
                                 message: msg,
                                 severity: Severity::Warning,
                                 fix: None,
@@ -1258,33 +1293,23 @@ impl Rule for MD057ExistingRelativeLinks {
                 continue;
             }
 
-            // Position of this definition's destination, shared by the checks
-            // that report on it.
-            let ref_line_idx = ref_def.line - 1;
-            let line_content = ctx.raw_lines().get(ref_line_idx).copied().unwrap_or("");
-            // Byte offset of the URL within the line drives the fix range;
-            // the displayed column is the corresponding character offset.
-            let url_byte = line_content.find(url.as_str());
-            let col = url_byte.map_or(1, |b| byte_to_char_count(line_content, b));
-            let ref_line_start_byte = ctx.line_index.get_line_start_byte(ref_def.line).unwrap_or(0);
-            let fix_byte_start = ref_line_start_byte + url_byte.unwrap_or(0);
-            let fix_byte_end = fix_byte_start + url.len();
-
             // A definition whose destination is the file holding it.
-            if let Some(self_link) = self.self_referential_link(url, &base_path, self_path.as_deref()) {
+            if let Some(self_link) =
+                self.self_referential_link(url, &base_path, &extra_search_paths, self_path.as_deref())
+            {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
-                    line: ref_def.line,
+                    line,
                     column: col,
-                    end_line: ref_def.line,
-                    end_column: col + url.chars().count(),
+                    end_line: line,
+                    end_column: end_col,
                     message: Self::self_referential_message(url, &self_link),
                     severity: Severity::Warning,
-                    fix: match &self_link {
-                        SelfReferentialLink::Fragment(fragment) => {
-                            Some(Fix::new(fix_byte_start..fix_byte_end, fragment.clone()))
+                    fix: match (&self_link, &url_range) {
+                        (SelfReferentialLink::Fragment(fragment), Some(range)) => {
+                            Some(Fix::new(range.clone(), fragment.clone()))
                         }
-                        SelfReferentialLink::WholeFile => None,
+                        _ => None,
                     },
                 });
                 continue;
@@ -1294,13 +1319,13 @@ impl Rule for MD057ExistingRelativeLinks {
             if let Some(suggestion) = self.compact_path_suggestion(url, &base_path) {
                 warnings.push(LintWarning {
                     rule_name: Some(self.name().to_string()),
-                    line: ref_def.line,
+                    line,
                     column: col,
-                    end_line: ref_def.line,
-                    end_column: col + url.chars().count(),
+                    end_line: line,
+                    end_column: end_col,
                     message: format!("Relative link '{url}' can be simplified to '{suggestion}'"),
                     severity: Severity::Warning,
-                    fix: Some(Fix::new(fix_byte_start..fix_byte_end, suggestion)),
+                    fix: url_range.clone().map(|range| Fix::new(range, suggestion)),
                 });
             }
 
@@ -1343,21 +1368,12 @@ impl Rule for MD057ExistingRelativeLinks {
             }
 
             // File doesn't exist and no source file found
-            // Calculate column position: find URL within the line
-            let line_idx = ref_def.line - 1;
-            let column = ctx.raw_lines().get(line_idx).copied().map_or(1, |line_content| {
-                // Find URL position in line (after ]: )
-                line_content
-                    .find(url.as_str())
-                    .map_or(1, |url_pos| byte_to_char_count(line_content, url_pos))
-            });
-
             warnings.push(LintWarning {
                 rule_name: Some(self.name().to_string()),
-                line: ref_def.line,
-                column,
-                end_line: ref_def.line,
-                end_column: column + url.chars().count(),
+                line,
+                column: col,
+                end_line: line,
+                end_column: end_col,
                 message: format!("Relative link '{url}' does not exist"),
                 severity: Severity::Error,
                 fix: None,
@@ -4227,6 +4243,52 @@ mod self_referential_links_tests {
         let fix = result[0].fix.as_ref().expect("the fragment form is fixable");
         assert_eq!(fix.replacement, "#level-2-heading");
         assert_eq!(&content[fix.range.clone()], "test.md#level-2-heading");
+    }
+
+    #[test]
+    fn test_a_reference_definition_whose_label_repeats_the_destination() {
+        let temp_dir = tempdir().unwrap();
+        let content = "# Title\n\nSee [the section][test.md#title].\n\n## Title\n\n[test.md#title]: test.md#title\n";
+        let result = check_as_file(temp_dir.path(), "test.md", content, enabled());
+
+        assert_eq!(result.len(), 1, "Expected one warning. Got: {result:?}");
+        let fix = result[0].fix.as_ref().expect("the fragment form is fixable");
+        // The label reads the same as the destination, so an unanchored search
+        // would rewrite the label and orphan the usage above.
+        assert_eq!(fix.range.start, content.rfind("test.md#title").unwrap());
+        let fixed = MD057ExistingRelativeLinks::from_config_struct(enabled())
+            .fix(&crate::lint_context::LintContext::new(
+                content,
+                crate::config::MarkdownFlavor::Standard,
+                Some(temp_dir.path().join("test.md")),
+            ))
+            .unwrap();
+        assert!(fixed.contains("[test.md#title]: #title"), "Got: {fixed}");
+        assert!(fixed.contains("[the section][test.md#title]"), "Got: {fixed}");
+    }
+
+    #[test]
+    fn test_a_self_link_resolved_through_a_search_path() {
+        let temp_dir = tempdir().unwrap();
+        let guide_dir = temp_dir.path().join("docs/guide");
+        std::fs::create_dir_all(&guide_dir).unwrap();
+        let config = MD057Config {
+            search_paths: vec![temp_dir.path().join("docs").to_string_lossy().into_owned()],
+            ..enabled()
+        };
+        let content = "# Title\n\nSee [this file](guide/test.md#title).\n";
+        let result = check_as_file(&guide_dir, "test.md", content, config);
+
+        assert_eq!(
+            result.len(),
+            1,
+            "A link the existence check accepts through a search path resolves to this same file. Got: {result:?}"
+        );
+        assert_eq!(
+            result[0].fix.as_ref().map(|f| f.replacement.as_str()),
+            Some("#title"),
+            "Got: {result:?}"
+        );
     }
 
     #[test]
