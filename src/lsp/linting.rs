@@ -110,18 +110,20 @@ impl RumdlLanguageServer {
         // Apply LSP config overrides (select_rules, ignore_rules from VSCode settings)
         filtered_rules = self.apply_lsp_config_overrides(filtered_rules, &lsp_config);
 
-        // The rule set configuration left enabled, which decides whether an inline
-        // enable can take effect. Taken here, before per-file-ignores, so the answer
-        // matches the one the CLI gives for the same document.
+        // The rule set configuration left enabled, which together with
+        // per-file-ignores below decides whether an inline enable can take
+        // effect. Taken here, before per-file-ignores, so the two are separable
+        // and a warning can name the setting actually in play.
         let active_rules: std::collections::HashSet<String> =
             filtered_rules.iter().map(|rule| rule.name().to_string()).collect();
 
         // Apply per-file-ignores filtering
-        if let Some(ref path) = file_path {
-            let ignored = rumdl_config.get_ignored_rules_for_file(path);
-            if !ignored.is_empty() {
-                filtered_rules.retain(|rule| !ignored.contains(rule.name()));
-            }
+        let ignored_for_file = match file_path {
+            Some(ref path) => rumdl_config.get_ignored_rules_for_file(path),
+            None => std::collections::HashSet::new(),
+        };
+        if !ignored_for_file.is_empty() {
+            filtered_rules.retain(|rule| !ignored_for_file.contains(rule.name()));
         }
 
         // Run rumdl linting with the configured flavor.
@@ -184,7 +186,7 @@ impl RumdlLanguageServer {
         // Report inline config comments that name something rumdl does not know,
         // the same set the CLI prints, so an editor shows a directive that silently
         // does nothing instead of leaving the user to wonder why it had no effect.
-        all_warnings.extend(inline_config_warnings(text, &active_rules));
+        all_warnings.extend(inline_config_warnings(text, &active_rules, &ignored_for_file));
 
         // Check embedded markdown blocks if configured in code-block-tools
         if should_lint_embedded_markdown(&rumdl_config.code_block_tools) {
@@ -517,17 +519,20 @@ impl RumdlLanguageServer {
 /// The inline config problems in a document, as diagnostics.
 ///
 /// Mirrors what the CLI validates for every file it checks: a directive naming an
-/// unknown rule or option, and an inline enable that config-level rule selection
-/// leaves with nothing to do. `active_rules` is the set configuration left
-/// enabled, which is what decides the second one.
+/// unknown rule or option, and an inline enable that rule selection leaves with
+/// nothing to do. `active_rules` is the set configuration left enabled and
+/// `ignored_for_file` the set per-file-ignores then takes away, which together
+/// decide the second one.
 fn inline_config_warnings(
     text: &str,
     active_rules: &std::collections::HashSet<String>,
+    ignored_for_file: &std::collections::HashSet<String>,
 ) -> Vec<crate::rule::LintWarning> {
     let mut warnings = crate::inline_config::validate_inline_config_rules(text);
     warnings.extend(crate::inline_config::validate_inline_enables_against_active_rules(
         text,
         active_rules,
+        ignored_for_file,
     ));
     warnings.iter().map(|w| w.to_lint_warning(text)).collect()
 }

@@ -681,10 +681,23 @@ pub enum InlineConfigProblem {
     /// A recognized rule carrying an unrecognized option key inside a
     /// configure-file config object.
     UnknownOption { key: String },
-    /// An inline directive tries to enable a rule that configuration left
-    /// disabled. rumdl treats config-level rule selection as final, so the
+    /// An inline directive tries to enable a rule that will not run over this
+    /// document. rumdl treats config-level rule selection as final, so the
     /// enable has no effect; this makes that silent no-op visible.
-    EnableHasNoEffect,
+    EnableHasNoEffect { reason: EnableNoEffectReason },
+}
+
+/// Why an inline enable cannot take effect.
+///
+/// The two are separate settings, so the message names the one actually in play
+/// rather than sending the reader to a knob their config does not have set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnableNoEffectReason {
+    /// Configuration did not enable the rule for this run at all.
+    NotEnabled,
+    /// Configuration enabled the rule, but `per-file-ignores` suppresses it for
+    /// this particular file.
+    IgnoredForFile,
 }
 
 /// Warning about an inline config comment.
@@ -725,8 +738,16 @@ impl InlineConfigWarning {
                     self.comment_type, self.rule_name
                 ),
             },
-            InlineConfigProblem::EnableHasNoEffect => format!(
+            InlineConfigProblem::EnableHasNoEffect {
+                reason: EnableNoEffectReason::NotEnabled,
+            } => format!(
                 "Rule {} is not enabled in configuration, so the inline {} comment enabling it has no effect",
+                self.rule_name, self.comment_type
+            ),
+            InlineConfigProblem::EnableHasNoEffect {
+                reason: EnableNoEffectReason::IgnoredForFile,
+            } => format!(
+                "Rule {} is ignored for this file by per-file-ignores, so the inline {} comment enabling it has no effect",
                 self.rule_name, self.comment_type
             ),
         }
@@ -876,41 +897,52 @@ pub fn validate_inline_config_rules(content: &str) -> Vec<InlineConfigWarning> {
     warnings
 }
 
-/// Warn when an inline directive tries to ENABLE a rule that configuration left
-/// disabled, so the enable has no effect.
+/// Warn when an inline directive tries to ENABLE a rule that will not run over
+/// this document, so the enable has no effect.
 ///
 /// rumdl removes disabled rules from the rule set before any file is read
 /// (`filter_rules`), so a disabled rule is never instantiated and inline config
-/// cannot bring it back. `active_rules` is the set of canonical rule ids that
-/// configuration left enabled; a valid rule outside it is not running.
+/// cannot bring it back. `per-file-ignores` removes further rules for the file
+/// at hand, with the same finality. `active_rules` is the set of canonical rule
+/// ids configuration left enabled and `ignored_for_file` the ids
+/// `per-file-ignores` then takes away; a valid rule outside the first, or inside
+/// the second, is not running.
 ///
-/// Only recognized rule names outside the active set warn. Unknown names are
-/// left to `validate_inline_config_rules`, a bare `enable`/`enable-file` (no
-/// rules, meaning "all") targets no specific rule, and a `configure-file`
-/// boolean warns only for `true` (an enable), never `false` (a disable).
+/// Only recognized rule names warn. Unknown names are left to
+/// `validate_inline_config_rules`, a bare `enable`/`enable-file` (no rules,
+/// meaning "all") targets no specific rule, and a `configure-file` boolean warns
+/// only for `true` (an enable), never `false` (a disable).
 pub fn validate_inline_enables_against_active_rules(
     content: &str,
     active_rules: &HashSet<String>,
+    ignored_for_file: &HashSet<String>,
 ) -> Vec<InlineConfigWarning> {
     use crate::config::is_valid_rule_name;
 
     let mut warnings = Vec::new();
 
     let flag = |warnings: &mut Vec<InlineConfigWarning>, name: &str, comment_type: &str, line: usize| {
-        // Skip unrecognized names (handled elsewhere) and rules that are active.
+        // Skip unrecognized names, which are handled elsewhere.
         if !is_valid_rule_name(name) {
             return;
         }
         let canonical = normalize_rule_name(name);
-        if active_rules.contains(&canonical) {
+        // A rule configuration never enabled reports that, even when
+        // per-file-ignores also names it: the redundant ignore entry is not the
+        // thing standing in the way.
+        let reason = if !active_rules.contains(&canonical) {
+            EnableNoEffectReason::NotEnabled
+        } else if ignored_for_file.contains(&canonical) {
+            EnableNoEffectReason::IgnoredForFile
+        } else {
             return;
-        }
+        };
         warnings.push(InlineConfigWarning {
             line_number: line,
             rule_name: canonical,
             comment_type: comment_type.to_string(),
             suggestion: None,
-            problem: InlineConfigProblem::EnableHasNoEffect,
+            problem: InlineConfigProblem::EnableHasNoEffect { reason },
         });
     };
 
@@ -1368,14 +1400,19 @@ This is a test line."#;
     // per line, so the comment may span lines. Every other directive stays
     // line-scoped in both tools.
 
-    // ── inline enable of a config-disabled rule ──────────────────────────
+    // ── inline enable of a rule that will not run ────────────────────────
     //
-    // rumdl treats config-level rule selection as final: a rule configuration
-    // disabled is never instantiated, so an inline enable of it does nothing.
-    // These warnings make that silent no-op visible.
+    // rumdl treats rule selection as final: a rule configuration disabled is
+    // never instantiated, and one per-file-ignores excludes is dropped before
+    // the file is linted, so an inline enable of either does nothing. These
+    // warnings make that silent no-op visible.
 
     fn active_set(names: &[&str]) -> HashSet<String> {
         names.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    fn no_ignores() -> HashSet<String> {
+        HashSet::new()
     }
 
     #[test]
@@ -1383,12 +1420,17 @@ This is a test line."#;
         let active = active_set(&["MD013", "MD022"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active);
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
 
         assert_eq!(warnings.len(), 1, "expected one no-effect warning: {warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD012");
         assert_eq!(warnings[0].comment_type, "enable");
-        assert_eq!(warnings[0].problem, InlineConfigProblem::EnableHasNoEffect);
+        assert_eq!(
+            warnings[0].problem,
+            InlineConfigProblem::EnableHasNoEffect {
+                reason: EnableNoEffectReason::NotEnabled
+            }
+        );
         assert_eq!(warnings[0].line_number, 1);
     }
 
@@ -1399,9 +1441,66 @@ This is a test line."#;
         let active = active_set(&["MD012", "MD013"]);
         let content = "<!-- rumdl-enable MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active);
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
 
         assert!(warnings.is_empty(), "active rule warned: {warnings:?}");
+    }
+
+    #[test]
+    fn test_inline_enable_of_per_file_ignored_rule_warns() {
+        // The rule is enabled in configuration, so nothing about the config
+        // explains the silence; per-file-ignores is what drops it here.
+        let active = active_set(&["MD012", "MD013"]);
+        let ignored = active_set(&["MD012"]);
+        let content = "<!-- rumdl-enable MD012 -->\n";
+
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+
+        assert_eq!(warnings.len(), 1, "expected one no-effect warning: {warnings:?}");
+        assert_eq!(warnings[0].rule_name, "MD012");
+        assert_eq!(
+            warnings[0].problem,
+            InlineConfigProblem::EnableHasNoEffect {
+                reason: EnableNoEffectReason::IgnoredForFile
+            }
+        );
+        assert!(
+            warnings[0].format_message().contains("per-file-ignores"),
+            "the message must name the setting in play: {}",
+            warnings[0].format_message()
+        );
+    }
+
+    #[test]
+    fn test_enable_of_rule_both_disabled_and_ignored_blames_configuration() {
+        // A per-file-ignores entry for a rule configuration never enabled is
+        // redundant; the setting standing in the way is the config one.
+        let active = active_set(&["MD013"]);
+        let ignored = active_set(&["MD012"]);
+        let content = "<!-- rumdl-enable MD012 -->\n";
+
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert_eq!(
+            warnings[0].problem,
+            InlineConfigProblem::EnableHasNoEffect {
+                reason: EnableNoEffectReason::NotEnabled
+            }
+        );
+    }
+
+    #[test]
+    fn test_per_file_ignores_of_an_unrelated_rule_does_not_warn() {
+        // The negative control for the per-file-ignores arm: an ignore entry
+        // naming a different rule must leave this enable alone.
+        let active = active_set(&["MD012", "MD013"]);
+        let ignored = active_set(&["MD013"]);
+        let content = "<!-- rumdl-enable MD012 -->\n";
+
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
+
+        assert!(warnings.is_empty(), "unrelated ignore warned: {warnings:?}");
     }
 
     #[test]
@@ -1409,7 +1508,7 @@ This is a test line."#;
         // `enable` with no rule list means "all"; it targets no specific rule.
         let active = active_set(&["MD013"]);
         for content in ["<!-- rumdl-enable -->\n", "<!-- rumdl-enable-file -->\n"] {
-            let warnings = validate_inline_enables_against_active_rules(content, &active);
+            let warnings = validate_inline_enables_against_active_rules(content, &active, &active_set(&["MD013"]));
             assert!(warnings.is_empty(), "bare enable warned: {content} -> {warnings:?}");
         }
     }
@@ -1420,7 +1519,7 @@ This is a test line."#;
         // enable-file, plus an alias for an inactive rule, both flagged.
         let content = "<!-- rumdl-enable-file no-multiple-blanks -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active);
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
 
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert_eq!(warnings[0].rule_name, "MD012", "alias must normalize to the id");
@@ -1433,8 +1532,8 @@ This is a test line."#;
         let enable = r#"<!-- markdownlint-configure-file {"MD012": true} -->"#;
         let disable = r#"<!-- markdownlint-configure-file {"MD012": false} -->"#;
 
-        let warn_true = validate_inline_enables_against_active_rules(enable, &active);
-        let warn_false = validate_inline_enables_against_active_rules(disable, &active);
+        let warn_true = validate_inline_enables_against_active_rules(enable, &active, &no_ignores());
+        let warn_false = validate_inline_enables_against_active_rules(disable, &active, &no_ignores());
 
         assert_eq!(warn_true.len(), 1, "configure-file true should warn: {warn_true:?}");
         assert_eq!(warn_true[0].rule_name, "MD012");
@@ -1451,19 +1550,20 @@ This is a test line."#;
         let active = active_set(&["MD013"]);
         let content = "<!-- rumdl-enable NotARule -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active);
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &no_ignores());
 
         assert!(warnings.is_empty(), "unknown rule double-warned: {warnings:?}");
     }
 
     #[test]
     fn test_disable_directive_never_warns_as_no_effect() {
-        // Only enables are no-ops against a disabled rule; a disable of an
-        // inactive rule is meaningless but harmless and must stay silent.
-        let active = active_set(&["MD013"]);
+        // Only enables are no-ops against a rule that will not run; a disable of
+        // one is meaningless but harmless and must stay silent.
+        let active = active_set(&["MD012", "MD013"]);
+        let ignored = active_set(&["MD012"]);
         let content = "<!-- rumdl-disable MD012 -->\n<!-- rumdl-disable-file MD012 -->\n";
 
-        let warnings = validate_inline_enables_against_active_rules(content, &active);
+        let warnings = validate_inline_enables_against_active_rules(content, &active, &ignored);
 
         assert!(warnings.is_empty(), "disable warned: {warnings:?}");
     }

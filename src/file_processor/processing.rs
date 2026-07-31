@@ -787,23 +787,33 @@ pub fn process_file_with_index(
         return process_rust_file_doc_comments(file_path, &content, rules, config, original_line_ending);
     }
 
+    // The rules per-file-ignores takes away for this file. Resolved here rather
+    // than at the filtering site below because the inline-config validation
+    // needs it too, and that runs ahead of the cache lookup.
+    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
+
     // Detect unknown rule names in inline disable comments. The result feeds the
     // exit code under --deny-config-warnings, so it is computed even when
     // --silent suppresses the printed notices.
     let inline_config_warning = rumdl_lib::time_section!("file: validate inline config", {
         let mut inline_warnings = rumdl_lib::inline_config::validate_inline_config_rules(&content);
-        // Also flag inline enables that cannot take effect because config
-        // disabled the rule. The active set is the rules that survived config
-        // filtering, which is exactly `rules` here.
+        // Also flag inline enables that cannot take effect, either because
+        // config disabled the rule or because per-file-ignores excludes it for
+        // this file. The active set is the rules that survived config filtering,
+        // which is exactly `rules` here; the per-file set is applied below.
         let active_rules: std::collections::HashSet<String> = rules.iter().map(|r| r.name().to_string()).collect();
         inline_warnings.extend(rumdl_lib::inline_config::validate_inline_enables_against_active_rules(
             &content,
             &active_rules,
+            &ignored_rules_for_file,
         ));
         let had_any = !inline_warnings.is_empty();
         if !silent {
+            // The same relative form the findings for this file carry, so both
+            // name the file the way the user typed it.
+            let display_path = to_display_path(file_path, None);
             for warn in inline_warnings {
-                warn.print_warning(file_path);
+                warn.print_warning(&display_path);
             }
         }
         had_any
@@ -910,7 +920,6 @@ pub fn process_file_with_index(
     let lint_start = Instant::now();
 
     // Filter rules based on per-file-ignores configuration
-    let ignored_rules_for_file = config.get_ignored_rules_for_file(Path::new(file_path));
     let filtered_rules: Vec<_> = rumdl_lib::time_function!(
         "file: filter rules",
         if !ignored_rules_for_file.is_empty() {

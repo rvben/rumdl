@@ -166,7 +166,8 @@ async fn test_inline_enable_of_a_disabled_rule_is_a_diagnostic() {
     let server = create_test_server();
     server.rumdl_config.write().await.global.disable = vec!["MD009".to_string()];
     let uri = Url::parse("file:///test.md").unwrap();
-    let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText.  \n";
+    // One trailing space, which MD009 flags; two would be a valid hard break.
+    let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText. \n";
 
     let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
 
@@ -175,6 +176,67 @@ async fn test_inline_enable_of_a_disabled_rule_is_a_diagnostic() {
             .iter()
             .any(|d| d.message.contains("MD009") && d.message.contains("has no effect")),
         "an inline enable of a config-disabled rule should say it has no effect, got: {diagnostics:?}"
+    );
+}
+
+/// per-file-ignores drops a rule for one file with the same finality, so an
+/// inline enable is equally a no-op there. The diagnostic names that setting
+/// rather than a config-level disable the user does not have set.
+#[tokio::test]
+async fn test_inline_enable_of_a_per_file_ignored_rule_is_a_diagnostic() {
+    let server = create_test_server();
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("*.md".to_string(), vec!["MD009".to_string()]);
+    let uri = Url::parse("file:///test.md").unwrap();
+    // One trailing space, which MD009 flags; two would be a valid hard break.
+    let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText. \n";
+
+    let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.message.contains("MD009") && d.message.contains("per-file-ignores")),
+        "the diagnostic should name per-file-ignores, got: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("MD009".to_string()))),
+        "the ignored rule must not also report findings, got: {diagnostics:?}"
+    );
+}
+
+/// The control for the pattern: one that does not cover this file leaves the
+/// enable alone and lets the rule run.
+#[tokio::test]
+async fn test_inline_enable_under_an_unrelated_ignore_pattern_is_silent() {
+    let server = create_test_server();
+    server
+        .rumdl_config
+        .write()
+        .await
+        .per_file_ignores
+        .insert("other.md".to_string(), vec!["MD009".to_string()]);
+    let uri = Url::parse("file:///test.md").unwrap();
+    // One trailing space, which MD009 flags; two would be a valid hard break.
+    let text = "# Title\n\n<!-- rumdl-enable MD009 -->\n\nText. \n";
+
+    let diagnostics = server.lint_document(&uri, text, false).await.unwrap();
+
+    assert!(
+        !diagnostics.iter().any(|d| d.message.contains("has no effect")),
+        "a pattern that does not cover this file must not warn, got: {diagnostics:?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == Some(NumberOrString::String("MD009".to_string()))),
+        "the rule should still run, got: {diagnostics:?}"
     );
 }
 

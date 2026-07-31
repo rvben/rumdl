@@ -363,12 +363,12 @@ fn test_per_file_ignores_config_in_subdirectory() {
     );
 }
 
-/// Run `rumdl check` in `dir` and return its normalized stdout.
+/// Run `rumdl check` in `dir` and return its normalized (stdout, stderr).
 ///
 /// The working directory belongs to the subprocess, which is the only way to
 /// exercise a relative `--config` path: changing this process's directory would
 /// leak into every other test sharing the binary.
-fn run_check(dir: &Path, args: &[&str]) -> String {
+fn run_check_output(dir: &Path, args: &[&str]) -> (String, String) {
     let output = Command::new(rumdl_bin())
         .current_dir(dir)
         .arg("check")
@@ -376,7 +376,15 @@ fn run_check(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap();
-    String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n")
+    (
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        String::from_utf8_lossy(&output.stderr).replace("\r\n", "\n"),
+    )
+}
+
+/// Run `rumdl check` in `dir` and return its normalized stdout.
+fn run_check(dir: &Path, args: &[&str]) -> String {
+    run_check_output(dir, args).0
 }
 
 /// Whether any reported issue names both this file and this rule.
@@ -483,5 +491,112 @@ fn test_relative_path_with_single_component() {
     assert!(
         !reports(&stdout, "docs/README.md", "MD013"),
         "MD013 must be ignored for docs/README.md via the glob pattern. stdout={stdout}"
+    );
+}
+
+/// An inline `enable` cannot resurrect a rule per-file-ignores excludes: the rule
+/// is dropped before the file is linted. Without a notice that is a silent no-op,
+/// with the reader sent to a config-level `disable` they do not have set.
+#[test]
+fn test_inline_enable_of_per_file_ignored_rule_warns() {
+    let temp_dir = tempdir().unwrap();
+
+    fs::write(
+        temp_dir.path().join("ignored.toml"),
+        r#"
+[per-file-ignores]
+"CHANGELOG.md" = ["MD024"]
+"#,
+    )
+    .unwrap();
+    // The same file under a pattern that does not cover it, as the control.
+    fs::write(
+        temp_dir.path().join("unrelated.toml"),
+        r#"
+[per-file-ignores]
+"OTHER.md" = ["MD024"]
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        temp_dir.path().join("CHANGELOG.md"),
+        "<!-- rumdl-enable MD024 -->\n\n# Release\n\ntext\n\n## Notes\n\ntext\n\n## Notes\n\ntext\n",
+    )
+    .unwrap();
+
+    let (stdout, stderr) = run_check_output(temp_dir.path(), &["--config", "ignored.toml", "CHANGELOG.md"]);
+    assert!(
+        stderr.contains("Rule MD024 is ignored for this file by per-file-ignores"),
+        "the notice must name per-file-ignores. stderr={stderr}"
+    );
+    assert!(
+        !reports(&stdout, "CHANGELOG.md", "MD024"),
+        "the enable must remain a no-op. stdout={stdout}"
+    );
+
+    let (control_stdout, control_stderr) =
+        run_check_output(temp_dir.path(), &["--config", "unrelated.toml", "CHANGELOG.md"]);
+    assert!(
+        !control_stderr.contains("has no effect"),
+        "a pattern that does not cover the file must not warn. stderr={control_stderr}"
+    );
+    assert!(
+        reports(&control_stdout, "CHANGELOG.md", "MD024"),
+        "the control must show MD024 running. stdout={control_stdout}"
+    );
+}
+
+/// The notice is a config problem, so `--deny-config-warnings` must fail the run
+/// on it, the same as for a config-disabled rule.
+#[test]
+fn test_inline_enable_of_per_file_ignored_rule_denies() {
+    let temp_dir = tempdir().unwrap();
+
+    fs::write(
+        temp_dir.path().join("ignored.toml"),
+        r#"
+[per-file-ignores]
+"clean.md" = ["MD024"]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        temp_dir.path().join("clean.md"),
+        "<!-- rumdl-enable MD024 -->\n\n# Release\n\ntext\n",
+    )
+    .unwrap();
+
+    let deny = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args([
+            "check",
+            "--no-cache",
+            "--deny-config-warnings",
+            "--config",
+            "ignored.toml",
+            "clean.md",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        deny.status.code(),
+        Some(2),
+        "a no-effect enable must be a tool error under the flag. stderr={}",
+        String::from_utf8_lossy(&deny.stderr)
+    );
+
+    // Without the flag the same file is clean, so the notice alone does not
+    // decide the exit code.
+    let plain = Command::new(rumdl_bin())
+        .current_dir(temp_dir.path())
+        .args(["check", "--no-cache", "--config", "ignored.toml", "clean.md"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        plain.status.code(),
+        Some(0),
+        "the notice must stay non-fatal by default. stderr={}",
+        String::from_utf8_lossy(&plain.stderr)
     );
 }

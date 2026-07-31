@@ -286,17 +286,26 @@ Regular content continues here.
 
 ### Inline Enable Has No Effect
 
-A rule disabled in configuration cannot be re-enabled with an inline comment.
-Configuration-level rule selection is final: a disabled rule never runs, so an
-`enable`, `enable-file`, or `configure-file` with `true` targeting it does
-nothing. rumdl warns when this happens:
+A rule that configuration leaves out cannot be re-enabled with an inline
+comment. Rule selection is final: such a rule never runs, so an `enable`,
+`enable-file`, or `configure-file` with `true` targeting it does nothing. rumdl
+warns when this happens, naming the setting that left the rule out.
+
+A rule disabled globally:
 
 ```text
 [inline config warning] file.md:1: Rule MD012 is not enabled in configuration, so the inline enable comment enabling it has no effect
 ```
 
-To use the rule, enable it in your configuration instead. Inline comments can
-only tighten configuration (disable rules), not loosen it.
+A rule that `per-file-ignores` excludes for this particular file:
+
+```text
+[inline config warning] CHANGELOG.md:1: Rule MD024 is ignored for this file by per-file-ignores, so the inline enable comment enabling it has no effect
+```
+
+To use the rule, enable it in your configuration (or drop it from the matching
+`per-file-ignores` pattern) instead. Inline comments can only tighten
+configuration (disable rules), not loosen it.
 
 ## See Also
 
