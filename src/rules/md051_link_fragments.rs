@@ -501,7 +501,7 @@ impl MD051LinkFragments {
         }
     }
 
-    /// Check if a path part (without fragment) is an extension-less path
+    /// Check if a path part (without fragment or query) is an extension-less path
     ///
     /// Extension-less paths are potential cross-file links that need resolution
     /// with markdown extensions (e.g., `page#section` -> `page.md#section`).
@@ -509,7 +509,7 @@ impl MD051LinkFragments {
     /// We recognize them as extension-less if:
     /// 1. Path has no extension (no dot)
     /// 2. Path is not empty
-    /// 3. Path doesn't look like a query parameter or special syntax
+    /// 3. Path doesn't look like query syntax
     /// 4. Path contains at least one alphanumeric character (valid filename)
     /// 5. Path contains only valid path characters (alphanumeric, slashes, hyphens, underscores)
     ///
@@ -517,12 +517,7 @@ impl MD051LinkFragments {
     #[inline]
     fn is_extensionless_path(path_part: &str) -> bool {
         // Quick rejections for common non-extension-less cases
-        if path_part.is_empty()
-            || path_part.contains('.')
-            || path_part.contains('?')
-            || path_part.contains('&')
-            || path_part.contains('=')
-        {
+        if path_part.is_empty() || path_part.contains('.') || path_part.contains('&') || path_part.contains('=') {
             return false;
         }
 
@@ -574,6 +569,15 @@ impl MD051LinkFragments {
                 return true;
             }
 
+            // A query string belongs to the destination, not to the path it names,
+            // so `page.md?raw=true` and `page?raw=true` name `page.md` and `page`.
+            let path_part = path_part.split('?').next().unwrap_or(path_part);
+
+            // A destination that is only a query and a fragment stays on this page
+            if path_part.is_empty() {
+                return false;
+            }
+
             // Check if it looks like a file path:
             // - Contains a file extension (dot followed by letters)
             // - Contains path separators
@@ -581,12 +585,11 @@ impl MD051LinkFragments {
             // - OR is an extension-less path with a fragment (GitHub-style: page#section)
             let has_extension = path_part.contains('.')
                 && (
-                    // Has file extension pattern (handle query parameters by splitting on them first)
+                    // Has file extension pattern
                     {
-                    let clean_path = path_part.split('?').next().unwrap_or(path_part);
                     // Handle files starting with dot
-                    if let Some(after_dot) = clean_path.strip_prefix('.') {
-                        let dots_count = clean_path.matches('.').count();
+                    if let Some(after_dot) = path_part.strip_prefix('.') {
+                        let dots_count = path_part.matches('.').count();
                         if dots_count == 1 {
                             // Could be ".ext" (file extension) or ".hidden" (hidden file)
                             // Treat short alphanumeric suffixes as file extensions
@@ -594,13 +597,13 @@ impl MD051LinkFragments {
                             after_dot.chars().all(|c| c.is_ascii_alphanumeric())
                         } else {
                             // Hidden file with extension like ".hidden.txt"
-                            clean_path.split('.').next_back().is_some_and(|ext| {
+                            path_part.split('.').next_back().is_some_and(|ext| {
                                 !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
                             })
                         }
                     } else {
                         // Regular file path
-                        clean_path.split('.').next_back().is_some_and(|ext| {
+                        path_part.split('.').next_back().is_some_and(|ext| {
                             !ext.is_empty() && ext.len() <= 10 && ext.chars().all(|c| c.is_ascii_alphanumeric())
                         })
                     }
@@ -1801,6 +1804,72 @@ See [link](#nonexistent) for details."#;
             "Link fragment 'missing' not found in 'other.md?raw=true'"
         );
         assert_eq!(warnings[0].line, 3);
+    }
+
+    #[test]
+    fn a_query_string_does_not_hide_an_extensionless_target_file() {
+        let rule = MD051LinkFragments::new();
+        let source = "# Source\n\n- [a](other?raw=true#target)\n- [b](other#target)\n- [c](other?raw=true#absent)\n";
+
+        let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let same_document = rule.check(&source_ctx).unwrap();
+        assert!(
+            same_document.is_empty(),
+            "Every fragment here belongs to another file, so none is a missing anchor of this one. Got: {same_document:?}"
+        );
+
+        let mut source_index = FileIndex::default();
+        rule.contribute_to_index(&source_ctx, &mut source_index);
+
+        let target_ctx = LintContext::new("# Other\n\n## Target\n", crate::config::MarkdownFlavor::Standard, None);
+        let mut target_index = FileIndex::default();
+        rule.contribute_to_index(&target_ctx, &mut target_index);
+
+        let source_path = PathBuf::from("docs/source.md");
+        let mut workspace = crate::workspace_index::WorkspaceIndex::new();
+        workspace.insert_file(source_path.clone(), source_index.clone());
+        workspace.insert_file(PathBuf::from("docs/other.md"), target_index);
+
+        let warnings = rule.cross_file_check(&source_path, &source_index, &workspace).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "The query is stripped before the markdown extension is added. Got: {warnings:?}"
+        );
+        assert_eq!(
+            warnings[0].message,
+            "Link fragment 'absent' not found in 'other?raw=true'"
+        );
+        assert_eq!(warnings[0].line, 5);
+    }
+
+    #[test]
+    fn a_destination_that_is_only_a_query_stays_on_this_page() {
+        let rule = MD051LinkFragments::new();
+        let source = "# Source\n\n## Here\n\n- [a](?raw=true#here)\n- [b](?raw=true#nowhere)\n";
+
+        let source_ctx = LintContext::new(source, crate::config::MarkdownFlavor::Standard, None);
+        let warnings = rule.check(&source_ctx).unwrap();
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "Only the absent anchor is reported. Got: {warnings:?}"
+        );
+        assert_eq!(
+            warnings[0].message,
+            "Link anchor '#nowhere' does not exist in document headings"
+        );
+        assert_eq!(warnings[0].line, 6);
+
+        let mut source_index = FileIndex::default();
+        rule.contribute_to_index(&source_ctx, &mut source_index);
+        assert!(
+            source_index.cross_file_links.is_empty(),
+            "A query with no path names no other file. Got: {:?}",
+            source_index.cross_file_links
+        );
     }
 
     #[test]
