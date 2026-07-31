@@ -311,11 +311,13 @@ disable = ["MD-001", "MD_002"]
 }
 
 #[test]
-fn test_deeply_nested_config() {
+fn test_rule_sub_table_reaches_the_rule_config() {
     let temp_dir = tempdir().unwrap();
     let config_path = temp_dir.path().join(".rumdl.toml");
 
-    // This should be ignored as we don't support nested tables within rule configs
+    // A sub-table is how a map-valued rule option is spelled, so it reaches the
+    // rule alongside the scalar options. An option a rule does not declare is
+    // reported by key validation, not dropped here.
     let config_content = r#"
 [MD013]
 line-length = 100
@@ -332,8 +334,11 @@ value = 42
         rule_config.values.get("line-length").unwrap(),
         &toml::Value::Integer(100)
     );
-    // Nested table should not be present
-    assert!(!rule_config.values.contains_key("nested"));
+    let nested = rule_config
+        .values
+        .get("nested")
+        .expect("the sub-table reaches the rule");
+    assert_eq!(nested["value"].as_integer(), Some(42));
 }
 
 #[test]

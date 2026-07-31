@@ -371,7 +371,7 @@ fn parse_global_key(
     display_path: &str,
     registry: &super::registry::RuleRegistry,
 ) -> bool {
-    use super::global_keys::{ApplyOutcome, apply_global_key, toml_edit_value_to_toml};
+    use super::global_keys::{ApplyOutcome, apply_global_key};
 
     if !super::global_keys::is_global_value_key(norm_key) {
         return false;
@@ -632,6 +632,55 @@ pub(super) fn parse_rumdl_toml(
     Ok(fragment)
 }
 
+/// Converts a `toml_edit` value into the equivalent plain `toml::Value`,
+/// preserving the TOML type it was written as.
+fn toml_edit_value_to_toml(value: &toml_edit::Value) -> toml::Value {
+    match value {
+        toml_edit::Value::String(s) => toml::Value::String(s.value().clone()),
+        toml_edit::Value::Integer(i) => toml::Value::Integer(*i.value()),
+        toml_edit::Value::Float(f) => toml::Value::Float(*f.value()),
+        toml_edit::Value::Boolean(b) => toml::Value::Boolean(*b.value()),
+        toml_edit::Value::Datetime(d) => toml::Value::Datetime(*d.value()),
+        toml_edit::Value::Array(arr) => toml::Value::Array(arr.iter().map(toml_edit_value_to_toml).collect()),
+        toml_edit::Value::InlineTable(t) => toml::Value::Table(
+            t.iter()
+                .map(|(k, v)| (k.to_string(), toml_edit_value_to_toml(v)))
+                .collect(),
+        ),
+    }
+}
+
+/// Converts a rule option's table into a `toml::value::Table`.
+///
+/// The keys of a map-valued option are data (a language name, a glob), not
+/// configuration keys, so they are carried over as written rather than normalized.
+fn rule_option_table(table: &toml_edit::Table) -> toml::value::Table {
+    table
+        .iter()
+        .filter_map(|(key, item)| Some((key.to_string(), rule_option_value(item)?)))
+        .collect()
+}
+
+/// The value a rule option holds, or `None` when the item carries no value.
+///
+/// Every TOML shape a rule option can take is converted, including the map forms
+/// (`preferred-aliases = { Shell = "sh" }` and its `[MD040.preferred-aliases]`
+/// sub-table spelling), so that a map option set in a config file reaches serde
+/// instead of being dropped.
+fn rule_option_value(item: &toml_edit::Item) -> Option<toml::Value> {
+    match item {
+        toml_edit::Item::Value(value) => Some(toml_edit_value_to_toml(value)),
+        toml_edit::Item::Table(table) => Some(toml::Value::Table(rule_option_table(table))),
+        toml_edit::Item::ArrayOfTables(tables) => Some(toml::Value::Array(
+            tables
+                .iter()
+                .map(|table| toml::Value::Table(rule_option_table(table)))
+                .collect(),
+        )),
+        toml_edit::Item::None => None,
+    }
+}
+
 /// Applies a rule configuration table (in toml_edit format) into the fragment.
 /// Used for both `[MDxxx]` and `[rules.MDxxx]` top-level table forms in rumdl.toml.
 fn apply_rule_table_toml_edit(
@@ -668,46 +717,12 @@ fn apply_rule_table_toml_edit(
             continue; // Skip regular value processing for severity
         }
 
-        let maybe_toml_val: Option<toml::Value> = match rv_item.as_value() {
-            Some(toml_edit::Value::String(formatted)) => Some(toml::Value::String(formatted.value().clone())),
-            Some(toml_edit::Value::Integer(formatted)) => Some(toml::Value::Integer(*formatted.value())),
-            Some(toml_edit::Value::Float(formatted)) => Some(toml::Value::Float(*formatted.value())),
-            Some(toml_edit::Value::Boolean(formatted)) => Some(toml::Value::Boolean(*formatted.value())),
-            Some(toml_edit::Value::Datetime(formatted)) => Some(toml::Value::Datetime(*formatted.value())),
-            Some(toml_edit::Value::Array(formatted_array)) => {
-                // Convert toml_edit Array to toml::Value::Array
-                let mut values = Vec::new();
-                for item in formatted_array {
-                    match item {
-                        toml_edit::Value::String(formatted) => {
-                            values.push(toml::Value::String(formatted.value().clone()))
-                        }
-                        toml_edit::Value::Integer(formatted) => values.push(toml::Value::Integer(*formatted.value())),
-                        toml_edit::Value::Float(formatted) => values.push(toml::Value::Float(*formatted.value())),
-                        toml_edit::Value::Boolean(formatted) => values.push(toml::Value::Boolean(*formatted.value())),
-                        toml_edit::Value::Datetime(formatted) => values.push(toml::Value::Datetime(*formatted.value())),
-                        _ => {
-                            log::warn!(
-                                "[WARN] Skipping unsupported array element type in key '{norm_rule_name}.{norm_rk}' in {display_path}"
-                            );
-                        }
-                    }
-                }
-                Some(toml::Value::Array(values))
-            }
-            Some(toml_edit::Value::InlineTable(_)) => {
-                log::warn!(
-                    "[WARN] Skipping inline table value for key '{norm_rule_name}.{norm_rk}' in {display_path}. Table conversion not yet fully implemented in parser."
-                );
-                None
-            }
-            None => {
-                log::warn!(
-                    "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
-                );
-                None
-            }
-        };
+        let maybe_toml_val = rule_option_value(rv_item);
+        if maybe_toml_val.is_none() {
+            log::warn!(
+                "[WARN] Skipping non-value item for key '{norm_rule_name}.{norm_rk}' in {display_path}. Expected simple value."
+            );
+        }
         if let Some(toml_val) = maybe_toml_val {
             let sv = rule_entry
                 .values
@@ -772,5 +787,94 @@ mod tests {
     #[test]
     fn pyproject_with_no_rumdl_section_is_none() {
         assert!(parse("[tool.black]\nline-length = 88\n").is_none());
+    }
+
+    fn rule_option(content: &str, rule: &str, option: &str) -> Option<toml::Value> {
+        let fragment = parse_rumdl_toml(content, ".rumdl.toml", ConfigSource::ProjectConfig).unwrap();
+        fragment
+            .rules
+            .get(rule)
+            .and_then(|entry| entry.values.get(option))
+            .map(|sourced| sourced.value.clone())
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_an_inline_table_option() {
+        let value = rule_option(
+            "[MD040]\npreferred-aliases = { Shell = \"sh\" }\n",
+            "MD040",
+            "preferred-aliases",
+        )
+        .expect("an inline table option must reach the fragment");
+        assert_eq!(value["Shell"].as_str(), Some("sh"));
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_a_sub_table_option() {
+        let value = rule_option(
+            "[MD040]\n[MD040.preferred-aliases]\nShell = \"sh\"\n",
+            "MD040",
+            "preferred-aliases",
+        )
+        .expect("a sub-table option must reach the fragment");
+        assert_eq!(value["Shell"].as_str(), Some("sh"));
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_map_keys_as_written() {
+        // Map keys name languages, so normalizing them the way option keys are
+        // normalized would rewrite the user's data.
+        let value = rule_option(
+            "[MD040]\npreferred-aliases = { \"Objective-C\" = \"objc\", JSON_with_comments = \"jsonc\" }\n",
+            "MD040",
+            "preferred-aliases",
+        )
+        .expect("an inline table option must reach the fragment");
+        assert_eq!(value["Objective-C"].as_str(), Some("objc"));
+        assert_eq!(value["JSON_with_comments"].as_str(), Some("jsonc"));
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_scalar_and_array_options() {
+        let array = rule_option(
+            "[MD040]\nallowed-languages = [\"rust\", \"python\"]\n",
+            "MD040",
+            "allowed-languages",
+        )
+        .expect("an array option must reach the fragment");
+        assert_eq!(
+            array.as_array().map(Vec::len),
+            Some(2),
+            "array elements must survive conversion"
+        );
+
+        let scalar = rule_option("[MD013]\nline-length = 120\n", "MD013", "line-length")
+            .expect("a scalar option must reach the fragment");
+        assert_eq!(scalar.as_integer(), Some(120));
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_the_type_an_option_was_written_as() {
+        // A datetime stays a datetime rather than collapsing into a string, so a
+        // rule reading it sees the type its config declares.
+        let value = rule_option("[MD001]\nwhen = 1979-05-27T07:32:00Z\n", "MD001", "when")
+            .expect("a datetime option must reach the fragment");
+        assert!(
+            matches!(value, toml::Value::Datetime(_)),
+            "a datetime option keeps its type, got {value:?}"
+        );
+    }
+
+    #[test]
+    fn rumdl_toml_keeps_nested_values_inside_an_array_option() {
+        let value = rule_option(
+            "[MD040]\nallowed-languages = [[\"rust\"], { name = \"python\" }]\n",
+            "MD040",
+            "allowed-languages",
+        )
+        .expect("an array option must reach the fragment");
+        let items = value.as_array().expect("the option is an array");
+        assert_eq!(items[0].as_array().and_then(|inner| inner[0].as_str()), Some("rust"));
+        assert_eq!(items[1]["name"].as_str(), Some("python"));
     }
 }

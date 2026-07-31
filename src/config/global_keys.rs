@@ -171,26 +171,6 @@ pub fn apply_global_key(
     }
 }
 
-/// Convert a `toml_edit` value to a plain `toml::Value` so the `rumdl.toml`
-/// parser can feed [`apply_global_key`]. Inline tables become tables;
-/// datetimes are stringified (no global key is datetime-typed, so this only
-/// affects the mismatch diagnostics).
-pub(super) fn toml_edit_value_to_toml(value: &toml_edit::Value) -> toml::Value {
-    match value {
-        toml_edit::Value::String(s) => toml::Value::String(s.value().clone()),
-        toml_edit::Value::Integer(i) => toml::Value::Integer(*i.value()),
-        toml_edit::Value::Float(f) => toml::Value::Float(*f.value()),
-        toml_edit::Value::Boolean(b) => toml::Value::Boolean(*b.value()),
-        toml_edit::Value::Datetime(d) => toml::Value::String(d.value().to_string()),
-        toml_edit::Value::Array(arr) => toml::Value::Array(arr.iter().map(toml_edit_value_to_toml).collect()),
-        toml_edit::Value::InlineTable(t) => toml::Value::Table(
-            t.iter()
-                .map(|(k, v)| (k.to_string(), toml_edit_value_to_toml(v)))
-                .collect(),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
