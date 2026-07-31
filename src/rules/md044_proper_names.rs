@@ -2,7 +2,7 @@ use crate::utils::fast_hash;
 use crate::utils::regex_cache::{escape_regex, get_cached_regex};
 
 use crate::rule::{Fix, LintError, LintResult, LintWarning, Rule, RuleCategory, Severity};
-use crate::rules::front_matter_utils::FrontMatterUtils;
+use crate::utils::frontmatter_values;
 use crate::utils::range_utils::byte_to_char_count;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -272,7 +272,7 @@ impl MD044ProperNames {
         let field_map = if self.ignore_fields.is_empty() {
             Vec::new()
         } else {
-            Self::frontmatter_field_map(ctx)
+            frontmatter_values::field_map(ctx)
         };
 
         // Use ctx.lines for better performance
@@ -314,7 +314,7 @@ impl MD044ProperNames {
             // For frontmatter lines, determine offset where checkable value content starts.
             // YAML keys should not be checked against proper names - only values.
             let fm_value_offset = if line_info.in_front_matter {
-                Self::frontmatter_value_offset(line)
+                frontmatter_values::value_offset(line)
             } else {
                 0
             };
@@ -328,7 +328,7 @@ impl MD044ProperNames {
                 continue;
             }
             let fm_value_span = if line_info.in_front_matter {
-                Self::frontmatter_value_span(line)
+                frontmatter_values::value_span(line)
             } else {
                 None
             };
@@ -846,124 +846,13 @@ impl MD044ProperNames {
         }
     }
 
-    /// Whether the frontmatter value starting at `value_start` is a quoted
-    /// scalar: the character immediately preceding `value_start` is a quote.
-    /// Call this with the span start returned by `frontmatter_value_span`,
-    /// which always lands just past the opening quote for quoted values.
-    /// The raw `frontmatter_value_offset` does not carry that guarantee: its
-    /// helper `kv_value_offset` only skips the opening quote when the whole
-    /// trimmed remainder of the line starts and ends with the same quote
-    /// character, so a trailing comment or an unterminated quote leaves the
-    /// offset pointing AT the quote instead of past it.
-    fn value_is_quoted(line: &str, value_start: usize) -> bool {
-        matches!(line[..value_start].chars().next_back(), Some('\'') | Some('"'))
-    }
-
-    /// Byte span of the semantic value on a frontmatter line: the checkable
-    /// content with a trailing comment excluded. For a quoted scalar the span
-    /// ends at the closing quote (or the trimmed end of line if the quote is
-    /// unterminated), so `#` and spaces inside it are literal, and the quote
-    /// characters themselves are never part of the span. `None` when the line
-    /// carries no checkable value, including an empty quoted value (`''`).
-    fn frontmatter_value_span(line: &str) -> Option<(usize, usize)> {
-        let start = Self::frontmatter_value_offset(line);
-        if start == usize::MAX || start >= line.len() {
-            return None;
-        }
-
-        // `frontmatter_value_offset` sometimes points past the opening quote
-        // already, and sometimes points AT it (see `value_is_quoted` docs).
-        // Detect the quote from either position so both cases converge on a
-        // `content_start` that is always just past the opening quote.
-        let before = line[..start].chars().next_back();
-        let at = line[start..].chars().next();
-        let (content_start, quote) = match (before, at) {
-            (Some(q @ ('\'' | '"')), _) => (start, Some(q)),
-            (_, Some(q @ ('\'' | '"'))) => (start + q.len_utf8(), Some(q)),
-            _ => (start, None),
-        };
-
-        let end = if let Some(quote) = quote {
-            let rest = &line[content_start..];
-            match rest.find(quote) {
-                Some(i) => content_start + i,
-                None => content_start + rest.trim_end().len(),
-            }
-        } else {
-            let rest = &line[content_start..];
-            let raw_end = match rest.find(" #") {
-                Some(i) => content_start + i,
-                None => line.len(),
-            };
-            line[..raw_end].trim_end().len()
-        };
-
-        if end <= content_start {
-            None
-        } else {
-            Some((content_start, end))
-        }
-    }
-
-    /// Delimiters that wrap a token from the outside (quotes, brackets,
-    /// parens, angle brackets) rather than appearing inside a path. Used only
-    /// by the edge-trimming pass: these characters legitimately occur inside
-    /// real paths (Next.js route groups `(marketing)/`, dynamic segments
-    /// `[slug]`, disambiguated filenames `myapp(1).md`), so they must not act
-    /// as mid-token boundaries, only as leading/trailing punctuation to peel
-    /// off prose wrapping such as `See (docs/a.md) here.`.
-    const PATH_TOKEN_WRAPPERS: &'static [char] = &['\'', '"', '`', '(', ')', '[', ']', '<', '>'];
-
-    /// Bounds of the whitespace-delimited token containing `pos`, clamped to
-    /// `[value_start, value_end)`. The clamp is what keeps this search inside
-    /// a single frontmatter value: it can never walk past the value's own
-    /// boundaries, so it can never wander into Markdown link syntax on the
-    /// same line (frontmatter has none) or onto a neighboring line.
-    fn value_token_bounds(line: &str, pos: usize, value_start: usize, value_end: usize) -> (usize, usize) {
-        let before = &line[value_start..pos];
-        let start = before.rfind(char::is_whitespace).map_or(value_start, |i| {
-            value_start + i + before[i..].chars().next().unwrap().len_utf8()
-        });
-
-        let after = &line[pos..value_end];
-        let end = after.find(char::is_whitespace).map_or(value_end, |i| pos + i);
-
-        (start, end)
-    }
-
-    /// Strip wrapping delimiters, then trailing sentence punctuation, repeating
-    /// both passes until a full pass leaves the bounds unchanged. Punctuation
-    /// removal can expose a wrapper underneath it (`"docs/myapp.md",` sheds the
-    /// comma to reveal a trailing quote), so a single sequential pass is not
-    /// enough to reach a stable result.
-    fn trim_token_bounds(line: &str, mut start: usize, mut end: usize) -> (usize, usize) {
-        const WRAPPERS: &[char] = MD044ProperNames::PATH_TOKEN_WRAPPERS;
-        const TRAILING: &[char] = &['.', ',', ';', ':', '!', '?'];
-        while start < end && line[start..end].starts_with(WRAPPERS) {
-            start += line[start..].chars().next().unwrap().len_utf8();
-        }
-        loop {
-            let before = (start, end);
-            while end > start && line[start..end].ends_with(WRAPPERS) {
-                end -= line[..end].chars().next_back().unwrap().len_utf8();
-            }
-            while end > start && line[start..end].ends_with(TRAILING) {
-                end -= line[..end].chars().next_back().unwrap().len_utf8();
-            }
-            if (start, end) == before {
-                break;
-            }
-        }
-        (start, end)
-    }
-
     /// Whether the match at `match_start` sits inside a file path, which must
     /// not be rewritten. `fm_value` is the semantic value span of the
     /// frontmatter line the match was found on.
     ///
     /// This exemption is deliberately scoped to frontmatter values only and
     /// is never applied to body prose. In frontmatter the value span is known
-    /// exactly (`frontmatter_value_span`), so token bounds can be clamped to
+    /// exactly (`frontmatter_values::value_span`), so token bounds can be clamped to
     /// it with no risk of crossing into unrelated syntax. Body prose has no
     /// such known span: a token there must be delimited by scanning the raw
     /// line for whitespace and Markdown punctuation, and that scan
@@ -997,7 +886,7 @@ impl MD044ProperNames {
         // falls back to per-word tokenization instead, otherwise quoting
         // alone would make the token span the whole value and vacuously
         // satisfy the sole-value check below.
-        let quoted_words: Vec<&str> = if Self::value_is_quoted(line, value_start) {
+        let quoted_words: Vec<&str> = if frontmatter_values::value_is_quoted(line, value_start) {
             line[value_start..value_end].split_whitespace().collect()
         } else {
             Vec::new()
@@ -1015,10 +904,10 @@ impl MD044ProperNames {
         let (raw_start, raw_end) = if is_single_quoted_path {
             (value_start, value_end)
         } else {
-            Self::value_token_bounds(line, match_start, value_start, value_end)
+            frontmatter_values::token_bounds(line, match_start, value_start, value_end)
         };
 
-        let (start, end) = Self::trim_token_bounds(line, raw_start, raw_end);
+        let (start, end) = frontmatter_values::trim_token_bounds(line, raw_start, raw_end);
         if match_start < start || match_start >= end {
             return false;
         }
@@ -1042,316 +931,10 @@ impl MD044ProperNames {
         // entire frontmatter value. In prose, `github/gitlab/bitbucket` is
         // shorthand, not a path.
         let sole_value = {
-            let (ts, te) = Self::trim_token_bounds(line, value_start, value_end);
+            let (ts, te) = frontmatter_values::trim_token_bounds(line, value_start, value_end);
             ts == start && te == end
         };
         sole_value && token.split('/').filter(|s| !s.is_empty()).count() >= 3
-    }
-
-    /// For a frontmatter line, return the byte offset where the checkable
-    /// value portion starts. Returns `usize::MAX` if the entire line should be
-    /// skipped (frontmatter delimiters, key-only lines, YAML comments, flow constructs).
-    fn frontmatter_value_offset(line: &str) -> usize {
-        let trimmed = line.trim();
-
-        // Skip frontmatter delimiters and empty lines
-        if trimmed == "---" || trimmed == "+++" || trimmed.is_empty() {
-            return usize::MAX;
-        }
-
-        // Skip YAML comments
-        if trimmed.starts_with('#') {
-            return usize::MAX;
-        }
-
-        // YAML list item: "  - item" or "  - key: value"
-        let stripped = line.trim_start();
-        if let Some(after_dash) = stripped.strip_prefix("- ") {
-            let leading = line.len() - stripped.len();
-            // Check if the list item contains a mapping (e.g., "- key: value")
-            if let Some(result) = Self::kv_value_offset(line, after_dash, leading + 2) {
-                return result;
-            }
-            // Bare list item value (no colon) - check content after "- "
-            return leading + 2;
-        }
-        if stripped == "-" {
-            return usize::MAX;
-        }
-
-        // Key-value pair with colon separator (YAML): "key: value"
-        if let Some(result) = Self::kv_value_offset(line, stripped, line.len() - stripped.len()) {
-            return result;
-        }
-
-        // Key-value pair with equals separator (TOML): "key = value"
-        if let Some(eq_pos) = line.find('=') {
-            let after_eq = eq_pos + 1;
-            if after_eq < line.len() && line.as_bytes()[after_eq] == b' ' {
-                let value_start = after_eq + 1;
-                let value_slice = &line[value_start..];
-                let value_trimmed = value_slice.trim();
-                if value_trimmed.is_empty() {
-                    return usize::MAX;
-                }
-                // For quoted values, skip the opening quote character
-                if (value_trimmed.starts_with('"') && value_trimmed.ends_with('"'))
-                    || (value_trimmed.starts_with('\'') && value_trimmed.ends_with('\''))
-                {
-                    let quote_offset = value_slice.find(['"', '\'']).unwrap_or(0);
-                    return value_start + quote_offset + 1;
-                }
-                return value_start;
-            }
-            // Equals with no space after or at end of line -> no value to check
-            return usize::MAX;
-        }
-
-        // No separator found - continuation line or bare value, check the whole line
-        0
-    }
-
-    /// Parse a key-value pair using colon separator within `content` that starts
-    /// at `base_offset` in the original line. Returns `Some(offset)` if a colon
-    /// separator is found, `None` if no colon is present.
-    fn kv_value_offset(line: &str, content: &str, base_offset: usize) -> Option<usize> {
-        let colon_pos = content.find(':')?;
-        let abs_colon = base_offset + colon_pos;
-        let after_colon = abs_colon + 1;
-        if after_colon < line.len() && line.as_bytes()[after_colon] == b' ' {
-            let value_start = after_colon + 1;
-            let value_slice = &line[value_start..];
-            let value_trimmed = value_slice.trim();
-            if value_trimmed.is_empty() {
-                return Some(usize::MAX);
-            }
-            // Skip flow mappings and flow sequences - too complex for heuristic parsing
-            if value_trimmed.starts_with('{') || value_trimmed.starts_with('[') {
-                return Some(usize::MAX);
-            }
-            // For quoted values, skip the opening quote character
-            if (value_trimmed.starts_with('"') && value_trimmed.ends_with('"'))
-                || (value_trimmed.starts_with('\'') && value_trimmed.ends_with('\''))
-            {
-                let quote_offset = value_slice.find(['"', '\'']).unwrap_or(0);
-                return Some(value_start + quote_offset + 1);
-            }
-            return Some(value_start);
-        }
-        // Colon with no space after or at end of line -> no value to check
-        Some(usize::MAX)
-    }
-
-    /// Byte offset of the first occurrence of `target` in `s` that is
-    /// outside a single- or double-quoted span, skipping escaped
-    /// characters inside double quotes. `None` if `target` never occurs
-    /// unquoted.
-    fn find_unquoted(s: &str, target: char) -> Option<usize> {
-        let mut in_double = false;
-        let mut in_single = false;
-        let mut chars = s.char_indices();
-        while let Some((i, c)) = chars.next() {
-            if in_double {
-                if c == '\\' {
-                    chars.next();
-                } else if c == '"' {
-                    in_double = false;
-                }
-            } else if in_single {
-                if c == '\'' {
-                    in_single = false;
-                }
-            } else if c == target {
-                return Some(i);
-            } else if c == '"' {
-                in_double = true;
-            } else if c == '\'' {
-                in_single = true;
-            }
-        }
-        None
-    }
-
-    /// Inner key path of a real TOML table header, `[seo]` or
-    /// `[[authors]]`.
-    ///
-    /// A header, after stripping an optional trailing `#comment` that is
-    /// outside quotes and trimming, must START with `[` and END with the
-    /// matching `]` or `]]` and nothing else, and its inner key path must
-    /// contain no unquoted comma: a comma never appears in a real header
-    /// key (a bare or dotted path like `params.seo`), only in an array
-    /// literal like `1, 2`. This rejects a column-0 array element such as
-    /// `[1, 2],`: TOML does not require array elements to be indented, so
-    /// without this check the line is misread as a header named `1, 2`.
-    ///
-    /// A quoted key that itself contains a comma (`["a,b"]`) is valid TOML
-    /// and is still recognized here, since the comma is inside the quotes
-    /// and `find_unquoted` skips it.
-    fn toml_table_header(trimmed: &str) -> Option<&str> {
-        let head = match Self::find_unquoted(trimmed, '#') {
-            Some(i) => trimmed[..i].trim_end(),
-            None => trimmed,
-        };
-
-        let inner = if let Some(rest) = head.strip_prefix("[[") {
-            rest.strip_suffix("]]")?
-        } else {
-            head.strip_prefix('[')?.strip_suffix(']')?
-        };
-
-        if Self::find_unquoted(inner, ',').is_some() {
-            return None;
-        }
-
-        let inner = inner.trim();
-        if inner.is_empty() { None } else { Some(inner) }
-    }
-
-    /// Signed count of `[` minus `]` on a TOML line, ignoring bracket
-    /// characters inside quoted strings. Used to track how deep the parser
-    /// is inside an unclosed `key = [ ... ]` array so a nested element like
-    /// `[1, 2],` is never misread as a table header.
-    fn toml_bracket_delta(trimmed: &str) -> i32 {
-        let mut delta = 0i32;
-        let mut chars = trimmed.chars();
-        let mut in_double = false;
-        let mut in_single = false;
-        while let Some(c) = chars.next() {
-            if in_double {
-                if c == '\\' {
-                    chars.next();
-                } else if c == '"' {
-                    in_double = false;
-                }
-            } else if in_single {
-                if c == '\'' {
-                    in_single = false;
-                }
-            } else {
-                match c {
-                    '"' => in_double = true,
-                    '\'' => in_single = true,
-                    '[' => delta += 1,
-                    ']' => delta -= 1,
-                    _ => {}
-                }
-            }
-        }
-        delta
-    }
-
-    fn strip_key_quotes(raw: &str) -> &str {
-        raw.strip_prefix('"')
-            .and_then(|k| k.strip_suffix('"'))
-            .or_else(|| raw.strip_prefix('\'').and_then(|k| k.strip_suffix('\'')))
-            .unwrap_or(raw)
-    }
-
-    /// The lowercased top-level frontmatter key owning each line, indexed by
-    /// line number. `None` where no owner is determinable, which leaves the
-    /// line checked.
-    ///
-    /// Attribution is a heuristic. It is deliberately biased so an uncertain
-    /// line falls back to being checked: an indent-0 YAML key line always
-    /// starts a new key, so a bracket inside a block scalar can never cause a
-    /// later real key to be suppressed. The cost is that an indent-0 flow
-    /// continuation is attributed to its own text rather than to its parent.
-    fn frontmatter_field_map(ctx: &crate::lint_context::LintContext) -> Vec<Option<String>> {
-        let mut map = vec![None; ctx.lines.len()];
-        let mut current: Option<String> = None;
-        let mut toml = false;
-        let mut in_toml_table = false;
-        // Depth of unclosed `[` inside the current TOML `key = [ ... ]`
-        // array, across lines. TOML only: see the comment in the YAML
-        // branch below for why this tracking does not extend there.
-        let mut toml_array_depth: i32 = 0;
-
-        for (idx, info) in ctx.lines.iter().enumerate() {
-            if !info.in_front_matter {
-                continue;
-            }
-            let line = info.content(ctx.content);
-            let trimmed = line.trim();
-
-            if trimmed == "---" || trimmed == "+++" {
-                toml = trimmed == "+++";
-                current = None;
-                in_toml_table = false;
-                toml_array_depth = 0;
-                continue;
-            }
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                map[idx].clone_from(&current);
-                continue;
-            }
-
-            if toml {
-                // A table header can only ever be found while
-                // `toml_array_depth` is zero: valid TOML never lets a
-                // `[table]`/`[[array-of-tables]]` header appear inside an
-                // unclosed array value, so a bracket-only line seen while
-                // depth is above zero, such as a column-0 array element
-                // `[1, 2]` or `[2]`, is always a continuation, never a
-                // header, regardless of whether it happens to satisfy
-                // `toml_table_header`'s shape check on its own.
-                //
-                // An indent-0 assignment, by contrast, always resyncs
-                // `current` and clears the stuck depth, even while
-                // `toml_array_depth` is stuck above zero from an unclosed
-                // array (a forgotten closing bracket). Without this, a
-                // malformed array would misattribute every following key
-                // to the array's key for the rest of the frontmatter.
-                let indent = line.len() - line.trim_start().len();
-                let header = if indent == 0 && toml_array_depth == 0 {
-                    Self::toml_table_header(trimmed)
-                } else {
-                    None
-                };
-                let assignment_eq = if indent == 0 {
-                    FrontMatterUtils::separator_pos_outside_quoted_key(trimmed, '=')
-                } else {
-                    None
-                };
-                let resync = header.is_some() || assignment_eq.is_some();
-
-                if resync {
-                    if let Some(name) = header {
-                        current = Some(FrontMatterUtils::toml_root_key(name).to_lowercase());
-                        in_toml_table = true;
-                    } else if !in_toml_table && let Some(eq) = assignment_eq {
-                        let root = FrontMatterUtils::toml_root_key(trimmed[..eq].trim());
-                        current = Some(root.to_lowercase());
-                    }
-                    // Inside a table, assignments belong to the table. Array
-                    // continuations match neither branch and inherit.
-                    toml_array_depth = 0;
-                }
-                toml_array_depth = (toml_array_depth + Self::toml_bracket_delta(trimmed)).max(0);
-            } else {
-                // YAML deliberately does not track bracket/flow depth the
-                // way the TOML branch does. YAML has block scalars
-                // (`description: |`) whose content is arbitrary text that
-                // could contain an unmatched `[`, and a running depth
-                // counter would misread that as an open array and wrongly
-                // swallow a later, real top-level key. TOML has no block
-                // scalars, so depth tracking is safe there. YAML instead
-                // stays with the simpler, safer rule: every indent-0 key
-                // line always starts a new key.
-                let indent = line.len() - line.trim_start().len();
-                if indent == 0 {
-                    if trimmed.starts_with("- ") || trimmed == "-" {
-                        current = None;
-                    } else if let Some(colon) = FrontMatterUtils::separator_pos_outside_quoted_key(trimmed, ':') {
-                        let raw = trimmed[..colon].trim();
-                        current = Some(Self::strip_key_quotes(raw).to_lowercase());
-                    }
-                }
-                // Indented lines inherit, which covers nested maps, sequence
-                // items and block-scalar continuations.
-            }
-            map[idx].clone_from(&current);
-        }
-        map
     }
 
     // Get the proper name that should be used for a found name
@@ -1494,7 +1077,7 @@ mod tests {
 
     fn field_map_for(content: &str) -> Vec<Option<String>> {
         let ctx = create_context(content);
-        MD044ProperNames::frontmatter_field_map(&ctx)
+        frontmatter_values::field_map(&ctx)
     }
 
     #[test]
@@ -4041,46 +3624,46 @@ Some javascript text.
     #[test]
     fn test_frontmatter_value_span_strips_trailing_comment() {
         let line = "link: docs/guide/myapp # canonical path";
-        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let (s, e) = frontmatter_values::value_span(line).unwrap();
         assert_eq!(&line[s..e], "docs/guide/myapp");
     }
 
     #[test]
     fn test_frontmatter_value_span_quoted_keeps_hash_and_spaces() {
         let line = "link: 'docs/My App/a#b'";
-        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let (s, e) = frontmatter_values::value_span(line).unwrap();
         assert_eq!(&line[s..e], "docs/My App/a#b");
     }
 
     #[test]
     fn test_frontmatter_value_span_plain_value() {
         let line = "title: Heading for myapp";
-        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let (s, e) = frontmatter_values::value_span(line).unwrap();
         assert_eq!(&line[s..e], "Heading for myapp");
     }
 
     #[test]
     fn test_frontmatter_value_span_none_for_key_only() {
-        assert!(MD044ProperNames::frontmatter_value_span("seo:").is_none());
-        assert!(MD044ProperNames::frontmatter_value_span("---").is_none());
+        assert!(frontmatter_values::value_span("seo:").is_none());
+        assert!(frontmatter_values::value_span("---").is_none());
     }
 
     #[test]
     fn test_frontmatter_value_span_quoted_strips_trailing_comment() {
         let line = "link: 'docs/guide' # canonical path";
-        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let (s, e) = frontmatter_values::value_span(line).unwrap();
         assert_eq!(&line[s..e], "docs/guide");
     }
 
     #[test]
     fn test_frontmatter_value_span_empty_quoted_value_is_none() {
-        assert!(MD044ProperNames::frontmatter_value_span("key: ''").is_none());
+        assert!(frontmatter_values::value_span("key: ''").is_none());
     }
 
     #[test]
     fn test_frontmatter_value_span_unterminated_quote_strips_leading_quote() {
         let line = "link: 'docs/a";
-        let (s, e) = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let (s, e) = frontmatter_values::value_span(line).unwrap();
         assert_eq!(&line[s..e], "docs/a");
     }
 
@@ -4098,7 +3681,7 @@ Some javascript text.
             "link: ./myapp.md",
             "link: ../shared/myapp.md",
         ] {
-            let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+            let span = frontmatter_values::value_span(line).unwrap();
             let pos = at(line, "myapp");
             assert!(
                 MD044ProperNames::is_in_path_like_token(line, pos, span),
@@ -4112,14 +3695,14 @@ Some javascript text.
         // Extra words around the slash-separated token mean it is not the
         // sole frontmatter value, so the 3+ segment path signal must not fire.
         let line = "description: We support github/gitlab/bitbucket imports.";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(
             !MD044ProperNames::is_in_path_like_token(line, at(line, "github"), span),
             "slash-separated prose is not a path"
         );
 
         let line = "description: The javascript/typescript ecosystem is large.";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(!MD044ProperNames::is_in_path_like_token(
             line,
             at(line, "javascript"),
@@ -4130,7 +3713,7 @@ Some javascript text.
     #[test]
     fn test_path_like_requires_a_slash_so_dotted_names_survive() {
         let line = "title: Use nodejs and myapp.md today.";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
@@ -4141,7 +3724,7 @@ Some javascript text.
         // protects dotted proper names like `Node.js` without over-exempting
         // plain slugs.
         let line = "slug: myapp-guide";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
@@ -4150,7 +3733,7 @@ Some javascript text.
         // A match outside the frontmatter value span (e.g. in the key) is
         // rejected immediately, before any token-bound scanning happens.
         let line = "myapp: docs/guide/myapp";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         let key_pos = 0;
         assert!(!MD044ProperNames::is_in_path_like_token(line, key_pos, span));
     }
@@ -4158,11 +3741,11 @@ Some javascript text.
     #[test]
     fn test_path_like_three_segments_only_as_sole_frontmatter_value() {
         let line = "link: docs/guide/myapp";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
 
         let line = "description: We support github/gitlab/bitbucket now";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(
             !MD044ProperNames::is_in_path_like_token(line, at(line, "github"), span),
             "multi-token value gets body treatment"
@@ -4174,7 +3757,7 @@ Some javascript text.
         // The collapsed token has a real extension on its last segment, so
         // signal (b) exempts it regardless of the multi-word collapse.
         let line = "link: 'docs/My App/myapp.md'";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
@@ -4187,21 +3770,21 @@ Some javascript text.
         // literal space is rare enough that this is an accepted narrowing,
         // not an oversight.
         let line = "link: 'docs/My App/myapp'";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(!MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
     #[test]
     fn test_path_like_trailing_comment_is_still_sole_value() {
         let line = "link: docs/guide/myapp # canonical path";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
     #[test]
     fn test_path_like_trailing_punctuation_trimmed() {
         let line = "link: docs/myapp.md, then leave.";
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         assert!(MD044ProperNames::is_in_path_like_token(line, at(line, "myapp"), span));
     }
 
@@ -4211,14 +3794,14 @@ Some javascript text.
         let raw_start = at(line, "\"docs");
         let raw_end = raw_start + r#""docs/myapp.md","#.len();
         assert_eq!(&line[raw_start..raw_end], r#""docs/myapp.md","#);
-        let (start, end) = MD044ProperNames::trim_token_bounds(line, raw_start, raw_end);
+        let (start, end) = frontmatter_values::trim_token_bounds(line, raw_start, raw_end);
         assert_eq!(&line[start..end], "docs/myapp.md");
     }
 
     #[test]
     fn test_trim_token_bounds_reaches_fixpoint_with_multiple_trailing_wrappers() {
         let line = r#"("docs/myapp.md")."#;
-        let (start, end) = MD044ProperNames::trim_token_bounds(line, 0, line.len());
+        let (start, end) = frontmatter_values::trim_token_bounds(line, 0, line.len());
         assert_eq!(&line[start..end], "docs/myapp.md");
     }
 
@@ -4375,7 +3958,7 @@ Some javascript text.
             r#"description: "and/or this/that myapp/gitlab""#,
             r#"description: "he/him she/her myapp/gitlab""#,
         ] {
-            let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+            let span = frontmatter_values::value_span(line).unwrap();
             for needle in ["myapp", "gitlab"] {
                 if let Some(byte_pos) = line.find(needle) {
                     assert!(
@@ -4390,7 +3973,7 @@ Some javascript text.
     #[test]
     fn test_path_like_collapsed_multiword_no_extension_not_exempt_toml() {
         let line = r#"description = "myapp/gitlab github/bitbucket""#;
-        let span = MD044ProperNames::frontmatter_value_span(line).unwrap();
+        let span = frontmatter_values::value_span(line).unwrap();
         for needle in ["myapp", "gitlab", "github", "bitbucket"] {
             let byte_pos = at(line, needle);
             assert!(

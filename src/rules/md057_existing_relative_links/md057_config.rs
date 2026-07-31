@@ -90,6 +90,31 @@ pub struct MD057Config {
     /// roots = ["content/en", "content/zh-cn"]
     /// ```
     pub roots: Vec<String>,
+
+    /// Also check path-shaped values in the document's frontmatter.
+    ///
+    /// Off by default, because frontmatter has no syntax marking a value as a
+    /// link: a path-shaped value is only a guess at one. Static-site generators
+    /// also resolve frontmatter paths from the site root rather than the
+    /// document's own directory, so checking them like body links reports
+    /// working paths as broken.
+    ///
+    /// Enable it for projects whose frontmatter paths really are relative to
+    /// the document, and use `ignore-frontmatter-fields` for the keys that are
+    /// not.
+    ///
+    /// Example:
+    /// ```toml
+    /// [MD057]
+    /// check-frontmatter = true
+    /// ignore-frontmatter-fields = ["image", "cover"]
+    /// ```
+    pub check_frontmatter: bool,
+
+    /// Top-level frontmatter keys whose values are not checked. Matched
+    /// case-insensitively. A parent key excludes its whole subtree. Applies
+    /// only when `check-frontmatter` is enabled.
+    pub ignore_frontmatter_fields: Vec<String>,
 }
 
 impl RuleConfig for MD057Config {
