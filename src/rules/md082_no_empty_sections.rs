@@ -12,6 +12,10 @@
 //! `# Title` straight into `## Section`. Set `level = 2` to exempt H1 while
 //! still requiring content under H2 and deeper.
 //!
+//! `allow-parent-headings` exempts a heading whose next heading is deeper,
+//! treating the subsections as the parent's content. Sibling headings with
+//! nothing between them stay flagged, which is the case the rule exists for.
+//!
 //! What does not count as a section body: blank lines, HTML comments,
 //! reference-link definitions (`[x]: url`), and lone thematic breaks (`---`).
 //! Everything else that renders counts: paragraphs, lists, code blocks, tables,
@@ -40,11 +44,21 @@ pub struct MD082Config {
     /// `## Section` is allowed) while still requiring content under H2 and below.
     #[serde(default = "default_level")]
     pub level: u8,
+
+    /// Accept a heading whose next heading is deeper, taking the subsections as
+    /// the parent's content. Sibling or shallower headings with nothing between
+    /// them are still flagged. Default false checks every heading against the
+    /// `level` floor regardless of what follows it.
+    #[serde(default)]
+    pub allow_parent_headings: bool,
 }
 
 impl Default for MD082Config {
     fn default() -> Self {
-        Self { level: default_level() }
+        Self {
+            level: default_level(),
+            allow_parent_headings: false,
+        }
     }
 }
 
@@ -172,6 +186,12 @@ impl Rule for MD082NoEmptySections {
                 continue;
             }
 
+            // A deeper heading opens a subsection of this one, so the subsections
+            // stand in for a body the parent never needed.
+            if self.config.allow_parent_headings && next.level > cur.level {
+                continue;
+            }
+
             // The section body begins after the heading construct. A setext
             // heading occupies two source lines (text + underline); an ATX
             // heading occupies one. Skipping the underline avoids counting it
@@ -274,7 +294,10 @@ mod tests {
 
     #[test]
     fn level_2_exempts_h1_but_flags_h2() {
-        let config = MD082Config { level: 2 };
+        let config = MD082Config {
+            level: 2,
+            ..Default::default()
+        };
         // H1 -> H2 with no body: exempt at level 2.
         assert!(check("# Title\n## Section\n\nBody\n", config.clone()).is_empty());
         // H2 -> H3 with no body: still flagged at level 2.
@@ -439,6 +462,79 @@ mod tests {
         // content, not a bare top-level break. Must not flag.
         let w = check_default("# A\n\n> ---\n\n## B\n\ntext\n");
         assert!(w.is_empty(), "got: {w:?}");
+    }
+
+    fn allow_parents() -> MD082Config {
+        MD082Config {
+            allow_parent_headings: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn default_does_not_allow_parent_headings() {
+        assert!(!MD082Config::default().allow_parent_headings);
+    }
+
+    #[test]
+    fn allow_parent_headings_accepts_a_heading_followed_by_a_deeper_one() {
+        // The issue's first example: subsections are the parent's content.
+        let content = "# H1\n\n## H2\n\ncontent...\n";
+        assert_eq!(check_default(content).len(), 1, "the default still flags it");
+        assert!(check(content, allow_parents()).is_empty());
+    }
+
+    #[test]
+    fn allow_parent_headings_still_flags_a_sibling_heading() {
+        // The issue's second example: nothing separates two H1 sections.
+        let content = "# H1\n\n# H1\n\ncontent...\n";
+        let w = check(content, allow_parents());
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 1);
+    }
+
+    #[test]
+    fn allow_parent_headings_still_flags_a_shallower_next_heading() {
+        // `## A` closes with an H1, so nothing nested under it renders.
+        let content = "# Title\n\nIntro\n\n## A\n# B\n\ncontent\n";
+        let w = check(content, allow_parents());
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 5);
+    }
+
+    #[test]
+    fn allow_parent_headings_accepts_a_skipped_level() {
+        // Depth is what matters, not adjacency of levels.
+        assert!(check("# A\n\n### C\n\ncontent\n", allow_parents()).is_empty());
+    }
+
+    #[test]
+    fn allow_parent_headings_accepts_setext_into_a_deeper_setext() {
+        assert!(check("Title\n=====\nSection\n-------\ncontent\n", allow_parents()).is_empty());
+    }
+
+    #[test]
+    fn allow_parent_headings_still_flags_the_last_empty_sibling() {
+        // The H2 chain nests, so only the second `## B` (a sibling of the first)
+        // is an empty section.
+        let content = "# Title\n\n## A\n\nbody\n\n## B\n## C\n\nbody\n";
+        let w = check(content, allow_parents());
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 7);
+    }
+
+    #[test]
+    fn allow_parent_headings_respects_the_level_floor() {
+        // A heading below the floor is exempt whatever follows it, and one at the
+        // floor followed by a sibling is still flagged.
+        let config = MD082Config {
+            level: 2,
+            allow_parent_headings: true,
+        };
+        assert!(check("# Title\n# Other\n\nbody\n", config.clone()).is_empty());
+        let w = check("# Title\n\nIntro\n\n## A\n## B\n\nbody\n", config);
+        assert_eq!(w.len(), 1, "got: {w:?}");
+        assert_eq!(w[0].line, 5);
     }
 
     #[test]
