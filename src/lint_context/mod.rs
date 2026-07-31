@@ -523,6 +523,19 @@ impl<'a> LintContext<'a> {
         let obsidian_comment_ranges = obsidian_comment_scan.ranges;
         let unterminated_obsidian_comment = obsidian_comment_scan.unterminated;
 
+        // An Obsidian comment hides the text it wraps, so a `<!--` inside one is
+        // not a comment opener. The HTML scan cannot know that yet - detecting
+        // Obsidian comments needs its ranges - so the opener it reported is
+        // re-resolved here, now that the comments that hide it are known.
+        let unterminated_html_comment = crate::utils::skip_context::unterminated_html_comment_outside(
+            unterminated_html_comment,
+            &obsidian_comment_ranges,
+            content,
+            &code_span_ranges,
+            &fenced_code_block_ranges,
+            body_start,
+        );
+
         // Detect MyST role syntax ({role}`content`)
         let myst_role_ranges = profile_section!(
             "MyST roles",

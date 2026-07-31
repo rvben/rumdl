@@ -143,6 +143,39 @@ pub fn scan_html_comments(
     }
 }
 
+/// Re-resolve an unterminated `<!--` that an Obsidian comment hides.
+///
+/// [`scan_html_comments`] has to run before Obsidian comments are known,
+/// because detecting those needs the HTML comment ranges. A `<!--` inside a
+/// `%%` comment is hidden text rather than an opener, so when the reported one
+/// falls in a comment the scan is repeated with those comments among the ranges
+/// whose delimiters are literal. That resumes the search at the next opener
+/// instead of suppressing the finding, which would hide a real unclosed comment
+/// below the hidden one.
+///
+/// Only the opener is taken from the second scan. Skipping strictly more of the
+/// content cannot turn up a closer the first scan missed, so the complete
+/// comments it found still stand.
+pub fn unterminated_html_comment_outside(
+    reported: Option<usize>,
+    hidden_ranges: &[(usize, usize)],
+    content: &str,
+    code_span_ranges: &[(usize, usize)],
+    code_block_ranges: &[(usize, usize)],
+    scan_from: usize,
+) -> Option<usize> {
+    let offset = reported?;
+    if !hidden_ranges
+        .iter()
+        .any(|&(start, end)| offset >= start && offset < end)
+    {
+        return reported;
+    }
+    let mut literal_ranges = code_block_ranges.to_vec();
+    literal_ranges.extend_from_slice(hidden_ranges);
+    scan_html_comments(content, code_span_ranges, &literal_ranges, scan_from).unterminated
+}
+
 /// Check if a byte position is within any of the pre-computed HTML comment ranges
 /// Uses binary search for O(log n) complexity
 pub fn is_in_html_comment_ranges(ranges: &[ByteRange], byte_pos: usize) -> bool {
@@ -735,6 +768,38 @@ mod tests {
 
         let closed = scan_html_comments("<!-- closed -->", &[], &[], 0);
         assert_eq!(closed.unterminated, None);
+    }
+
+    #[test]
+    fn test_unterminated_html_comment_outside_hidden_ranges() {
+        // An opener the caller can see is hidden resumes the search at the next
+        // one rather than clearing the finding.
+        let content = "%% note <!-- marker %%\n\n<!-- real\n";
+        let hidden = [(0, content.find("\n\n").unwrap())];
+        let reported = scan_html_comments(content, &[], &[], 0).unterminated;
+        assert_eq!(reported, Some(content.find("<!--").unwrap()), "the hidden one is first");
+        assert_eq!(
+            unterminated_html_comment_outside(reported, &hidden, content, &[], &[], 0),
+            Some(content.rfind("<!--").unwrap())
+        );
+
+        // Nothing left outside the hidden range: the finding goes away.
+        let only_hidden = "%% note <!-- marker %%\n";
+        let hidden_all = [(0, only_hidden.len())];
+        let reported = scan_html_comments(only_hidden, &[], &[], 0).unterminated;
+        assert!(reported.is_some(), "the scan sees the hidden opener");
+        assert_eq!(
+            unterminated_html_comment_outside(reported, &hidden_all, only_hidden, &[], &[], 0),
+            None
+        );
+
+        // An opener outside every hidden range is returned untouched.
+        let visible = "<!-- open\n\n%% a note %%\n";
+        let reported = scan_html_comments(visible, &[], &[], 0).unterminated;
+        assert_eq!(
+            unterminated_html_comment_outside(reported, &[(11, 23)], visible, &[], &[], 0),
+            Some(0)
+        );
     }
 
     #[test]

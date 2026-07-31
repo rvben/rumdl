@@ -83,29 +83,25 @@ impl Rule for MD086NoUnclosedComments {
     }
 
     fn check(&self, ctx: &LintContext) -> LintResult {
-        // Both scanners are run during context construction, and each reports at
-        // most one unclosed opener - the first one, after which nothing in the
-        // document can close.
-        let mut unclosed: Vec<UnclosedComment> = Vec::new();
-        if let Some(offset) = ctx.unterminated_html_comment() {
-            unclosed.push(UnclosedComment {
-                offset,
-                opener: "<!--",
-                closer: "-->",
-                syntax: "HTML",
-            });
-        }
-        if let Some(offset) = ctx.unterminated_obsidian_comment() {
-            unclosed.push(UnclosedComment {
-                offset,
-                opener: "%%",
-                closer: "%%",
-                syntax: "Obsidian",
-            });
-        }
-        unclosed.sort_by_key(|c| c.offset);
+        // Both scanners run during context construction, and each reports its
+        // first unclosed opener. Only the earlier of the two is real: an opener
+        // with no closer hides the rest of the document, so anything that looks
+        // like a second opener below it is text inside the first.
+        let html = ctx.unterminated_html_comment().map(|offset| UnclosedComment {
+            offset,
+            opener: "<!--",
+            closer: "-->",
+            syntax: "HTML",
+        });
+        let obsidian = ctx.unterminated_obsidian_comment().map(|offset| UnclosedComment {
+            offset,
+            opener: "%%",
+            closer: "%%",
+            syntax: "Obsidian",
+        });
+        let first = [html, obsidian].into_iter().flatten().min_by_key(|c| c.offset);
 
-        Ok(unclosed.iter().map(|c| self.warning(ctx, c)).collect())
+        Ok(first.iter().map(|c| self.warning(ctx, c)).collect())
     }
 
     fn fix_capability(&self) -> FixCapability {
@@ -256,14 +252,45 @@ mod tests {
     }
 
     #[test]
-    fn reports_both_syntaxes_in_document_order() {
+    fn reports_only_the_first_opener_when_both_syntaxes_are_unclosed() {
+        // The `%%` hides everything below it, so the `<!--` on line 3 is text
+        // inside that comment rather than a second unclosed opener.
         let content = "%% an Obsidian note\n\n<!-- an HTML note\n";
         let warnings = check_with(content, MarkdownFlavor::Obsidian);
-        assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
         assert_eq!(warnings[0].line, 1);
         assert!(warnings[0].message.contains("Obsidian"));
-        assert_eq!(warnings[1].line, 3);
-        assert!(warnings[1].message.contains("HTML"));
+    }
+
+    #[test]
+    fn ignores_an_obsidian_opener_below_an_unclosed_html_comment() {
+        // Mirror image: the `<!--` opens a block that runs to the end of the
+        // document, so the `%%` inside it is not a delimiter.
+        let content = "<!-- an HTML note\n\n%% an Obsidian note\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!(warnings[0].line, 1);
+        assert!(warnings[0].message.contains("HTML"));
+    }
+
+    #[test]
+    fn ignores_an_html_opener_inside_a_closed_obsidian_comment() {
+        // Obsidian hides the text between the `%%` pair, so the `<!--` there is
+        // never a comment opener.
+        let content = "# Title\n\n%% note <!-- marker %%\n\nVisible text.\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert!(warnings.is_empty(), "got: {warnings:?}");
+    }
+
+    #[test]
+    fn reports_a_real_opener_below_one_hidden_in_an_obsidian_comment() {
+        // Suppressing the hidden opener must resume the search rather than end
+        // it: the opener on line 5 is the one the author has to close.
+        let content = "%% note <!-- marker %%\n\n<!-- a genuinely unclosed one\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
+        assert_eq!((warnings[0].line, warnings[0].column), (3, 1));
+        assert!(warnings[0].message.contains("HTML"));
     }
 
     #[test]
