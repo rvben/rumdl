@@ -52,13 +52,40 @@ impl MD040FencedCodeLanguage {
         Self { config }
     }
 
+    /// The language a fence label names, or `None` when nothing recognizes it.
+    ///
+    /// Linguist stays authoritative, so a label it resolves keeps its canonical
+    /// name and its aliases. `custom-languages` answers for the labels Linguist
+    /// has no entry for, which lets a project name the languages it actually
+    /// uses instead of accepting every unknown label.
+    fn resolve_language(&self, label: &str) -> Option<&str> {
+        resolve_canonical(label).or_else(|| self.config.custom_language(label))
+    }
+
     /// Validate the configuration and return any errors
     fn validate_config(&self) -> Vec<String> {
-        self.config
-            .preferred_aliases
-            .iter()
-            .filter_map(|(language, alias)| self.config.preferred_alias_problem(language, alias))
-            .collect()
+        let mut errors = Vec::new();
+
+        // A fence label is the first whitespace-separated word of the info
+        // string, so an entry holding whitespace could never match one.
+        for declared in &self.config.custom_languages {
+            if declared.trim().is_empty() {
+                errors.push("Empty entry in custom-languages.".to_string());
+            } else if declared.split_whitespace().count() > 1 {
+                errors.push(format!(
+                    "Custom language '{declared}' contains whitespace, so no fence label can match it."
+                ));
+            }
+        }
+
+        errors.extend(
+            self.config
+                .preferred_aliases
+                .iter()
+                .filter_map(|(language, alias)| self.config.preferred_alias_problem(language, alias)),
+        );
+
+        errors
     }
 
     /// Determine the preferred label for each canonical language in the document
@@ -77,7 +104,7 @@ impl MD040FencedCodeLanguage {
             if block.language.is_empty() {
                 continue;
             }
-            if let Some(canonical) = resolve_canonical(&block.language) {
+            if let Some(canonical) = self.resolve_language(&block.language) {
                 by_canonical
                     .entry(canonical.to_string())
                     .or_default()
@@ -109,8 +136,10 @@ impl MD040FencedCodeLanguage {
                 if winners.len() == 1 {
                     winners[0].to_string()
                 } else {
-                    // Tie-break: use curated default if available, otherwise alphabetically first
+                    // Tie-break: use the curated default (or, for a custom
+                    // language, its declared spelling), otherwise alphabetically first
                     default_alias(&canonical)
+                        .or_else(|| self.config.custom_language(&canonical))
                         .filter(|default| winners.contains(default))
                         .map_or_else(
                             || winners.into_iter().min().unwrap().to_string(),
@@ -164,18 +193,22 @@ impl MD040FencedCodeLanguage {
         // GitHub accepts names, aliases, AND file extensions as fence labels
         // (```pytb highlights via the .pytb extension), so the unknown check
         // consults the full accept-set, not just resolvable aliases.
-        if crate::linguist_data::is_known_language(label) {
+        if crate::linguist_data::is_known_language(label) || self.config.custom_language(label).is_some() {
             return None;
         }
 
         match self.config.unknown_language_action {
             UnknownLanguageAction::Ignore => None,
             UnknownLanguageAction::Warn => Some((
-                format!("Unknown language '{label}' (not in GitHub Linguist). Syntax highlighting may not work."),
+                format!(
+                    "Unknown language '{label}' (not in GitHub Linguist). Syntax highlighting may not work. Add it to custom-languages to accept it."
+                ),
                 Severity::Warning,
             )),
             UnknownLanguageAction::Error => Some((
-                format!("Unknown language '{label}' (not in GitHub Linguist)"),
+                format!(
+                    "Unknown language '{label}' (not in GitHub Linguist). Add it to custom-languages to accept it."
+                ),
                 Severity::Error,
             )),
         }
@@ -322,7 +355,7 @@ impl Rule for MD040FencedCodeLanguage {
                 continue;
             }
 
-            let canonical = resolve_canonical(&block.language);
+            let canonical = self.resolve_language(&block.language);
 
             // Check language restrictions (allowlist/denylist)
             if let Some(msg) = self.check_language_allowed(canonical, &block.language) {
@@ -1178,6 +1211,177 @@ echo again
             warning.column >= 1,
             "Config error column should be >= 1, got {}",
             warning.column
+        );
+    }
+
+    // =========================================================================
+    // custom-languages tests
+    // =========================================================================
+
+    fn custom_languages_config(declared: &[&str]) -> MD040Config {
+        MD040Config {
+            unknown_language_action: UnknownLanguageAction::Error,
+            custom_languages: declared.iter().map(|s| (*s).to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_declared_custom_language_is_not_unknown() {
+        let content = "```cddl\nfoo = tstr\n```\n";
+
+        let flagged = run_check_with_config(content, custom_languages_config(&[])).unwrap();
+        assert_eq!(flagged.len(), 1, "an undeclared unknown label must still be reported");
+        assert!(flagged[0].message.contains("Unknown language 'cddl'"));
+
+        let accepted = run_check_with_config(content, custom_languages_config(&["cddl"])).unwrap();
+        assert!(accepted.is_empty(), "a declared label must be accepted: {accepted:?}");
+    }
+
+    #[test]
+    fn test_custom_language_matches_a_label_case_insensitively() {
+        let content = "```CDDL\nfoo = tstr\n```\n";
+        let result = run_check_with_config(content, custom_languages_config(&["cddl"])).unwrap();
+        assert!(result.is_empty(), "label case must not matter: {result:?}");
+    }
+
+    #[test]
+    fn test_custom_language_does_not_shadow_linguist() {
+        // Declaring a label Linguist knows leaves Linguist's answer in place, so
+        // `sh` still resolves to Shell and normalizes with the rest of that language.
+        let content = "```sh\necho hi\n```\n\n```bash\necho there\n```\n\n```bash\necho again\n```\n";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            custom_languages: vec!["sh".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config.clone()).unwrap();
+        assert_eq!(result.len(), 1, "sh must still be judged against Shell: {result:?}");
+        assert!(result[0].message.contains("use 'bash'"));
+
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(!fixed.contains("```sh\n"));
+    }
+
+    #[test]
+    fn test_custom_language_normalizes_under_consistent_style() {
+        let content = "```cddl\nfoo = tstr\n```\n\n```CDDL\nbar = int\n```\n";
+        let config = MD040Config {
+            style: LanguageStyle::Consistent,
+            custom_languages: vec!["cddl".to_string()],
+            ..Default::default()
+        };
+        let result = run_check_with_config(content, config.clone()).unwrap();
+        assert_eq!(result.len(), 1, "the two spellings are one language: {result:?}");
+
+        // Both spellings appear once, and the declared spelling breaks the tie.
+        let fixed = run_fix_with_config(content, config).unwrap();
+        assert!(fixed.contains("```cddl"));
+        assert!(!fixed.contains("```CDDL"));
+    }
+
+    #[test]
+    fn test_custom_language_participates_in_allowed_and_disallowed_lists() {
+        let content = "```cddl\nfoo = tstr\n```\n";
+
+        let allowed = run_check_with_config(
+            content,
+            MD040Config {
+                allowed_languages: vec!["cddl".to_string()],
+                custom_languages: vec!["cddl".to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(allowed.is_empty(), "an allowed custom language passes: {allowed:?}");
+
+        let disallowed = run_check_with_config(
+            content,
+            MD040Config {
+                disallowed_languages: vec!["cddl".to_string()],
+                custom_languages: vec!["cddl".to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(disallowed.len(), 1, "a disallowed custom language is reported");
+        assert!(disallowed[0].message.contains("is disallowed"));
+    }
+
+    #[test]
+    fn test_undeclared_language_is_not_allowed_by_the_allowlist() {
+        // Without a declaration the label resolves to nothing, so the allowlist
+        // cannot admit it even when its own name is on the list.
+        let result = run_check_with_config(
+            "```cddl\nfoo = tstr\n```\n",
+            MD040Config {
+                allowed_languages: vec!["cddl".to_string()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].message.contains("is not in the allowed list"));
+    }
+
+    #[test]
+    fn test_unusable_custom_language_entries_are_config_errors() {
+        let rule = MD040FencedCodeLanguage::with_config(custom_languages_config(&["c ddl", "   ", "cddl"]));
+        let errors = rule.validate_config();
+        assert_eq!(errors.len(), 2, "only the unusable entries are reported: {errors:?}");
+        assert!(errors.iter().any(|e| e.contains("contains whitespace")));
+        assert!(errors.iter().any(|e| e.contains("Empty entry in custom-languages")));
+    }
+
+    #[test]
+    fn test_preferred_alias_for_a_custom_language() {
+        let accepted = MD040FencedCodeLanguage::with_config(MD040Config {
+            preferred_aliases: HashMap::from([("CDDL".to_string(), "cddl".to_string())]),
+            custom_languages: vec!["cddl".to_string()],
+            ..Default::default()
+        });
+        assert!(
+            accepted.validate_config().is_empty(),
+            "a spelling of the declared name is a valid preference"
+        );
+
+        let rejected = MD040FencedCodeLanguage::with_config(MD040Config {
+            preferred_aliases: HashMap::from([("cddl".to_string(), "cbor-dl".to_string())]),
+            custom_languages: vec!["cddl".to_string()],
+            ..Default::default()
+        });
+        let errors = rejected.validate_config();
+        assert_eq!(errors.len(), 1, "a custom language has no aliases: {errors:?}");
+        assert!(errors[0].contains("Invalid alias 'cbor-dl' for custom language 'cddl'"));
+
+        // The rejected preference does not reach the document either: labels
+        // normalize to the declared spelling, not to the invalid alias.
+        let ctx = LintContext::new(
+            "```cddl\nfoo = tstr\n```\n\n```CDDL\nbar = int\n```\n",
+            crate::config::MarkdownFlavor::Standard,
+            None,
+        );
+        let rejected = MD040FencedCodeLanguage::with_config(MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: HashMap::from([("cddl".to_string(), "cbor-dl".to_string())]),
+            custom_languages: vec!["cddl".to_string()],
+            ..Default::default()
+        });
+        assert_eq!(
+            rejected.fix(&ctx).unwrap(),
+            "```cddl\nfoo = tstr\n```\n\n```cddl\nbar = int\n```\n"
+        );
+
+        // Control: an accepted preference does drive normalization.
+        let accepted = MD040FencedCodeLanguage::with_config(MD040Config {
+            style: LanguageStyle::Consistent,
+            preferred_aliases: HashMap::from([("cddl".to_string(), "CDDL".to_string())]),
+            custom_languages: vec!["cddl".to_string()],
+            ..Default::default()
+        });
+        assert_eq!(
+            accepted.fix(&ctx).unwrap(),
+            "```CDDL\nfoo = tstr\n```\n\n```CDDL\nbar = int\n```\n"
         );
     }
 

@@ -32,6 +32,38 @@ pub(crate) struct LinkTargetInfo {
     pub(crate) anchor: Option<(String, u32)>,
 }
 
+/// One label offered as a code fence language completion.
+struct LanguageCandidate {
+    /// The language the label stands for, shown next to the completion
+    canonical: String,
+    /// The label inserted when the completion is accepted
+    alias: String,
+    /// Whether this is the label MD040 normalizes the language to
+    is_default: bool,
+    /// Where the language is defined, shown next to the language name
+    source: &'static str,
+}
+
+impl LanguageCandidate {
+    fn linguist(canonical: &str, alias: &str, is_default: bool) -> Self {
+        Self {
+            canonical: canonical.to_string(),
+            alias: alias.to_string(),
+            is_default,
+            source: "GitHub Linguist",
+        }
+    }
+
+    fn custom(canonical: &str, alias: &str) -> Self {
+        Self {
+            canonical: canonical.to_string(),
+            alias: alias.to_string(),
+            is_default: true,
+            source: "custom-languages",
+        }
+    }
+}
+
 impl RumdlLanguageServer {
     /// Detect if the cursor is at a fenced code block language position
     ///
@@ -180,26 +212,39 @@ impl RumdlLanguageServer {
         let mut items = Vec::new();
         let current_lower = current_text.to_lowercase();
 
-        // Collect all canonical languages and their aliases
-        let mut language_entries: Vec<(String, String, bool)> = Vec::new(); // (canonical, alias, is_default)
-
-        for (canonical, aliases) in CANONICAL_TO_ALIASES.iter() {
-            // Check if language is allowed
-            if !md040_config.allowed_languages.is_empty()
-                && !md040_config
+        // A language the configuration rules out is never offered, whichever list
+        // it is defined in.
+        let is_offered = |language: &str| {
+            let allowed = md040_config.allowed_languages.is_empty()
+                || md040_config
                     .allowed_languages
                     .iter()
-                    .any(|a| a.eq_ignore_ascii_case(canonical))
-            {
-                continue;
-            }
-
-            // Check if language is disallowed
-            if md040_config
+                    .any(|a| a.eq_ignore_ascii_case(language));
+            let disallowed = md040_config
                 .disallowed_languages
                 .iter()
-                .any(|d| d.eq_ignore_ascii_case(canonical))
-            {
+                .any(|d| d.eq_ignore_ascii_case(language));
+            allowed && !disallowed
+        };
+
+        // Collect all canonical languages and their aliases
+        let mut language_entries: Vec<LanguageCandidate> = Vec::new();
+
+        // Declared custom languages come first so the result cap below cannot drop
+        // the labels a project defined for itself. Each has one entry, since a
+        // custom language has no aliases.
+        for declared in &md040_config.custom_languages {
+            if declared.trim().is_empty() || !is_offered(declared) {
+                continue;
+            }
+            language_entries.push(LanguageCandidate::custom(
+                declared,
+                md040_config.preferred_label(declared).unwrap_or(declared),
+            ));
+        }
+
+        for (canonical, aliases) in CANONICAL_TO_ALIASES.iter() {
+            if !is_offered(canonical) {
                 continue;
             }
 
@@ -211,18 +256,24 @@ impl RumdlLanguageServer {
                 .to_string();
 
             // Add the preferred alias as primary completion
-            language_entries.push(((*canonical).to_string(), preferred.clone(), true));
+            language_entries.push(LanguageCandidate::linguist(canonical, &preferred, true));
 
             // Add other aliases as secondary completions
             for &alias in aliases {
                 if alias != preferred {
-                    language_entries.push(((*canonical).to_string(), alias.to_string(), false));
+                    language_entries.push(LanguageCandidate::linguist(canonical, alias, false));
                 }
             }
         }
 
         // Filter by current text prefix
-        for (canonical, alias, is_default) in language_entries {
+        for candidate in language_entries {
+            let LanguageCandidate {
+                canonical,
+                alias,
+                is_default,
+                source,
+            } = candidate;
             if !current_text.is_empty() && !alias.to_lowercase().starts_with(&current_lower) {
                 continue;
             }
@@ -232,7 +283,7 @@ impl RumdlLanguageServer {
             let item = CompletionItem {
                 label: alias.clone(),
                 kind: Some(CompletionItemKind::VALUE),
-                detail: Some(format!("{canonical} (GitHub Linguist)")),
+                detail: Some(format!("{canonical} ({source})")),
                 documentation: None,
                 sort_text: Some(format!("{sort_priority}{alias}")),
                 filter_text: Some(alias.clone()),

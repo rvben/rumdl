@@ -2319,6 +2319,111 @@ disallowed-languages = ["Python"]
     }
 }
 
+/// A server whose config discovery sees `config` in a temp workspace, plus the
+/// URI of a markdown file in it.
+async fn server_with_md040_config(config: &str) -> (RumdlLanguageServer, Url, tempfile::TempDir) {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let test_file = temp_dir.path().join("test.md");
+    std::fs::write(&test_file, "```\ncode\n```").unwrap();
+    std::fs::write(temp_dir.path().join(".rumdl.toml"), config).unwrap();
+
+    let server = create_test_server();
+    server.workspace_roots.write().await.push(temp_dir.path().to_path_buf());
+    let uri = Url::from_file_path(&test_file).unwrap();
+    (server, uri, temp_dir)
+}
+
+#[tokio::test]
+async fn test_completion_offers_custom_languages() {
+    let (server, uri, _dir) = server_with_md040_config("[MD040]\ncustom-languages = [\"cddl\"]\n").await;
+    let items = server
+        .get_language_completions(&uri, "cd", 3, Position { line: 0, character: 5 })
+        .await;
+    let cddl = items
+        .iter()
+        .find(|item| item.label == "cddl")
+        .expect("a declared custom language must be offered");
+    assert_eq!(cddl.detail.as_deref(), Some("cddl (custom-languages)"));
+
+    // Control: the same label is not a language without the declaration.
+    let (plain, plain_uri, _plain_dir) = server_with_md040_config("[MD040]\n").await;
+    let items = plain
+        .get_language_completions(&plain_uri, "cd", 3, Position { line: 0, character: 5 })
+        .await;
+    assert!(
+        !items.iter().any(|item| item.label == "cddl"),
+        "an undeclared label must not be offered"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_offers_custom_languages_with_an_empty_prefix() {
+    // The result list is capped, so a custom language must not be pushed past the cap
+    // by the hundreds of Linguist entries.
+    let (server, uri, _dir) = server_with_md040_config("[MD040]\ncustom-languages = [\"cddl\"]\n").await;
+    let items = server
+        .get_language_completions(&uri, "", 3, Position { line: 0, character: 3 })
+        .await;
+    assert!(
+        items.iter().any(|item| item.label == "cddl"),
+        "a custom language must survive the result cap"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_applies_language_lists_to_custom_languages() {
+    let (allowed, allowed_uri, _allowed_dir) = server_with_md040_config(
+        "[MD040]\ncustom-languages = [\"cddl\", \"jsonnet\"]\nallowed-languages = [\"cddl\"]\n",
+    )
+    .await;
+    let items = allowed
+        .get_language_completions(&allowed_uri, "", 3, Position { line: 0, character: 3 })
+        .await;
+    assert!(items.iter().any(|item| item.label == "cddl"));
+    assert!(
+        !items.iter().any(|item| item.label == "jsonnet"),
+        "a custom language outside the allowlist must not be offered"
+    );
+
+    let (denied, denied_uri, _denied_dir) =
+        server_with_md040_config("[MD040]\ncustom-languages = [\"cddl\"]\ndisallowed-languages = [\"cddl\"]\n").await;
+    let items = denied
+        .get_language_completions(&denied_uri, "", 3, Position { line: 0, character: 3 })
+        .await;
+    assert!(
+        !items.iter().any(|item| item.label == "cddl"),
+        "a disallowed custom language must not be offered"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_ignores_an_invalid_preferred_alias() {
+    // A preferred alias the language does not have is a configuration error, so
+    // completing to it would insert a label the linter rejects.
+    let (server, uri, _dir) =
+        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"invalid_alias\" }\n").await;
+    let items = server
+        .get_language_completions(&uri, "invalid", 3, Position { line: 0, character: 10 })
+        .await;
+    assert!(
+        !items.iter().any(|item| item.label == "invalid_alias"),
+        "an invalid alias must not be offered"
+    );
+
+    // Control: a valid preference is offered as the label for its language.
+    let (valid, valid_uri, _valid_dir) =
+        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"zsh\" }\n").await;
+    let items = valid
+        .get_language_completions(&valid_uri, "zsh", 3, Position { line: 0, character: 6 })
+        .await;
+    assert!(
+        items
+            .iter()
+            .any(|item| item.label == "zsh" && item.detail.as_deref() == Some("Shell (GitHub Linguist)")),
+        "a valid preference is offered"
+    );
+}
+
 #[test]
 fn test_is_closing_fence_basic() {
     // Opening fence only - the next fence IS a closing fence
@@ -10112,47 +10217,5 @@ async fn test_a_secondary_workspace_root_with_a_broken_config_falls_back_to_defa
         crate::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
         None,
         "an unresolvable scope must fall back to defaults, not to another root's config"
-    );
-}
-
-/// A server whose config discovery sees `config` in a temp workspace, plus the
-/// URI of a markdown file in it.
-async fn server_with_md040_config(config: &str) -> (RumdlLanguageServer, Url, tempfile::TempDir) {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let test_file = temp_dir.path().join("test.md");
-    std::fs::write(&test_file, "```\ncode\n```").unwrap();
-    std::fs::write(temp_dir.path().join(".rumdl.toml"), config).unwrap();
-
-    let server = create_test_server();
-    server.workspace_roots.write().await.push(temp_dir.path().to_path_buf());
-    let uri = Url::from_file_path(&test_file).unwrap();
-    (server, uri, temp_dir)
-}
-
-#[tokio::test]
-async fn test_completion_ignores_an_invalid_preferred_alias() {
-    // A preferred alias the language does not have is a configuration error, so
-    // completing to it would insert a label the linter rejects.
-    let (server, uri, _dir) =
-        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"invalid_alias\" }\n").await;
-    let items = server
-        .get_language_completions(&uri, "invalid", 3, Position { line: 0, character: 10 })
-        .await;
-    assert!(
-        !items.iter().any(|item| item.label == "invalid_alias"),
-        "an invalid alias must not be offered"
-    );
-
-    // Control: a valid preference is offered as the label for its language.
-    let (valid, valid_uri, _valid_dir) =
-        server_with_md040_config("[MD040]\npreferred-aliases = { Shell = \"zsh\" }\n").await;
-    let items = valid
-        .get_language_completions(&valid_uri, "zsh", 3, Position { line: 0, character: 6 })
-        .await;
-    assert!(
-        items
-            .iter()
-            .any(|item| item.label == "zsh" && item.detail.as_deref() == Some("Shell (GitHub Linguist)")),
-        "a valid preference is offered"
     );
 }
