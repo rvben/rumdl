@@ -4,6 +4,7 @@ use rumdl_lib::config::Config;
 use rumdl_lib::rule::{FixCapability, Rule};
 use rumdl_lib::rules::MD018NoMissingSpaceAtx;
 use rumdl_lib::rules::MD033NoInlineHtml;
+use rumdl_lib::rules::MD041FirstLineHeading;
 use rumdl_lib::rules::MD045NoAltText;
 use rumdl_lib::rules::MD054LinkImageStyle;
 
@@ -26,6 +27,19 @@ fn test_md054_is_conditionally_fixable() {
     // not cover every warning.
     let rule = MD054LinkImageStyle::new(true, true, true, true, true, true);
     assert_eq!(rule.fix_capability(), FixCapability::ConditionallyFixable);
+}
+
+#[test]
+fn test_md041_capability_tracks_its_opt_in() {
+    // MD041 fixes only when `fix = true`, and the capability has to say so: the
+    // CLI reads it to decide whether a warning is fixable, so a rule that reports
+    // Unfixable while fixing gets its repairs left out of the `[*]` marker and the
+    // `Fixed N/M` count.
+    let default = MD041FirstLineHeading::default();
+    assert_eq!(default.fix_capability(), FixCapability::Unfixable);
+
+    let enabled = MD041FirstLineHeading::with_pattern(1, true, None, true);
+    assert_eq!(enabled.fix_capability(), FixCapability::ConditionallyFixable);
 }
 
 #[test]

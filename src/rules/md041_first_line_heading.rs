@@ -619,8 +619,16 @@ impl Rule for MD041FirstLineHeading {
         "First line in file should be a top level heading"
     }
 
+    /// Fixing is opt-in: adding a document title is a content decision, so the rule
+    /// reports no fix capability until `fix = true` turns it on. Once on it is only
+    /// ever conditional, because a document with no heading to promote or move has
+    /// nothing the fixer can safely do.
     fn fix_capability(&self) -> FixCapability {
-        FixCapability::Unfixable
+        if self.fix_enabled {
+            FixCapability::ConditionallyFixable
+        } else {
+            FixCapability::Unfixable
+        }
     }
 
     fn check(&self, ctx: &crate::lint_context::LintContext) -> LintResult {

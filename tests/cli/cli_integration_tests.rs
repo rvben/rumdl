@@ -2674,6 +2674,63 @@ mod config_include_nonstandard_extensions {
     }
 }
 
+/// A rule whose fix is opt-in must be reported as fixable once it is turned on.
+///
+/// The CLI decides what to mark `[*]`, what to count in `Fixed N/M`, and what to
+/// offer in the "run `rumdl fmt`" hint from the rule's declared fix capability.
+/// MD041 rewrote the heading level under `fix = true` while still declaring itself
+/// unfixable, so the repair happened and the report denied it.
+mod md041_opt_in_fix_reporting {
+    use std::fs;
+    use std::process::Command;
+    use tempfile::tempdir;
+
+    fn run(config: &str) -> (String, String) {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(".rumdl.toml"), config).unwrap();
+        fs::write(dir.path().join("test.md"), "## Wrong Level\n\nContent.\n").unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(["fmt", "--no-cache", "test.md"])
+            .current_dir(dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let content = fs::read_to_string(dir.path().join("test.md")).unwrap();
+        (stdout, content)
+    }
+
+    #[test]
+    fn test_enabled_fix_is_applied_and_counted() {
+        let (stdout, content) = run("[MD041]\nfix = true\n");
+
+        assert_eq!(content, "# Wrong Level\n\nContent.\n", "MD041 should rewrite the level");
+        assert!(
+            stdout.contains("Fixed 1/1"),
+            "the applied fix must be counted, got: {stdout}"
+        );
+        assert!(
+            stdout.contains("[fixed]"),
+            "the fixed warning must be marked, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_default_leaves_the_document_alone() {
+        let (stdout, content) = run("[MD041]\nlevel = 1\n");
+
+        assert_eq!(
+            content, "## Wrong Level\n\nContent.\n",
+            "MD041 must not fix without the opt-in"
+        );
+        assert!(
+            !stdout.contains("[fixed]") && !stdout.contains("Fixed 1/1"),
+            "nothing was fixed, so nothing should be reported as fixed, got: {stdout}"
+        );
+    }
+}
+
 // Tests for Issue #197: Exit code behavior with --fix
 // These tests verify that rumdl check --fix returns the correct exit code
 mod issue197_exit_code {
