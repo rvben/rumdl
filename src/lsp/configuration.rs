@@ -391,15 +391,39 @@ impl RumdlLanguageServer {
     ///    cannot have it overridden by editor settings.
     /// 2. `self.config.config_path` -- supplied by the client via initialization
     ///    options or `workspace/didChangeConfiguration`.
-    /// 3. None -- fall through to auto-discovery in `load_config_for_lsp`.
+    /// 3. None -- fall through to auto-discovery in `load_config_for_lsp`, which
+    ///    walks up from the workspace root rather than the process working
+    ///    directory: the editor chooses where to launch the server, so that
+    ///    directory can sit in a project the user is not editing.
     pub(super) async fn load_configuration(&self, notify_client: bool) {
+        self.load_configuration_impl(notify_client, None, None).await
+    }
+
+    /// Internal implementation that accepts the user-config directory and the home
+    /// directory for testing, mirroring `resolve_config_for_file_impl`.
+    pub(crate) async fn load_configuration_impl(
+        &self,
+        notify_client: bool,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) {
         let explicit_config_path = match self.cli_config_path.as_deref() {
             Some(path) => Some(path.to_string()),
             None => self.config.read().await.config_path.clone(),
         };
 
+        // A multi-root workspace has no single answer here, and per-file resolution
+        // already covers files in every root; the first root is the one the rest of
+        // the server treats as primary.
+        let workspace_root = self.workspace_roots.read().await.first().cloned();
+
         // Use the same discovery logic as CLI but with LSP-specific error handling
-        match Self::load_config_for_lsp(explicit_config_path.as_deref()) {
+        match Self::load_config_for_lsp(
+            explicit_config_path.as_deref(),
+            workspace_root.as_deref(),
+            user_config_dir,
+            home_dir,
+        ) {
             Ok(sourced_config) => {
                 let loaded_files = sourced_config.loaded_files.clone();
                 let discovery_warnings = sourced_config.discovery_warnings.clone();
@@ -462,12 +486,33 @@ impl RumdlLanguageServer {
             .any(|entry| entry.sourced.is_some())
     }
 
-    /// Load configuration for LSP - similar to CLI loading but returns Result
+    /// Load the workspace-level configuration, the way the CLI would inside `start_dir`.
+    ///
+    /// `start_dir` is the workspace root. Without one the walk falls back to the
+    /// process working directory, which is right only when nothing better exists:
+    /// a client that sends neither `workspaceFolders` nor `rootUri`, or a server
+    /// started by hand in a terminal, where that directory is the user's own
+    /// choice exactly as it is for `rumdl check`.
+    ///
+    /// `user_config_dir` and `home_dir` override the platform user-config directory
+    /// and the home-directory walk boundary, which tests set to keep discovery
+    /// inside a temporary tree.
     pub(crate) fn load_config_for_lsp(
         config_path: Option<&str>,
+        start_dir: Option<&Path>,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
     ) -> Result<crate::config::SourcedConfig, crate::config::ConfigError> {
-        // Use the same configuration loading as the CLI
-        crate::config::SourcedConfig::load_with_discovery(config_path, None, false)
+        match start_dir {
+            Some(dir) => crate::config::SourcedConfig::load_for_workspace(dir, config_path, user_config_dir, home_dir),
+            None => crate::config::SourcedConfig::load_with_discovery_impl(
+                config_path,
+                None,
+                false,
+                user_config_dir,
+                home_dir,
+            ),
+        }
     }
 
     /// Resolve configuration for a specific file

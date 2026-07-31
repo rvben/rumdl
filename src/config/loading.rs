@@ -480,6 +480,24 @@ impl SourcedConfig<ConfigLoaded> {
         })
     }
 
+    /// Where an upward config walk begins.
+    ///
+    /// `start_override` is the directory a caller chose as its scope; the CLI has
+    /// none and uses the process working directory, the directory the user typed
+    /// the command in.
+    fn resolve_discovery_start(start_override: Option<&Path>) -> Option<std::path::PathBuf> {
+        if let Some(dir) = start_override {
+            return Some(dir.to_path_buf());
+        }
+        match std::env::current_dir() {
+            Ok(dir) => Some(dir),
+            Err(e) => {
+                log::debug!("[rumdl-config] Failed to get current directory: {e}");
+                None
+            }
+        }
+    }
+
     /// Discover configuration file by traversing up the directory tree.
     /// Returns the first configuration file found.
     /// Discovers config file and returns both the config path and project root.
@@ -489,22 +507,17 @@ impl SourcedConfig<ConfigLoaded> {
     /// The walk stops at the home directory: a config file located in `$HOME`
     /// itself is user-level, not a project config, and must reach the loader only
     /// through the user-config fallback (`load_user_config`) so the platform
-    /// user-config directory keeps precedence over `~/.rumdl.toml`. The cwd is
-    /// exempt from that boundary: it is an explicitly chosen project context, so
-    /// its configs apply even when the cwd *is* `$HOME` (pre-commit.ci sets `HOME`
-    /// to the git checkout, and `pyproject.toml` has no user-config fallback).
-    /// `home_override` supplies the boundary for tests; production resolves the
-    /// real home directory.
+    /// user-config directory keeps precedence over `~/.rumdl.toml`. The start
+    /// directory is exempt from that boundary: it is an explicitly chosen project
+    /// context, so its configs apply even when it *is* `$HOME` (pre-commit.ci sets
+    /// `HOME` to the git checkout, and `pyproject.toml` has no user-config
+    /// fallback). `home_override` supplies the boundary for tests; production
+    /// resolves the real home directory.
     fn discover_config_upward(
+        start_override: Option<&Path>,
         home_override: Option<&Path>,
     ) -> Option<(std::path::PathBuf, std::path::PathBuf, Option<ShadowedConfigs>)> {
-        let start_dir = match std::env::current_dir() {
-            Ok(dir) => dir,
-            Err(e) => {
-                log::debug!("[rumdl-config] Failed to get current directory: {e}");
-                return None;
-            }
-        };
+        let start_dir = Self::resolve_discovery_start(start_override)?;
 
         // `rumdl_configs_in_dir` is the single source of truth for "which rumdl
         // configs live here", shared with the LSP and the shadow detector, so the
@@ -529,18 +542,15 @@ impl SourcedConfig<ConfigLoaded> {
     /// Discover markdownlint configuration file by traversing up the directory tree.
     /// Similar to discover_config_upward but for .markdownlint.yaml/json files, and
     /// bounded at the home directory for the same reason: a markdownlint config in
-    /// `$HOME` is user-level, not a project config. The cwd is exempt from the
-    /// boundary just like rumdl config discovery, and markdownlint files have no
-    /// user-config fallback at all, so without the exemption a config in a
-    /// `HOME == cwd` checkout would be ignored entirely.
-    fn discover_markdownlint_config_upward(home_override: Option<&Path>) -> Option<std::path::PathBuf> {
-        let start_dir = match std::env::current_dir() {
-            Ok(dir) => dir,
-            Err(e) => {
-                log::debug!("[rumdl-config] Failed to get current directory for markdownlint discovery: {e}");
-                return None;
-            }
-        };
+    /// `$HOME` is user-level, not a project config. The start directory is exempt
+    /// from the boundary just like rumdl config discovery, and markdownlint files
+    /// have no user-config fallback at all, so without the exemption a config in a
+    /// checkout that is itself `$HOME` would be ignored entirely.
+    fn discover_markdownlint_config_upward(
+        start_override: Option<&Path>,
+        home_override: Option<&Path>,
+    ) -> Option<std::path::PathBuf> {
+        let start_dir = Self::resolve_discovery_start(start_override)?;
 
         UpwardWalk::new(&start_dir)
             .stop_below(Self::resolve_home_boundary(home_override))
@@ -863,9 +873,52 @@ impl SourcedConfig<ConfigLoaded> {
         Ok(sourced_config)
     }
 
+    /// Load the configuration that applies to a directory, as if the CLI had run there.
+    ///
+    /// Discovery normally walks up from the process working directory, which is the
+    /// scope the user chose when they typed `rumdl check`. A language server has no
+    /// such directory: the editor launches it from wherever it happens to be, which
+    /// may sit in an unrelated project. The workspace root is the scope the user
+    /// chose, so the server passes that here and resolves what `rumdl check` would
+    /// resolve inside it.
+    ///
+    /// `user_config_dir` and `home_dir` override the platform user-config directory
+    /// and the home-directory walk boundary; the server passes the home directory it
+    /// already resolved for its per-file walk, and tests pass both.
+    pub fn load_for_workspace(
+        start_dir: &Path,
+        config_path: Option<&str>,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> Result<Self, ConfigError> {
+        Self::load_with_discovery_from(Some(start_dir), config_path, None, false, user_config_dir, home_dir)
+    }
+
     /// Internal implementation that accepts user config directory and home directory for testing
     #[doc(hidden)]
     pub fn load_with_discovery_impl(
+        config_path: Option<&str>,
+        cli_overrides: Option<&SourcedGlobalConfig>,
+        skip_auto_discovery: bool,
+        user_config_dir: Option<&Path>,
+        home_dir: Option<&Path>,
+    ) -> Result<Self, ConfigError> {
+        Self::load_with_discovery_from(
+            None,
+            config_path,
+            cli_overrides,
+            skip_auto_discovery,
+            user_config_dir,
+            home_dir,
+        )
+    }
+
+    /// Shared body of every discovery-based load.
+    ///
+    /// `start_dir` is where the upward walk begins; `None` means the process
+    /// working directory, which is what the CLI wants.
+    fn load_with_discovery_from(
+        start_dir: Option<&Path>,
         config_path: Option<&str>,
         cli_overrides: Option<&SourcedGlobalConfig>,
         skip_auto_discovery: bool,
@@ -901,7 +954,7 @@ impl SourcedConfig<ConfigLoaded> {
             log::debug!("[rumdl-config] No explicit config_path, searching default locations");
 
             // Try to discover project config first
-            if let Some((config_file, project_root, shadow)) = Self::discover_config_upward(home_dir) {
+            if let Some((config_file, project_root, shadow)) = Self::discover_config_upward(start_dir, home_dir) {
                 // Project config found - use ONLY this (standalone, no user config).
                 // Rumdl project configs can express all settings directly, so user config
                 // is not needed and omitting it ensures CI and local runs are identical.
@@ -921,7 +974,7 @@ impl SourcedConfig<ConfigLoaded> {
                 // No rumdl project config - try markdownlint config
                 log::debug!("[rumdl-config] No rumdl config found, checking markdownlint config");
 
-                if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward(home_dir) {
+                if let Some(markdownlint_path) = Self::discover_markdownlint_config_upward(start_dir, home_dir) {
                     log::debug!(
                         "[rumdl-config] Found markdownlint config: {}",
                         markdownlint_path.display()

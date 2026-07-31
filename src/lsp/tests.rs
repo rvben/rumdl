@@ -228,20 +228,18 @@ async fn test_configuration_loading() {
 #[tokio::test]
 async fn test_load_config_for_lsp() {
     // Test with no config file
-    let result = RumdlLanguageServer::load_config_for_lsp(None);
+    let result = RumdlLanguageServer::load_config_for_lsp(None, None, None, None);
     assert!(result.is_ok());
 
     // Test with non-existent config file
-    let result = RumdlLanguageServer::load_config_for_lsp(Some("/nonexistent/config.toml"));
+    let result = RumdlLanguageServer::load_config_for_lsp(Some("/nonexistent/config.toml"), None, None, None);
     assert!(result.is_err());
 }
 
-/// The LSP workspace-load path (`load_config_for_lsp(None)` -> auto-discovery) must
-/// carry the same shadowed-config warning the CLI does, so `load_configuration` can
+/// The LSP workspace-load path (auto-discovery from the workspace root) must carry
+/// the same shadowed-config warning the CLI does, so `load_configuration` can
 /// surface it to editor users. Pins CLI/LSP parity on the shared discovery helper.
-/// Mutates the process cwd, so it runs serially.
 #[test]
-#[serial_test::serial]
 fn test_lsp_discovery_carries_shadowed_config_warning() {
     use tempfile::tempdir;
 
@@ -249,14 +247,9 @@ fn test_lsp_discovery_carries_shadowed_config_warning() {
     std::fs::create_dir_all(temp.path().join(".git")).unwrap(); // bound discovery here
     std::fs::write(temp.path().join(".rumdl.toml"), "line-length = 11\n").unwrap();
     std::fs::write(temp.path().join("rumdl.toml"), "line-length = 22\n").unwrap();
-    let cwd = temp.path().canonicalize().unwrap();
+    let root = temp.path().canonicalize().unwrap();
 
-    let prev_cwd = std::env::current_dir().unwrap();
-    std::env::set_current_dir(&cwd).unwrap();
-    let result = std::panic::catch_unwind(|| RumdlLanguageServer::load_config_for_lsp(None));
-    std::env::set_current_dir(&prev_cwd).unwrap();
-
-    let sourced = result.unwrap().expect("config should load");
+    let sourced = RumdlLanguageServer::load_config_for_lsp(None, Some(&root), None, None).expect("config should load");
     assert!(
         sourced
             .discovery_warnings
@@ -8361,6 +8354,12 @@ async fn test_lsp_matches_cli_values_under_a_discovered_config() {
             Some(4),
         ),
         (
+            "markdownlint_cli2_project_config",
+            ".markdownlint-cli2.yaml",
+            "config:\n  MD004:\n    style: asterisk\n",
+            Some(4),
+        ),
+        (
             "rumdl_project_config",
             ".rumdl.toml",
             "[MD004]\nstyle = \"asterisk\"\n",
@@ -9677,4 +9676,144 @@ async fn test_formatting_honors_lsp_disable_rules() {
         after_first.contains("- Bullet 1"),
         "single-space marker must be preserved, got:\n{after_first}"
     );
+}
+
+/// One workspace/working-directory arrangement to resolve a file under.
+struct WorkspaceDiscoveryCase {
+    name: &'static str,
+    /// The MD007 indent `project/.rumdl.toml` sets, or `None` to leave the project
+    /// without a config of its own.
+    project_indent: Option<usize>,
+    /// The workspace root the client declares, relative to the temp root.
+    workspace_root: &'static str,
+    /// The directory holding the file being edited, relative to the temp root.
+    file_dir: &'static str,
+    /// The MD007 indent the file must resolve to.
+    expected_indent: usize,
+}
+
+/// The server must resolve a file's configuration from the workspace, never from
+/// the directory the editor happened to launch it in.
+///
+/// `rumdl check` discovers upward from the working directory because that is the
+/// scope the user chose. A server's working directory is whatever the editor was
+/// started in, so an unrelated project sitting there used to supply the settings
+/// for a workspace that had none. Each case pins the resolved value against what
+/// `rumdl check` resolves for the same file, and against the value itself so a
+/// change moving both together could not pass.
+///
+/// Mutates the process working directory, so it runs serially.
+#[tokio::test]
+#[serial_test::serial]
+async fn test_lsp_resolves_from_the_workspace_not_the_working_directory() {
+    use crate::config::{Config, SourcedConfig};
+    use std::fs;
+    use tempfile::tempdir;
+
+    const USER_INDENT: usize = 5;
+    const CWD_INDENT: usize = 7;
+
+    let cases = [
+        // The reported divergence: nothing in the workspace, so an unrelated
+        // project at the working directory used to answer for it.
+        WorkspaceDiscoveryCase {
+            name: "cwd_config_does_not_leak_into_the_workspace",
+            project_indent: None,
+            workspace_root: "project",
+            file_dir: "project/nested",
+            expected_indent: USER_INDENT,
+        },
+        WorkspaceDiscoveryCase {
+            name: "workspace_config_outranks_the_working_directory",
+            project_indent: Some(3),
+            workspace_root: "project",
+            file_dir: "project/nested",
+            expected_indent: 3,
+        },
+        // Opening a subdirectory as the workspace: the per-file walk stops at the
+        // declared root, so only the workspace-level walk can reach the config
+        // above it, which is the one `rumdl check` finds from the same file.
+        WorkspaceDiscoveryCase {
+            name: "config_above_the_workspace_root_still_applies",
+            project_indent: Some(3),
+            workspace_root: "project/docs",
+            file_dir: "project/docs",
+            expected_indent: 3,
+        },
+    ];
+
+    let mut failures = Vec::new();
+    for case in cases {
+        let temp = tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let project = root.join("project");
+        let other = root.join("other");
+        let user_config_dir = root.join("xdg");
+        let home_dir = root.join("fakehome");
+
+        fs::create_dir_all(project.join("nested")).unwrap();
+        fs::create_dir_all(project.join("docs")).unwrap();
+        fs::create_dir_all(project.join(".git")).unwrap();
+        fs::create_dir_all(other.join(".git")).unwrap();
+        fs::create_dir_all(user_config_dir.join("rumdl")).unwrap();
+        fs::create_dir_all(&home_dir).unwrap();
+
+        fs::write(
+            user_config_dir.join("rumdl").join("rumdl.toml"),
+            format!("[MD007]\nindent = {USER_INDENT}\n"),
+        )
+        .unwrap();
+        // An unrelated project that the server process happens to sit in.
+        fs::write(other.join(".rumdl.toml"), format!("[MD007]\nindent = {CWD_INDENT}\n")).unwrap();
+        if let Some(indent) = case.project_indent {
+            fs::write(project.join(".rumdl.toml"), format!("[MD007]\nindent = {indent}\n")).unwrap();
+        }
+
+        let file_dir = root.join(case.file_dir);
+        let md_file = file_dir.join("test.md");
+        fs::write(&md_file, "").unwrap();
+
+        let prev_cwd = std::env::current_dir().unwrap();
+
+        // What `rumdl check` resolves for this file, run from the file's directory.
+        std::env::set_current_dir(&file_dir).unwrap();
+        let cli = SourcedConfig::load_with_discovery_impl(None, None, false, Some(&user_config_dir), Some(&home_dir));
+        std::env::set_current_dir(&prev_cwd).unwrap();
+        let cli_config: Config = cli.expect("CLI config should load").into_validated_unchecked().into();
+        let cli_indent = crate::config::get_rule_config_value::<usize>(&cli_config, "MD007", "indent");
+
+        // What the server resolves for it, launched from the unrelated project.
+        let server = create_test_server();
+        server
+            .workspace_roots
+            .write()
+            .await
+            .push(root.join(case.workspace_root));
+        std::env::set_current_dir(&other).unwrap();
+        server
+            .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+            .await;
+        std::env::set_current_dir(&prev_cwd).unwrap();
+        let lsp_config = server
+            .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+            .await;
+        let lsp_indent = crate::config::get_rule_config_value::<usize>(&lsp_config, "MD007", "indent");
+
+        // Collected rather than asserted so one failing arrangement does not hide
+        // the others.
+        if cli_indent != Some(case.expected_indent) {
+            failures.push(format!(
+                "{}: the case does not describe what `rumdl check` resolves: expected MD007.indent {:?}, CLI resolved {cli_indent:?}",
+                case.name, case.expected_indent
+            ));
+        }
+        if lsp_indent != Some(case.expected_indent) {
+            failures.push(format!(
+                "{}: server resolved MD007.indent from the wrong scope: expected {:?}, got {lsp_indent:?}",
+                case.name, case.expected_indent
+            ));
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
