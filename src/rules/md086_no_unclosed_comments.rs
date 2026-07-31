@@ -275,6 +275,13 @@ mod tests {
     }
 
     #[test]
+    fn ignores_an_obsidian_opener_in_front_matter() {
+        let content = "---\ntitle: \"50%% off\"\n---\n\n# Title\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert!(warnings.is_empty(), "got: {warnings:?}");
+    }
+
+    #[test]
     fn reports_a_body_opener_below_front_matter_holding_one() {
         let content = "---\nauthor: \"a <!-- b\"\n---\n\n# Title\n\n<!-- a real one\n";
         let warnings = check(content);

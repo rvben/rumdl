@@ -1999,3 +1999,23 @@ fn test_unterminated_obsidian_comment_offset() {
         "%% is ordinary text outside the Obsidian flavor"
     );
 }
+
+#[test]
+fn test_front_matter_is_not_scanned_for_obsidian_comments() {
+    // A `%%` in a YAML value is part of the value. Treating it as a delimiter
+    // opened a comment that ran to the end of the note, hiding the body from
+    // every rule.
+    let content = "---\ntitle: \"50%% off\"\n---\n\n# Title\n\nText\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(ctx.unterminated_obsidian_comment(), None);
+    assert!(!ctx.is_in_obsidian_comment(content.find("# Title").unwrap()));
+    assert!(!ctx.is_in_obsidian_comment(content.find("Text").unwrap()));
+}
+
+#[test]
+fn test_obsidian_comment_in_the_body_is_found_after_front_matter() {
+    let content = "---\ntitle: \"50%% off\"\n---\n\nText %% a note %% more\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert!(ctx.is_in_obsidian_comment(content.find("a note").unwrap()));
+    assert!(!ctx.is_in_obsidian_comment(content.find("more").unwrap()));
+}

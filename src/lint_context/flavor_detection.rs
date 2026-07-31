@@ -605,6 +605,7 @@ pub(super) fn detect_obsidian_comments(
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
     code_span_ranges: &[(usize, usize)],
+    body_start: usize,
 ) -> ObsidianCommentScan {
     // Only process Obsidian files
     if flavor != MarkdownFlavor::Obsidian {
@@ -612,7 +613,7 @@ pub(super) fn detect_obsidian_comments(
     }
 
     // Compute Obsidian comment ranges (byte ranges)
-    let scan = compute_obsidian_comment_ranges(content, lines, code_span_ranges);
+    let scan = compute_obsidian_comment_ranges(content, lines, code_span_ranges, body_start);
 
     // Mark lines that fall within comment ranges
     for range in &scan.ranges {
@@ -660,10 +661,15 @@ pub(super) struct ObsidianCommentScan {
 ///
 /// Returns a vector of (start, end) byte offset pairs for each comment.
 /// Comments do not nest - first `%%` after an opening `%%` closes it.
+///
+/// The scan starts at `body_start`, the byte offset of the first line after
+/// front matter. A `%%` in a YAML value is part of the value, and treating it
+/// as a delimiter would hide the rest of the note from every rule.
 pub(super) fn compute_obsidian_comment_ranges(
     content: &str,
     lines: &[LineInfo],
     code_span_ranges: &[(usize, usize)],
+    body_start: usize,
 ) -> ObsidianCommentScan {
     let mut ranges = Vec::new();
 
@@ -700,7 +706,7 @@ pub(super) fn compute_obsidian_comment_ranges(
 
     let content_bytes = content.as_bytes();
     let len = content.len();
-    let mut i = 0;
+    let mut i = body_start.min(len);
     let mut in_comment = false;
     let mut comment_start = 0;
     let mut skip_idx = 0;

@@ -518,7 +518,7 @@ impl<'a> LintContext<'a> {
         let obsidian_comment_scan = profile_section!(
             "Obsidian comments",
             profile,
-            flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges)
+            flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges, body_start)
         );
         let obsidian_comment_ranges = obsidian_comment_scan.ranges;
         let unterminated_obsidian_comment = obsidian_comment_scan.unterminated;
