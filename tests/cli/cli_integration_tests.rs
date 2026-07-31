@@ -2731,6 +2731,121 @@ mod md041_opt_in_fix_reporting {
     }
 }
 
+/// A rule whose fix a document turns on for itself must be reported as fixable.
+///
+/// An inline `rumdl-configure-file` comment reconfigures a rule for one file, and
+/// the fixer runs that reconfigured rule. Reading the fix capability from the
+/// unconfigured instance instead made the CLI apply the fix and then report it as
+/// not applied.
+mod inline_configure_file_fix_reporting {
+    use std::fs;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use tempfile::tempdir;
+
+    const OPT_IN: &str = "<!-- rumdl-configure-file { \"MD033\": { \"fix\": true } } -->\n\n";
+    const BODY: &str = "# Title\n\nSome <b>bold</b> text.\n";
+
+    fn run(args: &[&str], content: &str) -> (String, String) {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.md"), content).unwrap();
+
+        let output = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(args)
+            .arg("test.md")
+            .current_dir(dir.path())
+            .output()
+            .expect("Failed to execute rumdl");
+
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let fixed = fs::read_to_string(dir.path().join("test.md")).unwrap();
+        (stdout, fixed)
+    }
+
+    #[test]
+    fn test_inline_opt_in_fix_is_counted() {
+        let (stdout, content) = run(&["fmt", "--no-cache", "--no-config"], &format!("{OPT_IN}{BODY}"));
+
+        assert_eq!(
+            content,
+            format!("{OPT_IN}# Title\n\nSome **bold** text.\n"),
+            "MD033 should replace the inline HTML"
+        );
+        assert!(
+            stdout.contains("Fixed 1/1"),
+            "the applied fix must be counted, got: {stdout}"
+        );
+        assert!(
+            stdout.contains("[fixed]"),
+            "the fixed warning must be marked, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_without_the_inline_opt_in_nothing_is_fixed() {
+        let (stdout, content) = run(&["fmt", "--no-cache", "--no-config"], BODY);
+
+        assert_eq!(content, BODY, "MD033 must not fix without the opt-in");
+        assert!(
+            !stdout.contains("[fixed]") && !stdout.contains("Fixed 1/1"),
+            "nothing was fixed, so nothing should be reported as fixed, got: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_check_offers_the_inline_opt_in_fix() {
+        let (opted_in, _) = run(&["check", "--no-cache", "--no-config"], &format!("{OPT_IN}{BODY}"));
+        let (plain, _) = run(&["check", "--no-cache", "--no-config"], BODY);
+
+        assert!(
+            opted_in.contains("[*]") && opted_in.contains("automatically fix 1"),
+            "the opt-in makes the violation fixable, so check should offer it, got: {opted_in}"
+        );
+        assert!(
+            !plain.contains("[*]") && !plain.contains("automatically fix"),
+            "without the opt-in there is nothing to offer, got: {plain}"
+        );
+    }
+
+    #[test]
+    fn test_stdin_counts_the_inline_opt_in_fix() {
+        // A violation the fix cannot touch keeps warnings on the report, which is
+        // the path that labels each one as fixed or not.
+        let content = format!("{OPT_IN}Not a heading.\n\nSome <b>bold</b> text.\n");
+
+        let mut child = Command::new(env!("CARGO_BIN_EXE_rumdl"))
+            .args(["check", "--fix", "--stdin", "--no-cache", "--no-config"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to execute rumdl");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(content.as_bytes())
+            .expect("write stdin");
+        let output = child.wait_with_output().expect("Failed to read rumdl output");
+
+        let fixed = String::from_utf8_lossy(&output.stdout).into_owned();
+        let report = String::from_utf8_lossy(&output.stderr).into_owned();
+
+        assert!(
+            fixed.contains("**bold**"),
+            "MD033 should replace the inline HTML, got: {fixed}"
+        );
+        assert!(
+            report.contains("1 issue(s) fixed"),
+            "the applied fix must be counted, got: {report}"
+        );
+        assert!(
+            report.contains("MD033") && report.contains("[fixed]"),
+            "the fixed warning must be marked, got: {report}"
+        );
+    }
+}
+
 // Tests for Issue #197: Exit code behavior with --fix
 // These tests verify that rumdl check --fix returns the correct exit code
 mod issue197_exit_code {

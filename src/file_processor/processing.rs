@@ -67,6 +67,19 @@ pub fn is_rule_actually_fixable(config: &rumdl_config::Config, rule_name: &str) 
 /// This replaces hardcoded rule name checks (e.g., `&& name != "MD033"`) with
 /// capability-based checks that are future-proof for any rule.
 pub fn is_rule_cli_fixable(rules: &[Box<dyn Rule>], config: &rumdl_config::Config, rule_name: &str) -> bool {
+    is_rule_cli_fixable_in(rules, &[], config, rule_name)
+}
+
+/// `is_rule_cli_fixable` for a document that configures some of its rules itself.
+///
+/// `document_rules` holds those rules as the document asked for them, and answers
+/// for the names it covers; every other name is answered from `rules`.
+pub fn is_rule_cli_fixable_in(
+    rules: &[Box<dyn Rule>],
+    document_rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    rule_name: &str,
+) -> bool {
     // First check config-based fixability
     if !is_rule_actually_fixable(config, rule_name) {
         return false;
@@ -75,10 +88,36 @@ pub fn is_rule_cli_fixable(rules: &[Box<dyn Rule>], config: &rumdl_config::Confi
     // Then check if the rule declares itself as Unfixable
     // Rules like MD033 have LSP-only fixes (for VS Code quick actions) but
     // their fix() method returns content unchanged, so CLI shouldn't count them
-    rules
+    document_rules
         .iter()
+        .chain(rules)
         .find(|r| r.name().eq_ignore_ascii_case(rule_name))
         .is_none_or(|r| r.fix_capability() != FixCapability::Unfixable)
+}
+
+/// The rules a document reconfigures, built with the settings it asks for.
+///
+/// A rule's fix capability can depend on its settings, and an inline
+/// `rumdl-configure-file` comment changes those settings for one file. The fixer
+/// already runs the reconfigured rule, so whatever reports what a run fixed has to
+/// read the capability from the same instance. Empty for the documents that carry
+/// no inline configuration, which is nearly all of them.
+pub fn rules_reconfigured_by_document(
+    rules: &[Box<dyn Rule>],
+    config: &rumdl_config::Config,
+    content: &str,
+) -> Vec<Box<dyn Rule>> {
+    let inline_config = rumdl_lib::inline_config::InlineConfig::from_content(content);
+    if inline_config.get_all_rule_configs().is_empty() {
+        return Vec::new();
+    }
+
+    let merged = config.merge_with_inline_config(&inline_config);
+    rules
+        .iter()
+        .filter(|rule| inline_config.get_rule_config(rule.name()).is_some())
+        .filter_map(|rule| rumdl_lib::rules::create_rule_by_name(rule.name(), &merged))
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -147,6 +186,10 @@ pub fn process_file_with_formatter(
             config_warning: false,
         };
     }
+
+    // The rules this document configures itself, which is what decides whether its
+    // warnings carry a fix the CLI will apply.
+    let document_rules = rules_reconfigured_by_document(rules, config, &content);
 
     // Compute filtered rules based on per-file-ignores. The fix coordinator, embedded
     // markdown formatting, and Rust doc-comment formatting all run against this set so
@@ -229,7 +272,7 @@ pub fn process_file_with_formatter(
                 .iter()
                 .map(|w| {
                     let rule_name = w.rule_name.as_deref().unwrap_or("");
-                    if !is_rule_cli_fixable(rules, config, rule_name) {
+                    if !is_rule_cli_fixable_in(rules, &document_rules, config, rule_name) {
                         LintWarning { fix: None, ..w.clone() }
                     } else {
                         w.clone()
@@ -312,7 +355,7 @@ pub fn process_file_with_formatter(
 
         let summary_issues_fixed = if total_warnings > 0 {
             let remaining_warnings = relint_fixed_file_content(&content, file_path, rules, config);
-            count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings)
+            count_actually_fixed_warnings(rules, &document_rules, config, &all_warnings, &remaining_warnings)
         } else {
             warnings_fixed
         };
@@ -433,7 +476,7 @@ pub fn process_file_with_formatter(
             .iter()
             .map(|warning| {
                 let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                let is_fixable = is_rule_cli_fixable(rules, config, rule_name);
+                let is_fixable = is_rule_cli_fixable_in(rules, &document_rules, config, rule_name);
                 warning.fix.is_some()
                     && is_fixable
                     && !remaining_warnings.iter().any(|w| {
@@ -570,6 +613,7 @@ fn relint_fixed_file_content(
 
 pub(crate) fn count_actually_fixed_warnings(
     rules: &[Box<dyn Rule>],
+    document_rules: &[Box<dyn Rule>],
     config: &rumdl_config::Config,
     all_warnings: &[LintWarning],
     remaining_warnings: &[LintWarning],
@@ -578,7 +622,7 @@ pub(crate) fn count_actually_fixed_warnings(
         .iter()
         .filter(|warning| {
             let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-            let is_fixable = is_rule_cli_fixable(rules, config, rule_name);
+            let is_fixable = is_rule_cli_fixable_in(rules, document_rules, config, rule_name);
             warning.fix.is_some()
                 && is_fixable
                 && !remaining_warnings.iter().any(|w| {
@@ -773,6 +817,10 @@ pub fn process_file_with_index(
         };
     }
 
+    // The rules this document configures itself, which is what decides whether its
+    // warnings carry a fix the CLI will apply.
+    let document_rules = rules_reconfigured_by_document(rules, config, &content);
+
     // Compute hashes for cache (Ruff-style: file content + config + enabled rules)
     let (config_hash, rules_hash) = if let Some(hashes) = cache_hashes {
         (Cow::Borrowed(&hashes.config_hash), Cow::Borrowed(&hashes.rules_hash))
@@ -804,7 +852,7 @@ pub fn process_file_with_index(
                             w.fix.is_some()
                                 && w.rule_name
                                     .as_ref()
-                                    .is_some_and(|name| is_rule_cli_fixable(rules, config, name))
+                                    .is_some_and(|name| is_rule_cli_fixable_in(rules, &document_rules, config, name))
                         })
                         .count()
                 );
@@ -948,7 +996,7 @@ pub fn process_file_with_index(
             w.fix.is_some()
                 && w.rule_name
                     .as_ref()
-                    .is_some_and(|name| is_rule_cli_fixable(rules, config, name))
+                    .is_some_and(|name| is_rule_cli_fixable_in(rules, &document_rules, config, name))
         })
         .count();
 

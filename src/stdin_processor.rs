@@ -106,6 +106,10 @@ pub fn process_stdin(
     };
     let effective_rules: &[Box<dyn Rule>] = &filtered_rules;
 
+    // The rules this document configures itself, which is what decides whether its
+    // warnings carry a fix the CLI will apply.
+    let document_rules = file_processor::rules_reconfigured_by_document(rules, config, &content);
+
     // Lint through the same engine as the file path, so inline config
     // overrides, kramdown suppression, inline-disable ranges, and severity
     // overrides behave identically to `rumdl check <file>`.
@@ -183,8 +187,13 @@ pub fn process_stdin(
                     exit::tool_error();
                 }
             };
-            let actual_warnings_fixed =
-                file_processor::count_actually_fixed_warnings(rules, config, &all_warnings, &remaining_warnings);
+            let actual_warnings_fixed = file_processor::count_actually_fixed_warnings(
+                rules,
+                &document_rules,
+                config,
+                &all_warnings,
+                &remaining_warnings,
+            );
 
             // Diagnostics always go to stderr in fix mode (stdout has fixed content)
             let fix_writer = OutputWriter::new(true, silent);
@@ -203,14 +212,15 @@ pub fn process_stdin(
                             let mut output = String::new();
                             for warning in &all_warnings {
                                 let rule_name = warning.rule_name.as_deref().unwrap_or("unknown");
-                                let was_fixed = file_processor::is_rule_cli_fixable(rules, config, rule_name)
-                                    && warning.fix.is_some()
-                                    && !remaining_warnings.iter().any(|w| {
-                                        w.line == warning.line
-                                            && w.column == warning.column
-                                            && w.rule_name == warning.rule_name
-                                            && w.message == warning.message
-                                    });
+                                let was_fixed =
+                                    file_processor::is_rule_cli_fixable_in(rules, &document_rules, config, rule_name)
+                                        && warning.fix.is_some()
+                                        && !remaining_warnings.iter().any(|w| {
+                                            w.line == warning.line
+                                                && w.column == warning.column
+                                                && w.rule_name == warning.rule_name
+                                                && w.message == warning.message
+                                        });
 
                                 let fix_indicator = if was_fixed {
                                     " [fixed]".green().to_string()
