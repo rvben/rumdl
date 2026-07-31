@@ -152,7 +152,6 @@ impl<'a> LintContext<'a> {
         let strong_spans = parse_result.strong_spans;
         let line_to_list = parse_result.line_to_list;
         let list_start_values = parse_result.list_start_values;
-        let html_blocks = parse_result.html_blocks;
 
         // Pre-compute HTML comment ranges ONCE for all operations.
         // Code-span and fenced-code-block ranges are passed so `<!--`/`-->`
@@ -182,32 +181,8 @@ impl<'a> LintContext<'a> {
                 body_start
             )
         );
-        let mut html_comment_ranges = html_comment_scan.ranges;
+        let html_comment_ranges = html_comment_scan.ranges;
         let unterminated_html_comment = html_comment_scan.unterminated;
-
-        // An unclosed `<!--` that opens an HTML block comments out the rest of
-        // that block, so the text below it is not content any rule should judge.
-        // Without this the block-structure rules and the comment-aware rules
-        // disagree about the same lines: the parser reports no list inside the
-        // block, while a bare URL there is still flagged.
-        //
-        // The opener stays reported either way. This governs what the rest of
-        // the linter sees, not whether the missing closer is raised.
-        //
-        // This is the opener as the HTML scan found it. In the Obsidian flavor a
-        // `<!--` that a closed `%%` pair hides is not one, and the real opener
-        // below it is resolved only once the Obsidian comments are known, which
-        // in turn needs these ranges. A document carrying both therefore leaves
-        // the block below the real opener visible to the other rules. Closing
-        // that means running the two scans to a fixpoint rather than reordering
-        // them, so it stays as it is.
-        if let Some(opener) = unterminated_html_comment
-            && let Some(range) = crate::utils::skip_context::unterminated_comment_range(opener, &html_blocks)
-        {
-            // Every complete comment starts before the unclosed opener, so this
-            // keeps the ranges sorted for the binary searches over them.
-            html_comment_ranges.push(range);
-        }
 
         // Pre-compute autodoc block ranges (avoids O(n^2) scaling)
         // Detected for all flavors except AzureDevOps, where `:::` denotes code fences
