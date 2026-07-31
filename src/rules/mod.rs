@@ -75,6 +75,7 @@ mod md082_no_empty_sections;
 mod md083_mojibake;
 mod md084_invisible_characters;
 mod md085_paragraph_continuation_indent;
+mod md086_no_unclosed_comments;
 
 pub use code_fence_utils::CodeFenceStyle;
 pub use md001_heading_increment::MD001HeadingIncrement;
@@ -152,6 +153,7 @@ pub use md082_no_empty_sections::MD082NoEmptySections;
 pub use md083_mojibake::MD083DetectMojibake;
 pub use md084_invisible_characters::MD084InvisibleCharacters;
 pub use md085_paragraph_continuation_indent::MD085ParagraphContinuationIndent;
+pub use md086_no_unclosed_comments::MD086NoUnclosedComments;
 
 mod md012_no_multiple_blanks;
 pub use md012_no_multiple_blanks::MD012NoMultipleBlanks;
@@ -591,6 +593,11 @@ const RULES: &[RuleEntry] = &[
         name: "MD085",
         ctor: MD085ParagraphContinuationIndent::from_config,
         opt_in: true,
+    },
+    RuleEntry {
+        name: "MD086",
+        ctor: MD086NoUnclosedComments::from_config,
+        opt_in: false,
     },
 ];
 

@@ -107,6 +107,8 @@ pub struct LintContext<'a> {
     code_span_byte_ranges: Vec<(usize, usize)>, // Pre-computed code span byte ranges from pulldown-cmark
     inline_config: InlineConfig,           // Parsed inline configuration comments for rule disabling
     obsidian_comment_ranges: Vec<(usize, usize)>, // Pre-computed Obsidian comment ranges (%%...%%)
+    unterminated_html_comment: Option<usize>, // Byte offset of a `<!--` with no `-->`
+    unterminated_obsidian_comment: Option<usize>, // Byte offset of a `%%` with no closing `%%`
     lazy_cont_lines_cache: OnceLock<Arc<Vec<LazyContLine>>>, // Lazy-loaded lazy continuation lines
     myst_directive_ranges: Vec<(usize, usize)>, // Pre-computed MyST colon directive byte ranges (:::{name} ... :::)
     myst_comment_ranges: Vec<(usize, usize)>, // Pre-computed MyST comment byte ranges (% comment)
@@ -169,7 +171,7 @@ impl<'a> LintContext<'a> {
         // delimiter line, so the body starts at the line after it, and a
         // document without front matter starts at byte 0.
         let body_start = line_offsets.get(front_matter_end).copied().unwrap_or(content.len());
-        let html_comment_ranges = profile_section!(
+        let html_comment_scan = profile_section!(
             "HTML comment ranges",
             profile,
             crate::utils::skip_context::scan_html_comments(
@@ -179,6 +181,8 @@ impl<'a> LintContext<'a> {
                 body_start
             )
         );
+        let html_comment_ranges = html_comment_scan.ranges;
+        let unterminated_html_comment = html_comment_scan.unterminated;
 
         // Pre-compute autodoc block ranges (avoids O(n^2) scaling)
         // Detected for all flavors except AzureDevOps, where `:::` denotes code fences
@@ -511,11 +515,13 @@ impl<'a> LintContext<'a> {
         }
 
         // Detect Obsidian comments (%%...%%) in Obsidian flavor
-        let obsidian_comment_ranges = profile_section!(
+        let obsidian_comment_scan = profile_section!(
             "Obsidian comments",
             profile,
             flavor_detection::detect_obsidian_comments(content, &mut lines, flavor, &code_span_ranges)
         );
+        let obsidian_comment_ranges = obsidian_comment_scan.ranges;
+        let unterminated_obsidian_comment = obsidian_comment_scan.unterminated;
 
         // Detect MyST role syntax ({role}`content`)
         let myst_role_ranges = profile_section!(
@@ -934,6 +940,8 @@ impl<'a> LintContext<'a> {
             code_span_byte_ranges: code_span_ranges,
             inline_config,
             obsidian_comment_ranges,
+            unterminated_html_comment,
+            unterminated_obsidian_comment,
             lazy_cont_lines_cache: OnceLock::new(),
             myst_directive_ranges,
             myst_comment_ranges,
@@ -1039,6 +1047,21 @@ impl<'a> LintContext<'a> {
     /// Get HTML comment ranges - pre-computed during LintContext construction
     pub fn html_comment_ranges(&self) -> &[crate::utils::skip_context::ByteRange] {
         &self.html_comment_ranges
+    }
+
+    /// Byte offset of a `<!--` that no `-->` closes, if the document has one.
+    ///
+    /// Everything after it is inside the comment as far as the parser is
+    /// concerned, so no rule sees that text.
+    pub fn unterminated_html_comment(&self) -> Option<usize> {
+        self.unterminated_html_comment
+    }
+
+    /// Byte offset of a `%%` that no second `%%` closes, if the document has
+    /// one. Always `None` outside the Obsidian flavor, where `%%` is ordinary
+    /// text rather than a comment delimiter.
+    pub fn unterminated_obsidian_comment(&self) -> Option<usize> {
+        self.unterminated_obsidian_comment
     }
 
     /// Check if a byte position is inside an Obsidian comment

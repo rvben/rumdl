@@ -794,5 +794,15 @@
     "fix": "Fix is always available.",
     "fix_availability": "Always",
     "url": "https://rumdl.dev/md085/"
+  },
+  {
+    "code": "MD086",
+    "name": "no-unclosed-comments",
+    "aliases": [],
+    "summary": "Comments should be closed",
+    "category": "other",
+    "fix": "Fix is not available.",
+    "fix_availability": "None",
+    "url": "https://rumdl.dev/md086/"
   }
 ]

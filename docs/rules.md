@@ -4,7 +4,7 @@
 
 ## Introduction
 
-rumdl implements <!-- RULE_COUNT -->79<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
+rumdl implements <!-- RULE_COUNT -->80<!-- /RULE_COUNT --> rules for checking Markdown files. This document provides a comprehensive reference of all available rules, organized by category.
 Each rule has a brief description and a link to its detailed documentation.
 
 For information on global configuration settings (file selection, rule enablement, etc.), see the [Global Settings Reference](global-settings.md).
@@ -280,6 +280,7 @@ Severity affects:
 | [MD073](md073.md) | TOC validation         | Table of Contents should match headings    |
 | [MD074](md074.md) | MkDocs nav validation  | Nav entries should point to existing files |
 | [MD083](md083.md) | Mojibake               | Detect mojibake due to encoding issues     |
+| [MD086](md086.md) | No unclosed comments   | Comment openers should have a closer       |
 
 ## Using Rules
 

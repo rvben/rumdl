@@ -1963,6 +1963,7 @@ fn test_front_matter_is_not_scanned_for_html_comments() {
         "got: {:?}",
         ctx.html_comment_ranges()
     );
+    assert!(ctx.unterminated_html_comment().is_none());
 }
 
 #[test]
@@ -1972,4 +1973,29 @@ fn test_html_comment_in_the_body_is_found_after_front_matter() {
     let ranges = ctx.html_comment_ranges();
     assert_eq!(ranges.len(), 1);
     assert_eq!(ranges[0].start, content.find("<!-- a body").unwrap());
+}
+
+#[test]
+fn test_unterminated_html_comment_offset() {
+    let content = "# Title\n\n<!-- never closed\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
+    assert!(ctx.html_comment_ranges().is_empty(), "an unclosed comment has no range");
+}
+
+#[test]
+fn test_unterminated_obsidian_comment_offset() {
+    let content = "# Title\n\n%% never closed\n";
+    let obsidian = LintContext::new(content, MarkdownFlavor::Obsidian, None);
+    assert_eq!(
+        obsidian.unterminated_obsidian_comment(),
+        Some(content.find("%%").unwrap())
+    );
+
+    let standard = LintContext::new(content, MarkdownFlavor::Standard, None);
+    assert_eq!(
+        standard.unterminated_obsidian_comment(),
+        None,
+        "%% is ordinary text outside the Obsidian flavor"
+    );
 }

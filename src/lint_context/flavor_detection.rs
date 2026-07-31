@@ -605,17 +605,17 @@ pub(super) fn detect_obsidian_comments(
     lines: &mut [LineInfo],
     flavor: MarkdownFlavor,
     code_span_ranges: &[(usize, usize)],
-) -> Vec<(usize, usize)> {
+) -> ObsidianCommentScan {
     // Only process Obsidian files
     if flavor != MarkdownFlavor::Obsidian {
-        return Vec::new();
+        return ObsidianCommentScan::default();
     }
 
     // Compute Obsidian comment ranges (byte ranges)
-    let comment_ranges = compute_obsidian_comment_ranges(content, lines, code_span_ranges);
+    let scan = compute_obsidian_comment_ranges(content, lines, code_span_ranges);
 
     // Mark lines that fall within comment ranges
-    for range in &comment_ranges {
+    for range in &scan.ranges {
         for line in lines.iter_mut() {
             // Skip lines in code blocks or HTML comments - they take precedence
             if line.in_code_block || line.in_html_comment {
@@ -640,7 +640,20 @@ pub(super) fn detect_obsidian_comments(
         }
     }
 
-    comment_ranges
+    scan
+}
+
+/// What a scan of the content found for Obsidian `%%` comments.
+#[derive(Debug, Default)]
+pub(super) struct ObsidianCommentScan {
+    /// Byte ranges of the comments, in document order. An unclosed comment
+    /// still gets a range, running to the end of the document, because that is
+    /// how much of the document Obsidian hides.
+    pub ranges: Vec<(usize, usize)>,
+    /// Byte offset of a `%%` that no second `%%` closes. A closed comment can
+    /// also end at the end of the document, so the fact is carried out of the
+    /// scan rather than inferred from the last range.
+    pub unterminated: Option<usize>,
 }
 
 /// Compute byte ranges for all Obsidian comments in the content
@@ -651,12 +664,12 @@ pub(super) fn compute_obsidian_comment_ranges(
     content: &str,
     lines: &[LineInfo],
     code_span_ranges: &[(usize, usize)],
-) -> Vec<(usize, usize)> {
+) -> ObsidianCommentScan {
     let mut ranges = Vec::new();
 
     // Quick check - if no %% at all, no comments
     if !content.contains("%%") {
-        return ranges;
+        return ObsidianCommentScan::default();
     }
 
     // Build skip ranges for code blocks, HTML comments, and inline code spans
@@ -730,7 +743,10 @@ pub(super) fn compute_obsidian_comment_ranges(
         ranges.push((comment_start, len));
     }
 
-    ranges
+    ObsidianCommentScan {
+        ranges,
+        unterminated: in_comment.then_some(comment_start),
+    }
 }
 
 /// Detect kramdown-specific constructs (extension blocks, IALs, ALDs)

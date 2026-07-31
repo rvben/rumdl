@@ -32,6 +32,16 @@ pub struct ByteRange {
     pub end: usize,
 }
 
+/// What a scan of the content found for HTML comments.
+#[derive(Debug, Default)]
+pub struct HtmlCommentScan {
+    /// Byte ranges of the complete comments, in document order.
+    pub ranges: Vec<ByteRange>,
+    /// Byte offset of a `<!--` that no `-->` closes. At most one is reported:
+    /// once the document has no closer left, no later opener can close either.
+    pub unterminated: Option<usize>,
+}
+
 /// Pre-compute all HTML comment ranges in the content.
 /// Returns a sorted vector of byte ranges for efficient lookup.
 pub fn compute_html_comment_ranges(content: &str) -> Vec<ByteRange> {
@@ -63,21 +73,25 @@ pub fn compute_html_comment_ranges_filtered(
     code_span_ranges: &[(usize, usize)],
     code_block_ranges: &[(usize, usize)],
 ) -> Vec<ByteRange> {
-    scan_html_comments(content, code_span_ranges, code_block_ranges, 0)
+    scan_html_comments(content, code_span_ranges, code_block_ranges, 0).ranges
 }
 
-/// Scan for HTML comments starting at `scan_from`, the byte offset the
-/// document's body begins at.
+/// Scan for HTML comments, keeping the position of an opener that never closes.
 ///
-/// The offset exists so front matter can be excluded. A `<!--` in a YAML or
-/// TOML value is data, and pairing it with a `-->` in the body would mark
-/// everything in between as a comment, hiding it from every rule.
+/// Same scan as [`compute_html_comment_ranges_filtered`], which discards the
+/// unterminated opener. MD086 reports it, so it is carried out of the scan
+/// rather than re-derived by a second, possibly disagreeing pass.
+///
+/// `scan_from` is the byte offset the document's body starts at, so front
+/// matter can be excluded. A `<!--` in a YAML or TOML value is data, and
+/// pairing it with a `-->` in the body would mark everything in between as a
+/// comment, hiding it from every rule.
 pub fn scan_html_comments(
     content: &str,
     code_span_ranges: &[(usize, usize)],
     code_block_ranges: &[(usize, usize)],
     scan_from: usize,
-) -> Vec<ByteRange> {
+) -> HtmlCommentScan {
     let in_code = |pos: usize| {
         code_span_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
             || code_block_ranges.iter().any(|&(start, end)| pos >= start && pos < end)
@@ -115,10 +129,18 @@ pub fn scan_html_comments(
             }
             // Unterminated comment (no closer anywhere): it covers no range,
             // and no opener after it can close either, so the scan is done.
-            None => break,
+            None => {
+                return HtmlCommentScan {
+                    ranges,
+                    unterminated: Some(open),
+                };
+            }
         }
     }
-    ranges
+    HtmlCommentScan {
+        ranges,
+        unterminated: None,
+    }
 }
 
 /// Check if a byte position is within any of the pre-computed HTML comment ranges
@@ -696,11 +718,23 @@ mod tests {
         // so it neither opens a comment nor closes one.
         let content = "---\nauthor: \"a <!-- b\"\n---\n\nText --> text\n";
         let body_start = content.rfind("---\n").unwrap() + "---\n".len();
-        let ranges = scan_html_comments(content, &[], &[], body_start);
-        assert!(ranges.is_empty(), "got: {ranges:?}");
+        let scan = scan_html_comments(content, &[], &[], body_start);
+        assert!(scan.ranges.is_empty(), "got: {:?}", scan.ranges);
+        assert_eq!(scan.unterminated, None);
 
         let unscoped = scan_html_comments(content, &[], &[], 0);
-        assert_eq!(unscoped.len(), 1, "without the offset the two pair up");
+        assert_eq!(unscoped.ranges.len(), 1, "without the offset the two pair up");
+    }
+
+    #[test]
+    fn test_scan_html_comments_reports_the_unterminated_opener() {
+        let content = "<!-- closed --> text <!-- open";
+        let scan = scan_html_comments(content, &[], &[], 0);
+        assert_eq!(scan.ranges.len(), 1);
+        assert_eq!(scan.unterminated, Some(content.rfind("<!--").unwrap()));
+
+        let closed = scan_html_comments("<!-- closed -->", &[], &[], 0);
+        assert_eq!(closed.unterminated, None);
     }
 
     #[test]

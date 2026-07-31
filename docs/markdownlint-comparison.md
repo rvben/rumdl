@@ -10,14 +10,14 @@ rumdl offers **high markdownlint compatibility with intentional differences** wh
 
 - **Performance**: rumdl is significantly faster (30-100x in many cases) thanks to Rust and intelligent caching
 - **Rule Coverage**: All 53 markdownlint rules are implemented, with a small number of intentional behavioral differences documented below
-- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->26<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD085<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
+- **Unique Features**: <!-- RULE_COUNT_ADDITIONAL -->27<!-- /RULE_COUNT_ADDITIONAL --> additional rules (MD057, MD061-<!-- RULE_MAX -->MD086<!-- /RULE_MAX -->), built-in LSP server, VS Code extension, 6 Markdown flavors
 - **Configuration**: Automatic markdownlint config discovery and conversion
 
 ## Rule Coverage
 
 ### Implemented Rules
 
-rumdl implements **<!-- RULE_COUNT -->79<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->26<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
+rumdl implements **<!-- RULE_COUNT -->80<!-- /RULE_COUNT --> rules total**: all 53 markdownlint rules plus <!-- RULE_COUNT_ADDITIONAL -->27<!-- /RULE_COUNT_ADDITIONAL --> unique rules.
 
 **Markdownlint-compatible rules (53):** All markdownlint rules are implemented with full compatibility. See the [Rules Reference](rules.md) for the complete list.
 
@@ -25,7 +25,7 @@ rumdl implements **<!-- RULE_COUNT -->79<!-- /RULE_COUNT --> rules total**: all 
 
 ### Rules Unique to rumdl
 
-rumdl implements <!-- RULE_COUNT_ADDITIONAL -->26<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
+rumdl implements <!-- RULE_COUNT_ADDITIONAL -->27<!-- /RULE_COUNT_ADDITIONAL --> additional rules not found in markdownlint:
 
 | Rule   | Name                           | Description                                                |
 | ------ | ------------------------------ | ---------------------------------------------------------- |
@@ -55,6 +55,7 @@ rumdl implements <!-- RULE_COUNT_ADDITIONAL -->26<!-- /RULE_COUNT_ADDITIONAL -->
 | MD083  | Detect mojibake                | Detects mojibake caused by encoding issues (opt-in)        |
 | MD084  | Invisible characters           | Detects hidden Unicode characters that should be intentional |
 | MD085  | Paragraph continuation indent  | Paragraph continuation lines should not be indented (opt-in) |
+| MD086  | No unclosed comments           | Flags a comment opener that nothing closes                 |
 
 **Opt-in rules:** MD060, MD063, MD070, MD072, MD073, MD074, MD080, MD082, MD083, MD084, and MD085 are disabled by default. Enable them explicitly in your configuration.
 
