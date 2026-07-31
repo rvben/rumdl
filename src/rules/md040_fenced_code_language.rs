@@ -67,11 +67,12 @@ impl MD040FencedCodeLanguage {
         let mut errors = Vec::new();
 
         // A fence label is the first whitespace-separated word of the info
-        // string, so an entry holding whitespace could never match one.
+        // string, so an entry holding whitespace anywhere, surrounding it
+        // included, could never match one.
         for declared in &self.config.custom_languages {
             if declared.trim().is_empty() {
                 errors.push("Empty entry in custom-languages.".to_string());
-            } else if declared.split_whitespace().count() > 1 {
+            } else if declared.chars().any(char::is_whitespace) {
                 errors.push(format!(
                     "Custom language '{declared}' contains whitespace, so no fence label can match it."
                 ));
@@ -1326,11 +1327,30 @@ echo again
 
     #[test]
     fn test_unusable_custom_language_entries_are_config_errors() {
-        let rule = MD040FencedCodeLanguage::with_config(custom_languages_config(&["c ddl", "   ", "cddl"]));
+        let rule =
+            MD040FencedCodeLanguage::with_config(custom_languages_config(&["c ddl", "cddl ", " cddl", "   ", "cddl"]));
         let errors = rule.validate_config();
-        assert_eq!(errors.len(), 2, "only the unusable entries are reported: {errors:?}");
-        assert!(errors.iter().any(|e| e.contains("contains whitespace")));
+        assert_eq!(errors.len(), 4, "only the unusable entries are reported: {errors:?}");
+        assert_eq!(
+            errors.iter().filter(|e| e.contains("contains whitespace")).count(),
+            3,
+            "whitespace around an entry is as unmatchable as whitespace inside it: {errors:?}"
+        );
         assert!(errors.iter().any(|e| e.contains("Empty entry in custom-languages")));
+    }
+
+    #[test]
+    fn test_custom_language_with_surrounding_whitespace_does_not_match_a_label() {
+        let content = "```cddl\nfoo = int\n```";
+        let result = run_check_with_config(content, custom_languages_config(&["cddl "])).unwrap();
+        assert_eq!(
+            result.len(),
+            2,
+            "the label stays unknown and the entry is reported: {result:?}"
+        );
+        assert!(result[0].message.contains("[config error]"));
+        assert!(result[0].message.contains("contains whitespace"));
+        assert!(result[1].message.contains("Unknown language 'cddl'"));
     }
 
     #[test]
