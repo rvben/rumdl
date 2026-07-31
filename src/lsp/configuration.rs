@@ -678,7 +678,7 @@ impl RumdlLanguageServer {
                 (config, sourced, Some(path))
             }
             _ => {
-                let (fallback, sourced) = self
+                let fallback = self
                     .fallback_config_for(
                         workspace_root.as_deref(),
                         in_primary_root,
@@ -686,6 +686,12 @@ impl RumdlLanguageServer {
                         home_dir.as_deref(),
                     )
                     .await;
+                // The config this root cannot resolve lies outside it, so nothing this
+                // server watches changes when it is repaired. Answering with defaults
+                // and skipping the cache keeps the file resolving on the next request.
+                let Some((fallback, sourced)) = fallback else {
+                    return Config::default();
+                };
                 (fallback, sourced, None)
             }
         };
@@ -713,13 +719,18 @@ impl RumdlLanguageServer {
     /// config would lint one project under another's settings. Those roots resolve
     /// their own scope instead. A file in no root at all keeps the startup config,
     /// which is the only scope the server has for it.
+    ///
+    /// `None` means that root's scope could not be resolved. Answering with the
+    /// startup config would put the project straight back under another project's
+    /// settings, so the caller answers with defaults, the same way it does for a
+    /// user config it cannot read.
     async fn fallback_config_for(
         &self,
         workspace_root: Option<&Path>,
         in_primary_root: bool,
         user_config_dir: Option<&Path>,
         home_dir: Option<&Path>,
-    ) -> (Config, Option<Arc<SourcedConfig<ConfigValidated>>>) {
+    ) -> Option<(Config, Option<Arc<SourcedConfig<ConfigValidated>>>)> {
         if let Some(root) = workspace_root.filter(|_| !in_primary_root) {
             match crate::config::SourcedConfig::load_for_workspace(root, None, user_config_dir, home_dir) {
                 Ok(sourced) => {
@@ -730,22 +741,23 @@ impl RumdlLanguageServer {
                     let validated = sourced.into_validated_unchecked();
                     let config: Config = validated.clone().into();
                     let sourced = sourced_for_editorconfig(&config, validated);
-                    return (config, sourced);
+                    return Some((config, sourced));
                 }
                 Err(e) => {
                     log::warn!(
-                        "Cannot resolve the configuration of workspace root {}: {e}. Using the server's own configuration.",
+                        "Cannot resolve the configuration of workspace root {}: {e}. Using default rules until it is fixed.",
                         root.display()
                     );
+                    return None;
                 }
             }
         }
 
         log::debug!("No project config found; using global/user fallback config");
-        (
+        Some((
             self.rumdl_config.read().await.clone(),
             self.rumdl_sourced.read().await.clone(),
-        )
+        ))
     }
 }
 

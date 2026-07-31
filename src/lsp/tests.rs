@@ -10004,3 +10004,51 @@ async fn test_a_secondary_workspace_root_resolves_a_config_above_itself() {
         "the secondary root must resolve the config above it, not the primary root's"
     );
 }
+
+/// A root whose own scope cannot be resolved is still not the primary root's project.
+/// Falling back to the server's startup config there would lint it under another
+/// project's settings for as long as the broken config stays broken.
+#[tokio::test]
+async fn test_a_secondary_workspace_root_with_a_broken_config_falls_back_to_defaults() {
+    use std::fs;
+    use tempfile::tempdir;
+
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let primary = root.join("primary");
+    let parent = root.join("parent");
+    let secondary = parent.join("secondary");
+    let user_config_dir = root.join("userconfig");
+    let home_dir = root.join("fakehome");
+
+    fs::create_dir_all(&primary).unwrap();
+    fs::create_dir_all(&secondary).unwrap();
+    fs::create_dir_all(parent.join(".git")).unwrap(); // bound the upward walk here
+    fs::create_dir_all(&user_config_dir).unwrap();
+    fs::create_dir_all(&home_dir).unwrap();
+    fs::write(primary.join(".rumdl.toml"), "[MD007]\nindent = 4\n").unwrap();
+    fs::write(parent.join(".rumdl.toml"), "[MD007\nindent = 3\n").unwrap();
+
+    let md_file = secondary.join("doc.md");
+    fs::write(&md_file, "").unwrap();
+
+    let server = create_test_server();
+    {
+        let mut roots = server.workspace_roots.write().await;
+        roots.push(primary.clone());
+        roots.push(secondary.clone());
+    }
+    server
+        .load_configuration_impl(false, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    let config = server
+        .resolve_config_for_file_impl(&md_file, Some(&user_config_dir), Some(&home_dir))
+        .await;
+
+    assert_eq!(
+        crate::config::get_rule_config_value::<usize>(&config, "MD007", "indent"),
+        None,
+        "an unresolvable scope must fall back to defaults, not to another root's config"
+    );
+}
