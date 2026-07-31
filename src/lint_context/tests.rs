@@ -1979,8 +1979,45 @@ fn test_html_comment_in_the_body_is_found_after_front_matter() {
 fn test_unterminated_html_comment_offset() {
     let content = "# Title\n\n<!-- never closed\n";
     let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let opener = content.find("<!--").unwrap();
+    assert_eq!(ctx.unterminated_html_comment(), Some(opener));
+    // The opener starts an HTML block, so it comments out the rest of it. The
+    // range is what keeps the comment-aware rules agreeing with the parser,
+    // which reports no headings or lists inside that block either.
+    let ranges = ctx.html_comment_ranges();
+    assert_eq!(ranges.len(), 1, "got: {ranges:?}");
+    assert_eq!((ranges[0].start, ranges[0].end), (opener, content.len()));
+}
+
+#[test]
+fn test_unterminated_inline_html_comment_has_no_range() {
+    // Mid-paragraph there is no comment for `<!--` to open: CommonMark renders
+    // it literally, so the text after it is published and stays visible to
+    // every rule.
+    let content = "# Title\n\nSome prose <!-- never closed\n\nMore text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
     assert_eq!(ctx.unterminated_html_comment(), Some(content.find("<!--").unwrap()));
-    assert!(ctx.html_comment_ranges().is_empty(), "an unclosed comment has no range");
+    assert!(
+        ctx.html_comment_ranges().is_empty(),
+        "an inline opener hides nothing, got: {:?}",
+        ctx.html_comment_ranges()
+    );
+}
+
+#[test]
+fn test_unterminated_html_comment_range_stops_at_its_container() {
+    // The block ends with the blockquote, not at the end of the document, so
+    // the paragraph below it is ordinary content.
+    let content = "> <!-- never closed\n> inside\n\nVisible text.\n";
+    let ctx = LintContext::new(content, MarkdownFlavor::Standard, None);
+    let ranges = ctx.html_comment_ranges();
+    assert_eq!(ranges.len(), 1, "got: {ranges:?}");
+    assert_eq!(ranges[0].start, content.find("<!--").unwrap());
+    assert!(
+        ranges[0].end < content.find("Visible").unwrap(),
+        "range {:?} should stop before the text after the quote",
+        ranges[0]
+    );
 }
 
 #[test]

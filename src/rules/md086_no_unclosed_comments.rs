@@ -86,16 +86,14 @@ impl Rule for MD086NoUnclosedComments {
         // Both scanners run during context construction and each reports its
         // first unclosed opener.
         //
-        // An `<!--` that an Obsidian comment hides is already gone by this
-        // point: the HTML scan is re-resolved against those comments when the
-        // context is built, and Obsidian hides everything from an unclosed `%%`
-        // to the end of the note.
+        // An opener the other syntax hides is already gone by this point, in
+        // both directions. The HTML scan is re-resolved against the Obsidian
+        // comments when the context is built, and an unclosed `<!--` that opens
+        // an HTML block covers the rest of that block, so a `%%` inside it is
+        // never scanned as a delimiter.
         //
-        // The reverse is deliberately not suppressed. A `%%` below an unclosed
-        // `<!--` is still a closer the author has to add, and the document
-        // already fails on the opener above it, so listing it costs one line on
-        // a file that is failing either way - while dropping it would lose a
-        // real missing closer.
+        // Both therefore report an opener only where it is a real one, and a
+        // document with two of them genuinely has two.
         let html = ctx.unterminated_html_comment().map(|offset| UnclosedComment {
             offset,
             opener: "<!--",
@@ -288,17 +286,28 @@ mod tests {
     }
 
     #[test]
-    fn reports_an_obsidian_opener_below_an_unclosed_html_block() {
-        // A line-start `<!--` opens an HTML block that runs to the end of the
-        // document, so the `%%` below it renders as nothing. It is still a
-        // closer the author has to add once the block above it is closed, and
-        // the file already fails on that opener, so both are listed.
+    fn ignores_an_obsidian_opener_inside_an_unclosed_html_block() {
+        // A line-start `<!--` opens an HTML block, so the `%%` below it is
+        // comment text rather than a delimiter. Closing the block is the one
+        // edit to make, and the `%%` may well be a `%%` the author wrote inside
+        // the comment on purpose.
         let content = "<!-- an aside\n\n%% an Obsidian note\n";
         let warnings = check_with(content, MarkdownFlavor::Obsidian);
-        assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+        assert_eq!(warnings.len(), 1, "got: {warnings:?}");
         assert_eq!((warnings[0].line, warnings[0].column), (1, 1));
         assert!(warnings[0].message.contains("HTML"));
-        assert_eq!((warnings[1].line, warnings[1].column), (3, 1));
+    }
+
+    #[test]
+    fn reports_an_obsidian_opener_after_an_html_block_that_ends_at_its_container() {
+        // The unclosed block ends with the blockquote, so the `%%` after it is
+        // outside the comment and is its own missing closer.
+        let content = "> <!-- an aside\n> inside\n\n%% an Obsidian note\n";
+        let warnings = check_with(content, MarkdownFlavor::Obsidian);
+        assert_eq!(warnings.len(), 2, "got: {warnings:?}");
+        assert_eq!((warnings[0].line, warnings[0].column), (1, 3));
+        assert!(warnings[0].message.contains("HTML"));
+        assert_eq!((warnings[1].line, warnings[1].column), (4, 1));
         assert!(warnings[1].message.contains("Obsidian"));
     }
 

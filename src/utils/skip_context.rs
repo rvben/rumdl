@@ -176,6 +176,30 @@ pub fn unterminated_html_comment_outside(
     scan_html_comments(content, code_span_ranges, &literal_ranges, scan_from).unterminated
 }
 
+/// The range an unclosed `<!--` hides, if it hides anything.
+///
+/// Whether an unclosed opener swallows the text after it is a block-structure
+/// question, so it is answered by the parser rather than by inspecting the line.
+/// At the start of a line `<!--` opens an HTML block and everything to the end
+/// of that block is comment text; mid-paragraph CommonMark has no comment to
+/// open, so the marker renders literally and hides nothing.
+///
+/// The block is the unit because it is not always the rest of the document. An
+/// opener inside a blockquote or a list item ends with its container, leaving
+/// the content after it visible, and one indented four spaces is code and opens
+/// no block at all. `html_blocks` are the parser's ranges, so each of those
+/// falls out without a separate rule here.
+///
+/// The range starts at the opener, not at the block, because a block may have
+/// begun earlier with a tag: in `<div>` followed by `<!--`, only the text from
+/// the marker on is inside the comment.
+pub fn unterminated_comment_range(opener: usize, html_blocks: &[(usize, usize)]) -> Option<ByteRange> {
+    html_blocks
+        .iter()
+        .find(|&&(start, end)| opener >= start && opener < end)
+        .map(|&(_, end)| ByteRange { start: opener, end })
+}
+
 /// Check if a byte position is within any of the pre-computed HTML comment ranges
 /// Uses binary search for O(log n) complexity
 pub fn is_in_html_comment_ranges(ranges: &[ByteRange], byte_pos: usize) -> bool {
@@ -800,6 +824,27 @@ mod tests {
             unterminated_html_comment_outside(reported, &[(11, 23)], visible, &[], &[], 0),
             Some(0)
         );
+    }
+
+    #[test]
+    fn test_unterminated_comment_range_follows_the_block() {
+        // An opener that starts a block hides the rest of that block.
+        let blocks = [(0, 40)];
+        let range = unterminated_comment_range(0, &blocks).expect("opener starts the block");
+        assert_eq!((range.start, range.end), (0, 40));
+
+        // An opener in a block a tag already started hides only from itself on,
+        // so the tag above it stays visible.
+        let range = unterminated_comment_range(7, &blocks).expect("opener sits inside the block");
+        assert_eq!((range.start, range.end), (7, 40));
+
+        // An opener in no block at all is inline, and hides nothing.
+        assert!(unterminated_comment_range(60, &blocks).is_none());
+        assert!(unterminated_comment_range(0, &[]).is_none());
+
+        // The end of a block is exclusive: an opener there belongs to whatever
+        // follows, not to the block that just closed.
+        assert!(unterminated_comment_range(40, &blocks).is_none());
     }
 
     #[test]

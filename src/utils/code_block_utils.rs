@@ -55,6 +55,13 @@ pub struct ParseResult {
     pub line_to_list: LineToListMap,
     /// Ordered list start values: maps list ID to start value
     pub list_start_values: ListStartValues,
+    /// HTML block byte ranges (start, end)
+    ///
+    /// Needed to know how far an unclosed `<!--` reaches. The block ends where
+    /// CommonMark says it does, which is the end of the enclosing container
+    /// rather than the end of the document: an unclosed comment in a blockquote
+    /// stops at the quote, and one in a list item stops at the blank line.
+    pub html_blocks: Vec<(usize, usize)>,
 }
 
 /// Classification of code blocks relative to list contexts
@@ -92,6 +99,7 @@ impl CodeBlockUtils {
         let mut spans = Vec::new();
         let mut details = Vec::new();
         let mut strong_spans = Vec::new();
+        let mut html_blocks = Vec::new();
         let mut code_block_start: Option<(usize, bool, String)> = None;
 
         // List membership tracking for ordered lists
@@ -160,6 +168,10 @@ impl CodeBlockUtils {
                         line_to_list.insert(line_num, list_id);
                     }
                 }
+                Event::Start(Tag::HtmlBlock) => {
+                    // The start event's range already spans the whole block.
+                    html_blocks.push((range.start, range.end));
+                }
                 Event::Code(_) => {
                     spans.push((range.start, range.end));
                 }
@@ -184,6 +196,7 @@ impl CodeBlockUtils {
         spans.sort_by_key(|&(start, _)| start);
         details.sort_by_key(|d| d.start);
         strong_spans.sort_by_key(|s| s.start);
+        html_blocks.sort_by_key(|&(start, _)| start);
         ParseResult {
             code_blocks: blocks,
             code_spans: spans,
@@ -191,6 +204,7 @@ impl CodeBlockUtils {
             strong_spans,
             line_to_list,
             list_start_values,
+            html_blocks,
         }
     }
 
